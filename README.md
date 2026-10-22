@@ -53,6 +53,10 @@ open PencilCAD.xcodeproj
 In Xcode: Target **PencilCAD** → *Signing & Capabilities* → eigenes **Team** wählen und ggf. die Bundle-ID
 (`com.example.pencilcad`) ändern. Dann iPad auswählen und starten.
 
+**Wichtig:** Das Xcode-Projekt wird nicht eingecheckt, sondern erzeugt. Nach jedem `git pull` oder Branch-Wechsel, der
+neue Dateien bringt, Xcode schließen und `./scripts/generate-project.sh` erneut ausführen. Sonst meldet Xcode
+„Cannot find '…' in scope“.
+
 Ohne Schritt 1 startet die App im Fallback-Modus. Das ist gut, um Viewer und Gesten sofort zu testen.
 
 ## Projektstruktur
