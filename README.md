@@ -3,12 +3,32 @@
 Eigene CAD-App fürs iPad, Bedienkonzept angelehnt an Shapr3D: Apple Pencil zum Zeichnen, Finger zum Navigieren.
 Geometriekernel: [OpenCASCADE](https://github.com/Open-Cascade-SAS/OCCT) (LGPL 2.1 mit Ausnahme). Rendering: Metal.
 
+## Bedienung
+
+| Eingabe | Wirkung |
+| --- | --- |
+| 1 Finger ziehen | Ansicht drehen |
+| 2 Finger ziehen | Ansicht verschieben |
+| Pinch | Zoomen |
+| Pencil (Skizzenmodus) | Zeichnen auf der Skizzenebene |
+
+**Skizzieren:** Oben links „Skizze“ einschalten, Werkzeug wählen und mit dem Pencil zeichnen.
+- *Rechteck:* von Ecke zu Ecke ziehen
+- *Kreis:* vom Mittelpunkt nach außen ziehen
+- *Linienzug:* Startpunkt tippen, dann jeden weiteren Punkt antippen oder hinziehen; zurück zum Startpunkt schließt das Profil
+
+Punkte rasten auf 1 mm ein, die Maße stehen live in der Leiste. Ist das Profil geschlossen, unten Höhe eingeben und
+„Neuer Körper“, „Vereinigen“ (mit dem zuletzt erzeugten Körper) oder „Abziehen“ wählen. Negative Höhe extrudiert nach unten.
+Die Skizzenebene liegt parallel zum Boden, ihre Höhe stellst du über „Ebene Z“ ein (z. B. 20 für die Oberseite des Demo-Quaders).
+Ohne Pencil (Simulator) „Finger zeichnet“ einschalten.
+
 ## Stand (Phase 1 – Fundament)
 
 - SwiftUI-App für iPad (iOS 17+)
 - Metal-Viewport: 1 Finger drehen, 2 Finger verschieben, Pinch zoomen (Pencil ist für Phase 2 reserviert)
 - Kernel-Brücke `PCKShape` (Objective-C++): Quader, Zylinder, Bohrung (Boolean Cut), Kanten runden, Triangulierung
 - Undo, STL-Export (binär) über die Dateien-App
+- Phase 2 (in Arbeit): Skizze mit Pencil (Rechteck, Kreis, Linienzug), Rasterfang, Live-Maße, Extrudieren
 - Fallback-Modus ohne OpenCASCADE: Viewer und UI laufen, Booleans/Rundung melden „braucht OpenCASCADE“
 
 ## Voraussetzungen

@@ -26,6 +26,12 @@ struct Mesh {
         indices = kernelMesh.indexData.withUnsafeBytes { Array($0.bindMemory(to: UInt32.self)) }
     }
 
+    mutating func append(_ other: Mesh) {
+        let offset = UInt32(vertices.count)
+        vertices += other.vertices
+        indices += other.indices.map { $0 + offset }
+    }
+
     /// Achsenparalleler Hüllquader (min, max).
     var bounds: (min: SIMD3<Float>, max: SIMD3<Float>)? {
         guard let first = vertices.first?.position else { return nil }

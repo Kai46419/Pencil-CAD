@@ -26,6 +26,11 @@ NS_ASSUME_NONNULL_BEGIN
 + (PCKShape *)cylinderAtX:(double)x y:(double)y z:(double)z radius:(double)radius height:(double)height
     NS_SWIFT_NAME(cylinder(x:y:z:radius:height:));
 
+/// Gerades Prisma aus einem geschlossenen Polygon in der Ebene Z = z, extrudiert um height entlang Z
+/// (negativ = nach unten). xy enthält die Eckpunkte abwechselnd als x, y. nil bei ungültigem Profil.
++ (nullable PCKShape *)prismFromPolygonXY:(NSArray<NSNumber *> *)xy z:(double)z height:(double)height
+    NS_SWIFT_NAME(prism(polygonXY:z:height:));
+
 /// Boolesche Operationen. nil, wenn die Operation fehlschlägt oder kein Kernel vorhanden ist.
 - (nullable PCKShape *)cutting:(PCKShape *)tool NS_SWIFT_NAME(cutting(_:));
 - (nullable PCKShape *)fusing:(PCKShape *)other NS_SWIFT_NAME(fusing(_:));

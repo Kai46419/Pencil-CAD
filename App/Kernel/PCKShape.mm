@@ -8,6 +8,9 @@
 #define PCK_HAS_OCCT 1
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
+#include <BRepBuilderAPI_MakeFace.hxx>
+#include <BRepBuilderAPI_MakePolygon.hxx>
+#include <BRepPrimAPI_MakePrism.hxx>
 #include <BRepFilletAPI_MakeFillet.hxx>
 #include <BRepLib_ToolTriangulatedShape.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
@@ -90,7 +93,43 @@ MeshBuffers fallbackCylinder(double cx, double cy, double cz, double r, double h
     }
     return m;
 }
+
+// Deckel werden als Fächer trianguliert, das ist nur für konvexe Profile korrekt.
+MeshBuffers fallbackPrism(const std::vector<double> &xy, double z, double h) {
+    MeshBuffers m;
+    const size_t n = xy.size() / 2;
+    const float z0 = z, z1 = z + h;
+    for (size_t i = 0; i < n; ++i) {
+        const size_t j = (i + 1) % n;
+        const float ax = xy[2 * i], ay = xy[2 * i + 1], bx = xy[2 * j], by = xy[2 * j + 1];
+        const float len = std::hypot(bx - ax, by - ay);
+        if (len == 0) continue;
+        const float normal[3] = {(by - ay) / len, -(bx - ax) / len, 0};
+        const float quad[4][3] = {{ax, ay, z0}, {bx, by, z0}, {bx, by, z1}, {ax, ay, z1}};
+        m.addQuad(quad, normal);
+    }
+    for (const float capZ : {z0, z1}) {
+        const float nz = (capZ == z1) == (h > 0) ? 1 : -1;
+        const uint32_t base = static_cast<uint32_t>(m.vertices.size() / 6);
+        for (size_t i = 0; i < n; ++i) {
+            m.addVertex(xy[2 * i], xy[2 * i + 1], capZ, 0, 0, nz);
+        }
+        for (size_t i = 1; i + 1 < n; ++i) {
+            m.indices.insert(m.indices.end(), {base, base + uint32_t(i), base + uint32_t(i + 1)});
+        }
+    }
+    return m;
+}
 #endif
+
+std::vector<double> toVector(NSArray<NSNumber *> *xy) {
+    std::vector<double> values;
+    values.reserve(xy.count);
+    for (NSNumber *number in xy) {
+        values.push_back(number.doubleValue);
+    }
+    return values;
+}
 
 } // namespace
 
@@ -135,6 +174,26 @@ MeshBuffers fallbackCylinder(double cx, double cy, double cz, double r, double h
 + (PCKShape *)cylinderAtX:(double)x y:(double)y z:(double)z radius:(double)radius height:(double)height {
     BRepPrimAPI_MakeCylinder maker(gp_Ax2(gp_Pnt(x, y, z), gp::DZ()), radius, height);
     return [[PCKShape alloc] initWithShape:maker.Shape()];
+}
+
++ (nullable PCKShape *)prismFromPolygonXY:(NSArray<NSNumber *> *)xy z:(double)z height:(double)height {
+    const std::vector<double> values = toVector(xy);
+    if (values.size() < 6 || height == 0) return nil;
+    try {
+        BRepBuilderAPI_MakePolygon polygon;
+        for (size_t i = 0; i + 1 < values.size(); i += 2) {
+            polygon.Add(gp_Pnt(values[i], values[i + 1], z));
+        }
+        polygon.Close();
+        if (!polygon.IsDone()) return nil;
+        BRepBuilderAPI_MakeFace face(polygon.Wire(), Standard_True);
+        if (!face.IsDone()) return nil;
+        BRepPrimAPI_MakePrism prism(face.Face(), gp_Vec(0, 0, height));
+        if (!prism.IsDone()) return nil;
+        return [[PCKShape alloc] initWithShape:prism.Shape()];
+    } catch (const Standard_Failure &) {
+        return nil;
+    }
 }
 
 - (nullable PCKShape *)cutting:(PCKShape *)tool {
@@ -221,6 +280,12 @@ MeshBuffers fallbackCylinder(double cx, double cy, double cz, double r, double h
 
 + (PCKShape *)cylinderAtX:(double)x y:(double)y z:(double)z radius:(double)radius height:(double)height {
     return [[PCKShape alloc] initWithFallbackMesh:fallbackCylinder(x, y, z, radius, height)];
+}
+
++ (nullable PCKShape *)prismFromPolygonXY:(NSArray<NSNumber *> *)xy z:(double)z height:(double)height {
+    const std::vector<double> values = toVector(xy);
+    if (values.size() < 6 || height == 0) return nil;
+    return [[PCKShape alloc] initWithFallbackMesh:fallbackPrism(values, z, height)];
 }
 
 - (nullable PCKShape *)cutting:(PCKShape *)tool {

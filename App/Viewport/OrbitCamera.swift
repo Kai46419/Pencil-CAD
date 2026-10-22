@@ -1,3 +1,4 @@
+import CoreGraphics
 import simd
 
 /// Orbit-Kamera um einen Zielpunkt, Z zeigt nach oben (CAD-Konvention).
@@ -21,6 +22,29 @@ struct OrbitCamera {
         .perspective(fovY: fieldOfView, aspect: aspect, near: max(distance * 0.01, 0.1), far: distance * 20)
     }
 
+    /// Ungefähre Weltlänge eines Bildschirmpunkts in der Tiefe des Zielpunkts.
+    func worldUnitsPerPoint(viewHeight: Float) -> Float {
+        2 * distance * tan(fieldOfView / 2) / max(viewHeight, 1)
+    }
+
+    /// Schnittpunkt des Sehstrahls durch einen Bildschirmpunkt mit der Ebene Z = planeZ.
+    func intersect(screenPoint p: CGPoint, viewSize: CGSize, planeZ: Float) -> SIMD3<Float>? {
+        guard viewSize.width > 0, viewSize.height > 0 else { return nil }
+        let aspect = Float(viewSize.width / viewSize.height)
+        let inverse = (projectionMatrix(aspect: aspect) * viewMatrix).inverse
+        let ndc = SIMD2(Float(2 * p.x / viewSize.width - 1), Float(1 - 2 * p.y / viewSize.height))
+        func unproject(_ depth: Float) -> SIMD3<Float> {
+            let v = inverse * SIMD4(ndc.x, ndc.y, depth, 1)
+            return SIMD3(v.x, v.y, v.z) / v.w
+        }
+        let near = unproject(0), far = unproject(1)
+        let direction = far - near
+        guard abs(direction.z) > 1e-6 else { return nil }
+        let t = (planeZ - near.z) / direction.z
+        guard t >= 0 else { return nil }
+        return near + t * direction
+    }
+
     mutating func orbit(dx: Float, dy: Float) {
         yaw -= dx * 0.008
         pitch = min(max(pitch + dy * 0.008, -1.55), 1.55)
@@ -28,7 +52,7 @@ struct OrbitCamera {
 
     /// Verschiebt das Ziel so, dass der Inhalt dem Finger folgt.
     mutating func pan(dx: Float, dy: Float, viewHeight: Float) {
-        let unitsPerPoint = 2 * distance * tan(fieldOfView / 2) / max(viewHeight, 1)
+        let unitsPerPoint = worldUnitsPerPoint(viewHeight: viewHeight)
         let forward = simd_normalize(target - position)
         let right = simd_normalize(simd_cross(forward, SIMD3(0, 0, 1)))
         let up = simd_cross(right, forward)
@@ -70,5 +94,12 @@ extension float4x4 {
             SIMD4(0, 0, zs, -1),
             SIMD4(0, 0, zs * near, 0)
         ))
+    }
+}
+
+extension float4x4 {
+    init(translation t: SIMD3<Float>) {
+        self = matrix_identity_float4x4
+        columns.3 = SIMD4(t.x, t.y, t.z, 1)
     }
 }
