@@ -1,0 +1,10 @@
+# Wie project.yml, zusätzlich mit OpenCASCADE (Vendor/OCCT.xcframework).
+# Wird von scripts/generate-project.sh automatisch gewählt, sobald das Framework existiert.
+include:
+  - project.yml
+
+targets:
+  PencilCAD:
+    dependencies:
+      - framework: Vendor/OCCT.xcframework
+        embed: false
