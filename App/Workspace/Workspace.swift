@@ -692,7 +692,8 @@ final class Workspace: ObservableObject {
     // MARK: Ziehpfeile
 
     var handles: [DragHandle] {
-        let blue = SIMD3<Float>(0.1, 0.42, 0.98)
+        // Wie bei Shapr3D: ein schlichter grauer Zugpfeil
+        let blue = SIMD3<Float>(0.3, 0.32, 0.36)
         if sketch.isActive {
             let plane = sketch.plane
             if sketch.tool == .offset, let handle = sketch.offsetHandle {

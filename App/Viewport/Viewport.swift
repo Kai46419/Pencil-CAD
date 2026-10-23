@@ -68,7 +68,7 @@ final class ViewportView: MTKView {
     private var handleDrag: HandleDragState?
     private let valueLabel = PaddedLabel()
     private var planeLabels: [PaddedLabel] = []
-    private var dimensionFields: [SketchDimension.Kind: DimensionField] = [:]
+    private var dimensionFields: [String: DimensionField] = [:]
     /// Kurzzeichen der Einschränkungen am Element
     private var badgeLabels: [PaddedLabel] = []
     /// Geladene Bilder (Canvas) je Datei
@@ -222,11 +222,9 @@ final class ViewportView: MTKView {
         updateBadges()
 
         let handles = workspace.handles
-        renderer.handles = handles.flatMap { handle -> [HandleGraphic] in
-            let graphic = HandleGraphic(base: handle.base, direction: handle.pointing, color: handle.color)
-            // Wie Shapr3D: Doppelpfeil, solange der Bereich noch nicht extrudiert ist
-            guard handle.kind == .region, handle.value == 0 else { return [graphic] }
-            return [graphic, HandleGraphic(base: handle.base, direction: -handle.pointing, color: handle.color)]
+        // Ein Pfeil, der knapp über dem Objekt schwebt; Ziehen in Gegenrichtung ergibt negative Werte
+        renderer.handles = handles.map { handle in
+            HandleGraphic(base: arrowBase(handle), direction: handle.pointing, color: handle.color)
         }
         updateValueLabel(handles)
         updateDimensionFields()
@@ -331,6 +329,31 @@ final class ViewportView: MTKView {
             if !dimensionLines.isEmpty {
                 groups.append(LineGroup(polylines: dimensionLines.map { $0.map(world) }, color: Self.dimensionInk,
                                         width: 1.2))
+            }
+            // Hilfspunkte (Mitten gewählter Punkte) als kleine Dreiecke, gewählte orange
+            if !sketch.marks.isEmpty {
+                let size = 5 * perPoint
+                let triangle = { (p: Point2) -> [Point2] in
+                    [p + Point2(0, size), p + Point2(-0.87 * size, -0.5 * size), p + Point2(0.87 * size, -0.5 * size),
+                     p + Point2(0, size)]
+                }
+                let selectedMarks = Set(sketch.selectedMarks)
+                let plain = sketch.marks.indices.filter { !selectedMarks.contains($0) }.map { triangle(sketch.marks[$0]) }
+                let chosen = sketch.selectedMarkPoints.map(triangle)
+                groups.append(LineGroup(polylines: plain.map { $0.map(world) }, color: Self.previewBlue, width: 1.6))
+                if !chosen.isEmpty {
+                    groups.append(LineGroup(polylines: chosen.map { $0.map(world) }, color: Self.selectionOrange, width: 2.4))
+                }
+            }
+            // Schwebender Stift: Fadenkreuz am (gefangenen) Punkt, damit man sieht, wo der Strich ansetzt
+            if let hover = sketch.hoverSnap?.point {
+                let arm = 9 * perPoint, gap = 2.5 * perPoint
+                let cross: [[Point2]] = [
+                    [hover + Point2(gap, 0), hover + Point2(arm, 0)], [hover - Point2(gap, 0), hover - Point2(arm, 0)],
+                    [hover + Point2(0, gap), hover + Point2(0, arm)], [hover - Point2(0, gap), hover - Point2(0, arm)],
+                ]
+                groups.append(LineGroup(polylines: cross.map { $0.map(world) }, color: Self.sketchInk, width: 1.3,
+                                        dots: [world(hover)], dotRadius: 1.4))
             }
             if !sketch.hoverNodes.isEmpty {
                 groups.append(LineGroup(polylines: [], color: Self.previewBlue, width: 0,
@@ -450,7 +473,7 @@ final class ViewportView: MTKView {
         }
         let a = dimension.span[0], b = dimension.span[1]
         switch dimension.kind {
-        case .width, .height, .length:
+        case .width, .height, .length, .distance:
             let n = dimension.direction
             let offset = 28 * perPoint
             let a2 = a + n * offset, b2 = b + n * offset
@@ -462,6 +485,8 @@ final class ViewportView: MTKView {
                     b + dimension.direction * 6 * perPoint, false)
         case .radius:
             return ([[a, b], arrowHead(at: b, from: a)], b + dimension.direction * 6 * perPoint, false)
+        case .angle:
+            return ([], dimension.position, true)
         }
     }
 
@@ -473,15 +498,15 @@ final class ViewportView: MTKView {
         let dimensions = sketch.isActive && !sketch.isChoosingPlane ? sketch.dimensions : []
         let plane = sketch.plane
         let perPoint = Double(renderer.camera.worldUnitsPerPoint(viewHeight: Float(bounds.height)))
-        var shown = Set<SketchDimension.Kind>()
+        var shown = Set<String>()
         for dimension in dimensions {
-            let field = dimensionFields[dimension.kind] ?? makeDimensionField(dimension.kind)
+            let field = dimensionFields[dimension.id] ?? makeDimensionField(dimension.id)
             let geometry = dimensionGeometry(dimension, perPoint: perPoint)
             let anchorWorld = SIMD3<Float>(plane.world(geometry.label))
             let tipWorld = SIMD3<Float>(plane.world(geometry.label + dimension.direction * perPoint * 10))
             guard let anchor = renderer.camera.project(anchorWorld, viewSize: bounds.size),
                   let tip = renderer.camera.project(tipWorld, viewSize: bounds.size) else { continue }
-            shown.insert(dimension.kind)
+            shown.insert(dimension.id)
             field.allowsEditing = dimension.isEditable
             field.prefix = dimension.prefix
             if !field.isFirstResponder {
@@ -497,7 +522,7 @@ final class ViewportView: MTKView {
             field.center = CGPoint(x: anchor.x + dx * distance, y: anchor.y + dy * distance)
             field.isHidden = false
         }
-        for (kind, field) in dimensionFields where !shown.contains(kind) {
+        for (id, field) in dimensionFields where !shown.contains(id) {
             if field.isFirstResponder {
                 field.appliesOnEnd = false
                 field.resignFirstResponder()
@@ -506,19 +531,19 @@ final class ViewportView: MTKView {
         }
     }
 
-    private func makeDimensionField(_ kind: SketchDimension.Kind) -> DimensionField {
-        let field = DimensionField(kind: kind)
+    private func makeDimensionField(_ id: String) -> DimensionField {
+        let field = DimensionField(dimensionID: id)
         field.delegate = self
         field.isHidden = true
         addSubview(field)
-        dimensionFields[kind] = field
+        dimensionFields[id] = field
         return field
     }
 
     private func apply(_ field: DimensionField) {
         let text = (field.text ?? "").replacingOccurrences(of: ",", with: ".").trimmingCharacters(in: .whitespaces)
         guard let value = Double(text), value > 0 else { return }
-        sketch?.setDimension(field.kind, to: value)
+        sketch?.setDimension(id: field.dimensionID, to: value)
         refresh()
     }
 
@@ -707,9 +732,9 @@ final class ViewportView: MTKView {
         }
         let shown = handleDrag?.handle.kind ?? handle.kind
         let active = handles.first { $0.kind == shown } ?? handle
-        let length = Renderer.handleLength * renderer.camera.worldUnitsPerPoint(at: active.base,
-                                                                                viewHeight: Float(bounds.height))
-        guard let tip = renderer.camera.project(active.base + active.pointing * length * 1.25, viewSize: bounds.size) else {
+        let base = arrowBase(active)
+        let length = Renderer.handleLength * renderer.camera.worldUnitsPerPoint(at: base, viewHeight: Float(bounds.height))
+        guard let tip = renderer.camera.project(base + active.pointing * length * 1.25, viewSize: bounds.size) else {
             valueLabel.isHidden = true
             return
         }
@@ -725,22 +750,25 @@ final class ViewportView: MTKView {
         guard let renderer, let workspace else { return nil }
         var best: (distance: CGFloat, handle: DragHandle)?
         for handle in workspace.handles {
-            let length = Renderer.handleLength * renderer.camera.worldUnitsPerPoint(at: handle.base,
-                                                                                    viewHeight: Float(bounds.height))
-            let directions = handle.kind == .region && handle.value == 0 ? [handle.pointing, -handle.pointing]
-                : [handle.pointing]
-            for direction in directions {
-                guard let a = renderer.camera.project(handle.base, viewSize: bounds.size),
-                      let b = renderer.camera.project(handle.base + direction * length, viewSize: bounds.size) else {
-                    continue
-                }
-                let distance = point.distance(toSegment: a, b)
-                if distance <= 30, distance < (best?.distance ?? .infinity) {
-                    best = (distance, handle)
-                }
+            let base = arrowBase(handle)
+            let length = Renderer.handleLength * renderer.camera.worldUnitsPerPoint(at: base, viewHeight: Float(bounds.height))
+            guard let a = renderer.camera.project(base, viewSize: bounds.size),
+                  let b = renderer.camera.project(base + handle.pointing * length, viewSize: bounds.size) else {
+                continue
+            }
+            let distance = point.distance(toSegment: a, b)
+            if distance <= 30, distance < (best?.distance ?? .infinity) {
+                best = (distance, handle)
             }
         }
         return best?.handle
+    }
+
+    /// Fuß des gezeichneten Pfeils: wie bei Shapr3D etwas über dem Objekt schwebend (Verschiebe-Pfeile am Mittelpunkt).
+    private func arrowBase(_ handle: DragHandle) -> SIMD3<Float> {
+        guard !handle.isMove, let renderer else { return handle.base }
+        let gap = 22 * renderer.camera.worldUnitsPerPoint(at: handle.base, viewHeight: Float(bounds.height))
+        return handle.base + handle.pointing * gap
     }
 
     /// Parameter entlang der Pfeilachse: nächster Punkt zwischen Sehstrahl und Achse.
@@ -1143,7 +1171,8 @@ final class PaddedLabel: UILabel {
 
 /// Maß direkt am Skizzenelement; antippen zum Ändern, Return übernimmt.
 final class DimensionField: UITextField {
-    let kind: SketchDimension.Kind
+    /// Kennung des Maßes (SketchDimension.id)
+    let dimensionID: String
     /// false, wenn das Feld geschlossen wird, weil sein Element nicht mehr das aktuelle ist.
     var appliesOnEnd = true
     var allowsEditing = false {
@@ -1154,8 +1183,8 @@ final class DimensionField: UITextField {
     }
     private let prefixLabel = UILabel()
 
-    init(kind: SketchDimension.Kind) {
-        self.kind = kind
+    init(dimensionID: String) {
+        self.dimensionID = dimensionID
         super.init(frame: .zero)
         font = .monospacedDigitSystemFont(ofSize: 15, weight: .semibold)
         textAlignment = .center

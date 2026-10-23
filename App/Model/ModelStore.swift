@@ -616,6 +616,14 @@ final class ModelStore: ObservableObject {
         guard let preview = previewBodies, let name = previewName else { return }
         previewBodies = nil
         previewName = nil
+        // Wie bei Fusion 360: Die verbrauchte Skizze wird ausgeblendet, damit der Körper geschlossen wirkt
+        // (unter „Elemente“ wieder einblendbar).
+        if name == Self.regionPreviewName, let index = selectedRegions.first?.sketch, sketches.indices.contains(index) {
+            var newSketches = sketches
+            newSketches[index].isHidden = true
+            commit(preview, sketches: newSketches, name: name)
+            return
+        }
         commit(preview, name: name)
     }
 

@@ -42,6 +42,8 @@ enum ConstraintKind: String, CaseIterable, Identifiable, Codable {
     case equal = "Gleich"
     case symmetric = "Symmetrien"
     case lock = "Sperren"
+    /// Bemaßung (Abstand, Winkel) als treibendes Maß; erscheint nicht in der Liste der Einschränkungen
+    case dimension = "Bemaßung"
 
     var id: Self { self }
 
@@ -58,6 +60,7 @@ enum ConstraintKind: String, CaseIterable, Identifiable, Codable {
         case .equal: "="
         case .symmetric: "⟷"
         case .lock: "🔒"
+        case .dimension: ""
         }
     }
 
@@ -74,6 +77,7 @@ enum ConstraintKind: String, CaseIterable, Identifiable, Codable {
         case .equal: "Gleich: zwei Linien oder zwei Kreise/Bögen antippen."
         case .symmetric: "Symmetrie: zwei Punkte (oder zwei Kreise/Linien) und zuletzt die Achse antippen."
         case .lock: "Sperren: Punkte oder Kurven antippen."
+        case .dimension: "Bemaßen: ein Element, zwei Punkte, Punkt und Linie oder zwei Linien antippen."
         }
     }
 
@@ -89,6 +93,7 @@ enum ConstraintKind: String, CaseIterable, Identifiable, Codable {
         case .equal: "equal"
         case .symmetric: "arrow.left.and.right.righttriangle.left.righttriangle.right"
         case .lock: "lock"
+        case .dimension: "ruler"
         }
     }
 }
@@ -112,6 +117,10 @@ struct SketchConstraint: Codable, Hashable {
         case equalRadius(SketchCurveRef, SketchCurveRef)
         case symmetric(SketchPointRef, SketchPointRef, axis: SketchCurveRef)
         case lock(SketchPointRef, at: Point2)
+        /// Treibende Maße: Abstand zweier Punkte, Abstand Punkt–Linie, Winkel zweier Linien (Grad)
+        case distance(SketchPointRef, SketchPointRef, value: Double)
+        case pointLineDistance(SketchPointRef, SketchCurveRef, value: Double)
+        case angle(SketchCurveRef, SketchCurveRef, degrees: Double)
     }
 
     var variant: Variant
@@ -128,6 +137,26 @@ struct SketchConstraint: Codable, Hashable {
         case .equalLength, .equalRadius: .equal
         case .symmetric: .symmetric
         case .lock: .lock
+        case .distance, .pointLineDistance, .angle: .dimension
+        }
+    }
+
+    /// Wert eines treibenden Maßes (mm bzw. Grad); nil bei anderen Einschränkungen.
+    var dimensionValue: Double? {
+        switch variant {
+        case .distance(_, _, let value), .pointLineDistance(_, _, let value): value
+        case .angle(_, _, let degrees): degrees
+        default: nil
+        }
+    }
+
+    /// Dasselbe Maß mit neuem Wert.
+    func withDimensionValue(_ newValue: Double) -> SketchConstraint {
+        switch variant {
+        case .distance(let a, let b, _): SketchConstraint(variant: .distance(a, b, value: newValue))
+        case .pointLineDistance(let p, let c, _): SketchConstraint(variant: .pointLineDistance(p, c, value: newValue))
+        case .angle(let a, let b, _): SketchConstraint(variant: .angle(a, b, degrees: newValue))
+        default: self
         }
     }
 
@@ -146,6 +175,12 @@ struct SketchConstraint: Codable, Hashable {
             [a.entity, b.entity, axis.entity]
         case .lock(let p, _):
             [p.entity]
+        case .distance(let a, let b, _):
+            [a.entity, b.entity]
+        case .pointLineDistance(let p, let c, _):
+            [p.entity, c.entity]
+        case .angle(let a, let b, _):
+            [a.entity, b.entity]
         }
     }
 
@@ -171,6 +206,10 @@ struct SketchConstraint: Codable, Hashable {
         case .symmetric(let a, let b, let axis):
             v = p(a).flatMap { a in p(b).flatMap { b in c(axis).map { .symmetric(a, b, axis: $0) } } }
         case .lock(let a, let at): v = p(a).map { .lock($0, at: at) }
+        case .distance(let a, let b, let value): v = p(a).flatMap { a in p(b).map { .distance(a, $0, value: value) } }
+        case .pointLineDistance(let a, let b, let value):
+            v = p(a).flatMap { a in c(b).map { .pointLineDistance(a, $0, value: value) } }
+        case .angle(let a, let b, let degrees): v = c(a).flatMap { a in c(b).map { .angle(a, $0, degrees: degrees) } }
         }
         return v.map { SketchConstraint(variant: $0) }
     }
@@ -475,6 +514,21 @@ enum ConstraintSolver {
         case .lock(let a, let at):
             guard let p = point(a, e) else { return [] }
             return [p.x - at.x, p.y - at.y]
+        case .distance(let a, let b, let value):
+            guard let p = point(a, e), let q = point(b, e) else { return [] }
+            return [simd_distance(p, q) - value]
+        case .pointLineDistance(let a, let c, let value):
+            guard let p = point(a, e) else { return [] }
+            switch curve(c, e) {
+            case .line(let q1, let q2): return [abs(cross(direction(q1, q2), p - q1)) - value]
+            case .circle(let center, let r): return [abs(simd_distance(p, center) - r) - value]
+            case .other: return []
+            }
+        case .angle(let a, let b, let degrees):
+            guard case .line(let p1, let p2) = curve(a, e), case .line(let q1, let q2) = curve(b, e) else { return [] }
+            let d1 = direction(p1, p2), d2 = direction(q1, q2)
+            let angle = atan2(abs(cross(d1, d2)), simd_dot(d1, d2))
+            return [angle - degrees * .pi / 180]
         }
     }
 }

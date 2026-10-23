@@ -104,6 +104,7 @@ final class Renderer: NSObject, MTKViewDelegate {
     private let linePipeline: MTLRenderPipelineState
     private let colorPipeline: MTLRenderPipelineState
     private let colorOverlayPipeline: MTLRenderPipelineState
+    private let edgePipeline: MTLRenderPipelineState
     private let fillPipeline: MTLRenderPipelineState
     private let texturePipeline: MTLRenderPipelineState
     private let depthState: MTLDepthStencilState
@@ -117,8 +118,10 @@ final class Renderer: NSObject, MTKViewDelegate {
     private var selectionCount = 0
     private var edgeBuffer: MTLBuffer?
     private var edgeCount = 0
-    private var edgeHighlightBuffer: MTLBuffer?
-    private var edgeHighlightCount = 0
+    /// Körperkanten als zusammenhängende Linienzüge (für die breite Darstellung)
+    private var edgePolylines: [[SIMD3<Float>]] = []
+    /// Gewählte Kanten (Punktpaare)
+    private var edgeHighlight: [SIMD3<Float>] = []
     private var hasFramedOnce = false
 
     init?(view: MTKView) {
@@ -163,6 +166,7 @@ final class Renderer: NSObject, MTKViewDelegate {
               let linePipeline = pipeline(vertex: "vertex_main", fragment: "fragment_flat"),
               let colorPipeline = pipeline(vertex: "vertex_main", fragment: "fragment_color"),
               let colorOverlayPipeline = pipeline(vertex: "vertex_overlay", fragment: "fragment_color"),
+              let edgePipeline = pipeline(vertex: "vertex_overlay", fragment: "fragment_color_clip"),
               let fillPipeline = pipeline(vertex: "vertex_overlay", fragment: "fragment_flat", blended: true),
               let texturePipeline = pipeline(vertex: "vertex_main", fragment: "fragment_texture", blended: true),
               let depthState = depth(.lessEqual, write: true),
@@ -177,6 +181,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         self.linePipeline = linePipeline
         self.colorPipeline = colorPipeline
         self.colorOverlayPipeline = colorOverlayPipeline
+        self.edgePipeline = edgePipeline
         self.fillPipeline = fillPipeline
         self.texturePipeline = texturePipeline
         self.depthState = depthState
@@ -194,6 +199,16 @@ final class Renderer: NSObject, MTKViewDelegate {
         let edges = mesh.edges.map { Vertex(position: $0, normal: SIMD3(0, 0, 1)) }
         edgeBuffer = makeBuffer(edges)
         edgeCount = edges.count
+        var polylines: [[SIMD3<Float>]] = []
+        for i in stride(from: 0, to: mesh.edges.count - 1, by: 2) {
+            let a = mesh.edges[i], b = mesh.edges[i + 1]
+            if let last = polylines.last?.last, last == a {
+                polylines[polylines.count - 1].append(b)
+            } else {
+                polylines.append([a, b])
+            }
+        }
+        edgePolylines = polylines
         selectionBuffer = nil
         selectionCount = 0
 
@@ -206,9 +221,7 @@ final class Renderer: NSObject, MTKViewDelegate {
     func updateSelection(indices: [UInt32], edges: [SIMD3<Float>]) {
         selectionBuffer = makeBuffer(indices)
         selectionCount = indices.count
-        let edgeVertices = edges.map { Vertex(position: $0, normal: SIMD3(0, 0, 1)) }
-        edgeHighlightBuffer = makeBuffer(edgeVertices)
-        edgeHighlightCount = edgeVertices.count
+        edgeHighlight = edges
     }
 
     private func makeBuffer<T>(_ array: [T]) -> MTLBuffer? {
@@ -458,14 +471,24 @@ final class Renderer: NSObject, MTKViewDelegate {
             var color = SIMD4<Float>(r, g, b, a)
             encoder.setFragmentBytes(&color, length: MemoryLayout<SIMD4<Float>>.stride, index: 2)
         }
+        // Kanten wie bei Shapr3D als feine dunkle Linien mit fester Bildschirmbreite
         func drawEdges(depth: MTLDepthStencilState) {
-            guard let edgeBuffer, edgeCount > 0 else { return }
-            encoder.setRenderPipelineState(overlayPipeline)
-            encoder.setDepthStencilState(depth)
-            encoder.setVertexBuffer(edgeBuffer, offset: 0, index: 0)
-            setUniforms(&uniforms)
-            setColor(0.12, 0.13, 0.16)
-            encoder.drawPrimitives(type: .line, vertexStart: 0, vertexCount: edgeCount)
+            let group = LineGroup(polylines: edgePolylines, color: SIMD3(0.07, 0.075, 0.09), width: 1.1, onTop: false)
+            let triangles = lineTriangles(group, viewHeight: viewHeight)
+            if let buffer = makeBuffer(triangles) {
+                encoder.setRenderPipelineState(edgePipeline)
+                encoder.setDepthStencilState(depth)
+                encoder.setVertexBuffer(buffer, offset: 0, index: 0)
+                setUniforms(&uniforms)
+                encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: triangles.count)
+            } else if let edgeBuffer, edgeCount > 0 {
+                encoder.setRenderPipelineState(overlayPipeline)
+                encoder.setDepthStencilState(depth)
+                encoder.setVertexBuffer(edgeBuffer, offset: 0, index: 0)
+                setUniforms(&uniforms)
+                setColor(0.12, 0.13, 0.16)
+                encoder.drawPrimitives(type: .line, vertexStart: 0, vertexCount: edgeCount)
+            }
         }
 
         // Raster zuerst, damit es hinter halbtransparenten Körpern liegt
@@ -570,14 +593,18 @@ final class Renderer: NSObject, MTKViewDelegate {
             }
         }
 
-        // Gewählte Kanten
-        if let edgeHighlightBuffer, edgeHighlightCount > 0 {
-            encoder.setRenderPipelineState(overlayPipeline)
-            encoder.setDepthStencilState(alwaysDepthState)
-            encoder.setVertexBuffer(edgeHighlightBuffer, offset: 0, index: 0)
-            setUniforms(&uniforms)
-            setColor(0.98, 0.55, 0.08)
-            encoder.drawPrimitives(type: .line, vertexStart: 0, vertexCount: edgeHighlightCount)
+        // Gewählte Kanten: breiter und orange über den normalen Kanten
+        if edgeHighlight.count >= 2 {
+            let pairs = stride(from: 0, to: edgeHighlight.count - 1, by: 2).map { [edgeHighlight[$0], edgeHighlight[$0 + 1]] }
+            let group = LineGroup(polylines: pairs, color: SIMD3(0.98, 0.55, 0.08), width: 3)
+            let triangles = lineTriangles(group, viewHeight: viewHeight)
+            if let buffer = makeBuffer(triangles) {
+                encoder.setRenderPipelineState(colorPipeline)
+                encoder.setDepthStencilState(alwaysDepthState)
+                encoder.setVertexBuffer(buffer, offset: 0, index: 0)
+                setUniforms(&uniforms)
+                encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: triangles.count)
+            }
         }
 
         // Skizzenbereiche: halbtransparent, auf Flächen nicht flimmernd

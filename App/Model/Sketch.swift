@@ -176,6 +176,20 @@ private struct OffsetTarget {
 struct SketchDimension: Identifiable {
     enum Kind: Hashable {
         case width, height, diameter, radius, length
+        /// Abstand (zwei Punkte, Punkt–Linie) und Winkel zweier Linien in Grad
+        case distance, angle
+    }
+
+    /// Was eine Eingabe in das Maßfeld ändert.
+    enum Target {
+        /// Nur Anzeige
+        case display
+        /// Maß eines Elements (Breite, Höhe, Durchmesser, Radius, Länge)
+        case entity(Int)
+        /// Vorhandenes treibendes Maß (Index in constraints)
+        case constraint(Int)
+        /// Neues treibendes Maß aus der Auswahl
+        case create(SketchConstraint.Variant)
     }
 
     var kind: Kind
@@ -186,15 +200,26 @@ struct SketchDimension: Identifiable {
     var isEditable: Bool
     /// Gemessene Punkte (lokal) für die Maßlinie mit Pfeilen; leer = nur Etikett.
     var span: [Point2] = []
-
-    var id: Kind { kind }
+    /// Eindeutig je Maß (ein Eingabefeld im Viewport)
+    var id = ""
+    var target: Target = .display
 
     var prefix: String {
         switch kind {
         case .diameter: "Ø "
         case .radius: "R "
+        case .angle: "∠ "
         default: ""
         }
+    }
+
+    /// Dasselbe Maß mit Kennung und Ziel.
+    func tagged(_ id: String, _ target: Target) -> SketchDimension {
+        var copy = self
+        copy.id = id
+        copy.target = target
+        if case .display = target { copy.isEditable = false }
+        return copy
     }
 }
 
@@ -282,6 +307,10 @@ final class SketchController: ObservableObject {
     @Published private(set) var construction: Set<Int> = []
     /// Ausgewählte Punkte und Kurven (Finger antippen), in Auswahlreihenfolge
     @Published private(set) var selection: [SketchRef] = []
+    /// Hilfspunkte (kleine Dreiecke): Mitte zweier gewählter Punkte. Fangbar und selbst wieder wählbar,
+    /// so lassen sich Mitten von Mitten bilden. Sie gehören nicht zur gespeicherten Skizze.
+    @Published private(set) var marks: [Point2] = []
+    @Published private(set) var selectedMarks: [Int] = []
     /// Geschlossene Bereiche (Außenkontur mit Löchern), größter zuerst.
     @Published private(set) var regions: [SketchRegion] = []
     @Published private(set) var offsetPreview: [SketchEntity] = []
@@ -376,6 +405,9 @@ final class SketchController: ObservableObject {
         self.entities = entities
         self.constraints = constraints
         self.construction = construction
+        selection = []
+        marks = []
+        selectedMarks = []
         undoStack = []
         entitiesChanged()
     }
@@ -383,6 +415,9 @@ final class SketchController: ObservableObject {
     // MARK: Eingabe
 
     func began(at point: Point2, tolerance: Double) {
+        // Der Stift setzt auf: Schwebe-Fadenkreuz aus
+        hoverSnap = nil
+        hoverNodes = []
         let anchor: Point2? = switch tool {
         case .polyline: chainEnd
         case .spline: splinePoints.last
@@ -678,6 +713,8 @@ final class SketchController: ObservableObject {
         constraints = []
         construction = []
         selection = []
+        marks = []
+        selectedMarks = []
         undoStack = []
         notice = nil
         entitiesChanged()
@@ -766,15 +803,196 @@ final class SketchController: ObservableObject {
         if tool == .polyline, let from = chainEnd, let hover = hoverSnap?.point, simd_distance(from, hover) > 1e-6 {
             return Self.lineDimensions(from, hover, editable: false)
         }
-        guard let index = editableIndex, entities.indices.contains(index), !isInProgress || chainEnd != nil else {
-            return []
+        var result: [SketchDimension] = []
+        if let index = editableIndex, entities.indices.contains(index), !isInProgress || chainEnd != nil {
+            result = Self.dimensions(of: entities[index], editable: true)
+                .map { $0.tagged("e\(index)-\($0.kind)", .entity(index)) }
+        } else if !isInProgress {
+            result = selectionDimensions
         }
-        return Self.dimensions(of: entities[index], editable: true)
+        if !isInProgress || chainEnd != nil {
+            result += drivingDimensions
+        }
+        return result
     }
 
-    /// Maß des zuletzt gezeichneten Elements setzen. Startecke, Mitte bzw. Startpunkt bleiben fest.
-    func setDimension(_ kind: SketchDimension.Kind, to value: Double) {
-        guard value > 0, let index = editableIndex, entities.indices.contains(index) else { return }
+    /// Wie bei Shapr3D: Maße zur Auswahl. Ein Element zeigt seine Maße, zwei Punkte ihren Abstand,
+    /// Punkt und Linie den senkrechten Abstand, zwei Linien ihren Winkel (bzw. Abstand, wenn parallel).
+    private var selectionDimensions: [SketchDimension] {
+        let points = selection.compactMap { ref -> SketchPointRef? in
+            if case .point(let p) = ref { return p }
+            return nil
+        }
+        let curves = selection.compactMap { ref -> SketchCurveRef? in
+            if case .curve(let c) = ref { return c }
+            return nil
+        }
+        func position(_ ref: SketchPointRef) -> Point2? { ConstraintSolver.point(ref, entities) }
+        func distance(_ a: SketchPointRef, _ b: SketchPointRef) -> [SketchDimension] {
+            guard let p = position(a), let q = position(b) else { return [] }
+            return Self.lineDimensions(p, q, editable: true).map { dimension -> SketchDimension in
+                var copy = dimension
+                copy.kind = .distance
+                return copy.tagged("s-distance", .create(.distance(a, b, value: dimension.value)))
+            }
+        }
+        // Gleiches Maß schon vorhanden: nur das treibende zeigen
+        func exists(_ entitiesInvolved: Set<Int>) -> Bool {
+            constraints.contains { $0.kind == .dimension && Set($0.entities) == entitiesInvolved }
+        }
+
+        switch (points.count, curves.count) {
+        case (0, 1):
+            let ref = curves[0]
+            guard entities.indices.contains(ref.entity) else { return [] }
+            if case .polyline = entities[ref.entity], let ends = lineEndIndices(ref) {
+                return distance(SketchPointRef(entity: ref.entity, index: ends.0),
+                                SketchPointRef(entity: ref.entity, index: ends.1))
+            }
+            return Self.dimensions(of: entities[ref.entity], editable: true)
+                .map { $0.tagged("s\(ref.entity)-\($0.kind)", .entity(ref.entity)) }
+        case (2, 0):
+            guard points[0] != points[1] else { return [] }
+            return distance(points[0], points[1])
+        case (1, 1):
+            guard let p = position(points[0]), case .line(let q1, let q2) = ConstraintSolver.curve(curves[0], entities) else {
+                return []
+            }
+            let d = simd_normalize(q2 - q1)
+            let foot = q1 + d * simd_dot(p - q1, d)
+            let value = simd_distance(p, foot)
+            guard value > 1e-6 else { return [] }
+            return Self.lineDimensions(foot, p, editable: true).map { dimension -> SketchDimension in
+                var copy = dimension
+                copy.kind = .distance
+                return copy.tagged("s-pointline", .create(.pointLineDistance(points[0], curves[0], value: value)))
+            }
+        case (0, 2):
+            guard case .line(let p1, let p2) = ConstraintSolver.curve(curves[0], entities),
+                  case .line(let q1, let q2) = ConstraintSolver.curve(curves[1], entities) else {
+                // Zwei Kreise/Bögen: Abstand der Mittelpunkte
+                guard case .circle = ConstraintSolver.curve(curves[0], entities),
+                      case .circle = ConstraintSolver.curve(curves[1], entities) else { return [] }
+                let a = SketchPointRef(entity: curves[0].entity, index: centerIndex(of: curves[0].entity))
+                let b = SketchPointRef(entity: curves[1].entity, index: centerIndex(of: curves[1].entity))
+                guard a.entity != b.entity, !exists([a.entity, b.entity]) else { return [] }
+                return distance(a, b)
+            }
+            let d1 = simd_normalize(p2 - p1), d2 = simd_normalize(q2 - q1)
+            let crossing = abs(d1.x * d2.y - d1.y * d2.x)
+            if crossing < 1e-6 {
+                // Parallel: Abstand von einem Ende der zweiten Linie zur ersten
+                guard let ends = lineEndIndices(curves[1]) else { return [] }
+                let p = SketchPointRef(entity: curves[1].entity, index: ends.0)
+                let foot = p1 + d1 * simd_dot(q1 - p1, d1)
+                let value = simd_distance(q1, foot)
+                guard value > 1e-6 else { return [] }
+                return Self.lineDimensions(foot, q1, editable: true).map { dimension -> SketchDimension in
+                    var copy = dimension
+                    copy.kind = .distance
+                    return copy.tagged("s-parallel", .create(.pointLineDistance(p, curves[0], value: value)))
+                }
+            }
+            let degrees = atan2(crossing, simd_dot(d1, d2)) * 180 / .pi
+            let label = ((p1 + p2) / 2 + (q1 + q2) / 2) / 2
+            return [SketchDimension(kind: .angle, value: degrees, position: label, direction: Point2(0, 1),
+                                    isEditable: true)
+                .tagged("s-angle", .create(.angle(curves[0], curves[1], degrees: degrees)))]
+        default:
+            return []
+        }
+    }
+
+    /// Treibende Maße (Abstände, Winkel) bleiben in der Skizze sichtbar und änderbar.
+    private var drivingDimensions: [SketchDimension] {
+        constraints.enumerated().flatMap { entry -> [SketchDimension] in
+            let index = entry.offset
+            switch entry.element.variant {
+            case .distance(let a, let b, let value):
+                guard let p = ConstraintSolver.point(a, entities), let q = ConstraintSolver.point(b, entities) else {
+                    return []
+                }
+                return Self.lineDimensions(p, q, editable: true).map { dimension -> SketchDimension in
+                    var copy = dimension
+                    copy.kind = .distance
+                    copy.value = value
+                    return copy.tagged("c\(index)", .constraint(index))
+                }
+            case .pointLineDistance(let a, let c, let value):
+                guard let p = ConstraintSolver.point(a, entities) else { return [] }
+                var foot = p
+                switch ConstraintSolver.curve(c, entities) {
+                case .line(let q1, let q2):
+                    let d = simd_normalize(q2 - q1)
+                    foot = q1 + d * simd_dot(p - q1, d)
+                case .circle(let center, let r):
+                    foot = center + simd_normalize(p - center) * r
+                case .other:
+                    return []
+                }
+                return Self.lineDimensions(foot, p, editable: true).map { dimension -> SketchDimension in
+                    var copy = dimension
+                    copy.kind = .distance
+                    copy.value = value
+                    return copy.tagged("c\(index)", .constraint(index))
+                }
+            case .angle(let a, let b, let degrees):
+                guard case .line(let p1, let p2) = ConstraintSolver.curve(a, entities),
+                      case .line(let q1, let q2) = ConstraintSolver.curve(b, entities) else { return [] }
+                let label = ((p1 + p2) / 2 + (q1 + q2) / 2) / 2
+                return [SketchDimension(kind: .angle, value: degrees, position: label, direction: Point2(0, 1),
+                                        isEditable: true)
+                    .tagged("c\(index)", .constraint(index))]
+            default:
+                return []
+            }
+        }
+    }
+
+    /// Wert eines Maßfelds übernehmen: Element ändern, treibendes Maß ändern oder neu anlegen.
+    func setDimension(id: String, to value: Double) {
+        guard value > 0, let dimension = dimensions.first(where: { $0.id == id }) else { return }
+        switch dimension.target {
+        case .display:
+            return
+        case .entity(let index):
+            setEntityDimension(dimension.kind, of: index, to: value)
+        case .constraint(let index):
+            guard constraints.indices.contains(index) else { return }
+            var updated = constraints
+            updated[index] = updated[index].withDimensionValue(value)
+            applyDimension(updated, anchor: constraints[index].entities.first)
+        case .create(let variant):
+            let constraint = SketchConstraint(variant: variant).withDimensionValue(value)
+            applyDimension(constraints + [constraint], anchor: selection.first?.entity)
+        }
+    }
+
+    /// Treibendes Maß einhalten; das zuerst gewählte Element bleibt nach Möglichkeit stehen.
+    private func applyDimension(_ updated: [SketchConstraint], anchor: Int?) {
+        remember()
+        let before = entities, beforeConstraints = constraints
+        constraints = updated
+        let locked: Set<Int> = anchor.map { [$0] } ?? []
+        if let solved = ConstraintSolver.solve(entities, constraints: constraints, locked: locked)
+            ?? ConstraintSolver.solve(entities, constraints: constraints) {
+            entities = solved
+            selection = []
+            selectedMarks = []
+            notice = nil
+        } else {
+            entities = before
+            constraints = beforeConstraints
+            undoStack.removeLast()
+            notice = "Maß widerspricht den Einschränkungen."
+        }
+        editableIndex = nil
+        entitiesChanged()
+    }
+
+    /// Maß eines Elements setzen. Startecke, Mitte bzw. Startpunkt bleiben fest.
+    private func setEntityDimension(_ kind: SketchDimension.Kind, of index: Int, to value: Double) {
+        guard entities.indices.contains(index) else { return }
         let entity = entities[index]
         var updated: SketchEntity?
         switch (entity, kind) {
@@ -1029,7 +1247,20 @@ final class SketchController: ObservableObject {
 
     /// Finger antippen: Element zur Auswahl hinzufügen bzw. entfernen; ins Leere tippen leert die Auswahl.
     func select(at p: Point2, tolerance: Double) {
-        if let ref = pick(at: p, tolerance: tolerance) {
+        let ref = pick(at: p, tolerance: tolerance)
+        var pointRef = false
+        if case .point? = ref { pointRef = true }
+        // Hilfspunkte vor Kurven, Elementpunkte vor Hilfspunkten
+        let mark: Int? = pointRef ? nil : marks.indices
+            .filter { simd_distance(marks[$0], p) <= tolerance * 0.6 }
+            .min { simd_distance(marks[$0], p) < simd_distance(marks[$1], p) }
+        if let mark {
+            if let index = selectedMarks.firstIndex(of: mark) {
+                selectedMarks.remove(at: index)
+            } else {
+                selectedMarks.append(mark)
+            }
+        } else if let ref {
             if let index = selection.firstIndex(of: ref) {
                 selection.remove(at: index)
             } else {
@@ -1037,25 +1268,51 @@ final class SketchController: ObservableObject {
             }
         } else {
             selection = []
+            selectedMarks = []
         }
+        addMidpointMark()
         notice = nil
         changed()
     }
 
+    /// Zwei Punkte gewählt (Elementpunkte oder Hilfspunkte): ihre Mitte als Hilfspunkt zeigen.
+    private func addMidpointMark() {
+        let chosen = selectionPoints + selectedMarks.filter { marks.indices.contains($0) }.map { marks[$0] }
+        guard chosen.count == 2, simd_distance(chosen[0], chosen[1]) > 1e-6 else { return }
+        let middle = (chosen[0] + chosen[1]) / 2
+        guard !marks.contains(where: { simd_distance($0, middle) < 1e-6 }) else { return }
+        marks.append(middle)
+    }
+
     func clearSelection() {
         selection = []
+        selectedMarks = []
         changed()
     }
 
     func deleteSelection() {
-        guard !selection.isEmpty else {
+        guard !selection.isEmpty || !selectedMarks.isEmpty else {
             notice = "Elemente mit dem Finger antippen, dann „Löschen“."
+            return
+        }
+        if !selectedMarks.isEmpty {
+            let removed = Set(selectedMarks)
+            marks = marks.indices.filter { !removed.contains($0) }.map { marks[$0] }
+            selectedMarks = []
+        }
+        guard !selection.isEmpty else {
+            notice = nil
+            changed()
             return
         }
         remember()
         removeEntities(selectedEntities)
         notice = nil
         entitiesChanged()
+    }
+
+    var selectedMarkPoints: [Point2] {
+        selectedMarks.filter { marks.indices.contains($0) }.map { marks[$0] }
     }
 
     /// „Konstruktion erstellen“: Auswahl zu Konstruktionsgeometrie (oder zurück).
@@ -1233,6 +1490,8 @@ final class SketchController: ObservableObject {
                     : [.symmetric(pa0, pb1, axis: axis), .symmetric(pa1, pb0, axis: axis)]
             }
             return []
+        case .dimension:
+            return []
         case .lock:
             var result: [SketchConstraint.Variant] = points.compactMap { ref -> SketchConstraint.Variant? in
                 guard let p = ConstraintSolver.point(ref, entities) else { return nil }
@@ -1312,6 +1571,9 @@ final class SketchController: ObservableObject {
         case .coincident(let p, _), .pointOnCurve(let p, _), .midpoint(let p, _), .horizontalPoints(let p, _),
              .verticalPoints(let p, _), .symmetric(let p, _, _), .lock(let p, _):
             return ConstraintSolver.point(p, entities)
+        case .distance, .pointLineDistance, .angle:
+            // Maße zeigt das Maßfeld
+            return nil
         }
     }
 
@@ -1405,7 +1667,7 @@ final class SketchController: ObservableObject {
 
     /// Punkte der laufenden Eingabe, an denen ebenfalls gefangen wird.
     private var inputPoints: [Point2] {
-        var points = splinePoints
+        var points = splinePoints + marks
         if let chainStart { points.append(chainStart) }
         if let arcChord { points += [arcChord.start, arcChord.end] }
         return points

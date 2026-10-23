@@ -309,7 +309,7 @@ struct ConstraintColumn: View {
 
     private var groups: [[Row]] {
         let hasSelection = !sketch.selection.isEmpty
-        let kinds = ConstraintKind.allCases.filter { $0 != .lock }.map { kind in
+        let kinds = ConstraintKind.allCases.filter { $0 != .lock && $0 != .dimension }.map { kind in
             Row(id: kind.rawValue, systemImage: kind.systemImage, applicable: sketch.canApply(kind)) {
                 sketch.applyConstraint(kind)
             }

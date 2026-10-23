@@ -105,3 +105,10 @@ fragment float4 fragment_flat(VertexOut in [[stage_in]],
 fragment float4 fragment_color(VertexOut in [[stage_in]]) {
     return float4(in.color, 1.0);
 }
+
+/// Körperkanten als breite Linien in Vertexfarbe, mit Schnittansicht.
+fragment float4 fragment_color_clip(VertexOut in [[stage_in]],
+                                    constant Uniforms &uniforms [[buffer(1)]]) {
+    if (clipped(in, uniforms)) discard_fragment();
+    return float4(in.color, 1.0);
+}
