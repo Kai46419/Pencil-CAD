@@ -70,6 +70,12 @@ NS_ASSUME_NONNULL_BEGIN
 + (nullable PCKShape *)prismWithProfileWires:(NSArray<NSArray<NSNumber *> *> *)wires direction:(simd_double3)direction
     NS_SWIFT_NAME(prism(profileWires:direction:));
 
+/// Prisma wie prismWithProfileWires:, die Seitenflächen um degrees geneigt (Verjüngung wie in Fusion 360,
+/// Neutralebene = Profilebene). nil, wenn der Kernel die Neigung nicht bilden kann.
++ (nullable PCKShape *)draftPrismWithProfileWires:(NSArray<NSArray<NSNumber *> *> *)wires
+                                        direction:(simd_double3)direction angle:(double)degrees
+    NS_SWIFT_NAME(draftPrism(profileWires:direction:angle:));
+
 /// Ebene Fläche aus einem Skizzenprofil (Kodierung wie oben), z. B. zum Einfärben eines Bereichs.
 + (nullable PCKShape *)faceWithProfileWires:(NSArray<NSArray<NSNumber *> *> *)wires
     NS_SWIFT_NAME(face(profileWires:));

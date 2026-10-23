@@ -747,24 +747,57 @@ func profileWires(_ region: SketchRegion, plane: SketchPlane, offset: Double = 0
     return ([region.outer] + region.holes).map { $0.code(normal: plane.normal, xAxis: plane.u, world: world) }
 }
 
+/// Richtung einer Extrusion wie in Fusion 360.
+enum ExtrudeDirection: String, CaseIterable, Identifiable {
+    case oneSide = "Eine Seite"
+    /// Gleich weit nach beiden Seiten (Abstand je Seite)
+    case symmetric = "Symmetrisch"
+    /// Zweite Seite mit eigenem Abstand
+    case twoSides = "Zwei Seiten"
+
+    var id: Self { self }
+}
+
 /// Körper aus Bereichen einer Skizze. Beim Abziehen beginnt das Werkzeug minimal außerhalb,
-/// damit keine hauchdünnen Restflächen bleiben.
-func extrudeRegions(_ regions: [SketchRegion], plane: SketchPlane, distance: Double, mode: ExtrudeMode) -> PCKShape? {
+/// damit keine hauchdünnen Restflächen bleiben. taper: Verjüngungswinkel in Grad (Seitenflächen geneigt).
+func extrudeRegions(_ regions: [SketchRegion], plane: SketchPlane, distance: Double, mode: ExtrudeMode,
+                    direction: ExtrudeDirection = .oneSide, secondDistance: Double = 0, taper: Double = 0) -> PCKShape? {
     guard !regions.isEmpty, distance != 0 else { return nil }
     let sign = plane.extrusionSign(mode: mode)
-    let from = mode == .cut ? -sign * 0.01 : 0
-    let direction = plane.normal * (sign * distance - from)
+    let main = sign * distance
+    let from: Double
+    let length: Double
+    switch direction {
+    case .oneSide:
+        from = mode == .cut ? -sign * 0.01 : 0
+        length = main - from
+    case .symmetric:
+        from = -main
+        length = 2 * main
+    case .twoSides:
+        let second = abs(secondDistance) * (main >= 0 ? -1 : 1)
+        from = second
+        length = main - second
+    }
+    guard length != 0 else { return nil }
+    let vector = plane.normal * length
     var shapes: [PCKShape] = []
     for region in regions {
         let shape: PCKShape?
         if PCKShape.kernelAvailable {
-            shape = PCKShape.prism(profileWires: profileWires(region, plane: plane, offset: from), direction: direction)
+            if abs(taper) > 1e-9 {
+                shape = PCKShape.draftPrism(profileWires: profileWires(region, plane: plane, offset: from),
+                                            direction: vector, angle: taper)
+            } else {
+                shape = holedPrism(region, plane: plane, from: from, length: length)
+                    ?? PCKShape.prism(profileWires: profileWires(region, plane: plane, offset: from), direction: vector)
+            }
         } else {
             let xyz = region.polygon.flatMap { p -> [NSNumber] in
                 let w = plane.world(p) + plane.normal * from
                 return [NSNumber(value: w.x), NSNumber(value: w.y), NSNumber(value: w.z)]
             }
-            shape = PCKShape.prism(pointsXYZ: xyz, direction: direction)
+            shape = PCKShape.prism(pointsXYZ: xyz, direction: vector)
         }
         guard let shape else { return nil }
         shapes.append(shape)
@@ -772,14 +805,152 @@ func extrudeRegions(_ regions: [SketchRegion], plane: SketchPlane, distance: Dou
     return PCKShape.compound(shapes)
 }
 
+/// Ringe und Bereiche mit Löchern: Außenkontur voll extrudieren und die Löcher als etwas längere
+/// Prismen abziehen. Robuster als eine Fläche mit Lochdrähten, deren Umlaufrichtung (Ellipsen,
+/// Splines) der Kernel sonst selbst erraten muss. nil ohne Löcher oder wenn der Kernel scheitert.
+private func holedPrism(_ region: SketchRegion, plane: SketchPlane, from: Double, length: Double) -> PCKShape? {
+    guard !region.holes.isEmpty, length != 0 else { return nil }
+    let outer = SketchRegion(outer: region.outer, holes: [], polygon: region.polygon, area: region.area)
+    guard var body = PCKShape.prism(profileWires: profileWires(outer, plane: plane, offset: from),
+                                    direction: plane.normal * length) else { return nil }
+    let overshoot = 0.5 * (length > 0 ? 1.0 : -1.0)
+    for hole in region.holes {
+        let tool = SketchRegion(outer: hole, holes: [], polygon: hole.polygon, area: abs(signedArea(hole.polygon)))
+        guard let prism = PCKShape.prism(profileWires: profileWires(tool, plane: plane, offset: from - overshoot),
+                                         direction: plane.normal * (length + 2 * overshoot)),
+              let cut = body.cutting(prism) else { return nil }
+        body = cut
+    }
+    return body
+}
+
 /// Dreiecke (Weltpunkte, je drei) zum Einfärben eines Bereichs.
 func regionTriangles(_ region: SketchRegion, plane: SketchPlane) -> [SIMD3<Float>] {
-    if PCKShape.kernelAvailable, let face = PCKShape.face(profileWires: profileWires(region, plane: plane)) {
+    if region.holes.isEmpty, PCKShape.kernelAvailable, let face = PCKShape.face(profileWires: profileWires(region, plane: plane)) {
         let mesh = Mesh(face.triangulate(deflection: 0.05), body: -1)
         return mesh.indices.map { mesh.vertices[Int($0)].position }
     }
-    // Ohne Kernel: Fächer, nur für konvexe Bereiche korrekt
-    let points = region.polygon.map { SIMD3<Float>(plane.world($0)) }
-    guard points.count >= 3 else { return [] }
-    return (1..<(points.count - 1)).flatMap { [points[0], points[$0], points[$0 + 1]] }
+    // Mit Löchern (Ringe) oder ohne Kernel: Polygon mit Löchern in Ohren zerlegen
+    let triangles = triangulate(outer: region.polygon, holes: region.holes.map(\.polygon))
+    return triangles.map { SIMD3<Float>(plane.world($0)) }
+}
+
+// MARK: Triangulierung
+
+/// Zerlegt ein Polygon mit Löchern in Dreiecke (Ohrenschneiden, Löcher über Brücken eingebunden).
+/// Liefert die Eckpunkte, je drei pro Dreieck.
+func triangulate(outer: [Point2], holes: [[Point2]]) -> [Point2] {
+    var polygon = signedArea(outer) >= 0 ? outer : outer.reversed()
+    guard polygon.count >= 3 else { return [] }
+    // Löcher im Uhrzeigersinn, von rechts nach links einbinden
+    let prepared = holes
+        .filter { $0.count >= 3 }
+        .map { signedArea($0) <= 0 ? $0 : Array($0.reversed()) }
+        .sorted { ($0.map(\.x).max() ?? 0) > ($1.map(\.x).max() ?? 0) }
+    for hole in prepared {
+        polygon = bridge(hole, into: polygon)
+    }
+    return earClip(polygon)
+}
+
+/// Verbindet ein Loch über eine Brücke vom rechtesten Lochpunkt zu einem sichtbaren Randpunkt.
+private func bridge(_ hole: [Point2], into polygon: [Point2]) -> [Point2] {
+    guard let m = hole.indices.max(by: { hole[$0].x < hole[$1].x }) else { return polygon }
+    let p = hole[m]
+    // Strahl nach rechts: nächster Schnitt mit dem Rand
+    var best: (x: Double, index: Int)?
+    for i in polygon.indices {
+        let a = polygon[i], b = polygon[(i + 1) % polygon.count]
+        guard (a.y > p.y) != (b.y > p.y) || a.y == p.y || b.y == p.y else { continue }
+        let x: Double
+        if a.y == b.y {
+            x = max(a.x, b.x)
+        } else {
+            let t = (p.y - a.y) / (b.y - a.y)
+            guard t >= 0, t <= 1 else { continue }
+            x = a.x + t * (b.x - a.x)
+        }
+        guard x >= p.x, x < (best?.x ?? .infinity) else { continue }
+        // Endpunkt mit größerem x ist Kandidat
+        best = (x, a.x > b.x ? i : (i + 1) % polygon.count)
+    }
+    var target: Int
+    if let best {
+        target = best.index
+        // Liegt ein anderer Randpunkt im Dreieck (p, Schnitt, Kandidat), den mit kleinstem Winkel nehmen
+        let hit = Point2(best.x, p.y)
+        let candidate = polygon[target]
+        var bestAngle = Double.infinity
+        for (i, q) in polygon.enumerated() where i != target {
+            guard q.x >= p.x, pointInTriangle(q, p, hit, candidate) else { continue }
+            let angle = abs(atan2(q.y - p.y, q.x - p.x))
+            if angle < bestAngle {
+                bestAngle = angle
+                target = i
+            }
+        }
+    } else {
+        target = polygon.indices.min { simd_distance(polygon[$0], p) < simd_distance(polygon[$1], p) } ?? 0
+    }
+    var result = Array(polygon[...target])
+    result += Array(hole[m...]) + Array(hole[..<m])
+    result.append(p)
+    result.append(polygon[target])
+    if target + 1 < polygon.count { result += polygon[(target + 1)...] }
+    return result
+}
+
+private func pointInTriangle(_ p: Point2, _ a: Point2, _ b: Point2, _ c: Point2) -> Bool {
+    let d1 = cross2(b - a, p - a), d2 = cross2(c - b, p - b), d3 = cross2(a - c, p - c)
+    let negative = d1 < 0 || d2 < 0 || d3 < 0
+    let positive = d1 > 0 || d2 > 0 || d3 > 0
+    return !(negative && positive)
+}
+
+private func cross2(_ a: Point2, _ b: Point2) -> Double { a.x * b.y - a.y * b.x }
+
+/// Ohrenschneiden für ein einfaches Polygon gegen den Uhrzeigersinn (Brückenkanten erlaubt).
+private func earClip(_ input: [Point2]) -> [Point2] {
+    var indices = Array(input.indices)
+    var result: [Point2] = []
+    var guardCount = 0
+    while indices.count > 3, guardCount < input.count * input.count {
+        guardCount += 1
+        var clipped = false
+        for k in indices.indices {
+            let i0 = indices[(k + indices.count - 1) % indices.count]
+            let i1 = indices[k]
+            let i2 = indices[(k + 1) % indices.count]
+            let a = input[i0], b = input[i1], c = input[i2]
+            let turn = cross2(b - a, c - b)
+            if abs(turn) < 1e-14, simd_distance(a, c) > 0 {
+                // Gerader Punkt: ohne Dreieck entfernen
+                indices.remove(at: k)
+                clipped = true
+                break
+            }
+            guard turn > 0 else { continue }
+            let blocked = indices.contains { j in
+                guard j != i0, j != i1, j != i2 else { return false }
+                let q = input[j]
+                // Doppelte Brückenpunkte zählen nicht als innen
+                if q == a || q == b || q == c { return false }
+                return pointInTriangle(q, a, b, c)
+            }
+            guard !blocked else { continue }
+            result += [a, b, c]
+            indices.remove(at: k)
+            clipped = true
+            break
+        }
+        // Kein Ohr gefunden (numerisch entartet): Rest als Fächer
+        if !clipped { break }
+    }
+    if indices.count >= 3 {
+        let first = input[indices[0]]
+        for k in 1..<(indices.count - 1) {
+            result += [first, input[indices[k]], input[indices[k + 1]]]
+        }
+    }
+    return result
 }

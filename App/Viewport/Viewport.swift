@@ -218,7 +218,7 @@ final class ViewportView: MTKView {
         holdGesture?.isEnabled = sketching
 
         let plane = sketch.plane
-        renderer.gridTransform = sketching
+        renderer.gridTransform = sketching && !sketch.showsGrid ? nil : sketching
             ? float4x4(origin: SIMD3<Float>(plane.origin), u: SIMD3<Float>(plane.u),
                        v: SIMD3<Float>(plane.v), n: SIMD3<Float>(plane.normal))
             : matrix_identity_float4x4
@@ -264,7 +264,7 @@ final class ViewportView: MTKView {
         let perPoint = Double(renderer.camera.worldUnitsPerPoint(viewHeight: Float(bounds.height)))
 
         // Achsen wie bei Shapr3D: X rot, Y grün, Z blau, vom Ursprung in positiver Richtung bis zum Horizont
-        if !sketching {
+        if !sketching, workspace.showsOrigin {
             let reach = max(renderer.camera.distance * 10, planeHalfSize * 20)
             for (axis, color) in Self.axes {
                 groups.append(LineGroup(polylines: [[.zero, axis * reach]], color: color, width: 1, onTop: false))
@@ -316,10 +316,21 @@ final class ViewportView: MTKView {
                 sketchFillRevision = sketch.geometryRevision
                 sketchFills = sketch.regions.map { regionTriangles($0, plane: plane) }
             }
-            fills += sketchFills.map { FillGroup(triangles: $0, color: SIMD4(0.2, 0.45, 0.95, 0.16)) }
+            if sketch.showsProfiles {
+                fills += sketchFills.map { FillGroup(triangles: $0, color: SIMD4(0.2, 0.45, 0.95, 0.16)) }
+            }
             groups.append(LineGroup(polylines: sketch.entityPolylines.map { $0.map(world) }, color: Self.sketchInk,
                                     width: 2.6))
-            let construction = sketch.constructionPolylines.flatMap { dashed($0, dash: 5 * perPoint) }
+            // Punkte wie in Fusion 360: Enden und Ecken als kleine Punkte
+            if sketch.showsPoints {
+                let points = sketch.entityPoints
+                if !points.isEmpty {
+                    groups.append(LineGroup(polylines: [], color: Self.sketchInk, width: 0,
+                                            dots: points.map(world), dotRadius: 2.6))
+                }
+            }
+            let construction = sketch.showsConstruction
+                ? sketch.constructionPolylines.flatMap { dashed($0, dash: 5 * perPoint) } : []
             if !construction.isEmpty {
                 groups.append(LineGroup(polylines: construction.map { $0.map(world) }, color: Self.constructionGray,
                                         width: 1.8))
@@ -334,7 +345,7 @@ final class ViewportView: MTKView {
             if !preview.isEmpty {
                 groups.append(LineGroup(polylines: preview.map { $0.map(world) }, color: Self.previewBlue, width: 2.6))
             }
-            let dimensionLines = sketch.dimensions.flatMap { dimensionGeometry($0, perPoint: perPoint).lines }
+            let dimensionLines = sketch.visibleDimensions.flatMap { dimensionGeometry($0, perPoint: perPoint).lines }
             if !dimensionLines.isEmpty {
                 groups.append(LineGroup(polylines: dimensionLines.map { $0.map(world) }, color: Self.dimensionInk,
                                         width: 1.2))
@@ -517,7 +528,7 @@ final class ViewportView: MTKView {
     /// Maße des Elements beim Aufziehen (nur Anzeige) und danach als Eingabefelder direkt am Element.
     private func updateDimensionFields() {
         guard let renderer, let sketch else { return }
-        let dimensions = sketch.isActive && !sketch.isChoosingPlane ? sketch.dimensions : []
+        let dimensions = sketch.isActive && !sketch.isChoosingPlane ? sketch.visibleDimensions : []
         let plane = sketch.plane
         let perPoint = Double(renderer.camera.worldUnitsPerPoint(viewHeight: Float(bounds.height)))
         var shown = Set<String>()
@@ -716,7 +727,7 @@ final class ViewportView: MTKView {
     /// Kurzzeichen der Einschränkungen neben den Elementen.
     private func updateBadges() {
         guard let renderer, let sketch else { return }
-        let badges = sketch.isActive && !sketch.isChoosingPlane ? sketch.constraintBadges : []
+        let badges = sketch.isActive && !sketch.isChoosingPlane && sketch.showsConstraintBadges ? sketch.constraintBadges : []
         while badgeLabels.count < badges.count {
             let label = PaddedLabel()
             label.font = .systemFont(ofSize: 11, weight: .bold)
@@ -942,6 +953,10 @@ final class ViewportView: MTKView {
                 return
             case .trim:
                 if let point = sketchPoint(at: location) { sketch.trim(at: point, tolerance: snapTolerance) }
+                refresh()
+                return
+            case .fillet:
+                if let point = sketchPoint(at: location) { sketch.filletCorner(at: point, tolerance: snapTolerance) }
                 refresh()
                 return
             default:

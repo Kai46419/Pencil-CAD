@@ -2,6 +2,8 @@ import Foundation
 import simd
 
 enum SketchTool: String, CaseIterable, Identifiable {
+    /// Pfeil: zeichnet nicht, wählt Elemente, verschiebt sie und zieht Eck- und Endpunkte
+    case select = "Auswählen"
     case polyline = "Linie"
     case rectangle = "Rechteck"
     case circle = "Kreis"
@@ -14,12 +16,15 @@ enum SketchTool: String, CaseIterable, Identifiable {
     case offset = "Kante versetzen"
     case project = "Projizieren"
     case trim = "Beschneiden"
+    /// Ecke zweier Linien mit einem Bogen abrunden (Skizzenverrundung wie in Fusion 360)
+    case fillet = "Abrunden"
     case scale = "Skalieren"
 
     var id: Self { self }
 
     var systemImage: String {
         switch self {
+        case .select: "cursorarrow"
         case .polyline: "line.diagonal"
         case .rectangle: "rectangle"
         case .circle: "circle.circle"
@@ -32,6 +37,7 @@ enum SketchTool: String, CaseIterable, Identifiable {
         case .offset: "square.on.square.dashed"
         case .project: "square.and.arrow.down.on.square"
         case .trim: "scissors"
+        case .fillet: "app"
         case .scale: "arrow.up.left.and.arrow.down.right"
         }
     }
@@ -39,12 +45,14 @@ enum SketchTool: String, CaseIterable, Identifiable {
     /// Untertitel in der Werkzeugleiste (Variante des Werkzeugs).
     var subtitle: String? {
         switch self {
+        case .select: "Verschieben, Größe"
         case .polyline: "Automatisch"
         case .arc: "3 Punkte"
         case .text: "Schrift als Profil"
         case .offset: "Kurven versetzen"
         case .project: "Körperkanten"
         case .trim: "Bis zum Schnittpunkt"
+        case .fillet: "Ecke antippen"
         case .scale: "Auswahl oder alles"
         default: nil
         }
@@ -223,6 +231,31 @@ struct SketchDimension: Identifiable {
     }
 }
 
+/// Einschränkung bzw. Aktion der rechten Spalte, die auf die passende Auswahl wartet
+/// (wie in Fusion 360: erst das Symbol, dann die Elemente antippen).
+enum SketchPendingAction: Equatable {
+    case constraint(ConstraintKind)
+    case detach
+    case construction
+
+    var title: String {
+        switch self {
+        case .constraint(let kind): kind.rawValue
+        case .detach: "Trennen"
+        case .construction: "Konstruktion erstellen"
+        }
+    }
+
+    /// Was jetzt anzutippen ist.
+    var hint: String {
+        switch self {
+        case .constraint(let kind): kind.selectionHint
+        case .detach: "Trennen: Element oder gemeinsamen Punkt antippen, dessen Verbindungen gelöst werden sollen."
+        case .construction: "Konstruktion erstellen: Elemente antippen, die zu Hilfslinien werden sollen."
+        }
+    }
+}
+
 /// Zustand der aktuellen Skizze: Elemente, Werkzeugeingabe, Fang, geschlossene Bereiche.
 /// Bekommt Punkte im lokalen System der Skizzenebene vom Viewport.
 @MainActor
@@ -281,10 +314,21 @@ final class SketchController: ObservableObject {
     }
     /// Faktor für das Skalieren-Werkzeug.
     @Published var scaleFactor: Double = 2
+    /// Radius für das Abrunden-Werkzeug (mm)
+    @Published var filletRadius: Double = 2
     /// Neue Elemente als Konstruktionsgeometrie (zählen nicht als Profil).
     @Published var constructionMode = false
+    // Skizzenpalette (wie in Fusion 360): was beim Skizzieren angezeigt wird
+    @Published var showsGrid = true
+    @Published var showsProfiles = true
+    @Published var showsPoints = true
+    @Published var showsDimensions = true
+    @Published var showsConstraintBadges = true
+    @Published var showsConstruction = true
     /// Hinweis für die Oberfläche (z. B. Einschränkung nicht möglich).
     @Published var notice: String?
+    /// Gewählte Einschränkung, die auf passende Elemente wartet
+    @Published private(set) var pendingAction: SketchPendingAction?
     @Published var offsetKind: OffsetKind = .loop {
         didSet {
             offsetTarget = nil
@@ -344,6 +388,10 @@ final class SketchController: ObservableObject {
     private var editableIndex: Int?
     /// Rechteck mit 3 Punkten: erste Kante steht, Höhe folgt.
     private var rectangleBase: (start: Point2, end: Point2)?
+    /// Pfeil-Werkzeug: Element unter dem Stift, das gezogen wird
+    private var selectDrag: SelectDrag?
+    /// Pfeil-Werkzeug: Aufsetzpunkt (Tippen ohne Ziehen wählt beim Abheben)
+    private var selectStart: (point: Point2, tolerance: Double)?
 
     /// Stand vor jeder Änderung (für Rückgängig).
     private struct Snapshot {
@@ -423,6 +471,10 @@ final class SketchController: ObservableObject {
         // Der Stift setzt auf: Schwebe-Fadenkreuz aus
         hoverSnap = nil
         hoverNodes = []
+        if tool == .select {
+            beginSelectDrag(at: point, tolerance: tolerance)
+            return
+        }
         let anchor: Point2? = switch tool {
         case .polyline: chainEnd
         case .spline: splinePoints.last
@@ -437,6 +489,10 @@ final class SketchController: ObservableObject {
     }
 
     func moved(to point: Point2, tolerance: Double) {
+        if tool == .select {
+            moveSelectDrag(to: point, tolerance: tolerance)
+            return
+        }
         guard dragStart != nil else { return }
         dragCurrent = snap(point, tolerance: tolerance, anchor: strokeAnchor)
         // Der Stift liefert bis zu 240 Punkte pro Sekunde: nicht jedes Mal die Oberfläche neu aufbauen,
@@ -445,6 +501,10 @@ final class SketchController: ObservableObject {
     }
 
     func ended(at point: Point2, tolerance: Double) {
+        if tool == .select {
+            endSelectDrag(at: point, tolerance: tolerance)
+            return
+        }
         guard let start = dragStart else { return }
         let end = snap(point, tolerance: tolerance, anchor: strokeAnchor)
         dragStart = nil
@@ -494,7 +554,9 @@ final class SketchController: ObservableObject {
         case .trim:
             // Ungefangener Punkt: der Fang würde auf Schnittpunkte springen
             trim(at: point, tolerance: tolerance)
-        case .project, .scale:
+        case .fillet:
+            filletCorner(at: point, tolerance: tolerance)
+        case .project, .scale, .select:
             // Projizieren übernimmt der Viewport (braucht die Körperkanten), Skalieren die Parameterkarte
             break
         }
@@ -529,6 +591,15 @@ final class SketchController: ObservableObject {
     }
 
     func cancelStroke() {
+        if let drag = selectDrag {
+            if drag.hasMoved {
+                entities = drag.original
+                undoStack.removeLast()
+                entitiesChanged()
+            }
+            selectDrag = nil
+        }
+        selectStart = nil
         dragStart = nil
         dragCurrent = nil
         activeSnap = nil
@@ -560,6 +631,285 @@ final class SketchController: ObservableObject {
             notice = "Punkt 1 gemerkt – zweiten Punkt 1 Sekunde halten."
         }
         changed()
+    }
+
+    // MARK: Abrunden (Ecke zweier Linien)
+
+    /// Ecke antippen: die beiden Linien werden gekürzt und durch einen tangentialen Bogen mit filletRadius
+    /// verbunden. Rechtecke und Linienzüge werden dafür in einzelne Linien zerlegt.
+    func filletCorner(at p: Point2, tolerance: Double) {
+        guard let corner = nearestCorner(to: p, tolerance: tolerance * 1.5) else {
+            notice = "Ecke antippen, an der zwei Linien zusammenstoßen."
+            changed()
+            return
+        }
+        let radius = filletRadius
+        guard radius > 0 else { return }
+        let before = (entities: entities, constraints: constraints, construction: construction)
+        remember()
+        func fail(_ message: String) {
+            undoStack.removeLast()
+            entities = before.entities
+            constraints = before.constraints
+            construction = before.construction
+            notice = message
+            entitiesChanged()
+        }
+        for index in entities.indices.reversed() {
+            switch entities[index] {
+            case .rectangle, .polyline:
+                if entities[index].handlePoints.contains(where: { simd_distance($0, corner) < 1e-6 }) { explode(index) }
+            default:
+                break
+            }
+        }
+        let lines = entities.indices.filter { index in
+            guard case .line(let a, let b) = entities[index] else { return false }
+            return simd_distance(a, corner) < 1e-6 || simd_distance(b, corner) < 1e-6
+        }
+        guard lines.count == 2, case .line(let a1, let b1) = entities[lines[0]],
+              case .line(let a2, let b2) = entities[lines[1]] else {
+            fail("Hier stoßen nicht genau zwei Linien zusammen.")
+            return
+        }
+        let firstAtStart = simd_distance(a1, corner) < 1e-6, secondAtStart = simd_distance(a2, corner) < 1e-6
+        let far1 = firstAtStart ? b1 : a1, far2 = secondAtStart ? b2 : a2
+        let u1 = simd_normalize(far1 - corner), u2 = simd_normalize(far2 - corner)
+        let theta = acos(min(max(simd_dot(u1, u2), -1), 1))
+        guard theta > 1e-3, theta < .pi - 1e-3 else {
+            fail("Die Linien liegen in einer Flucht – keine Ecke zum Abrunden.")
+            return
+        }
+        let t = radius / tan(theta / 2)
+        guard t < simd_distance(far1, corner) - 1e-6, t < simd_distance(far2, corner) - 1e-6 else {
+            fail("Radius zu groß für diese Ecke.")
+            return
+        }
+        let t1 = corner + u1 * t, t2 = corner + u2 * t
+        let bisector = simd_normalize(u1 + u2)
+        let center = corner + bisector * (radius / sin(theta / 2))
+        let mid = center - bisector * radius
+        entities[lines[0]] = firstAtStart ? .line(t1, b1) : .line(a1, t1)
+        entities[lines[1]] = secondAtStart ? .line(t2, b2) : .line(a2, t2)
+        // Die alte Ecke gibt es nicht mehr
+        let pair = Set(lines)
+        constraints.removeAll { constraint in
+            if case .coincident = constraint.variant { return Set(constraint.entities) == pair }
+            return false
+        }
+        entities.append(.arc(start: t1, mid: mid, end: t2))
+        let arc = entities.count - 1
+        if construction.contains(lines[0]) { construction.insert(arc) }
+        connect(arc)
+        selection = []
+        editableIndex = arc
+        notice = nil
+        entitiesChanged()
+    }
+
+    /// Nächste Ecke (Linienende, Rechteck- oder Linienzugecke) beim Punkt.
+    private func nearestCorner(to p: Point2, tolerance: Double) -> Point2? {
+        var best: (distance: Double, point: Point2)?
+        for entity in entities {
+            let corners: [Point2]
+            switch entity {
+            case .line(let a, let b): corners = [a, b]
+            case .rectangle: corners = Array(entity.handlePoints.prefix(4))
+            case .polyline(let points, _): corners = points
+            default: continue
+            }
+            for q in corners {
+                let d = simd_distance(p, q)
+                if d <= tolerance, d < (best?.distance ?? .infinity) { best = (d, q) }
+            }
+        }
+        return best?.point
+    }
+
+    /// Rechteck bzw. Linienzug in einzelne, verbundene Linien zerlegen.
+    private func explode(_ index: Int) {
+        let entity = entities[index]
+        let points: [Point2]
+        let closed: Bool
+        switch entity {
+        case .rectangle:
+            points = Array(entity.handlePoints.prefix(4))
+            closed = true
+        case .polyline(let corners, let isClosed):
+            points = corners
+            closed = isClosed
+        default:
+            return
+        }
+        let wasConstruction = construction.contains(index)
+        removeEntities([index])
+        let count = closed ? points.count : points.count - 1
+        guard count > 0 else { return }
+        for k in 0..<count {
+            let a = points[k], b = points[(k + 1) % points.count]
+            guard simd_distance(a, b) > 1e-9 else { continue }
+            entities.append(.line(a, b))
+            if wasConstruction { construction.insert(entities.count - 1) }
+            connect(entities.count - 1)
+        }
+    }
+
+    // MARK: Pfeil-Werkzeug (Auswählen, Verschieben, Größe ändern)
+
+    private struct SelectDrag {
+        enum Kind {
+            /// Griffpunkt (Ecke, Ende, Zentrum) ziehen
+            case handle(Int)
+            /// Kante eines Rechtecks bzw. Linienzugs parallel verschieben
+            case edge(Int)
+            /// Kreis- bzw. Ellipsenrand: Größe ändern
+            case radius
+            /// Bogen: Wölbung ändern
+            case bulge
+            /// Ganzes Element verschieben
+            case move
+        }
+        var entity: Int
+        var kind: Kind
+        var start: Point2
+        /// Gegriffener Punkt am Element (Griffpunkt bzw. Aufsetzpunkt)
+        var grab: Point2
+        var original: [SketchEntity]
+        /// Fang ohne das gezogene Element (sonst rastet es an seiner alten Lage ein)
+        var snapIndex: SnapIndex
+        var hasMoved = false
+    }
+
+    private func beginSelectDrag(at p: Point2, tolerance: Double) {
+        selectStart = (point: p, tolerance: tolerance)
+        selectDrag = nil
+        guard let ref = pick(at: p, tolerance: tolerance), entities.indices.contains(ref.entity) else { return }
+        let index = ref.entity
+        let kind: SelectDrag.Kind
+        var grab = p
+        switch ref {
+        case .point(let point):
+            kind = .handle(point.index)
+            let handles = entities[index].handlePoints
+            if handles.indices.contains(point.index) { grab = handles[point.index] }
+        case .curve(let curve):
+            switch entities[index] {
+            case .circle, .ellipse: kind = .radius
+            case .arc: kind = .bulge
+            case .rectangle, .polyline: kind = .edge(curve.index)
+            default: kind = .move
+            }
+        }
+        let others = entities.indices.filter { $0 != index }.map { entities[$0] }
+        selectDrag = SelectDrag(entity: index, kind: kind, start: p, grab: grab, original: entities,
+                                snapIndex: SnapIndex(entities: others))
+    }
+
+    private func moveSelectDrag(to p: Point2, tolerance: Double) {
+        guard var drag = selectDrag else { return }
+        if !drag.hasMoved {
+            // Kleines Zittern beim Tippen ist noch kein Ziehen
+            guard simd_distance(p, drag.start) > tolerance * 0.15 else { return }
+            drag.hasMoved = true
+            remember()
+        }
+        let raw = drag.grab + (p - drag.start)
+        var target = raw
+        if snapEnabled {
+            let result = drag.snapIndex.snap(raw, tolerance: tolerance, kinds: snapKinds, extra: marks, gridStep: gridStep)
+            activeSnap = result.kind == nil ? nil : result
+            target = result.point
+        }
+        var result = drag.original
+        result[drag.entity] = Self.dragged(drag.original[drag.entity], kind: drag.kind, grab: drag.grab, to: target)
+        // Verbundene Elemente folgen über die Einschränkungen (gemeinsame Ecken, Mittelpunkte …)
+        if !constraints.isEmpty {
+            guard let solved = ConstraintSolver.solve(result, constraints: constraints, locked: [drag.entity]) else {
+                selectDrag = drag
+                notice = "Die Einschränkungen lassen diese Änderung nicht zu (z. B. „Sperren“)."
+                changed(publish: false)
+                return
+            }
+            result = solved
+        }
+        notice = nil
+        selectDrag = drag
+        entities = result
+        changed(publish: false)
+    }
+
+    private func endSelectDrag(at p: Point2, tolerance: Double) {
+        defer {
+            selectDrag = nil
+            selectStart = nil
+            activeSnap = nil
+        }
+        if let drag = selectDrag, drag.hasMoved {
+            moveSelectDrag(to: p, tolerance: tolerance)
+            // Maße des gezogenen Elements bleiben zum Eintippen offen
+            editableIndex = drag.entity
+            entitiesChanged()
+            return
+        }
+        // Tippen ohne Ziehen: Element wählen bzw. abwählen (wie mit dem Finger)
+        let start = selectStart ?? (point: p, tolerance: tolerance)
+        select(at: start.point, tolerance: start.tolerance)
+        editableIndex = selection.count == 1 ? selection[0].entity : nil
+        changed()
+    }
+
+    /// Element nach dem Ziehen: aus dem Zustand beim Aufsetzen berechnet, damit sich nichts aufschaukelt.
+    private static func dragged(_ entity: SketchEntity, kind: SelectDrag.Kind, grab: Point2, to p: Point2) -> SketchEntity {
+        let delta = p - grab
+        switch kind {
+        case .move:
+            return entity.translated(by: delta)
+        case .handle(let k):
+            return entity.movingHandle(k, to: p) ?? entity.translated(by: delta)
+        case .radius:
+            switch entity {
+            case .circle(let center, _):
+                return .circle(center: center, radius: max(simd_distance(center, p), 1e-4))
+            case .ellipse(let center, let radii):
+                // Gleichmäßig größer bzw. kleiner, Seitenverhältnis bleibt
+                let before = simd_distance(center, grab)
+                guard before > 1e-9 else { return entity }
+                let factor = max(simd_distance(center, p) / before, 1e-4)
+                return .ellipse(center: center, radii: radii * factor)
+            default:
+                return entity.translated(by: delta)
+            }
+        case .bulge:
+            if case .arc(let a, _, let b) = entity, circleThrough(a, p, b) != nil {
+                return .arc(start: a, mid: p, end: b)
+            }
+            return entity
+        case .edge(let i):
+            switch entity {
+            case .rectangle(let corner, let size):
+                let lo = simd_min(corner, corner + size), hi = simd_max(corner, corner + size)
+                let corners = [corner, corner + Point2(size.x, 0), corner + size, corner + Point2(0, size.y)]
+                let a = corners[i % 4], b = corners[(i + 1) % 4]
+                var newLo = lo, newHi = hi
+                if abs(a.y - b.y) < abs(a.x - b.x) {
+                    // Waagrechte Kante: nur in y
+                    if abs(a.y - lo.y) < abs(a.y - hi.y) { newLo.y += delta.y } else { newHi.y += delta.y }
+                } else {
+                    if abs(a.x - lo.x) < abs(a.x - hi.x) { newLo.x += delta.x } else { newHi.x += delta.x }
+                }
+                let low = simd_min(newLo, newHi), high = simd_max(newLo, newHi)
+                guard high.x - low.x > 1e-6, high.y - low.y > 1e-6 else { return entity }
+                return .rectangle(corner: low, size: high - low)
+            case .polyline(var points, let closed):
+                guard points.count >= 2 else { return entity }
+                let j = i % points.count, k = (i + 1) % points.count
+                points[j] += delta
+                points[k] += delta
+                return .polyline(points, closed: closed)
+            default:
+                return entity.translated(by: delta)
+            }
+        }
     }
 
     /// Bezugspunkt für Winkelschritte während eines Strichs.
@@ -758,6 +1108,7 @@ final class SketchController: ObservableObject {
 
     /// Laufende Eingabe beim Werkzeugwechsel abschließen.
     private func finishInput() {
+        if tool != .select { pendingAction = nil }
         if splinePoints.count >= 2 {
             add(.spline(points: splinePoints, kind: splineKind, closed: false))
         }
@@ -816,7 +1167,8 @@ final class SketchController: ObservableObject {
         if let start = dragStart, let current = dragCurrent {
             if tool == .polyline {
                 let from = chainEnd ?? start
-                return Self.lineDimensions(from, current, editable: false)
+                // Wie in Fusion 360: beim Ziehen Länge und Winkel zur Waagrechten
+                return Self.lineDimensions(from, current, editable: false) + Self.lineAngle(from, current)
             }
             if tool == .arc, arcChord == nil {
                 return Self.lineDimensions(start, current, editable: false)
@@ -837,7 +1189,7 @@ final class SketchController: ObservableObject {
             return []
         }
         if tool == .polyline, let from = chainEnd, let hover = hoverSnap?.point, simd_distance(from, hover) > 1e-6 {
-            return Self.lineDimensions(from, hover, editable: false)
+            return Self.lineDimensions(from, hover, editable: false) + Self.lineAngle(from, hover)
         }
         var result: [SketchDimension] = []
         if let index = editableIndex, entities.indices.contains(index), !isInProgress || chainEnd != nil {
@@ -1070,6 +1422,18 @@ final class SketchController: ObservableObject {
             }
         }
         entitiesChanged()
+    }
+
+    /// Winkel der Linie a→b zur Waagrechten (0…360°), nur Anzeige, auf halbem Winkel neben dem Startpunkt.
+    private static func lineAngle(_ a: Point2, _ b: Point2) -> [SketchDimension] {
+        let length = simd_distance(a, b)
+        guard length > 1e-6 else { return [] }
+        var radians = atan2(b.y - a.y, b.x - a.x)
+        if radians < 0 { radians += 2 * .pi }
+        let half = radians / 2
+        let label = a + Point2(cos(half), sin(half)) * length * 0.45
+        return [SketchDimension(kind: .angle, value: radians * 180 / .pi, position: label, direction: Point2(0, 1),
+                                isEditable: false).tagged("live-angle", .display)]
     }
 
     private static func lineDimensions(_ a: Point2, _ b: Point2, editable: Bool) -> [SketchDimension] {
@@ -1308,7 +1672,62 @@ final class SketchController: ObservableObject {
         }
         addMidpointMark()
         notice = nil
+        // Wartende Einschränkung: setzen, sobald die Auswahl passt; danach geht es mit den nächsten Elementen weiter
+        if let action = pendingAction {
+            if canPerform(action) {
+                perform(action)
+                selection = []
+                selectedMarks = []
+                if notice == nil {
+                    notice = "„\(action.title)“ gesetzt. Nächste Elemente antippen – oder das Symbol nochmal tippen zum Beenden."
+                }
+            } else {
+                notice = action.hint
+            }
+        }
         changed()
+    }
+
+    /// Einschränkung bzw. Trennen/Konstruktion aus der rechten Spalte. Passt die Auswahl schon, wird sie
+    /// sofort angewendet; sonst wartet sie, bis die passenden Elemente angetippt sind (Pfeil-Werkzeug).
+    /// Nochmal tippen beendet das Warten.
+    func start(_ action: SketchPendingAction) {
+        if pendingAction == action {
+            cancelPending()
+            return
+        }
+        if canPerform(action) {
+            pendingAction = nil
+            perform(action)
+            return
+        }
+        if tool != .select { tool = .select }
+        selection = []
+        selectedMarks = []
+        pendingAction = action
+        notice = action.hint
+        changed()
+    }
+
+    func cancelPending() {
+        pendingAction = nil
+        notice = nil
+        changed()
+    }
+
+    private func canPerform(_ action: SketchPendingAction) -> Bool {
+        switch action {
+        case .constraint(let kind): canApply(kind)
+        case .detach, .construction: !selection.isEmpty
+        }
+    }
+
+    private func perform(_ action: SketchPendingAction) {
+        switch action {
+        case .constraint(let kind): applyConstraint(kind)
+        case .detach: detachSelection()
+        case .construction: toggleConstruction()
+        }
     }
 
     /// Zwei Punkte gewählt (Elementpunkte oder Hilfspunkte): ihre Mitte als Hilfspunkt zeigen.
@@ -1562,6 +1981,22 @@ final class SketchController: ObservableObject {
     // MARK: Darstellung
 
     /// Linienzüge der fertigen Elemente (lokal), ohne Konstruktionsgeometrie.
+    /// Enden und Ecken der Elemente (Anzeige „Punkte“ der Skizzenpalette), ohne Text.
+    var entityPoints: [Point2] {
+        entities.indices.flatMap { index -> [Point2] in
+            switch entities[index] {
+            case .text: return []
+            case .rectangle: return Array(entities[index].handlePoints.prefix(4))
+            default: return entities[index].handlePoints
+            }
+        }
+    }
+
+    /// Maße laut Skizzenpalette; beim Zeichnen bleiben Länge und Winkel immer sichtbar.
+    var visibleDimensions: [SketchDimension] {
+        showsDimensions || isInProgress ? dimensions : []
+    }
+
     var entityPolylines: [[Point2]] {
         entities.indices.filter { !construction.contains($0) }.flatMap { entities[$0].drawing }
     }
@@ -1668,7 +2103,7 @@ final class SketchController: ObservableObject {
                 polylines += preview.drawing
                 if splineKind == .control { polylines.append(points) }
             }
-        case .point, .text, .offset, .project, .trim, .scale:
+        case .point, .text, .offset, .project, .trim, .scale, .select, .fillet:
             break
         }
         return polylines

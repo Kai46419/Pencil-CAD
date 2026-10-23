@@ -57,13 +57,26 @@ private struct WorkspaceContent: View {
                     .padding(.leading, 16)
                     .padding(.top, 76)
                 }
+                // Browser „Ebenen“ wie in Fusion 360: Reiter oben links, das Fenster liegt über der Werkzeugleiste
+                .overlay(alignment: .topLeading) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        layersTab
+                        if workspace.showsLayers {
+                            LayersPanel(workspace: workspace, model: model, projectName: projectName) {
+                                workspace.showsLayers = false
+                            }
+                            .transition(.opacity.combined(with: .move(edge: .leading)))
+                        }
+                    }
+                    .padding(.leading, 16)
+                    .padding(.top, 12)
+                    .animation(.easeOut(duration: 0.15), value: workspace.showsLayers)
+                }
                 .overlay(alignment: .topTrailing) {
                     HStack(alignment: .top, spacing: 12) {
                         switch panel {
                         case .history:
                             HistoryPanel(model: model) { panel = nil }
-                        case .elements:
-                            ElementsPanel(workspace: workspace, model: model) { panel = nil }
                         case nil:
                             EmptyView()
                         }
@@ -75,6 +88,7 @@ private struct WorkspaceContent: View {
                 .overlay(alignment: .bottom) { bottomArea }
                 .overlay(alignment: .bottomLeading) { undoRedo }
         }
+        .hoverTipLayer()
         .onChange(of: workspace.tool) { openGroup = nil }
         .onChange(of: model.selectionRevision) {
             openGroup = nil
@@ -118,6 +132,30 @@ private struct WorkspaceContent: View {
     }
 
     // MARK: Oben
+
+    /// Reiter „Ebenen“ (Browser) oben links.
+    private var layersTab: some View {
+        Button {
+            workspace.showsLayers.toggle()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "square.3.layers.3d")
+                Text("Ebenen")
+                    .font(.callout.weight(.semibold))
+                Image(systemName: "chevron.down")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(workspace.showsLayers ? 180 : 0))
+            }
+            .foregroundStyle(workspace.showsLayers ? Color.white : Color.primary)
+            .padding(.horizontal, 14)
+            .frame(height: 36)
+            .background(workspace.showsLayers ? Color.accentColor : Color(.systemBackground), in: Capsule())
+            .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
+        }
+        .buttonStyle(.plain)
+        .hoverTip("Ebenen")
+    }
 
     private var topArea: some View {
         VStack(spacing: 10) {

@@ -181,6 +181,14 @@ struct ParameterCard: View {
         case .trim:
             Text("Kurvenstück antippen (Stift oder Finger)")
                 .foregroundStyle(.secondary)
+        case .fillet:
+            HStack(spacing: 14) {
+                NumberField(title: "Radius", value: sketch.filletRadius) { value in
+                    if value > 0 { sketch.filletRadius = value }
+                }
+                Text("Ecke antippen")
+                    .foregroundStyle(.secondary)
+            }
         case .project:
             Text("Körperkante oder Fläche antippen")
                 .foregroundStyle(.secondary)
@@ -263,8 +271,20 @@ struct ParameterCard: View {
                 }
                 .pickerStyle(.segmented)
                 .fixedSize()
-                NumberField(title: "Abstand", value: model.regionValue) { model.setRegionValue($0) }
-                Text(model.selectedRegions.count == 1 ? "1 Bereich" : "\(model.selectedRegions.count) Bereiche")
+                Picker("Richtung", selection: $model.regionDirection) {
+                    ForEach(ExtrudeDirection.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.menu)
+                .fixedSize()
+                .hoverTip("Richtung", "Eine Seite, symmetrisch (gleich weit nach beiden Seiten) oder zwei Seiten mit eigenem Abstand – wie in Fusion 360.")
+                NumberField(title: model.regionDirection == .symmetric ? "Je Seite" : "Abstand",
+                            value: model.regionValue) { model.setRegionValue($0) }
+                if model.regionDirection == .twoSides {
+                    NumberField(title: "Seite 2", value: model.regionSecondValue) { model.regionSecondValue = abs($0) }
+                }
+                NumberField(title: "Verjüngung", value: model.regionTaper, unit: "°", width: 52) { model.regionTaper = $0 }
+                    .hoverTip("Verjüngung", "Neigt die Seitenwände um diesen Winkel (Entformungsschräge). Positiv und negativ ausprobieren: eine Richtung wird schmaler, die andere breiter.")
+                Text(model.selectedRegions.count == 1 ? "1 Profil" : "\(model.selectedRegions.count) Profile")
                     .foregroundStyle(.secondary)
                     .fixedSize()
             }
@@ -848,87 +868,262 @@ struct HistoryPanel: View {
 
 // MARK: Elemente
 
-/// Körper der Szene: Farbe, Name, Sichtbarkeit; Antippen wählt den Körper.
-struct ElementsPanel: View {
+/// Reiter „Ebenen“ links, aufgebaut wie der Browser in Fusion 360: Projekt, Dokumenteinstellungen,
+/// Ursprung, Ordner „Skizzen“ (jede Skizze ist eine Ebene, darunter die Skizze selbst und alle Körper,
+/// die aus ihr extrudiert wurden), weitere Körper, Konstruktion und Bilder – jeweils mit Auge.
+struct LayersPanel: View {
     @ObservedObject var workspace: Workspace
     @ObservedObject var model: ModelStore
+    let projectName: String
     let close: () -> Void
 
-    @State private var renaming: Int?
+    private enum Renaming: Equatable {
+        case body(Int)
+        case sketch(Int)
+    }
+
+    @State private var collapsed: Set<UUID> = []
+    /// Zugeklappte Ordner (Dokumenteinstellungen anfangs zu, wie in Fusion 360)
+    @State private var closedFolders: Set<String> = ["settings"]
+    @State private var renaming: Renaming?
     @State private var newName = ""
 
+    /// „Skizze 3“ heißt im Reiter „Ebene 3“.
+    static func layerName(_ sketchName: String) -> String {
+        sketchName.hasPrefix("Skizze ") ? "Ebene " + sketchName.dropFirst("Skizze ".count) : sketchName
+    }
+
     var body: some View {
-        SidePanelFrame(title: "Elemente", close: close) {
-            if model.bodies.isEmpty && model.sketches.isEmpty && model.constructions.isEmpty && model.canvases.isEmpty {
-                Text("Noch keine Körper oder Skizzen")
-                    .foregroundStyle(.secondary)
-                    .padding(8)
-            }
-            if !model.sketches.isEmpty {
-                sectionTitle("Skizzen")
-                ForEach(model.sketches.indices, id: \.self) { index in
-                    sketchRow(index)
+        SidePanelFrame(title: "Ebenen", close: close) {
+            folder("root", title: projectName, systemImage: "cube.transparent", visible: nil) {
+                folder("settings", title: "Dokumenteinstellungen", systemImage: "gearshape", visible: nil) {
+                    infoRow("Einheiten: mm", systemImage: "ruler")
                 }
-                if !model.bodies.isEmpty { sectionTitle("Körper") }
-            }
-            if !model.constructions.isEmpty {
-                sectionTitle("Konstruktion")
-                ForEach(model.constructions) { item in
-                    constructionRow(item)
+                folder("origin", title: "Ursprung", systemImage: "move.3d", visible: workspace.showsOrigin,
+                       toggle: { workspace.showsOrigin.toggle() }, hasChildren: false) {
+                    EmptyView()
                 }
-            }
-            if !model.canvases.isEmpty {
-                sectionTitle("Bilder")
-                ForEach(model.canvases) { canvas in
-                    canvasRow(canvas)
-                }
-            }
-            if !model.bodies.isEmpty, !model.constructions.isEmpty || !model.canvases.isEmpty, model.sketches.isEmpty {
-                sectionTitle("Körper")
-            }
-            ForEach(model.bodies.indices, id: \.self) { index in
-                let item = model.bodies[index]
-                let isSelected = model.selectedBodies.contains(index) || model.selectedBody == index
-                HStack(spacing: 10) {
-                    Circle()
-                        .fill(Color(item.color))
-                        .frame(width: 14, height: 14)
-                    Text(item.name)
-                        .lineLimit(1)
-                        .foregroundStyle(item.isHidden ? Color.secondary : Color.primary)
-                    Spacer(minLength: 0)
-                    Button {
-                        model.setHidden(!item.isHidden, body: index)
-                    } label: {
-                        Image(systemName: item.isHidden ? "eye.slash" : "eye")
-                            .foregroundStyle(.secondary)
-                            .frame(width: 30, height: 30)
+                folder("sketches", title: "Skizzen", systemImage: "folder",
+                       count: model.sketches.count, visible: model.sketches.isEmpty ? nil : model.showsSketches,
+                       toggle: { model.setSketchesHidden(model.showsSketches) }) {
+                    if model.sketches.isEmpty {
+                        infoRow("Noch keine Skizze", systemImage: "pencil.and.outline")
                     }
-                    .buttonStyle(.plain)
-                }
-                .padding(.vertical, 4)
-                .padding(.horizontal, 8)
-                .background(isSelected ? Color.accentColor.opacity(0.15) : Color.clear,
-                            in: RoundedRectangle(cornerRadius: 8))
-                .contentShape(Rectangle())
-                .onTapGesture { select(index) }
-                .contextMenu {
-                    Button("Umbenennen", systemImage: "pencil") {
-                        newName = item.name
-                        renaming = index
+                    ForEach(model.sketches.indices, id: \.self) { index in
+                        layer(index)
                     }
-                    Button("Löschen", systemImage: "trash", role: .destructive) {
-                        model.toggleBody(index, exclusive: true)
-                        model.deleteSelected()
+                }
+                if !otherBodies.isEmpty {
+                    let anyVisible = otherBodies.contains { !model.bodies[$0].isHidden }
+                    folder("bodies", title: "Körper", systemImage: "folder", count: otherBodies.count,
+                           visible: anyVisible, toggle: { model.setBodiesHidden(anyVisible, bodies: otherBodies) }) {
+                        ForEach(otherBodies, id: \.self) { index in
+                            bodyRow(index)
+                        }
+                    }
+                }
+                if !model.constructions.isEmpty {
+                    folder("constructions", title: "Konstruktion", systemImage: "folder",
+                           count: model.constructions.count, visible: model.showsConstructions,
+                           toggle: { model.setConstructionsHidden(model.showsConstructions) }) {
+                        ForEach(model.constructions) { item in
+                            constructionRow(item)
+                        }
+                    }
+                }
+                if !model.canvases.isEmpty {
+                    folder("canvases", title: "Bilder", systemImage: "folder", count: model.canvases.count,
+                           visible: model.showsCanvases, toggle: { model.setCanvasesHidden(model.showsCanvases) }) {
+                        ForEach(model.canvases) { canvas in
+                            canvasRow(canvas)
+                        }
                     }
                 }
             }
         }
-        .alert("Körper umbenennen", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
+        .alert(isRenamingSketch ? "Ebene umbenennen" : "Körper umbenennen",
+               isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("Name", text: $newName)
             Button("Abbrechen", role: .cancel) {}
             Button("Umbenennen") {
-                if let renaming { model.rename(body: renaming, to: newName) }
+                switch renaming {
+                case .body(let index): model.rename(body: index, to: newName)
+                case .sketch(let index): model.rename(sketch: index, to: newName)
+                case nil: break
+                }
+            }
+        }
+    }
+
+    // MARK: Ordner
+
+    /// Ordnerzeile wie im Fusion-Browser: Pfeil zum Auf-/Zuklappen, Auge, Symbol, Name; Inhalt eingerückt.
+    private func folder<Content: View>(_ id: String, title: String, systemImage: String, count: Int? = nil,
+                                       visible: Bool?, toggle: (() -> Void)? = nil, hasChildren: Bool = true,
+                                       @ViewBuilder content: () -> Content) -> some View {
+        let isOpen = !closedFolders.contains(id)
+        return VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(isOpen ? 90 : 0))
+                    .frame(width: 16, height: 30)
+                    .opacity(hasChildren ? 1 : 0)
+                if let visible, let toggle {
+                    eye(visible, action: toggle)
+                }
+                Image(systemName: systemImage)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 20)
+                Text(title)
+                    .fontWeight(id == "root" ? .semibold : .regular)
+                    .lineLimit(1)
+                    .foregroundStyle(visible == false ? Color.secondary : Color.primary)
+                if let count, count > 0 {
+                    Text("\(count)")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(Color(.secondarySystemBackground), in: Capsule())
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 2)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                guard hasChildren else { return }
+                withAnimation(.easeOut(duration: 0.15)) {
+                    if isOpen { closedFolders.insert(id) } else { closedFolders.remove(id) }
+                }
+            }
+            if isOpen, hasChildren {
+                VStack(alignment: .leading, spacing: 2) {
+                    content()
+                }
+                .padding(.leading, id == "root" ? 10 : 18)
+            }
+        }
+    }
+
+    private func infoRow(_ title: String, systemImage: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .foregroundStyle(.secondary)
+                .frame(width: 20)
+            Text(title)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+        }
+        .padding(.leading, 24)
+        .frame(height: 30)
+    }
+
+    private var otherBodies: [Int] { model.unassignedBodies }
+
+    private var isRenamingSketch: Bool {
+        guard case .sketch? = renaming else { return false }
+        return true
+    }
+
+    // MARK: Ebene
+
+    /// Kopfzeile der Ebene (auf- und zuklappbar, Auge für alles) und darunter Skizze und Körper.
+    private func layer(_ index: Int) -> some View {
+        let item = model.sketches[index]
+        let bodies = model.bodies(fromSketch: index)
+        let isOpen = !collapsed.contains(item.id)
+        let isVisible = model.isLayerVisible(index)
+        return VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(isOpen ? 90 : 0))
+                    .frame(width: 16, height: 30)
+                eye(isVisible) { model.setLayerHidden(isVisible, sketch: index) }
+                Image(systemName: "square.3.layers.3d")
+                    .foregroundStyle(isVisible ? Color.accentColor : Color.secondary)
+                    .frame(width: 20)
+                Text(Self.layerName(item.name))
+                    .fontWeight(.semibold)
+                    .lineLimit(1)
+                    .foregroundStyle(isVisible ? Color.primary : Color.secondary)
+                if !bodies.isEmpty {
+                    Text(bodies.count == 1 ? "1 Körper" : "\(bodies.count) Körper")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 2)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                withAnimation(.easeOut(duration: 0.15)) {
+                    if isOpen { collapsed.insert(item.id) } else { collapsed.remove(item.id) }
+                }
+            }
+            .contextMenu {
+                Button("Umbenennen", systemImage: "pencil") {
+                    newName = item.name
+                    renaming = .sketch(index)
+                }
+                Button("Skizze bearbeiten", systemImage: "pencil.and.outline") { workspace.editSketch(index) }
+                Button(isVisible ? "Ebene ausblenden" : "Ebene einblenden", systemImage: isVisible ? "eye.slash" : "eye") {
+                    model.setLayerHidden(isVisible, sketch: index)
+                }
+                Button("Skizze löschen", systemImage: "trash", role: .destructive) { model.deleteSketch(index) }
+            }
+            if isOpen {
+                sketchRow(index)
+                    .padding(.leading, 18)
+                ForEach(bodies, id: \.self) { body in
+                    bodyRow(body)
+                        .padding(.leading, 18)
+                }
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func eye(_ visible: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: visible ? "eye" : "eye.slash")
+                .foregroundStyle(.secondary)
+                .frame(width: 30, height: 30)
+        }
+        .buttonStyle(.plain)
+        .hoverTip(visible ? "Ausblenden" : "Einblenden")
+    }
+
+    /// Körper: Farbe, Name, Auge; antippen wählt ihn.
+    private func bodyRow(_ index: Int) -> some View {
+        let item = model.bodies[index]
+        let isSelected = model.selectedBodies.contains(index) || model.selectedBody == index
+        return HStack(spacing: 6) {
+            eye(!item.isHidden) { model.setHidden(!item.isHidden, body: index) }
+            Image(systemName: "cube.fill")
+                .foregroundStyle(Color(item.color))
+                .frame(width: 20)
+            Text(item.name)
+                .lineLimit(1)
+                .foregroundStyle(item.isHidden ? Color.secondary : Color.primary)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 4)
+        .background(isSelected ? Color.accentColor.opacity(0.15) : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 8))
+        .contentShape(Rectangle())
+        .onTapGesture { select(index) }
+        .contextMenu {
+            Button("Umbenennen", systemImage: "pencil") {
+                newName = item.name
+                renaming = .body(index)
+            }
+            Button("Löschen", systemImage: "trash", role: .destructive) {
+                model.toggleBody(index, exclusive: true)
+                model.deleteSelected()
             }
         }
     }
@@ -938,35 +1133,37 @@ struct ElementsPanel: View {
             .font(.footnote.weight(.semibold))
             .foregroundStyle(.secondary)
             .padding(.horizontal, 8)
-            .padding(.top, 6)
+            .padding(.top, 8)
     }
 
-    /// Skizze: antippen öffnet sie zum Bearbeiten, Auge blendet sie aus.
+    /// Skizze: antippen wählt ihre Bereiche, Stift öffnet sie, Auge blendet sie aus.
     private func sketchRow(_ index: Int) -> some View {
         let item = model.sketches[index]
-        return HStack(spacing: 10) {
+        return HStack(spacing: 6) {
+            eye(!item.isHidden) { model.setSketchHidden(!item.isHidden, sketch: index) }
             Image(systemName: "pencil.and.outline")
-                .foregroundStyle(.secondary)
-                .frame(width: 14)
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 20)
             Text(item.name)
                 .lineLimit(1)
                 .foregroundStyle(item.isHidden ? Color.secondary : Color.primary)
             Spacer(minLength: 0)
             Button {
-                model.setSketchHidden(!item.isHidden, sketch: index)
+                workspace.editSketch(index)
             } label: {
-                Image(systemName: item.isHidden ? "eye.slash" : "eye")
-                    .foregroundStyle(.secondary)
+                Image(systemName: "pencil")
+                    .foregroundStyle(Color.accentColor)
                     .frame(width: 30, height: 30)
             }
             .buttonStyle(.plain)
+            .hoverTip("Skizze bearbeiten", "Öffnet die Skizze zum Zeichnen und Ändern.")
         }
-        .padding(.vertical, 4)
-        .padding(.horizontal, 8)
+        .padding(.horizontal, 4)
         .background(model.selectedRegions.first?.sketch == index ? Color.accentColor.opacity(0.15) : Color.clear,
                     in: RoundedRectangle(cornerRadius: 8))
         .contentShape(Rectangle())
-        .onTapGesture { workspace.editSketch(index) }
+        // Wie im Fusion-Browser: antippen wählt die Skizze (alle Bereiche, danach am Pfeil extrudieren)
+        .onTapGesture { model.selectSketch(index) }
         .contextMenu {
             Button("Bearbeiten", systemImage: "pencil") { workspace.editSketch(index) }
             Button("Löschen", systemImage: "trash", role: .destructive) { model.deleteSketch(index) }
@@ -975,25 +1172,17 @@ struct ElementsPanel: View {
 
     /// Konstruktionsebene, -achse oder -punkt: Ebenen lassen sich direkt als Skizzenebene nutzen.
     private func constructionRow(_ item: ConstructionItem) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 6) {
+            eye(!item.isHidden) { model.setConstructionHidden(!item.isHidden, id: item.id) }
             Image(systemName: item.kind.systemImage)
                 .foregroundStyle(.orange)
-                .frame(width: 14)
+                .frame(width: 20)
             Text(item.name)
                 .lineLimit(1)
                 .foregroundStyle(item.isHidden ? Color.secondary : Color.primary)
             Spacer(minLength: 0)
-            Button {
-                model.setConstructionHidden(!item.isHidden, id: item.id)
-            } label: {
-                Image(systemName: item.isHidden ? "eye.slash" : "eye")
-                    .foregroundStyle(.secondary)
-                    .frame(width: 30, height: 30)
-            }
-            .buttonStyle(.plain)
         }
-        .padding(.vertical, 4)
-        .padding(.horizontal, 8)
+        .padding(.horizontal, 4)
         .contentShape(Rectangle())
         .onTapGesture {
             if item.kind == .plane { workspace.startSketch(on: item.sketchPlane) }
@@ -1009,27 +1198,21 @@ struct ElementsPanel: View {
     }
 
     private func canvasRow(_ canvas: CanvasImage) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 6) {
+            eye(!canvas.isHidden) {
+                var changed = canvas
+                changed.isHidden.toggle()
+                model.updateCanvas(changed)
+            }
             Image(systemName: "photo")
                 .foregroundStyle(.secondary)
-                .frame(width: 14)
+                .frame(width: 20)
             Text(canvas.name)
                 .lineLimit(1)
                 .foregroundStyle(canvas.isHidden ? Color.secondary : Color.primary)
             Spacer(minLength: 0)
-            Button {
-                var changed = canvas
-                changed.isHidden.toggle()
-                model.updateCanvas(changed)
-            } label: {
-                Image(systemName: canvas.isHidden ? "eye.slash" : "eye")
-                    .foregroundStyle(.secondary)
-                    .frame(width: 30, height: 30)
-            }
-            .buttonStyle(.plain)
         }
-        .padding(.vertical, 4)
-        .padding(.horizontal, 8)
+        .padding(.horizontal, 4)
         .background(workspace.tool == .canvas(canvas.id) ? Color.accentColor.opacity(0.15) : Color.clear,
                     in: RoundedRectangle(cornerRadius: 8))
         .contentShape(Rectangle())
@@ -1056,7 +1239,7 @@ struct ElementsPanel: View {
     }
 }
 
-/// Rahmen der rechten Fenster (Verlauf, Elemente). Lange Listen scrollen.
+/// Rahmen der seitlichen Fenster (Verlauf, Ebenen). Lange Listen scrollen.
 struct SidePanelFrame<Content: View>: View {
     let title: String
     let close: () -> Void

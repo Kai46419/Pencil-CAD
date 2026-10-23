@@ -73,7 +73,7 @@ struct QuickToolsPalette: View {
     private var items: [Item] {
         let model = workspace.model
         if sketch.isActive {
-            let tools: [SketchTool] = [.polyline, .rectangle, .circle, .arc, .spline, .offset]
+            let tools: [SketchTool] = [.select, .polyline, .rectangle, .circle, .arc, .spline, .offset]
             return tools.map { tool in
                 Item(id: tool.rawValue, systemImage: tool.systemImage, isActive: sketch.tool == tool) {
                     sketch.tool = tool

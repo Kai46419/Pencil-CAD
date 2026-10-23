@@ -32,6 +32,7 @@
 #include <BRepGProp_Face.hxx>
 #include <BRepLib_ToolTriangulatedShape.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
+#include <BRepOffsetAPI_DraftAngle.hxx>
 #include <BRepOffsetAPI_MakeThickSolid.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCone.hxx>
@@ -500,6 +501,39 @@ static TopoDS_Face faceFromWires(NSArray<NSArray<NSNumber *> *> *wires) {
         BRepPrimAPI_MakePrism prism(face, gp_Vec(direction.x, direction.y, direction.z));
         if (!prism.IsDone()) return nil;
         return [[PCKShape alloc] initWithShape:prism.Shape()];
+    } catch (const Standard_Failure &) {
+        return nil;
+    }
+}
+
++ (nullable PCKShape *)draftPrismWithProfileWires:(NSArray<NSArray<NSNumber *> *> *)wires
+                                        direction:(simd_double3)direction angle:(double)degrees {
+    if (simd_length(direction) == 0) return nil;
+    try {
+        const TopoDS_Face face = faceFromWires(wires);
+        if (face.IsNull()) return nil;
+        const gp_Vec vector(direction.x, direction.y, direction.z);
+        BRepPrimAPI_MakePrism prism(face, vector);
+        if (!prism.IsDone()) return nil;
+        const TopoDS_Shape solid = prism.Shape();
+        if (std::abs(degrees) < 1e-9) return [[PCKShape alloc] initWithShape:solid];
+        const gp_Dir pull(vector);
+        BRepAdaptor_Surface base(face);
+        if (base.GetType() != GeomAbs_Plane) return nil;
+        // Neutralebene = Profilebene: unten bleibt das Profil, nach oben wird es schmaler bzw. breiter
+        const gp_Pln neutral(base.Plane().Location(), pull);
+        BRepOffsetAPI_DraftAngle draft(solid);
+        for (TopExp_Explorer it(solid, TopAbs_FACE); it.More(); it.Next()) {
+            const TopoDS_Face side = TopoDS::Face(it.Current());
+            BRepAdaptor_Surface surface(side);
+            // Boden und Deckel bleiben
+            if (surface.GetType() == GeomAbs_Plane && surface.Plane().Axis().Direction().IsParallel(pull, 1e-6)) continue;
+            draft.Add(side, pull, degrees * M_PI / 180.0, neutral);
+            if (!draft.AddDone()) return nil;
+        }
+        draft.Build();
+        if (!draft.IsDone()) return nil;
+        return [[PCKShape alloc] initWithShape:draft.Shape()];
     } catch (const Standard_Failure &) {
         return nil;
     }
@@ -1057,6 +1091,11 @@ static std::vector<TopoDS_Edge> edgesFromNumbers(const TopTools_IndexedMapOfShap
 }
 
 + (nullable PCKShape *)prismWithProfileWires:(NSArray<NSArray<NSNumber *> *> *)wires direction:(simd_double3)direction {
+    return nil;
+}
+
++ (nullable PCKShape *)draftPrismWithProfileWires:(NSArray<NSArray<NSNumber *> *> *)wires
+                                        direction:(simd_double3)direction angle:(double)degrees {
     return nil;
 }
 

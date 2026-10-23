@@ -4,7 +4,6 @@ import simd
 /// Seitenleisten-Fenster rechts.
 enum SidePanel: String, Identifiable {
     case history = "Verlauf"
-    case elements = "Elemente"
 
     var id: Self { self }
 }
@@ -149,10 +148,12 @@ struct RightRail: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Fang")
+                    .hoverTip("Fang")
                     .popover(isPresented: $isSnapMenuShown, arrowEdge: .trailing) {
                         SnapMenu(sketch: sketch, gridSteps: Self.gridSteps)
                     }
                     gridMenu(stacked: true)
+                        .hoverTip("Raster")
                     Button {
                         workspace.send(.alignToSketchPlane)
                     } label: {
@@ -160,6 +161,7 @@ struct RightRail: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Normal zu Skizze")
+                    .hoverTip("Normal zu Skizze")
                     .disabled(sketch.isChoosingPlane)
                     .opacity(sketch.isChoosingPlane ? 0.4 : 1)
                     Button {
@@ -170,6 +172,7 @@ struct RightRail: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Finger zeichnet")
+                    .hoverTip("Finger zeichnet")
                 }
             }
 
@@ -182,6 +185,7 @@ struct RightRail: View {
                 }
             }
             .accessibilityLabel("Anzeigemodus")
+            .hoverTip("Anzeigemodi")
             labeledButton("Screenshot", systemImage: "camera", action: screenshot)
             labeledButton("Verlauf", systemImage: "clock.arrow.circlepath", isActive: panel == .history) {
                 panel = panel == .history ? nil : .history
@@ -195,6 +199,17 @@ struct RightRail: View {
                 }
             }
             .accessibilityLabel("Sichtbarkeit")
+            .hoverTip("Sichtbarkeit")
+            Menu {
+                sketchPaletteItems
+            } label: {
+                HStack(spacing: 8) {
+                    RailLabel(title: "Skizzenpalette")
+                    RailIcon(systemImage: "slider.horizontal.3")
+                }
+            }
+            .accessibilityLabel("Skizzenpalette")
+            .hoverTip("Skizzenpalette")
 
             Capsule()
                 .fill(Color.secondary.opacity(0.35))
@@ -220,6 +235,7 @@ struct RightRail: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(title)
+        .hoverTip(title)
     }
 
     /// Rastermaß; im Skizzenmodus wie bei Shapr3D zweizeilig („50“ über „mm“).
@@ -267,9 +283,22 @@ struct RightRail: View {
                isOn: Binding(get: { model.showsConstructions }, set: { model.setConstructionsHidden(!$0) }))
             .disabled(model.constructions.isEmpty)
         Divider()
-        Button("Einzeln in „Elemente“ …", systemImage: "square.3.layers.3d") {
-            panel = .elements
+        Button("Einzeln in „Ebenen“ …", systemImage: "square.3.layers.3d") {
+            workspace.showsLayers = true
         }
+    }
+
+    /// Skizzenpalette wie in Fusion 360: was beim Skizzieren angezeigt wird.
+    @ViewBuilder
+    private var sketchPaletteItems: some View {
+        Toggle("Skizzierraster", systemImage: "grid", isOn: $sketch.showsGrid)
+        Toggle("Fang", systemImage: "scope", isOn: $sketch.snapEnabled)
+        Divider()
+        Toggle("Profil (Bereiche)", systemImage: "square.fill.on.square", isOn: $sketch.showsProfiles)
+        Toggle("Punkte", systemImage: "circle.grid.cross", isOn: $sketch.showsPoints)
+        Toggle("Bemaßungen", systemImage: "ruler", isOn: $sketch.showsDimensions)
+        Toggle("Abhängigkeiten", systemImage: "link", isOn: $sketch.showsConstraintBadges)
+        Toggle("Konstruktionsgeometrie", systemImage: "square.dashed", isOn: $sketch.showsConstruction)
     }
 
     @ViewBuilder
@@ -292,15 +321,18 @@ struct RightRail: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Fang")
+            .hoverTip("Fang")
             .popover(isPresented: $isSnapMenuShown, arrowEdge: .trailing) {
                 SnapMenu(sketch: sketch, gridSteps: Self.gridSteps)
             }
             gridMenu(stacked: false)
+                .hoverTip("Raster")
 
             ViewCube(camera: workspace.camera) { normal in
                 workspace.send(.look(normal))
             }
             .padding(.vertical, 4)
+            .hoverTip("Ansichtswürfel", "Seite antippen: Ansicht senkrecht auf diese Seite drehen.")
 
             RailButton(systemImage: "arrow.up.left.and.arrow.down.right", label: "Einpassen") {
                 workspace.send(.fitAll)
@@ -311,6 +343,7 @@ struct RightRail: View {
                 RailIcon(systemImage: workspace.displayMode.systemImage)
                     .accessibilityLabel("Anzeigemodus")
             }
+            .hoverTip("Anzeigemodi")
             RailButton(systemImage: "camera", label: "Screenshot", action: screenshot)
             RailButton(systemImage: "clock.arrow.circlepath", label: "Verlauf", isActive: panel == .history) {
                 panel = panel == .history ? nil : .history
@@ -321,16 +354,18 @@ struct RightRail: View {
                 RailIcon(systemImage: "eye")
                     .accessibilityLabel("Sichtbarkeit")
             }
-            RailButton(systemImage: "square.3.layers.3d", label: "Elemente", isActive: panel == .elements) {
-                panel = panel == .elements ? nil : .elements
+            .hoverTip("Sichtbarkeit")
+            RailButton(systemImage: "square.3.layers.3d", label: "Ebenen", isActive: workspace.showsLayers) {
+                workspace.showsLayers.toggle()
             }
         }
     }
 }
 
-/// „Einschränkungen“ im Skizzenmodus (wie Shapr3D): wirken auf die mit dem Finger gewählten Elemente.
-/// Die Symbole stehen in weißen Säulen, die Namen links daneben. Passende Einschränkungen sind blau,
-/// andere grau; Antippen zeigt dann, was zu wählen ist. Vor der Ebenenwahl ist alles ausgegraut.
+/// „Einschränkungen“ im Skizzenmodus. Bedienung wie in Fusion 360: Symbol antippen, dann die Elemente –
+/// die Einschränkung wird gesetzt, sobald die Auswahl passt, und bleibt für die nächsten Elemente aktiv
+/// (blau hinterlegt), bis das Symbol nochmal getippt wird. Sind schon passende Elemente gewählt, wirkt sie
+/// sofort. Passende Einschränkungen zur aktuellen Auswahl sind blau, andere grau; Schweben zeigt die Erklärung.
 struct ConstraintColumn: View {
     @ObservedObject var sketch: SketchController
     var isEnabled = true
@@ -338,31 +373,44 @@ struct ConstraintColumn: View {
     private struct Row: Identifiable {
         let id: String
         let systemImage: String
+        let action: SketchPendingAction
         let applicable: Bool
-        let action: () -> Void
     }
 
     private var groups: [[Row]] {
         let hasSelection = !sketch.selection.isEmpty
         let kinds = ConstraintKind.allCases.filter { $0 != .lock && $0 != .dimension }.map { kind in
-            Row(id: kind.rawValue, systemImage: kind.systemImage, applicable: sketch.canApply(kind)) {
-                sketch.applyConstraint(kind)
-            }
+            Row(id: kind.rawValue, systemImage: kind.systemImage, action: .constraint(kind), applicable: sketch.canApply(kind))
         }
         return [
             kinds,
-            [Row(id: "Trennen", systemImage: "link.badge.plus", applicable: hasSelection) { sketch.detachSelection() }],
-            [Row(id: ConstraintKind.lock.rawValue, systemImage: ConstraintKind.lock.systemImage,
-                 applicable: sketch.canApply(.lock)) { sketch.applyConstraint(.lock) },
-             Row(id: "Konstruktion erstellen", systemImage: "square.dashed", applicable: hasSelection) {
-                 sketch.toggleConstruction()
-             }],
+            [Row(id: "Trennen", systemImage: "link.badge.plus", action: .detach, applicable: hasSelection)],
+            [Row(id: ConstraintKind.lock.rawValue, systemImage: ConstraintKind.lock.systemImage, action: .constraint(.lock),
+                 applicable: sketch.canApply(.lock)),
+             Row(id: "Konstruktion erstellen", systemImage: "square.dashed", action: .construction, applicable: hasSelection)],
         ]
     }
 
     var body: some View {
         let groups = self.groups
         VStack(alignment: .trailing, spacing: 8) {
+            if let pending = sketch.pendingAction {
+                Button {
+                    sketch.cancelPending()
+                } label: {
+                    HStack(spacing: 6) {
+                        Text("„\(pending.title)“ aktiv")
+                            .font(.caption.weight(.semibold))
+                        Image(systemName: "xmark.circle.fill")
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Color.accentColor, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .hoverTip("Einschränkung beenden", "Tippen beendet das Setzen. Solange sie aktiv ist, wählen Stift und Finger nur aus.")
+            }
             ForEach(groups.indices, id: \.self) { index in
                 VStack(alignment: .trailing, spacing: 0) {
                     ForEach(groups[index]) { row in
@@ -382,19 +430,27 @@ struct ConstraintColumn: View {
     }
 
     private func rowView(_ row: Row) -> some View {
-        let active = isEnabled && row.applicable
-        return Button(action: row.action) {
+        let pending = sketch.pendingAction == row.action
+        let active = isEnabled && (row.applicable || pending)
+        return Button {
+            sketch.start(row.action)
+        } label: {
             HStack(spacing: 8) {
-                RailLabel(title: row.id, dimmed: !active)
+                RailLabel(title: row.id, dimmed: !active && !isEnabled)
                 Image(systemName: row.systemImage)
                     .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(active ? Color.accentColor : Color.secondary.opacity(isEnabled ? 1 : 0.6))
+                    .foregroundStyle(pending ? Color.white
+                                     : active ? Color.accentColor : Color.primary.opacity(isEnabled ? 0.75 : 0.35))
+                    .frame(width: 38, height: 34)
+                    .background(pending ? Color.accentColor : Color.clear,
+                                in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                     .frame(width: 44, height: 38)
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(row.id)
+        .hoverTip(row.id)
     }
 }
 
@@ -447,6 +503,7 @@ struct RailButton: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)
+        .hoverTip(label)
     }
 }
 

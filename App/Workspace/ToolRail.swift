@@ -104,6 +104,7 @@ struct ToolRail: View {
                 .buttonStyle(.plain)
                 .disabled(!entry.isEnabled)
                 .opacity(entry.isEnabled ? 1 : 0.45)
+                .hoverTip(entry.title)
             }
         }
         return HStack(alignment: .top, spacing: 12) {
@@ -170,6 +171,11 @@ struct ToolRail: View {
             RailEntry(id: "sketch.finish", title: "Skizzieren beenden", systemImage: "xmark") {
                 workspace.finishSketch()
             },
+            // Pfeil: zeichnet nicht, sondern wählt, verschiebt und zieht Eck- und Endpunkte
+            RailEntry(id: "sketch.select", title: SketchTool.select.rawValue, subtitle: SketchTool.select.subtitle,
+                      systemImage: SketchTool.select.systemImage, isActive: sketch.tool == .select) {
+                sketch.tool = .select
+            },
             // Wie bei Shapr3D: Werkzeuge lassen sich schon vor der Ebenenwahl wählen
             RailEntry(id: "sketch.plane", title: sketch.isChoosingPlane ? "Keine aktive Ebene" : "Aktive Ebene",
                       subtitle: sketch.isChoosingPlane ? nil : activePlaneName,
@@ -201,8 +207,8 @@ struct ToolRail: View {
             toolEntry(.project),
             toolEntry(.offset),
             RailEntry(id: "sketch.more", title: "Mehr", systemImage: "ellipsis.circle",
-                      isActive: [SketchTool.point, .text, .scale].contains(sketch.tool),
-                      flyout: [toolItem(.point), toolItem(.text), toolItem(.scale)]),
+                      isActive: [SketchTool.point, .text, .scale, .fillet].contains(sketch.tool),
+                      flyout: [toolItem(.fillet), toolItem(.point), toolItem(.text), toolItem(.scale)]),
             toolEntry(.trim),
             RailEntry(id: "sketch.delete", title: "Löschen", subtitle: sketch.selection.isEmpty ? nil : "Auswahl",
                       systemImage: "trash", isEnabled: !sketch.selection.isEmpty) {
@@ -354,6 +360,7 @@ struct ToolRail: View {
                                  isActive: isActive(group), isOpen: openGroup == group, size: tileSize)
                     }
                     .buttonStyle(.plain)
+                    .hoverTip(group.rawValue)
                 }
             }
             if let openGroup, let index = ToolGroup.allCases.firstIndex(of: openGroup) {
@@ -600,6 +607,7 @@ private struct Flyout: View {
                 .buttonStyle(.plain)
                 .disabled(!item.isEnabled)
                 .opacity(item.isEnabled ? 1 : 0.4)
+                .hoverTip(item.title, ToolTips.detail(for: item.title) ?? item.subtitle)
             }
         }
         .padding(10)

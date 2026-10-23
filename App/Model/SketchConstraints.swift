@@ -278,6 +278,52 @@ extension SketchEntity {
         }
     }
 
+    /// Element, bei dem Griffpunkt k (siehe handlePoints) nach p gezogen wurde – wie im Pfeil-Werkzeug:
+    /// Rechteckecke zieht gegenüber fest, Polygonecke ändert Radius und Drehung, Zentren verschieben.
+    /// nil, wenn der Punkt das ganze Element verschiebt.
+    func movingHandle(_ k: Int, to p: Point2) -> SketchEntity? {
+        switch self {
+        case .line(let a, let b):
+            return k == 0 ? .line(p, b) : .line(a, p)
+        case .rectangle(let corner, let size):
+            guard k < 4 else { return nil }
+            let corners = [corner, corner + Point2(size.x, 0), corner + size, corner + Point2(0, size.y)]
+            let opposite = corners[(k + 2) % 4]
+            let lo = simd_min(opposite, p), hi = simd_max(opposite, p)
+            guard hi.x - lo.x > 1e-6, hi.y - lo.y > 1e-6 else { return self }
+            return .rectangle(corner: lo, size: hi - lo)
+        case .regularPolygon(let center, _, let sides, _):
+            guard k >= 1 else { return nil }
+            let radius = simd_distance(center, p)
+            guard radius > 1e-6 else { return self }
+            let angle = atan2(p.y - center.y, p.x - center.x) - Double(k - 1) / Double(max(sides, 3)) * 2 * .pi
+            return .regularPolygon(center: center, radius: radius, sides: sides, angle: angle)
+        case .arc(let a, let m, let b):
+            switch k {
+            case 0:
+                let moved = SketchEntity.arc(start: p, mid: m + (p - a) / 2, end: b)
+                return circleThrough(p, m + (p - a) / 2, b) == nil ? self : moved
+            case 1:
+                let moved = SketchEntity.arc(start: a, mid: m + (p - b) / 2, end: p)
+                return circleThrough(a, m + (p - b) / 2, p) == nil ? self : moved
+            default:
+                return nil
+            }
+        case .spline(var points, let kind, let closed):
+            guard points.indices.contains(k) else { return nil }
+            points[k] = p
+            return .spline(points: points, kind: kind, closed: closed)
+        case .polyline(var points, let closed):
+            guard points.indices.contains(k) else { return nil }
+            points[k] = p
+            return .polyline(points, closed: closed)
+        case .point:
+            return .point(p)
+        case .circle, .ellipse, .text:
+            return nil
+        }
+    }
+
     /// Anzahl auswählbarer Kurven (Kanten).
     var curveCount: Int {
         switch self {

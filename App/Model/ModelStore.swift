@@ -85,6 +85,8 @@ struct SceneBody {
     var name: String
     var color: SIMD3<Float>
     var isHidden = false
+    /// Skizze, aus der der Körper extrudiert wurde (Gruppierung im Reiter „Ebenen“)
+    var sketchID: UUID? = nil
 
     func with(_ shape: PCKShape) -> SceneBody {
         var body = self
@@ -100,6 +102,8 @@ struct SceneBody {
 
 /// Fertige Skizze im Modell. Ihre geschlossenen Bereiche lassen sich antippen und extrudieren.
 struct StoredSketch: Codable {
+    /// Bleibt beim Bearbeiten gleich; verknüpft die Skizze mit ihren Körpern
+    var id = UUID()
     var name: String
     var plane: SketchPlane
     var entities: [SketchEntity]
@@ -118,7 +122,7 @@ struct StoredSketch: Codable {
     private(set) var fills: [[SIMD3<Float>]] = []
 
     private enum CodingKeys: String, CodingKey {
-        case name, plane, entities, constraints, construction, isHidden
+        case id, name, plane, entities, constraints, construction, isHidden
     }
 
     init(name: String, plane: SketchPlane, entities: [SketchEntity], constraints: [SketchConstraint] = [],
@@ -133,6 +137,7 @@ struct StoredSketch: Codable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? container.decodeIfPresent(UUID.self, forKey: .id)) ?? UUID()
         name = try container.decode(String.self, forKey: .name)
         plane = try container.decode(SketchPlane.self, forKey: .plane)
         entities = try container.decode([SketchEntity].self, forKey: .entities)
@@ -144,6 +149,7 @@ struct StoredSketch: Codable {
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
         try container.encode(name, forKey: .name)
         try container.encode(plane, forKey: .plane)
         try container.encode(entities, forKey: .entities)
@@ -232,6 +238,23 @@ final class ModelStore: ObservableObject {
     /// Extrusion gewählter Skizzenbereiche: Wert in mm entlang der Normale der Skizze.
     @Published private(set) var regionValue: Double = 0
     @Published var regionMode: ExtrudeMode = .newBody {
+        didSet {
+            if regionValue != 0 { setRegionValue(regionValue) }
+        }
+    }
+    /// Wie in Fusion 360: eine Seite, symmetrisch oder zwei Seiten mit eigenem Abstand
+    @Published var regionDirection: ExtrudeDirection = .oneSide {
+        didSet {
+            if regionValue != 0 { setRegionValue(regionValue) }
+        }
+    }
+    @Published var regionSecondValue: Double = 10 {
+        didSet {
+            if regionValue != 0, regionDirection == .twoSides { setRegionValue(regionValue) }
+        }
+    }
+    /// Verjüngungswinkel in Grad (0 = gerade Wände)
+    @Published var regionTaper: Double = 0 {
         didSet {
             if regionValue != 0 { setRegionValue(regionValue) }
         }
@@ -467,11 +490,14 @@ final class ModelStore: ObservableObject {
             distance = -value
         }
         guard mode == .newBody || requireKernel() else { return }
-        guard let solid = extrudeRegions(regions, plane: sketch.plane, distance: distance, mode: mode) else {
-            message = "Bereich lässt sich nicht extrudieren."
+        guard let solid = extrudeRegions(regions, plane: sketch.plane, distance: distance, mode: mode,
+                                         direction: regionDirection, secondDistance: regionSecondValue,
+                                         taper: regionTaper) else {
+            message = regionTaper != 0 ? "Mit diesem Verjüngungswinkel nicht möglich – kleineren Winkel versuchen."
+                : "Bereich lässt sich nicht extrudieren."
             return
         }
-        guard let result = extrusionResult(solid, sourceBody: sketch.plane.sourceBody, mode: mode) else { return }
+        guard let result = extrusionResult(solid, sourceBody: sketch.plane.sourceBody, mode: mode, sketch: sketch.id) else { return }
         message = nil
         showPreview(result, name: Self.regionPreviewName)
     }
@@ -688,6 +714,7 @@ final class ModelStore: ObservableObject {
             var sketch = StoredSketch(name: result[index].name, plane: plane, entities: entities,
                                       constraints: constraints, construction: construction)
             sketch.isHidden = result[index].isHidden
+            sketch.id = result[index].id
             result[index] = sketch
             commit(bodies, sketches: result, name: "Skizze bearbeiten")
         } else {
@@ -714,6 +741,67 @@ final class ModelStore: ObservableObject {
             clearSelectionState()
         }
         refreshHighlight()
+        save()
+    }
+
+    // MARK: Ebenen (Skizze mit ihren Körpern)
+
+    /// Körper, die aus der Skizze extrudiert wurden.
+    func bodies(fromSketch index: Int) -> [Int] {
+        guard sketches.indices.contains(index) else { return [] }
+        let id = sketches[index].id
+        return bodies.indices.filter { bodies[$0].sketchID == id }
+    }
+
+    /// Körper ohne (noch vorhandene) Skizze: Grundkörper, STEP-Import, Skizze gelöscht.
+    var unassignedBodies: [Int] {
+        let ids = Set(sketches.map(\.id))
+        return bodies.indices.filter { bodies[$0].sketchID.map { !ids.contains($0) } ?? true }
+    }
+
+    /// Ganze Ebene ein- oder ausblenden: Skizze und alle Körper daraus.
+    func setLayerHidden(_ hidden: Bool, sketch index: Int) {
+        guard sketches.indices.contains(index) else { return }
+        commitPreview()
+        sketches[index].isHidden = hidden
+        for body in bodies(fromSketch: index) {
+            bodies[body].isHidden = hidden
+        }
+        if hidden { clearSelectionState() }
+        remesh()
+        refreshHighlight()
+        save()
+    }
+
+    /// Ebene sichtbar, wenn Skizze oder einer ihrer Körper sichtbar ist.
+    func isLayerVisible(_ index: Int) -> Bool {
+        guard sketches.indices.contains(index) else { return false }
+        return !sketches[index].isHidden || bodies(fromSketch: index).contains { !bodies[$0].isHidden }
+    }
+
+    /// Mehrere Körper auf einmal ein- oder ausblenden (Ordner „Körper“ im Browser).
+    func setBodiesHidden(_ hidden: Bool, bodies indices: [Int]) {
+        let valid = indices.filter { bodies.indices.contains($0) }
+        guard !valid.isEmpty else { return }
+        commitPreview()
+        for index in valid { bodies[index].isHidden = hidden }
+        if hidden { clearSelectionState() }
+        remesh()
+        refreshHighlight()
+        save()
+    }
+
+    /// Skizze im Browser antippen: alle ihre Bereiche wählen (danach z. B. am Pfeil extrudieren).
+    func selectSketch(_ index: Int) {
+        guard sketches.indices.contains(index) else { return }
+        if sketches[index].isHidden { setSketchHidden(false, sketch: index) }
+        dropPreview()
+        selectRegions(sketches[index].regions.indices.map { RegionRef(sketch: index, region: $0) })
+    }
+
+    func rename(sketch index: Int, to name: String) {
+        guard sketches.indices.contains(index), !name.isEmpty else { return }
+        sketches[index].name = name
         save()
     }
 
@@ -750,14 +838,14 @@ final class ModelStore: ObservableObject {
     }
 
     /// Ergebnis einer Extrusion je Modus: neuer Körper, mit dem Flächenkörper vereinigt oder von allen abgezogen.
-    private func extrusionResult(_ solid: PCKShape, sourceBody: Int?, mode: ExtrudeMode) -> [SceneBody]? {
+    private func extrusionResult(_ solid: PCKShape, sourceBody: Int?, mode: ExtrudeMode, sketch: UUID? = nil) -> [SceneBody]? {
         switch mode {
         case .newBody:
-            return bodies + [newBody(solid, name: "Körper")]
+            return bodies + [newBody(solid, name: "Körper", sketch: sketch)]
         case .union:
             // Mit dem Körper der Skizzenfläche vereinigen, sonst mit dem zuletzt erzeugten.
             let target = sourceBody.flatMap { bodies.indices.contains($0) ? $0 : nil } ?? bodies.indices.last
-            guard let target else { return [newBody(solid, name: "Körper")] }
+            guard let target else { return [newBody(solid, name: "Körper", sketch: sketch)] }
             guard let fused = bodies[target].shape.fusing(solid) else {
                 message = "Vereinigen fehlgeschlagen."
                 return nil
@@ -843,10 +931,10 @@ final class ModelStore: ObservableObject {
 
     // MARK: Intern
 
-    private func newBody(_ shape: PCKShape, name: String) -> SceneBody {
+    private func newBody(_ shape: PCKShape, name: String, sketch: UUID? = nil) -> SceneBody {
         let number = bodies.count + 1
         return SceneBody(shape: shape, name: "\(name) \(number)",
-                         color: SceneBody.palette[bodies.count % SceneBody.palette.count])
+                         color: SceneBody.palette[bodies.count % SceneBody.palette.count], sketchID: sketch)
     }
 
     private func requireKernel() -> Bool {
@@ -946,6 +1034,7 @@ final class ModelStore: ObservableObject {
         var name: String
         var color: [Float]
         var isHidden: Bool
+        var sketchID: UUID?
     }
 
     private var modelURL: URL? { folder?.appending(path: "model.step") }
@@ -976,7 +1065,7 @@ final class ModelStore: ObservableObject {
             if index < metas.count, metas[index].color.count == 3 {
                 let meta = metas[index]
                 return SceneBody(shape: shape, name: meta.name, color: SIMD3(meta.color[0], meta.color[1], meta.color[2]),
-                                 isHidden: meta.isHidden)
+                                 isHidden: meta.isHidden, sketchID: meta.sketchID)
             }
             return SceneBody(shape: shape, name: "Körper \(index + 1)", color: SceneBody.palette[index % SceneBody.palette.count])
         }
@@ -999,7 +1088,9 @@ final class ModelStore: ObservableObject {
         } else {
             _ = PCKShape.writeSTEP(bodies.map(\.shape), path: path)
         }
-        let metas = bodies.map { BodyMeta(name: $0.name, color: [$0.color.x, $0.color.y, $0.color.z], isHidden: $0.isHidden) }
+        let metas = bodies.map {
+            BodyMeta(name: $0.name, color: [$0.color.x, $0.color.y, $0.color.z], isHidden: $0.isHidden, sketchID: $0.sketchID)
+        }
         if let data = try? JSONEncoder().encode(metas) {
             try? data.write(to: metaURL)
         }
@@ -1525,7 +1616,8 @@ extension ModelStore {
     private func showSolid(_ shapes: [PCKShape], sourceBody: Int?, mode: ExtrudeMode, name: String) {
         let combined: PCKShape? = shapes.count == 1 ? shapes.first : PCKShape.compound(shapes)
         guard let solid = combined,
-              let result = extrusionResult(solid, sourceBody: sourceBody, mode: mode) else {
+              let result = extrusionResult(solid, sourceBody: sourceBody, mode: mode,
+                                           sketch: selectedRegions.first.flatMap { sketches.indices.contains($0.sketch) ? sketches[$0.sketch].id : nil }) else {
             dropPreview()
             return
         }

@@ -193,6 +193,10 @@ final class Workspace: ObservableObject {
     @Published var isPickingImage = false
     /// Kontextleiste: alle Werkzeuggruppen zeigen („Mehr“)
     @Published var showsAllTools = false
+    /// Ursprung (Achsen) zeigen – im Browser „Ebenen“ ein- und ausblendbar
+    @Published var showsOrigin = true
+    /// Browser „Ebenen“ links (wie in Fusion 360)
+    @Published var showsLayers = false
 
     /// Liefert ein Bild der Ansicht (vom Viewport gesetzt).
     var snapshot: ((CGSize) -> UIImage?)?
@@ -812,6 +816,11 @@ final class Workspace: ObservableObject {
     private var sketchHint: String {
         if sketch.isChoosingPlane { return "Skizzenebene antippen – oder eine ebene Fläche eines Körpers" }
         switch sketch.tool {
+        case .select:
+            if !sketch.selection.isEmpty {
+                return "\(sketch.selection.count) gewählt · Ecke oder Kante ziehen ändert die Größe · rechts Einschränkung wählen"
+            }
+            return "Element antippen zum Wählen · Ecke/Ende ziehen ändert die Größe · Linie ziehen verschiebt"
         case .polyline where sketch.hasOpenChain:
             return "Nächsten Punkt setzen · zurück zum Start schließt"
         case .arc:
@@ -828,6 +837,8 @@ final class Workspace: ObservableObject {
             return sketch.hasOffsetTarget ? "Pfeil ziehen, dann „Fertig“" : "Kontur oder Kurve antippen"
         case .trim:
             return "Stück einer Kurve antippen – es wird bis zu den Schnittpunkten entfernt"
+        case .fillet:
+            return "Ecke antippen, an der zwei Linien zusammenstoßen – Radius unten eingeben"
         case .project:
             return "Körperkante oder Fläche antippen, um sie in die Skizze zu übernehmen"
         case .scale:
