@@ -638,6 +638,9 @@ final class SketchController: ObservableObject {
             endKind = previewedKind
         }
         let samples = strokeSamples + [point]
+        // Angezeigter Kreis/Bogen des runden Strichs: wird übernommen, auch wenn die Erkennung mit dem
+        // letzten (zittrigen) Punkt knapp scheitert – vorher wurde trotz Halbkreis-Vorschau eine Gerade daraus
+        let previewShape = strokeShape
         circleInference = nil
         let arcStroke = arcActive
         arcLatched = false
@@ -691,7 +694,7 @@ final class SketchController: ObservableObject {
             // Finger aufgelegt: tangentialer Bogen am Ende des Linienzugs
             if arcStroke, endTangentArc(to: end, from: start) { break }
             // Rund gezogen: Kreis bzw. Bogen statt Linie
-            if !endShapeStroke(samples, start: start, end: end, tolerance: tolerance) {
+            if !endShapeStroke(samples, start: start, end: end, tolerance: tolerance, preview: previewShape) {
                 endLineStroke(start: start, end: end)
             }
         case .arc where arcMode == .center:
@@ -1059,8 +1062,15 @@ final class SketchController: ObservableObject {
     }
 
     /// Kreis oder Bogen aus einem runden Strich des Linienwerkzeugs übernehmen. false = gerade Linie.
-    private func endShapeStroke(_ samples: [Point2], start: Point2, end: Point2, tolerance: Double) -> Bool {
-        guard let shape = StrokeGesture.recognize(samples, tolerance: tolerance) else { return false }
+    private func endShapeStroke(_ samples: [Point2], start: Point2, end: Point2, tolerance: Double,
+                                preview: SketchEntity? = nil) -> Bool {
+        var previewed: StrokeGesture.Shape?
+        switch preview {
+        case .circle(let center, let radius)?: previewed = .circle(center: center, radius: radius)
+        case .arc(_, let mid, _)?: previewed = .arc(mid: mid)
+        default: previewed = nil
+        }
+        guard let shape = StrokeGesture.recognize(samples, tolerance: tolerance) ?? previewed else { return false }
         switch shape {
         case .circle(let center, let rawRadius):
             // Mitte rastet auf vorhandene Punkte ein, der Radius aufs Raster
@@ -1077,7 +1087,7 @@ final class SketchController: ObservableObject {
         case .arc(let mid):
             let from = chainEnd ?? start
             // Der Bogen muss am Anfang des Strichs ansetzen
-            guard let first = samples.first, simd_distance(first, from) <= tolerance * 1.5,
+            guard let first = samples.first, simd_distance(first, from) <= tolerance * 1.5 || previewed != nil,
                   simd_distance(from, end) > 1e-6, circleThrough(from, mid, end) != nil else { return false }
             if chainEnd == nil { chainStart = from }
             add(.arc(start: from, mid: mid, end: end), editable: true)
