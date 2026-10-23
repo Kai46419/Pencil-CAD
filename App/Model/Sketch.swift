@@ -986,6 +986,12 @@ final class SketchController: ObservableObject {
     /// Linien- bzw. Bogenende an – dieses Ende.
     private func arcAnchor(from origin: Point2?) -> (start: Point2, direction: Point2, entity: Int)? {
         let reach = max(strokeTolerance, 1e-6)
+        // Stift genau auf einem Linien- bzw. Bogenende angesetzt (eingerastet): dort beginnt der Bogen,
+        // auch wenn der Linienzug woanders endet
+        if let origin, chainEnd.map({ simd_distance($0, origin) > 1e-6 }) ?? true,
+           let tangent = outwardTangent(at: origin, tolerance: 1e-6) {
+            return (origin, tangent.direction, tangent.entity)
+        }
         if let end = chainEnd, origin.map({ simd_distance($0, end) <= reach * 2 }) ?? true,
            let tangent = outwardTangent(at: end, tolerance: 1e-6) {
             return (end, tangent.direction, tangent.entity)
@@ -1008,10 +1014,16 @@ final class SketchController: ObservableObject {
 
     /// Bogen vom Ende des Linienzugs nach end, tangential an das letzte Stück.
     private func tangentArc(to end: Point2, from origin: Point2? = nil) -> (entity: SketchEntity, previous: Int)? {
-        guard let anchor = arcAnchor(from: origin ?? dragStart) else { return nil }
-        let start = anchor.start
+        guard let anchor = arcAnchor(from: origin ?? dragStart),
+              let arc = Self.tangentArcShape(start: anchor.start, direction: anchor.direction, end: end) else { return nil }
+        return (arc, anchor.entity)
+    }
+
+    /// Bogen von start nach end, der in start in Richtung direction losläuft. nil, wenn end (fast) auf der
+    /// Verlängerung liegt.
+    private static func tangentArcShape(start: Point2, direction: Point2, end: Point2) -> SketchEntity? {
         let d = end - start
-        let normal = Point2(-anchor.direction.y, anchor.direction.x)
+        let normal = Point2(-direction.y, direction.x)
         let side = simd_dot(d, normal)
         // Fast gerade weiter: kein Bogen
         guard simd_length(d) > 1e-6, abs(side) > simd_length(d) * 0.02 else { return nil }
@@ -1028,7 +1040,7 @@ final class SketchController: ObservableObject {
         let middle = a0 + sweep / 2
         let mid = center + Point2(cos(middle), sin(middle)) * abs(radius)
         guard circleThrough(start, mid, end) != nil else { return nil }
-        return (.arc(start: start, mid: mid, end: end), anchor.entity)
+        return .arc(start: start, mid: mid, end: end)
     }
 
     /// Bogen des Bogen-Strichs (Finger aufgelegt): tangential, wenn möglich. Liegt das Ende auf der
@@ -1039,6 +1051,12 @@ final class SketchController: ObservableObject {
         -> (entity: SketchEntity, previous: Int?)? {
         if let arc = tangentArc(to: end, from: origin) { return (arc.entity, arc.previous) }
         guard let from = origin ?? dragStart else { return nil }
+        // Tangential am Ziel: Endet der Strich an einem Linien- bzw. Bogenende (z. B. am Anfang der ersten
+        // Linie), schließt der Bogen dort tangential an – auch wenn der Stift gerade zum Ziel gezogen wurde
+        if let target = outwardTangent(at: end, tolerance: 1e-6),
+           case .arc(let a, let m, let b)? = Self.tangentArcShape(start: end, direction: target.direction, end: from) {
+            return (.arc(start: b, mid: m, end: a), target.entity)
+        }
         let points = samples ?? strokeSamples
         let chord = end - from
         let length = simd_length(chord)
