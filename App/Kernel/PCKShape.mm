@@ -13,6 +13,15 @@
 #include <BRepAlgoAPI_Common.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
+#include <BRepBuilderAPI_GTransform.hxx>
+#include <BRepGProp.hxx>
+#include <BRepOffsetAPI_MakePipe.hxx>
+#include <BRepOffsetAPI_ThruSections.hxx>
+#include <BRepPrimAPI_MakeHalfSpace.hxx>
+#include <BRepPrimAPI_MakeRevol.hxx>
+#include <BRepPrimAPI_MakeTorus.hxx>
+#include <GProp_GProps.hxx>
+#include <gp_GTrsf.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
@@ -506,6 +515,66 @@ static TopoDS_Face faceFromWires(NSArray<NSArray<NSNumber *> *> *wires) {
     }
 }
 
++ (nullable PCKShape *)torusWithCenter:(simd_double3)center axis:(simd_double3)axis
+                           majorRadius:(double)majorRadius minorRadius:(double)minorRadius {
+    if (majorRadius <= 0 || minorRadius <= 0 || minorRadius >= majorRadius || simd_length(axis) == 0) return nil;
+    try {
+        BRepPrimAPI_MakeTorus torus(gp_Ax2(toPnt(center), toDir(axis)), majorRadius, minorRadius);
+        return [[PCKShape alloc] initWithShape:torus.Shape()];
+    } catch (const Standard_Failure &) {
+        return nil;
+    }
+}
+
++ (nullable PCKShape *)revolveProfileWires:(NSArray<NSArray<NSNumber *> *> *)wires axisOrigin:(simd_double3)origin
+                             axisDirection:(simd_double3)direction angle:(double)radians {
+    if (simd_length(direction) == 0 || radians == 0) return nil;
+    try {
+        const TopoDS_Face face = faceFromWires(wires);
+        if (face.IsNull()) return nil;
+        const double angle = std::min(std::abs(radians), 2 * M_PI);
+        gp_Dir axis = toDir(direction);
+        if (radians < 0) axis.Reverse();
+        BRepPrimAPI_MakeRevol revol(face, gp_Ax1(toPnt(origin), axis), angle, Standard_True);
+        if (!revol.IsDone()) return nil;
+        return [[PCKShape alloc] initWithShape:revol.Shape()];
+    } catch (const Standard_Failure &) {
+        return nil;
+    }
+}
+
++ (nullable PCKShape *)sweepProfileWires:(NSArray<NSArray<NSNumber *> *> *)wires path:(NSArray<NSNumber *> *)path {
+    try {
+        const TopoDS_Face face = faceFromWires(wires);
+        const TopoDS_Wire spine = wireFromCode(toVector(path));
+        if (face.IsNull() || spine.IsNull()) return nil;
+        BRepOffsetAPI_MakePipe pipe(spine, face);
+        pipe.Build();
+        if (!pipe.IsDone()) return nil;
+        return [[PCKShape alloc] initWithShape:pipe.Shape()];
+    } catch (const Standard_Failure &) {
+        return nil;
+    }
+}
+
++ (nullable PCKShape *)loftThroughWires:(NSArray<NSArray<NSNumber *> *> *)sections {
+    if (sections.count < 2) return nil;
+    try {
+        BRepOffsetAPI_ThruSections loft(Standard_True, Standard_False);
+        for (NSArray<NSNumber *> *code in sections) {
+            const TopoDS_Wire wire = wireFromCode(toVector(code));
+            if (wire.IsNull()) return nil;
+            loft.AddWire(wire);
+        }
+        loft.CheckCompatibility(Standard_True);
+        loft.Build();
+        if (!loft.IsDone()) return nil;
+        return [[PCKShape alloc] initWithShape:loft.Shape()];
+    } catch (const Standard_Failure &) {
+        return nil;
+    }
+}
+
 + (nullable PCKShape *)compoundOfShapes:(NSArray<PCKShape *> *)shapes {
     if (shapes.count == 0) return nil;
     if (shapes.count == 1) return shapes[0];
@@ -627,6 +696,84 @@ static TopoDS_Shape unified(const TopoDS_Shape &shape) {
     return [self transformedBy:transform];
 }
 
+- (nullable PCKShape *)scaledAboutPoint:(simd_double3)center factors:(simd_double3)factors {
+    if (factors.x <= 0 || factors.y <= 0 || factors.z <= 0) return nil;
+    if (factors.x == factors.y && factors.y == factors.z) {
+        gp_Trsf transform;
+        transform.SetScale(toPnt(center), factors.x);
+        return [self transformedBy:transform];
+    }
+    try {
+        // Ungleichmäßig: je Achse strecken, center bleibt fest
+        gp_GTrsf stretch;
+        stretch.SetValue(1, 1, factors.x);
+        stretch.SetValue(2, 2, factors.y);
+        stretch.SetValue(3, 3, factors.z);
+        stretch.SetTranslationPart(gp_XYZ(center.x * (1 - factors.x), center.y * (1 - factors.y),
+                                          center.z * (1 - factors.z)));
+        BRepBuilderAPI_GTransform op(_shape, stretch, Standard_True);
+        if (!op.IsDone()) return nil;
+        return [[PCKShape alloc] initWithShape:op.Shape()];
+    } catch (const Standard_Failure &) {
+        return nil;
+    }
+}
+
+- (nullable NSArray<PCKShape *> *)splitAtPlaneOrigin:(simd_double3)origin normal:(simd_double3)normal {
+    if (simd_length(normal) == 0) return nil;
+    try {
+        const gp_Pln plane(toPnt(origin), toDir(normal));
+        const TopoDS_Face face = BRepBuilderAPI_MakeFace(plane, -1e5, 1e5, -1e5, 1e5).Face();
+        const simd_double3 n = simd_normalize(normal);
+        NSMutableArray<PCKShape *> *parts = [NSMutableArray array];
+        for (double side : {1.0, -1.0}) {
+            BRepPrimAPI_MakeHalfSpace half(face, toPnt(origin + n * side));
+            BRepAlgoAPI_Common common(_shape, half.Solid());
+            if (!common.IsDone()) return nil;
+            GProp_GProps props;
+            BRepGProp::VolumeProperties(common.Shape(), props);
+            if (std::abs(props.Mass()) > 1e-6) {
+                [parts addObject:[[PCKShape alloc] initWithShape:unified(common.Shape())]];
+            }
+        }
+        return parts.count == 2 ? parts : nil;
+    } catch (const Standard_Failure &) {
+        return nil;
+    }
+}
+
+- (double)volume {
+    try {
+        GProp_GProps props;
+        BRepGProp::VolumeProperties(_shape, props);
+        return std::abs(props.Mass());
+    } catch (const Standard_Failure &) {
+        return 0;
+    }
+}
+
+- (double)lengthOfEdge:(NSInteger)index {
+    if (index < 1 || index > _edges.Extent()) return 0;
+    try {
+        GProp_GProps props;
+        BRepGProp::LinearProperties(_edges(int(index)), props);
+        return props.Mass();
+    } catch (const Standard_Failure &) {
+        return 0;
+    }
+}
+
+- (double)areaOfFace:(NSInteger)index {
+    if (index < 1 || index > _faces.Extent()) return 0;
+    try {
+        GProp_GProps props;
+        BRepGProp::SurfaceProperties(_faces(int(index)), props);
+        return props.Mass();
+    } catch (const Standard_Failure &) {
+        return 0;
+    }
+}
+
 /// Echte Kanten einer Fläche, ohne Nahtkanten (z. B. bei Zylindern) und entartete Kanten.
 static TopTools_IndexedMapOfShape realEdgesOfFace(const TopTools_IndexedMapOfShape &faces, NSInteger index) {
     TopTools_IndexedMapOfShape result;
@@ -638,6 +785,15 @@ static TopTools_IndexedMapOfShape realEdgesOfFace(const TopTools_IndexedMapOfSha
         result.Add(edge);
     }
     return result;
+}
+
+- (NSArray<NSNumber *> *)edgeNumbersOfFace:(NSInteger)face {
+    NSMutableArray<NSNumber *> *numbers = [NSMutableArray array];
+    const TopTools_IndexedMapOfShape edges = realEdgesOfFace(_faces, face);
+    for (int i = 1; i <= edges.Extent(); ++i) {
+        [numbers addObject:@(_edges.FindIndex(edges(i)))];
+    }
+    return numbers;
 }
 
 - (nullable PCKShape *)filletingEdgesOfFace:(NSInteger)face radius:(double)radius {
@@ -906,6 +1062,48 @@ static std::vector<TopoDS_Edge> edgesFromNumbers(const TopTools_IndexedMapOfShap
 
 + (nullable PCKShape *)faceWithProfileWires:(NSArray<NSArray<NSNumber *> *> *)wires {
     return nil;
+}
+
++ (nullable PCKShape *)torusWithCenter:(simd_double3)center axis:(simd_double3)axis
+                           majorRadius:(double)majorRadius minorRadius:(double)minorRadius {
+    return nil;
+}
+
++ (nullable PCKShape *)revolveProfileWires:(NSArray<NSArray<NSNumber *> *> *)wires axisOrigin:(simd_double3)origin
+                             axisDirection:(simd_double3)direction angle:(double)radians {
+    return nil;
+}
+
++ (nullable PCKShape *)sweepProfileWires:(NSArray<NSArray<NSNumber *> *> *)wires path:(NSArray<NSNumber *> *)path {
+    return nil;
+}
+
++ (nullable PCKShape *)loftThroughWires:(NSArray<NSArray<NSNumber *> *> *)sections {
+    return nil;
+}
+
+- (nullable PCKShape *)scaledAboutPoint:(simd_double3)center factors:(simd_double3)factors {
+    return nil;
+}
+
+- (nullable NSArray<PCKShape *> *)splitAtPlaneOrigin:(simd_double3)origin normal:(simd_double3)normal {
+    return nil;
+}
+
+- (double)volume {
+    return 0;
+}
+
+- (double)lengthOfEdge:(NSInteger)index {
+    return 0;
+}
+
+- (double)areaOfFace:(NSInteger)index {
+    return 0;
+}
+
+- (NSArray<NSNumber *> *)edgeNumbersOfFace:(NSInteger)face {
+    return @[];
 }
 
 + (nullable PCKShape *)compoundOfShapes:(NSArray<PCKShape *> *)shapes {

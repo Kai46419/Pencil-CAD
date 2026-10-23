@@ -8,6 +8,8 @@ private struct Uniforms {
     var model: float4x4
     var lightDirection: SIMD3<Float>
     var baseColor: SIMD3<Float>
+    /// Schnittansicht: xyz = Normale, w = Abstand; Normale 0 = aus
+    var clipPlane: SIMD4<Float> = .zero
 }
 
 enum DisplayMode: String, CaseIterable, Identifiable {
@@ -57,14 +59,21 @@ struct LineGroup {
     var onTop = true
 }
 
+/// Bild (Canvas) als Rechteck: Ecken links unten, rechts unten, rechts oben, links oben.
+struct CanvasGraphic {
+    var texture: MTLTexture
+    var corners: [SIMD3<Float>]
+    var opacity: Float
+}
+
 /// Halbtransparente Füllung (Skizzenbereiche), Dreiecke in Weltkoordinaten.
 struct FillGroup {
     var triangles: [SIMD3<Float>]
     var color: SIMD4<Float>
 }
 
-/// Hintergrund wie bei Shapr3D: mittleres Grau, damit helle Körper und dunkle Linien gut zu sehen sind.
-let viewportBackground = MTLClearColor(red: 0.74, green: 0.75, blue: 0.78, alpha: 1)
+/// Hintergrund wie bei Shapr3D: helles Grau, etwas dunkler als Weiß, damit helle Körper sichtbar bleiben.
+let viewportBackground = MTLClearColor(red: 0.84, green: 0.85, blue: 0.87, alpha: 1)
 
 final class Renderer: NSObject, MTKViewDelegate {
     /// Länge eines Ziehpfeils in Bildschirmpunkten.
@@ -78,6 +87,9 @@ final class Renderer: NSObject, MTKViewDelegate {
     var planes: [PlaneGraphic] = []
     var lineGroups: [LineGroup] = []
     var fills: [FillGroup] = []
+    var canvases: [CanvasGraphic] = []
+    /// Schnittansicht (siehe Uniforms.clipPlane)
+    var clipPlane: SIMD4<Float> = .zero
     /// Wird vor jedem Bild aufgerufen; der Viewport gleicht dort seinen Zustand ab (höchstens einmal je Bild).
     var willDraw: (() -> Void)?
 
@@ -93,6 +105,7 @@ final class Renderer: NSObject, MTKViewDelegate {
     private let colorPipeline: MTLRenderPipelineState
     private let colorOverlayPipeline: MTLRenderPipelineState
     private let fillPipeline: MTLRenderPipelineState
+    private let texturePipeline: MTLRenderPipelineState
     private let depthState: MTLDepthStencilState
     private let readOnlyDepthState: MTLDepthStencilState
     private let alwaysDepthState: MTLDepthStencilState
@@ -146,11 +159,12 @@ final class Renderer: NSObject, MTKViewDelegate {
 
         guard let solidPipeline = pipeline(vertex: "vertex_main", fragment: "fragment_main"),
               let xrayPipeline = pipeline(vertex: "vertex_main", fragment: "fragment_xray", blended: true),
-              let overlayPipeline = pipeline(vertex: "vertex_overlay", fragment: "fragment_flat"),
+              let overlayPipeline = pipeline(vertex: "vertex_overlay", fragment: "fragment_flat_clip"),
               let linePipeline = pipeline(vertex: "vertex_main", fragment: "fragment_flat"),
               let colorPipeline = pipeline(vertex: "vertex_main", fragment: "fragment_color"),
               let colorOverlayPipeline = pipeline(vertex: "vertex_overlay", fragment: "fragment_color"),
               let fillPipeline = pipeline(vertex: "vertex_overlay", fragment: "fragment_flat", blended: true),
+              let texturePipeline = pipeline(vertex: "vertex_main", fragment: "fragment_texture", blended: true),
               let depthState = depth(.lessEqual, write: true),
               let readOnlyDepthState = depth(.lessEqual, write: false),
               let alwaysDepthState = depth(.always, write: false) else { return nil }
@@ -164,6 +178,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         self.colorPipeline = colorPipeline
         self.colorOverlayPipeline = colorOverlayPipeline
         self.fillPipeline = fillPipeline
+        self.texturePipeline = texturePipeline
         self.depthState = depthState
         self.readOnlyDepthState = readOnlyDepthState
         self.alwaysDepthState = alwaysDepthState
@@ -400,6 +415,8 @@ final class Renderer: NSObject, MTKViewDelegate {
     private func encode(_ encoder: MTLRenderCommandEncoder, aspect: Float, viewHeight: Float) {
         encoder.setDepthStencilState(depthState)
         encoder.setCullMode(.none)
+        // Kernel-Dreiecke sind von außen gesehen gegen den Uhrzeigersinn
+        encoder.setFrontFacing(.counterClockwise)
 
         // Licht kommt leicht versetzt aus Blickrichtung, damit Flächen Kontrast haben.
         let toEye = simd_normalize(camera.position - camera.target)
@@ -407,7 +424,8 @@ final class Renderer: NSObject, MTKViewDelegate {
             viewProjection: camera.projectionMatrix(aspect: aspect) * camera.viewMatrix,
             model: matrix_identity_float4x4,
             lightDirection: simd_normalize(toEye + SIMD3(0.3, 0.2, 0.6)),
-            baseColor: SIMD3(0.55, 0.62, 0.72)
+            baseColor: SIMD3(0.55, 0.62, 0.72),
+            clipPlane: clipPlane
         )
 
         func setUniforms(_ u: inout Uniforms) {
@@ -436,7 +454,7 @@ final class Renderer: NSObject, MTKViewDelegate {
             encoder.setRenderPipelineState(linePipeline)
             encoder.setDepthStencilState(depthState)
             setUniforms(&gridUniforms)
-            for (lines, shade) in [(grid.minor, Float(0.69)), (grid.major, Float(0.62))] {
+            for (lines, shade) in [(grid.minor, Float(0.78)), (grid.major, Float(0.69))] {
                 guard let buffer = makeBuffer(lines) else { continue }
                 encoder.setVertexBuffer(buffer, offset: 0, index: 0)
                 setColor(shade, shade + 0.01, shade + 0.03)
@@ -480,6 +498,22 @@ final class Renderer: NSObject, MTKViewDelegate {
                 encoder.drawIndexedPrimitives(type: .triangle, indexCount: selectionCount, indexType: .uint32,
                                               indexBuffer: selectionBuffer, indexBufferOffset: 0)
             }
+        }
+
+        // Bilder: halbtransparent, von Körpern davor verdeckt (uv steckt in der Normale)
+        for canvas in canvases where canvas.corners.count == 4 {
+            let uv: [SIMD3<Float>] = [[0, 1, 0], [1, 1, 0], [1, 0, 0], [0, 0, 0]]
+            let quad = [0, 1, 2, 0, 2, 3].map { Vertex(position: canvas.corners[$0], normal: uv[$0]) }
+            guard let buffer = makeBuffer(quad) else { continue }
+            var noClip = uniforms
+            noClip.clipPlane = .zero
+            encoder.setRenderPipelineState(texturePipeline)
+            encoder.setDepthStencilState(readOnlyDepthState)
+            encoder.setVertexBuffer(buffer, offset: 0, index: 0)
+            setUniforms(&noClip)
+            setColor(1, 1, 1, canvas.opacity)
+            encoder.setFragmentTexture(canvas.texture, index: 0)
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: quad.count)
         }
 
         // Ebenenscheiben: halbtransparent, hinter Körpern verdeckt

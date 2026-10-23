@@ -69,6 +69,10 @@ final class ViewportView: MTKView {
     private let valueLabel = PaddedLabel()
     private var planeLabels: [PaddedLabel] = []
     private var dimensionFields: [SketchDimension.Kind: DimensionField] = [:]
+    /// Kurzzeichen der Einschränkungen am Element
+    private var badgeLabels: [PaddedLabel] = []
+    /// Geladene Bilder (Canvas) je Datei
+    private var canvasTextures: [String: MTLTexture] = [:]
     /// Bereichsfüllungen der aktuellen Skizze, neu berechnet nur bei geänderter Geometrie.
     private var sketchFillRevision = -1
     private var sketchFills: [[SIMD3<Float>]] = []
@@ -209,11 +213,21 @@ final class ViewportView: MTKView {
             ? float4x4(origin: SIMD3<Float>(plane.origin), u: SIMD3<Float>(plane.u),
                        v: SIMD3<Float>(plane.v), n: SIMD3<Float>(plane.normal))
             : matrix_identity_float4x4
+        renderer.clipPlane = workspace.clipPlane.map {
+            SIMD4<Float>(Float($0.normal.x), Float($0.normal.y), Float($0.normal.z), Float($0.distance))
+        } ?? .zero
         updateLines()
         refreshPlanes()
+        updateCanvases()
+        updateBadges()
 
         let handles = workspace.handles
-        renderer.handles = handles.map { HandleGraphic(base: $0.base, direction: $0.pointing, color: $0.color) }
+        renderer.handles = handles.flatMap { handle -> [HandleGraphic] in
+            let graphic = HandleGraphic(base: handle.base, direction: handle.pointing, color: handle.color)
+            // Wie Shapr3D: Doppelpfeil, solange der Bereich noch nicht extrudiert ist
+            guard handle.kind == .region, handle.value == 0 else { return [graphic] }
+            return [graphic, HandleGraphic(base: handle.base, direction: -handle.pointing, color: handle.color)]
+        }
         updateValueLabel(handles)
         updateDimensionFields()
     }
@@ -223,25 +237,46 @@ final class ViewportView: MTKView {
     private static let sketchInk = SIMD3<Float>(0.05, 0.06, 0.09)
     private static let previewBlue = SIMD3<Float>(0.05, 0.4, 0.98)
     private static let snapOrange = SIMD3<Float>(0.98, 0.45, 0.05)
+    private static let constructionGray = SIMD3<Float>(0.4, 0.42, 0.48)
+    private static let selectionOrange = SIMD3<Float>(0.98, 0.5, 0.06)
+    private static let helperOrange = SIMD3<Float>(0.93, 0.55, 0.16)
+    private static let dimensionInk = SIMD3<Float>(0.18, 0.2, 0.26)
 
-    /// Skizzenlinien (dick, immer sichtbar), gespeicherte Skizzen, Fangsymbole, Knoten und Bereichsfüllungen.
+    /// Skizzenlinien (dick, immer sichtbar), gespeicherte Skizzen, Konstruktionsgeometrie, Auswahl,
+    /// Maßlinien, Fangsymbole, Knoten und Bereichsfüllungen.
     private func updateLines() {
         guard let renderer, let sketch, let model, let workspace else { return }
         let sketching = sketch.isActive && !sketch.isChoosingPlane
         var groups: [LineGroup] = []
         var fills: [FillGroup] = []
+        let perPoint = Double(renderer.camera.worldUnitsPerPoint(viewHeight: Float(bounds.height)))
 
         for (index, stored) in model.sketches.enumerated() where !stored.isHidden {
             if sketch.isActive, index == workspace.editingSketchIndex { continue }
-            groups.append(LineGroup(polylines: stored.lines,
+            // Skizze, die gerade verschoben wird, an der neuen Stelle zeigen
+            let shift = !sketch.isActive && workspace.tool == .move && model.movingSketch == index
+                ? SIMD3<Float>(model.moveOffset) : SIMD3<Float>(0, 0, 0)
+            let move = { (line: [SIMD3<Float>]) in line.map { $0 + shift } }
+            groups.append(LineGroup(polylines: stored.lines.map(move),
                                     color: sketching ? SIMD3(0.36, 0.38, 0.44) : SIMD3(0.12, 0.14, 0.2),
                                     width: 1.8, onTop: false))
+            if !stored.constructionLines.isEmpty {
+                groups.append(LineGroup(polylines: stored.constructionLines.flatMap { dashed(move($0), dash: Float(4 * perPoint)) },
+                                        color: Self.constructionGray, width: 1.2, onTop: false))
+            }
             guard !sketch.isActive else { continue }
             for (region, triangles) in stored.fills.enumerated() {
                 let selected = model.selectedRegions.contains(RegionRef(sketch: index, region: region))
-                fills.append(FillGroup(triangles: triangles,
-                                       color: selected ? SIMD4(0.1, 0.42, 0.98, 0.5) : SIMD4(0.2, 0.45, 0.95, 0.14)))
+                fills.append(FillGroup(triangles: triangles.map { $0 + shift },
+                                       color: selected ? SIMD4(0.98, 0.55, 0.15, 0.55) : SIMD4(0.2, 0.45, 0.95, 0.14)))
             }
+        }
+
+        addConstructionItems(to: &groups, perPoint: perPoint, sketching: sketching)
+        if !sketch.isActive, workspace.tool == .measure, !workspace.measurePoints.isEmpty {
+            let points = workspace.measurePoints.map { SIMD3<Float>($0) }
+            groups.append(LineGroup(polylines: points.count == 2 ? [points] : [], color: Self.previewBlue, width: 2,
+                                    dots: points, dotRadius: 5))
         }
 
         if sketching {
@@ -254,17 +289,32 @@ final class ViewportView: MTKView {
             fills += sketchFills.map { FillGroup(triangles: $0, color: SIMD4(0.2, 0.45, 0.95, 0.16)) }
             groups.append(LineGroup(polylines: sketch.entityPolylines.map { $0.map(world) }, color: Self.sketchInk,
                                     width: 2.6))
+            let construction = sketch.constructionPolylines.flatMap { dashed($0, dash: 5 * perPoint) }
+            if !construction.isEmpty {
+                groups.append(LineGroup(polylines: construction.map { $0.map(world) }, color: Self.constructionGray,
+                                        width: 1.8))
+            }
+            let selected = sketch.selectionPolylines
+            let selectedPoints = sketch.selectionPoints
+            if !selected.isEmpty || !selectedPoints.isEmpty {
+                groups.append(LineGroup(polylines: selected.map { $0.map(world) }, color: Self.selectionOrange,
+                                        width: 4.2, dots: selectedPoints.map(world), dotRadius: 6))
+            }
             let preview = sketch.previewPolylines
             if !preview.isEmpty {
                 groups.append(LineGroup(polylines: preview.map { $0.map(world) }, color: Self.previewBlue, width: 2.6))
             }
-            let perPoint = Double(renderer.camera.worldUnitsPerPoint(viewHeight: Float(bounds.height)))
+            let dimensionLines = sketch.dimensions.flatMap { dimensionGeometry($0, perPoint: perPoint).lines }
+            if !dimensionLines.isEmpty {
+                groups.append(LineGroup(polylines: dimensionLines.map { $0.map(world) }, color: Self.dimensionInk,
+                                        width: 1.2))
+            }
             if !sketch.hoverNodes.isEmpty {
                 groups.append(LineGroup(polylines: [], color: Self.previewBlue, width: 0,
                                         dots: sketch.hoverNodes.map(world), dotRadius: 3.5))
             }
             if let snap = sketch.currentSnap, let kind = snap.kind {
-                let guides = snap.guides.flatMap { dashed($0.0, $0.1, dash: 5 * perPoint) }
+                let guides = snap.guides.flatMap { dashed([$0.0, $0.1], dash: 5 * perPoint) }
                 if !guides.isEmpty {
                     groups.append(LineGroup(polylines: guides.map { $0.map(world) }, color: Self.snapOrange, width: 1.3))
                 }
@@ -279,18 +329,117 @@ final class ViewportView: MTKView {
         renderer.fills = fills
     }
 
-    /// Gestrichelte Hilfslinie als einzelne Striche.
-    private func dashed(_ a: Point2, _ b: Point2, dash: Double) -> [[Point2]] {
-        let length = simd_distance(a, b)
-        guard length > 1e-9, dash > 0 else { return [] }
-        let d = (b - a) / length
-        var result: [[Point2]] = []
-        var t = 0.0
-        while t < length, result.count < 300 {
-            result.append([a + d * t, a + d * min(t + dash, length)])
-            t += dash * 2
+    /// Konstruktionsachsen (gestrichelt) und -punkte; Ebenen zeichnet refreshPlanes.
+    private func addConstructionItems(to groups: inout [LineGroup], perPoint: Double, sketching: Bool) {
+        guard let model else { return }
+        let reach = Double(planeHalfSize) * 1.6
+        var axes: [[SIMD3<Float>]] = []
+        var points: [SIMD3<Float>] = []
+        for item in model.constructions where !item.isHidden {
+            switch item.kind {
+            case .axis:
+                let a = SIMD3<Float>(item.origin - item.direction * reach)
+                let b = SIMD3<Float>(item.origin + item.direction * reach)
+                axes += dashed([a, b], dash: Float(6 * perPoint))
+            case .point:
+                points.append(SIMD3<Float>(item.origin))
+            case .plane:
+                break
+            }
         }
+        if !axes.isEmpty || !points.isEmpty {
+            groups.append(LineGroup(polylines: axes, color: Self.helperOrange, width: 1.6, dots: points,
+                                    dotRadius: 4.5, onTop: !sketching))
+        }
+    }
+
+    /// Gestrichelter Linienzug (lokal) als einzelne Striche entlang der Länge.
+    private func dashed(_ points: [Point2], dash: Double) -> [[Point2]] {
+        guard points.count >= 2, dash > 0 else { return [] }
+        var result: [[Point2]] = []
+        var current: [Point2] = [points[0]]
+        var drawing = true
+        var left = dash
+        for i in 0..<(points.count - 1) {
+            var a = points[i]
+            let b = points[i + 1]
+            var length = simd_distance(a, b)
+            while length > 1e-12 {
+                let step = min(left, length)
+                let p = a + (b - a) / length * step
+                if drawing { current.append(p) }
+                left -= step
+                length -= step
+                a = p
+                if left <= 1e-12 {
+                    if drawing, current.count >= 2 { result.append(current) }
+                    drawing.toggle()
+                    current = drawing ? [a] : []
+                    left = dash
+                    if result.count > 2000 { return result }
+                }
+            }
+        }
+        if drawing, current.count >= 2 { result.append(current) }
         return result
+    }
+
+    private func dashed(_ points: [SIMD3<Float>], dash: Float) -> [[SIMD3<Float>]] {
+        guard points.count >= 2, dash > 0 else { return [] }
+        var result: [[SIMD3<Float>]] = []
+        var drawing = true
+        var left = dash
+        var current: [SIMD3<Float>] = [points[0]]
+        for i in 0..<(points.count - 1) {
+            var a = points[i]
+            let b = points[i + 1]
+            var length = simd_distance(a, b)
+            while length > 1e-9 {
+                let step = min(left, length)
+                let p = a + (b - a) / length * step
+                if drawing { current.append(p) }
+                left -= step
+                length -= step
+                a = p
+                if left <= 1e-9 {
+                    if drawing, current.count >= 2 { result.append(current) }
+                    drawing.toggle()
+                    current = drawing ? [a] : []
+                    left = dash
+                    if result.count > 2000 { return result }
+                }
+            }
+        }
+        if drawing, current.count >= 2 { result.append(current) }
+        return result
+    }
+
+    /// Maßlinie mit Hilfslinien und Pfeilen (lokal) und Lage des Maßfelds.
+    private func dimensionGeometry(_ dimension: SketchDimension, perPoint: Double)
+        -> (lines: [[Point2]], label: Point2, onLine: Bool) {
+        let arrow = 8 * perPoint, wing = 3 * perPoint
+        func arrowHead(at tip: Point2, from tail: Point2) -> [Point2] {
+            let t = simd_normalize(tip - tail), n = Point2(-t.y, t.x)
+            return [tip - t * arrow + n * wing, tip, tip - t * arrow - n * wing]
+        }
+        guard dimension.span.count == 2, simd_distance(dimension.span[0], dimension.span[1]) > 1e-9 else {
+            return ([], dimension.position + dimension.direction * 10 * perPoint, false)
+        }
+        let a = dimension.span[0], b = dimension.span[1]
+        switch dimension.kind {
+        case .width, .height, .length:
+            let n = dimension.direction
+            let offset = 28 * perPoint
+            let a2 = a + n * offset, b2 = b + n * offset
+            let lines = [[a + n * 3 * perPoint, a2 + n * 5 * perPoint], [b + n * 3 * perPoint, b2 + n * 5 * perPoint],
+                         [a2, b2], arrowHead(at: a2, from: b2), arrowHead(at: b2, from: a2)]
+            return (lines, (a2 + b2) / 2, true)
+        case .diameter:
+            return ([[a, b], arrowHead(at: a, from: b), arrowHead(at: b, from: a)],
+                    b + dimension.direction * 6 * perPoint, false)
+        case .radius:
+            return ([[a, b], arrowHead(at: b, from: a)], b + dimension.direction * 6 * perPoint, false)
+        }
     }
 
     // MARK: Maße am Element
@@ -304,8 +453,9 @@ final class ViewportView: MTKView {
         var shown = Set<SketchDimension.Kind>()
         for dimension in dimensions {
             let field = dimensionFields[dimension.kind] ?? makeDimensionField(dimension.kind)
-            let anchorWorld = SIMD3<Float>(plane.world(dimension.position))
-            let tipWorld = SIMD3<Float>(plane.world(dimension.position + dimension.direction * perPoint * 10))
+            let geometry = dimensionGeometry(dimension, perPoint: perPoint)
+            let anchorWorld = SIMD3<Float>(plane.world(geometry.label))
+            let tipWorld = SIMD3<Float>(plane.world(geometry.label + dimension.direction * perPoint * 10))
             guard let anchor = renderer.camera.project(anchorWorld, viewSize: bounds.size),
                   let tip = renderer.camera.project(tipWorld, viewSize: bounds.size) else { continue }
             shown.insert(dimension.kind)
@@ -319,8 +469,8 @@ final class ViewportView: MTKView {
             let length = max((dx * dx + dy * dy).squareRoot(), 1e-6)
             dx /= length
             dy /= length
-            // Etikett neben das Element setzen, Abstand passend zur Größe des Felds
-            let distance = 10 + abs(dx) * field.bounds.width / 2 + abs(dy) * field.bounds.height / 2
+            // Auf der Maßlinie mittig, sonst neben das Element, Abstand passend zur Größe des Felds
+            let distance = geometry.onLine ? 0 : abs(dx) * field.bounds.width / 2 + abs(dy) * field.bounds.height / 2
             field.center = CGPoint(x: anchor.x + dx * distance, y: anchor.y + dy * distance)
             field.isHidden = false
         }
@@ -388,6 +538,16 @@ final class ViewportView: MTKView {
                 labels.append((facingSide(ofBasePlane: index).rawValue, (plane.u + plane.v) * half * 0.8))
             }
         }
+        // Konstruktionsebenen (beim Skizzieren ausgeblendet, bei der Ebenenwahl antippbar)
+        if !sketch.isActive || sketch.isChoosingPlane, let model {
+            for item in model.constructions where item.kind == .plane && !item.isHidden {
+                let frame = item.sketchPlane
+                graphics.append(PlaneGraphic(center: SIMD3<Float>(item.origin), u: SIMD3<Float>(frame.u),
+                                             v: SIMD3<Float>(frame.v), halfSize: half * 0.6,
+                                             color: SIMD3(0.95, 0.6, 0.2)))
+                labels.append((item.name, SIMD3<Float>(item.origin + (frame.u + frame.v) * Double(half) * 0.5)))
+            }
+        }
         // Beim Skizzieren keine Scheibe: die ganze Ebene ist Zeichenfläche
         renderer.planes = graphics
 
@@ -431,6 +591,80 @@ final class ViewportView: MTKView {
         return best
     }
 
+    /// Konstruktionsebene unter dem Sehstrahl (für die Skizzenebenen-Wahl).
+    private func constructionPlaneHit(ray: (origin: SIMD3<Float>, direction: SIMD3<Float>)) -> (plane: SketchPlane, t: Float)? {
+        guard let model else { return nil }
+        let half = planeHalfSize * 0.6
+        var best: (plane: SketchPlane, t: Float)?
+        for item in model.constructions where item.kind == .plane && !item.isHidden {
+            let frame = item.sketchPlane
+            let normal = SIMD3<Float>(frame.normal)
+            let denominator = simd_dot(ray.direction, normal)
+            guard abs(denominator) > 1e-6 else { continue }
+            let t = simd_dot(SIMD3<Float>(item.origin) - ray.origin, normal) / denominator
+            guard t > 0, t < (best?.t ?? .infinity) else { continue }
+            let d = ray.origin + t * ray.direction - SIMD3<Float>(item.origin)
+            guard abs(simd_dot(d, SIMD3<Float>(frame.u))) <= half, abs(simd_dot(d, SIMD3<Float>(frame.v))) <= half else {
+                continue
+            }
+            best = (frame, t)
+        }
+        return best
+    }
+
+    // MARK: Bilder und Kurzzeichen
+
+    /// Bilder (Canvas) als Texturen an den Renderer geben.
+    private func updateCanvases() {
+        guard let renderer, let model, let device else { return }
+        var graphics: [CanvasGraphic] = []
+        for canvas in model.canvases where !canvas.isHidden {
+            var texture = canvasTextures[canvas.fileName]
+            if texture == nil, let url = model.canvasURL(canvas) {
+                texture = try? MTKTextureLoader(device: device).newTexture(URL: url, options: [
+                    .SRGB: true, .origin: MTKTextureLoader.Origin.topLeft.rawValue,
+                ])
+                canvasTextures[canvas.fileName] = texture
+            }
+            guard let texture else { continue }
+            graphics.append(CanvasGraphic(texture: texture, corners: canvas.corners.map { SIMD3<Float>($0) },
+                                          opacity: Float(canvas.opacity)))
+        }
+        renderer.canvases = graphics
+    }
+
+    /// Kurzzeichen der Einschränkungen neben den Elementen.
+    private func updateBadges() {
+        guard let renderer, let sketch else { return }
+        let badges = sketch.isActive && !sketch.isChoosingPlane ? sketch.constraintBadges : []
+        while badgeLabels.count < badges.count {
+            let label = PaddedLabel()
+            label.font = .systemFont(ofSize: 11, weight: .bold)
+            label.textColor = UIColor(white: 0.25, alpha: 1)
+            label.backgroundColor = UIColor(white: 1, alpha: 0.9)
+            label.layer.cornerRadius = 7
+            label.layer.borderWidth = 1
+            label.layer.borderColor = UIColor(white: 0.7, alpha: 1).cgColor
+            label.layer.masksToBounds = true
+            label.isUserInteractionEnabled = false
+            addSubview(label)
+            badgeLabels.append(label)
+        }
+        let plane = sketch.plane
+        for (index, label) in badgeLabels.enumerated() {
+            guard index < badges.count,
+                  let point = renderer.camera.project(SIMD3<Float>(plane.world(badges[index].position)),
+                                                      viewSize: bounds.size) else {
+                label.isHidden = true
+                continue
+            }
+            label.text = badges[index].text
+            label.sizeToFit()
+            label.center = CGPoint(x: point.x + 14, y: point.y - 14)
+            label.isHidden = false
+        }
+    }
+
     /// Maß-Etikett an der Pfeilspitze des ersten Ziehpfeils.
     private func updateValueLabel(_ handles: [DragHandle]) {
         guard let renderer, let handle = handles.first(where: { $0.value != 0 }) ?? handles.first,
@@ -460,13 +694,17 @@ final class ViewportView: MTKView {
         for handle in workspace.handles {
             let length = Renderer.handleLength * renderer.camera.worldUnitsPerPoint(at: handle.base,
                                                                                     viewHeight: Float(bounds.height))
-            guard let a = renderer.camera.project(handle.base, viewSize: bounds.size),
-                  let b = renderer.camera.project(handle.base + handle.pointing * length, viewSize: bounds.size) else {
-                continue
-            }
-            let distance = point.distance(toSegment: a, b)
-            if distance <= 30, distance < (best?.distance ?? .infinity) {
-                best = (distance, handle)
+            let directions = handle.kind == .region && handle.value == 0 ? [handle.pointing, -handle.pointing]
+                : [handle.pointing]
+            for direction in directions {
+                guard let a = renderer.camera.project(handle.base, viewSize: bounds.size),
+                      let b = renderer.camera.project(handle.base + direction * length, viewSize: bounds.size) else {
+                    continue
+                }
+                let distance = point.distance(toSegment: a, b)
+                if distance <= 30, distance < (best?.distance ?? .infinity) {
+                    best = (distance, handle)
+                }
             }
         }
         return best?.handle
@@ -576,6 +814,7 @@ final class ViewportView: MTKView {
         sketchTouch = nil
         if let point = sketchPoint(for: touch) {
             sketch?.ended(at: point, tolerance: snapTolerance)
+            if sketch?.tool == .project { project(at: touch.location(in: self)) }
         } else {
             sketch?.cancelStroke()
         }
@@ -613,6 +852,24 @@ final class ViewportView: MTKView {
                 chooseSketchPlane(ray: ray, faceHit: hit)
                 return
             }
+            switch sketch.tool {
+            case .project:
+                project(at: location)
+                refresh()
+                return
+            case .trim:
+                if let point = sketchPoint(at: location) { sketch.trim(at: point, tolerance: snapTolerance) }
+                refresh()
+                return
+            default:
+                break
+            }
+            // Finger tippt Elemente an (Auswahl für Einschränkungen, Löschen, Konstruktion)
+            if !sketch.entities.isEmpty, let point = sketchPoint(at: location) {
+                sketch.select(at: point, tolerance: snapTolerance)
+                refresh()
+                return
+            }
             // Ebene nur wechseln, solange noch nichts gezeichnet ist (der Wechsel leert die Skizze)
             guard sketch.isEmpty else { return }
             guard let hit else {
@@ -629,16 +886,35 @@ final class ViewportView: MTKView {
             refresh()
             return
         }
-        let edge = pickEdge(at: location, ray: ray, faceHit: hit)
+        let edgeHit = pickEdge(at: location, ray: ray, faceHit: hit)
         // Skizzenbereich vor der Fläche, auf der er liegt
         var region: RegionRef?
-        if edge == nil, let regionHit = model.pickRegion(origin: ray.origin, direction: ray.direction) {
+        if edgeHit == nil, let regionHit = model.pickRegion(origin: ray.origin, direction: ray.direction) {
             let faceT = hit.map { simd_dot($0.point - ray.origin, ray.direction) } ?? .infinity
             if regionHit.t <= faceT + max(faceT * 0.002, 0.05) {
                 region = regionHit.ref
             }
         }
-        workspace.tapped(face: hit?.face, edge: edge, region: region)
+        workspace.tapped(face: hit?.face, edge: edgeHit?.edge, region: region, point: edgeHit?.point ?? hit?.point)
+    }
+
+    /// Projizieren: Körperkante (bzw. alle Kanten der Fläche) unter dem Punkt in die Skizze übernehmen.
+    private func project(at location: CGPoint) {
+        guard let renderer, let model, let sketch,
+              let ray = renderer.camera.ray(through: location, viewSize: bounds.size) else { return }
+        let hit = model.pick(origin: ray.origin, direction: ray.direction)
+        var polylines: [[SIMD3<Double>]] = []
+        if let edge = pickEdge(at: location, ray: ray, faceHit: hit)?.edge {
+            polylines = model.edgePolylines(edge)
+        } else if let hit {
+            polylines = model.edgePolylines(ofFace: hit.face)
+        }
+        guard !polylines.isEmpty else {
+            sketch.notice = "Eine Körperkante oder Fläche antippen."
+            return
+        }
+        let plane = sketch.plane
+        sketch.addProjected(polylines.map { $0.map(plane.local) })
     }
 
     /// Ebenenwahl: vorderste Standardebene oder ebene Körperfläche unter dem Finger.
@@ -646,6 +922,12 @@ final class ViewportView: MTKView {
                                    faceHit: (face: FaceRef, point: SIMD3<Float>)?) {
         guard let model, let workspace else { return }
         let planeHit = basePlaneHit(ray: ray)
+        if let construction = constructionPlaneHit(ray: ray),
+           construction.t < (planeHit?.t ?? .infinity),
+           construction.t < faceHit.map({ simd_dot($0.point - ray.origin, ray.direction) }) ?? .infinity {
+            workspace.chooseSketchPlane(construction.plane)
+            return
+        }
         if let faceHit {
             let faceT = simd_dot(faceHit.point - ray.origin, ray.direction)
             if planeHit == nil || faceT < planeHit!.t {
@@ -665,7 +947,7 @@ final class ViewportView: MTKView {
 
     /// Kante in Fingernähe, die nicht von einer Fläche verdeckt ist.
     private func pickEdge(at location: CGPoint, ray: (origin: SIMD3<Float>, direction: SIMD3<Float>),
-                          faceHit: (face: FaceRef, point: SIMD3<Float>)?) -> EdgeRef? {
+                          faceHit: (face: FaceRef, point: SIMD3<Float>)?) -> (edge: EdgeRef, point: SIMD3<Float>)? {
         guard let renderer, let model else { return nil }
         let size = bounds.size
         let camera = renderer.camera
@@ -678,7 +960,7 @@ final class ViewportView: MTKView {
                 return nil
             }
         }
-        return found.edge
+        return found
     }
 
     /// Während ein Ziehpfeil gezogen wird, drehen und wählen die Finger nicht.

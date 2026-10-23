@@ -12,20 +12,31 @@ struct Uniforms {
     float4x4 model;
     float3 lightDirection;
     float3 baseColor;
+    /// Schnittansicht: xyz = Normale, w = Abstand; Normale 0 = aus
+    float4 clipPlane;
 };
 
 struct VertexOut {
     float4 position [[position]];
     float3 normal;
     float3 color;
+    float3 world;
 };
 
 static VertexOut transformVertex(Vertex v, constant Uniforms &uniforms) {
     VertexOut out;
-    out.position = uniforms.viewProjection * uniforms.model * float4(v.position, 1.0);
+    float4 world = uniforms.model * float4(v.position, 1.0);
+    out.position = uniforms.viewProjection * world;
     out.normal = (uniforms.model * float4(v.normal, 0.0)).xyz;
     out.color = v.color;
+    out.world = world.xyz;
     return out;
+}
+
+/// Schnittansicht: alles auf der Seite der Normale ausblenden.
+static bool clipped(VertexOut in, constant Uniforms &uniforms) {
+    float3 n = uniforms.clipPlane.xyz;
+    return dot(n, n) > 0.0 && dot(n, in.world) > uniforms.clipPlane.w;
 }
 
 vertex VertexOut vertex_main(const device Vertex *vertices [[buffer(0)]],
@@ -52,14 +63,37 @@ static float3 shade(VertexOut in, constant Uniforms &uniforms) {
 
 /// Schattierte Körper in Vertexfarbe.
 fragment float4 fragment_main(VertexOut in [[stage_in]],
-                              constant Uniforms &uniforms [[buffer(1)]]) {
+                              constant Uniforms &uniforms [[buffer(1)]],
+                              bool frontFacing [[front_facing]]) {
+    if (clipped(in, uniforms)) discard_fragment();
+    // Schnittansicht: Innenseiten wirken als Schnittfläche (flach, abgedunkelt)
+    float3 n = uniforms.clipPlane.xyz;
+    if (dot(n, n) > 0.0 && !frontFacing) return float4(in.color * 0.55 + float3(0.25, 0.12, 0.02), 1.0);
     return float4(shade(in, uniforms), 1.0);
 }
 
 /// Röntgenansicht: halbtransparent.
 fragment float4 fragment_xray(VertexOut in [[stage_in]],
                               constant Uniforms &uniforms [[buffer(1)]]) {
+    if (clipped(in, uniforms)) discard_fragment();
     return float4(shade(in, uniforms), 0.28);
+}
+
+/// Kanten und Auswahl, mit Schnittansicht.
+fragment float4 fragment_flat_clip(VertexOut in [[stage_in]],
+                                   constant Uniforms &uniforms [[buffer(1)]],
+                                   constant float4 &color [[buffer(2)]]) {
+    if (clipped(in, uniforms)) discard_fragment();
+    return color;
+}
+
+/// Bild (Canvas): uv steckt in der Normale, Deckkraft in color.a.
+fragment float4 fragment_texture(VertexOut in [[stage_in]],
+                                 texture2d<float> image [[texture(0)]],
+                                 constant float4 &color [[buffer(2)]]) {
+    constexpr sampler linearSampler(filter::linear, address::clamp_to_edge);
+    float4 c = image.sample(linearSampler, in.normal.xy);
+    return float4(c.rgb, c.a * color.a);
 }
 
 fragment float4 fragment_flat(VertexOut in [[stage_in]],

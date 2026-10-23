@@ -37,9 +37,36 @@ Oberfläche nach dem Aufbau von Shapr3D (eigene Symbole, kein Shapr3D-Material):
 - Automatisches Speichern je Projekt (`Projects/<id>/` in der Dateien-App unter „Auf meinem iPad › PencilCAD“)
 - Fallback-Modus ohne OpenCASCADE: Viewer, Skizze und „Neuer Körper“ laufen, alles andere meldet „braucht OpenCASCADE“
 
-Grau dargestellt und noch nicht umgesetzt: Projizieren, Trimmen, Ebenen/Achsen, Muster, Skalieren,
-Rotieren/Sweep/Loft, Kante versetzen, Beschneiden, Teilen, Schnittansicht, Messen, Einschränkungen.
+- **Skizzenleiste wie Shapr3D:** Skizzieren beenden, Linie/Bogen, Spline (Fit/Kontroll), Rechteck (Mitte, Diagonal,
+  3 Punkte), Kreis, Ellipse, Polygon, Projizieren, Kante versetzen, Mehr (Punkt, Text, Skalieren), Beschneiden,
+  Löschen, Konstruktion (neue Elemente als Konstruktionsgeometrie, gestrichelt), Schnittansicht
+- **Einschränkungen** (rechts im Skizzenmodus): Parallel, Senkrecht, Tangential, Zusammenfallend, Mittelpunkt,
+  Konzentrisch, Horizontal/Vertikal, Gleich, Symmetrie, Trennen, Sperren, Konstruktion erstellen. Elemente mit dem
+  Finger antippen, dann die Einschränkung; passende sind blau umrandet. Ein Löser hält sie beim Ändern von Maßen ein.
+  Gefangene Enden bleiben automatisch verbunden. Maße erscheinen als Maßlinien mit Pfeilen.
+- **Kontextleiste:** Mit Auswahl zeigt die linke Leiste die passenden Aktionen (Alle abwählen, Skizze,
+  Verschieben/Rotieren, Skizze skalieren, Muster, Extrudieren, Achse senkrecht, Ebene Versatz, Text, Achsendrehung,
+  Löschen, Isolieren, Schnittansicht, Messen); „Mehr“ zeigt alle Gruppen.
+- **Konstruieren:** Ebenen (Versatz zu Standardebene, Fläche oder anderer Ebene), Achsen (Weltachse, Kante,
+  Flächennormale), Punkte; Ebenen dienen als Skizzenebene, Achsen für Muster und Drehen
+- **Transformation:** Muster linear und kreisförmig, Skalieren (gleichmäßig oder je Achse), Ausrichten (Min/Mitte/Max),
+  Skizzen verschieben, drehen und skalieren
+- **Tools:** Achsendrehung (Rotieren), Sweep, Loft, Kante versetzen (Fläche antippen), Körper teilen
+- **Visualisieren:** Schnittansicht (Ebene, Versatz, Seite), Messen (Kantenlänge, Fläche, Volumen, Abstand zweier
+  Punkte), Isolieren; **Einfügen:** Torus und Bild (aus Fotos, als Vorlage auf einer Ebene)
+
 Bereiche entstehen aus geschlossenen Konturen; sich kreuzende Linien teilen Bereiche noch nicht auf.
+
+### Vorbild und Dokumentation der Werkzeuge
+
+| Werkzeug | Umgesetzt nach |
+| --- | --- |
+| Projizieren, Achsendrehung (Revolve), Loft, Muster, Körper teilen, Einschränkungen | Shapr3D-Handbuch (support.shapr3d.com) |
+| Sweep | bei Shapr3D nur erwähnt; Ablauf nach Fusion 360 (Profil + Pfad) |
+| Beschneiden (Trim) | bei Shapr3D nicht dokumentiert; nach Fusion 360 „Trim“ |
+| Schnittansicht, Messen, Skalieren | Fusion 360 („Section Analysis“, „Measure“, „Scale“) |
+| Konstruktionsebene/-achse/-punkt, Ausrichten | Fusion 360 „Construct“ bzw. „Align“, Bedienung wie Shapr3D |
+| 3D-„Beschneiden“ | entfällt: bei Shapr3D gibt es Beschneiden nur in Skizzen, für Körper dient „Körper teilen“ |
 
 ## Bedienung
 
@@ -68,7 +95,15 @@ Bereiche entstehen aus geschlossenen Konturen; sich kreuzende Linien teilen Bere
 6. Titelleiste › „⋯“ › „Als STEP exportieren …“ oder „Als STL exportieren …“.
 
 Werkzeuge im Detail:
-- *Rechteck:* von Ecke zu Ecke ziehen
+- *Rechteck:* Diagonal von Ecke zu Ecke, Mitte von der Mitte zur Ecke, 3 Punkte erst eine Kante, dann die Höhe ziehen
+- *Beschneiden:* Kurvenstück antippen, es verschwindet bis zu den nächsten Schnittpunkten (ohne Schnitt: ganze Kurve)
+- *Projizieren:* Körperkante oder Fläche antippen; Kanten werden als Linien, Kreise und Bögen übernommen
+- *Einschränkung:* Elemente mit dem Finger antippen (Punkte oder Kurven), dann rechts die Einschränkung;
+  das zuerst gewählte Element bleibt stehen
+- *Achsendrehung:* Bereich antippen, Achse (Weltachse, Linie der Skizze oder Konstruktionsachse) und Winkel wählen
+- *Sweep:* Profilbereich antippen, Skizze mit dem Pfad wählen (Pfad muss am Profil beginnen)
+- *Loft:* Bereiche verschiedener Skizzen nacheinander antippen
+- *Messen:* Kante oder Fläche antippen; zwei angetippte Punkte ergeben den Abstand
 - *Kreis, Polygon:* vom Mittelpunkt nach außen ziehen (Polygon: Seitenzahl unten einstellbar)
 - *Ellipse:* vom Mittelpunkt zur Ecke des umschließenden Rechtecks ziehen
 - *Linie:* Startpunkt tippen, dann jeden weiteren Punkt antippen oder hinziehen; zurück zum Startpunkt schließt das Profil
@@ -125,7 +160,8 @@ App/
   Files.swift          Dateitypen und Export
   Projects/   Projektliste (Documents/Projects), Startseite
   Workspace/  Arbeitsbereich: Zustand und Werkzeuge, Werkzeugleisten, ViewCube, Parameterkarten, Verlauf, Elemente
-  Model/      Mesh (Netz, Picking, STL), Sketch (Skizzenebene, Werkzeuge, Profile), ModelStore (Körper, Verlauf, STEP)
+  Model/      Mesh (Netz, Picking, STL), Sketch (Skizzenebene, Werkzeuge, Profile), SketchConstraints (Löser),
+              SketchTrim (Beschneiden, Projizieren), ModelStore (Körper, Konstruktion, Bilder, Verlauf, STEP)
   Viewport/   Metal-Renderer, Orbit-Kamera, Gesten, Pencil-Eingabe, Ziehpfeile, Shader
   Kernel/     PCKShape.h/.mm – Brücke zu OpenCASCADE (mit Fallback ohne Kernel)
 scripts/      OCCT-Build, Projekt-Generierung
@@ -134,5 +170,4 @@ project.yml   XcodeGen-Spezifikation (project-occt.yml = mit Kernel)
 
 ## Bewusst noch nicht enthalten
 
-Parametrische Historie (nachträgliches Ändern von Maßen), Constraints in Skizzen, Drehen/Sweep/Loft, Baugruppen,
-2D-Zeichnungen sowie die oben grau aufgeführten Werkzeuge. Für den App-Store-Vertrieb vorher Lizenz (LGPL) und Markenrecht prüfen lassen.
+Parametrische Historie (nachträgliches Ändern von Maßen am Körper), Baugruppen, 2D-Zeichnungen, Werkzeugsuche. Für den App-Store-Vertrieb vorher Lizenz (LGPL) und Markenrecht prüfen lassen.

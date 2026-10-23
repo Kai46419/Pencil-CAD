@@ -84,6 +84,34 @@ struct ParameterCard: View {
                 shellCard
             case .color:
                 colorCard
+            case .pattern(let kind):
+                patternCard(kind)
+            case .scale:
+                scaleCard
+            case .align:
+                alignCard
+            case .revolve:
+                revolveCard
+            case .sweep:
+                sweepCard
+            case .loft:
+                loftCard
+            case .split:
+                splitCard
+            case .section:
+                sectionCard
+            case .measure:
+                measureCard
+            case .construct(let kind):
+                constructCard(kind)
+            case .canvas(let id):
+                canvasCard(id)
+            case .scaleSketch:
+                sketchScaleCard
+            case .offsetEdges:
+                Card {
+                    Label("Kante versetzen: ebene Fläche antippen", systemImage: "square.dashed.inset.filled")
+                }
             }
         }
     }
@@ -171,6 +199,28 @@ struct ParameterCard: View {
         case .polygon:
             Stepper("\(sketch.polygonSides) Seiten", value: $sketch.polygonSides, in: 3...24)
                 .fixedSize()
+        case .rectangle:
+            Picker("Art", selection: $sketch.rectangleMode) {
+                ForEach(RectangleMode.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .fixedSize()
+        case .scale:
+            HStack(spacing: 14) {
+                NumberField(title: "Faktor", value: sketch.scaleFactor, unit: "×", width: 60) { value in
+                    if value > 0 { sketch.scaleFactor = value }
+                }
+                Text(sketch.selection.isEmpty ? "Ganze Skizze" : "\(sketch.selection.count) gewählt")
+                    .foregroundStyle(.secondary)
+                Button("Skalieren", systemImage: "checkmark", action: sketch.applyScale)
+                    .buttonStyle(.borderedProminent)
+            }
+        case .trim:
+            Text("Kurvenstück antippen (Stift oder Finger)")
+                .foregroundStyle(.secondary)
+        case .project:
+            Text("Körperkante oder Fläche antippen")
+                .foregroundStyle(.secondary)
         case .polyline:
             if sketch.hasOpenChain {
                 Button("Linie absetzen", systemImage: "scissors", action: sketch.endChain)
@@ -285,6 +335,9 @@ struct ParameterCard: View {
                     sizeField("Höhe", 2)
                 case .sphere:
                     sizeField("Ø", 0)
+                case .torus:
+                    sizeField("Ø", 0)
+                    sizeField("Rohr Ø", 2)
                 }
             }
         }
@@ -336,13 +389,13 @@ struct ParameterCard: View {
                     ForEach(0..<3, id: \.self) { axis in
                         let name = ["X", "Y", "Z"][axis]
                         let vector = Self.unitAxis(axis)
-                        Button("\(name) −90°") { model.rotateSelected(axis: vector, degrees: -90) }
-                        Button("\(name) +90°") { model.rotateSelected(axis: vector, degrees: 90) }
+                        Button("\(name) −90°") { rotate(axis: vector, degrees: -90) }
+                        Button("\(name) +90°") { rotate(axis: vector, degrees: 90) }
                     }
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
-                .disabled(model.selectedBodies.isEmpty)
+                .disabled(model.selectedBodies.isEmpty && model.movingSketch == nil)
             }
         }
     }
@@ -351,6 +404,15 @@ struct ParameterCard: View {
         var vector = SIMD3<Double>(0, 0, 0)
         vector[axis] = 1
         return vector
+    }
+
+    /// Körper drehen, oder die Skizze, die gerade verschoben wird.
+    private func rotate(axis: SIMD3<Double>, degrees: Double) {
+        if let index = model.movingSketch {
+            model.rotateSketch(index, axis: axis, degrees: degrees)
+        } else {
+            model.rotateSelected(axis: axis, degrees: degrees)
+        }
     }
 
     private var mirrorCard: some View {
@@ -420,6 +482,356 @@ struct ParameterCard: View {
     }
 }
 
+// MARK: Neue Werkzeuge
+
+extension ParameterCard {
+    private static let axisNames = ["X", "Y", "Z"]
+
+    /// Auswahl einer Bezugsachse (Weltachsen, Konstruktionsachsen, optional Linien einer Skizze).
+    func axisPicker(_ title: String, selection: Binding<ReferenceAxis>, sketchIndex: Int? = nil) -> some View {
+        Picker(title, selection: selection) {
+            ForEach(0..<3, id: \.self) { Text("\(Self.axisNames[$0])-Achse").tag(ReferenceAxis.world($0)) }
+            if let sketchIndex {
+                ForEach(model.sketchLines(sketchIndex)) { line in
+                    Text(line.name).tag(ReferenceAxis.sketchLine(line.index))
+                }
+            }
+            ForEach(model.constructions.filter { $0.kind == .axis }) { item in
+                Text(item.name).tag(ReferenceAxis.construction(item.id))
+            }
+        }
+        .fixedSize()
+    }
+
+    /// Auswahl einer Bezugsebene (Weltebenen, Konstruktionsebenen, angetippte Fläche).
+    func planePicker(_ title: String, selection: Binding<ReferencePlane>) -> some View {
+        var tappedFace: FaceRef?
+        if case .face(let face) = selection.wrappedValue { tappedFace = face }
+        return Picker(title, selection: selection) {
+            Text("YZ (Normale X)").tag(ReferencePlane.world(0))
+            Text("XZ (Normale Y)").tag(ReferencePlane.world(1))
+            Text("XY (Normale Z)").tag(ReferencePlane.world(2))
+            ForEach(model.constructions.filter { $0.kind == .plane }) { item in
+                Text(item.name).tag(ReferencePlane.construction(item.id))
+            }
+            if let tappedFace {
+                Text("Angetippte Fläche").tag(ReferencePlane.face(tappedFace))
+            }
+        }
+        .fixedSize()
+    }
+
+    private func preview<T>(_ keyPath: ReferenceWritableKeyPath<Workspace, T>) -> Binding<T> {
+        Binding(get: { workspace[keyPath: keyPath] }, set: { value in
+            workspace[keyPath: keyPath] = value
+            workspace.updatePreview()
+        })
+    }
+
+    private func bodyCount() -> some View {
+        Text(model.selectedBodies.isEmpty ? "Körper antippen"
+             : model.selectedBodies.count == 1 ? "1 Körper" : "\(model.selectedBodies.count) Körper")
+            .foregroundStyle(.secondary)
+            .fixedSize()
+    }
+
+    func patternCard(_ kind: PatternKind) -> some View {
+        Card {
+            HStack(spacing: 14) {
+                Label(kind.rawValue, systemImage: kind.systemImage)
+                    .font(.callout.weight(.semibold))
+                Stepper("Anzahl \(workspace.patternCount)", value: preview(\.patternCount), in: 2...100)
+                    .fixedSize()
+                if kind == .linear {
+                    NumberField(title: "Abstand", value: workspace.patternSpacing, width: 60) { value in
+                        workspace.patternSpacing = value
+                        workspace.updatePreview()
+                    }
+                    axisPicker("Richtung", selection: preview(\.patternAxis))
+                } else {
+                    NumberField(title: "Winkel", value: workspace.patternAngle, unit: "°", width: 56) { value in
+                        workspace.patternAngle = max(-360, min(360, value))
+                        workspace.updatePreview()
+                    }
+                    axisPicker("Achse", selection: preview(\.patternAxis))
+                }
+                bodyCount()
+            }
+        }
+    }
+
+    var scaleCard: some View {
+        Card {
+            HStack(spacing: 14) {
+                Label("Skalieren", systemImage: "arrow.up.left.and.arrow.down.right")
+                    .font(.callout.weight(.semibold))
+                Toggle("Gleichmäßig", isOn: preview(\.scaleUniform))
+                    .fixedSize()
+                if workspace.scaleUniform {
+                    NumberField(title: "Faktor", value: workspace.scaleFactors.x, unit: "×", width: 56) { value in
+                        guard value > 0 else { return }
+                        workspace.scaleFactors = SIMD3(repeating: value)
+                        workspace.updatePreview()
+                    }
+                } else {
+                    ForEach(0..<3, id: \.self) { axis in
+                        NumberField(title: Self.axisNames[axis], value: workspace.scaleFactors[axis], unit: "×",
+                                    width: 50) { value in
+                            guard value > 0 else { return }
+                            workspace.scaleFactors[axis] = value
+                            workspace.updatePreview()
+                        }
+                    }
+                }
+                bodyCount()
+            }
+        }
+    }
+
+    var alignCard: some View {
+        Card {
+            HStack(spacing: 14) {
+                Label("Ausrichten", systemImage: "align.horizontal.center")
+                    .font(.callout.weight(.semibold))
+                ForEach(0..<3, id: \.self) { axis in
+                    Picker(Self.axisNames[axis], selection: Binding(get: { workspace.alignModes[axis] }, set: { mode in
+                        workspace.alignModes[axis] = mode
+                        workspace.updatePreview()
+                    })) {
+                        ForEach(AlignMode.allCases) { Text("\(Self.axisNames[axis]): \($0.rawValue)").tag($0) }
+                    }
+                    .fixedSize()
+                }
+                Text(model.selectedBodies.count < 2 ? "Bezug + Körper antippen"
+                     : "An \(model.bodies.indices.contains(model.selectedBodies[0]) ? model.bodies[model.selectedBodies[0]].name : "")")
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+            }
+        }
+    }
+
+    private var solidModePicker: some View {
+        Picker("Ergebnis", selection: preview(\.solidMode)) {
+            ForEach(ExtrudeMode.allCases) { Text($0.rawValue).tag($0) }
+        }
+        .pickerStyle(.segmented)
+        .fixedSize()
+    }
+
+    private var regionCount: some View {
+        Text(model.selectedRegions.isEmpty ? "Bereich antippen"
+             : model.selectedRegions.count == 1 ? "1 Bereich" : "\(model.selectedRegions.count) Bereiche")
+            .foregroundStyle(.secondary)
+            .fixedSize()
+    }
+
+    var revolveCard: some View {
+        Card {
+            HStack(spacing: 14) {
+                Label("Achsendrehung", systemImage: "arrow.triangle.2.circlepath")
+                    .font(.callout.weight(.semibold))
+                axisPicker("Achse", selection: preview(\.revolveAxis), sketchIndex: model.selectedRegions.first?.sketch)
+                NumberField(title: "Winkel", value: workspace.revolveAngle, unit: "°", width: 56) { value in
+                    workspace.revolveAngle = max(-360, min(360, value))
+                    workspace.updatePreview()
+                }
+                solidModePicker
+                regionCount
+            }
+        }
+    }
+
+    var sweepCard: some View {
+        Card {
+            HStack(spacing: 14) {
+                Label("Sweep", systemImage: "point.3.connected.trianglepath.dotted")
+                    .font(.callout.weight(.semibold))
+                Picker("Pfad", selection: preview(\.sweepPath)) {
+                    Text("Pfad wählen").tag(Int?.none)
+                    ForEach(model.pathSketches, id: \.self) { index in
+                        Text("Pfad: \(model.sketches[index].name)").tag(Int?.some(index))
+                    }
+                }
+                .fixedSize()
+                solidModePicker
+                regionCount
+            }
+        }
+    }
+
+    var loftCard: some View {
+        Card {
+            HStack(spacing: 14) {
+                Label("Loft", systemImage: "square.3.layers.3d")
+                    .font(.callout.weight(.semibold))
+                Text(model.selectedRegions.isEmpty ? "Querschnitte nacheinander antippen"
+                     : "\(model.selectedRegions.count) Querschnitte")
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+                solidModePicker
+                if !model.selectedRegions.isEmpty {
+                    Button("Neu beginnen", systemImage: "arrow.counterclockwise") {
+                        model.resetSelection()
+                    }
+                }
+            }
+        }
+    }
+
+    var splitCard: some View {
+        Card {
+            HStack(spacing: 14) {
+                Label("Körper teilen", systemImage: "rectangle.split.2x1")
+                    .font(.callout.weight(.semibold))
+                planePicker("Ebene", selection: preview(\.splitPlane))
+                NumberField(title: "Versatz", value: workspace.splitOffset, width: 60) { value in
+                    workspace.splitOffset = value
+                    workspace.updatePreview()
+                }
+                bodyCount()
+            }
+        }
+    }
+
+    var sectionCard: some View {
+        Card {
+            HStack(spacing: 14) {
+                Label("Schnittansicht", systemImage: "square.split.diagonal.2x2")
+                    .font(.callout.weight(.semibold))
+                planePicker("Ebene", selection: Binding(get: { workspace.section?.plane ?? .world(1) },
+                                                         set: { workspace.section?.plane = $0 }))
+                NumberField(title: "Versatz", value: workspace.section?.offset ?? 0, width: 60) { value in
+                    workspace.section?.offset = value
+                }
+                Toggle("Umkehren", isOn: Binding(get: { workspace.section?.flipped ?? false },
+                                                 set: { workspace.section?.flipped = $0 }))
+                    .fixedSize()
+                Button("Aus", systemImage: "xmark") {
+                    workspace.section = nil
+                    workspace.activate(.select)
+                }
+            }
+        }
+    }
+
+    var measureCard: some View {
+        Card {
+            HStack(alignment: .top, spacing: 14) {
+                Label("Messen", systemImage: "ruler")
+                    .font(.callout.weight(.semibold))
+                VStack(alignment: .leading, spacing: 3) {
+                    if workspace.measureLines.isEmpty {
+                        Text("Kante, Fläche oder zwei Punkte antippen")
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(workspace.measureLines, id: \.self) { line in
+                        Text(line)
+                            .monospacedDigit()
+                    }
+                }
+            }
+        }
+    }
+
+    func constructCard(_ kind: ConstructionKind) -> some View {
+        Card {
+            HStack(spacing: 14) {
+                Label("\(kind.rawValue) erstellen", systemImage: kind.systemImage)
+                    .font(.callout.weight(.semibold))
+                switch kind {
+                case .plane:
+                    planePicker("Bezug", selection: $workspace.constructReference)
+                    NumberField(title: "Abstand", value: workspace.constructOffset, width: 60) {
+                        workspace.constructOffset = $0
+                    }
+                case .axis:
+                    if let custom = workspace.constructCustomAxis {
+                        Text("Durch \(custom.name)")
+                        Button("Weltachse", systemImage: "xmark") { workspace.constructCustomAxis = nil }
+                    } else {
+                        axisPicker("Achse", selection: $workspace.constructAxis)
+                        Text("oder Kante/Fläche antippen")
+                            .foregroundStyle(.secondary)
+                    }
+                case .point:
+                    ForEach(0..<3, id: \.self) { axis in
+                        NumberField(title: Self.axisNames[axis], value: workspace.constructPoint[axis], width: 60) {
+                            workspace.constructPoint[axis] = $0
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    func canvasCard(_ id: UUID) -> some View {
+        if let canvas = model.canvases.first(where: { $0.id == id }) {
+            Card {
+                HStack(spacing: 14) {
+                    Label(canvas.name, systemImage: "photo")
+                        .font(.callout.weight(.semibold))
+                    Picker("Ebene", selection: Binding(get: { canvas.plane }, set: { plane in
+                        var changed = canvas
+                        changed.plane = plane
+                        model.updateCanvas(changed)
+                    })) {
+                        ForEach(BasePlane.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .fixedSize()
+                    NumberField(title: "Breite", value: canvas.width, width: 60) { value in
+                        guard value > 0 else { return }
+                        var changed = canvas
+                        changed.width = value
+                        model.updateCanvas(changed)
+                    }
+                    NumberField(title: "X", value: canvas.offset.x, width: 54) { value in
+                        var changed = canvas
+                        changed.offset.x = value
+                        model.updateCanvas(changed)
+                    }
+                    NumberField(title: "Y", value: canvas.offset.y, width: 54) { value in
+                        var changed = canvas
+                        changed.offset.y = value
+                        model.updateCanvas(changed)
+                    }
+                    Slider(value: Binding(get: { canvas.opacity }, set: { value in
+                        var changed = canvas
+                        changed.opacity = value
+                        model.updateCanvas(changed)
+                    }), in: 0.1...1)
+                    .frame(width: 90)
+                    Button(role: .destructive) {
+                        model.deleteCanvas(id)
+                        workspace.activate(.select)
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                }
+            }
+        }
+    }
+
+    var sketchScaleCard: some View {
+        Card {
+            HStack(spacing: 14) {
+                Label("Skizze skalieren", systemImage: "arrow.up.left.and.arrow.down.right")
+                    .font(.callout.weight(.semibold))
+                NumberField(title: "Faktor", value: workspace.sketchScaleFactor, unit: "×", width: 56) { value in
+                    if value > 0 { workspace.sketchScaleFactor = value }
+                }
+                if let index = model.selectedRegions.first?.sketch, model.sketches.indices.contains(index) {
+                    Text(model.sketches[index].name)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Bereich der Skizze antippen")
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+}
+
 // MARK: Verlauf
 
 /// Liste der Schritte; Antippen springt zu diesem Stand (auch vorwärts).
@@ -484,7 +896,7 @@ struct ElementsPanel: View {
 
     var body: some View {
         SidePanelFrame(title: "Elemente", close: close) {
-            if model.bodies.isEmpty && model.sketches.isEmpty {
+            if model.bodies.isEmpty && model.sketches.isEmpty && model.constructions.isEmpty && model.canvases.isEmpty {
                 Text("Noch keine Körper oder Skizzen")
                     .foregroundStyle(.secondary)
                     .padding(8)
@@ -495,6 +907,21 @@ struct ElementsPanel: View {
                     sketchRow(index)
                 }
                 if !model.bodies.isEmpty { sectionTitle("Körper") }
+            }
+            if !model.constructions.isEmpty {
+                sectionTitle("Konstruktion")
+                ForEach(model.constructions) { item in
+                    constructionRow(item)
+                }
+            }
+            if !model.canvases.isEmpty {
+                sectionTitle("Bilder")
+                ForEach(model.canvases) { canvas in
+                    canvasRow(canvas)
+                }
+            }
+            if !model.bodies.isEmpty, !model.constructions.isEmpty || !model.canvases.isEmpty, model.sketches.isEmpty {
+                sectionTitle("Körper")
             }
             ForEach(model.bodies.indices, id: \.self) { index in
                 let item = model.bodies[index]
@@ -583,12 +1010,83 @@ struct ElementsPanel: View {
         }
     }
 
+    /// Konstruktionsebene, -achse oder -punkt: Ebenen lassen sich direkt als Skizzenebene nutzen.
+    private func constructionRow(_ item: ConstructionItem) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: item.kind.systemImage)
+                .foregroundStyle(.orange)
+                .frame(width: 14)
+            Text(item.name)
+                .lineLimit(1)
+                .foregroundStyle(item.isHidden ? Color.secondary : Color.primary)
+            Spacer(minLength: 0)
+            Button {
+                model.setConstructionHidden(!item.isHidden, id: item.id)
+            } label: {
+                Image(systemName: item.isHidden ? "eye.slash" : "eye")
+                    .foregroundStyle(.secondary)
+                    .frame(width: 30, height: 30)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.vertical, 4)
+        .padding(.horizontal, 8)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if item.kind == .plane { workspace.startSketch(on: item.sketchPlane) }
+        }
+        .contextMenu {
+            if item.kind == .plane {
+                Button("Skizze auf dieser Ebene", systemImage: "pencil.and.outline") {
+                    workspace.startSketch(on: item.sketchPlane)
+                }
+            }
+            Button("Löschen", systemImage: "trash", role: .destructive) { model.deleteConstruction(item.id) }
+        }
+    }
+
+    private func canvasRow(_ canvas: CanvasImage) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "photo")
+                .foregroundStyle(.secondary)
+                .frame(width: 14)
+            Text(canvas.name)
+                .lineLimit(1)
+                .foregroundStyle(canvas.isHidden ? Color.secondary : Color.primary)
+            Spacer(minLength: 0)
+            Button {
+                var changed = canvas
+                changed.isHidden.toggle()
+                model.updateCanvas(changed)
+            } label: {
+                Image(systemName: canvas.isHidden ? "eye.slash" : "eye")
+                    .foregroundStyle(.secondary)
+                    .frame(width: 30, height: 30)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.vertical, 4)
+        .padding(.horizontal, 8)
+        .background(workspace.tool == .canvas(canvas.id) ? Color.accentColor.opacity(0.15) : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 8))
+        .contentShape(Rectangle())
+        .onTapGesture { workspace.activate(.canvas(canvas.id)) }
+        .contextMenu {
+            Button("Bearbeiten", systemImage: "slider.horizontal.3") { workspace.activate(.canvas(canvas.id)) }
+            Button("Löschen", systemImage: "trash", role: .destructive) { model.deleteCanvas(canvas.id) }
+        }
+    }
+
     /// Im Auswahlwerkzeug wird der Körper allein gewählt, in Körperwerkzeugen hinzugefügt.
     private func select(_ index: Int) {
         switch workspace.tool {
-        case .boolean, .mirror, .color:
+        case .boolean, .mirror, .color, .pattern, .scale, .align:
             model.toggleBody(index)
             workspace.updateMirrorPreview()
+            workspace.updatePreview()
+        case .split:
+            model.toggleBody(index, exclusive: true)
+            workspace.updatePreview()
         default:
             model.toggleBody(index, exclusive: true)
         }

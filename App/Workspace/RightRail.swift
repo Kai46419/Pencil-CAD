@@ -115,6 +115,15 @@ struct RightRail: View {
     @State private var isSnapMenuShown = false
 
     var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            if sketch.isActive, !sketch.isChoosingPlane {
+                ConstraintColumn(sketch: sketch)
+            }
+            mainColumn
+        }
+    }
+
+    private var mainColumn: some View {
         VStack(spacing: 10) {
             Button {
                 isSnapMenuShown = true
@@ -146,9 +155,6 @@ struct RightRail: View {
                 RailButton(systemImage: "scope", label: "Normal zu Skizze") {
                     workspace.send(.alignToSketchPlane)
                 }
-                RailButton(systemImage: "lock", label: "Einschränkungen (bald)") {}
-                    .disabled(true)
-                    .opacity(0.4)
                 RailButton(systemImage: sketch.fingerDraws ? "hand.draw.fill" : "hand.draw",
                            label: "Finger zeichnet", isActive: sketch.fingerDraws) {
                     sketch.fingerDraws.toggle()
@@ -186,6 +192,66 @@ struct RightRail: View {
                 panel = panel == .elements ? nil : .elements
             }
         }
+    }
+}
+
+/// „Einschränkungen“ im Skizzenmodus (wie Shapr3D): wirken auf die mit dem Finger gewählten Elemente.
+/// Passende Einschränkungen sind blau umrandet; andere zeigen beim Antippen, was zu wählen ist.
+struct ConstraintColumn: View {
+    @ObservedObject var sketch: SketchController
+
+    var body: some View {
+        let list = VStack(alignment: .trailing, spacing: 7) {
+            Text("Einschränkungen")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(.regularMaterial, in: Capsule())
+            ForEach(ConstraintKind.allCases) { kind in
+                row(kind.rawValue, kind.systemImage, applicable: sketch.canApply(kind)) {
+                    sketch.applyConstraint(kind)
+                }
+                if kind == .symmetric {
+                    row("Trennen", "scissors", applicable: !sketch.selection.isEmpty) { sketch.detachSelection() }
+                }
+            }
+            row("Konstruktion erstellen", "line.diagonal.arrow", applicable: !sketch.selection.isEmpty) {
+                sketch.toggleConstruction()
+            }
+        }
+        ViewThatFits(in: .vertical) {
+            list
+            ScrollView(showsIndicators: false) { list }
+        }
+    }
+
+    private func row(_ title: String, _ systemImage: String, applicable: Bool,
+                     action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 4)
+                    .background(.regularMaterial, in: Capsule())
+                Image(systemName: systemImage)
+                    .font(.system(size: 16, weight: .medium))
+                    .frame(width: 40, height: 40)
+                    .foregroundStyle(applicable ? Color.accentColor : Color.primary)
+                    .background(Color(.systemBackground), in: Circle())
+                    .overlay {
+                        if applicable {
+                            Circle().strokeBorder(Color.accentColor, lineWidth: 2)
+                        }
+                    }
+                    .shadow(color: .black.opacity(0.12), radius: 4, y: 1)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
     }
 }
 

@@ -1,3 +1,4 @@
+import PhotosUI
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -29,6 +30,7 @@ private struct WorkspaceContent: View {
     @State private var isImporting = false
     @State private var isClearConfirmationShown = false
     @State private var screenshot: Screenshot?
+    @State private var photoItem: PhotosPickerItem?
 
     private var projectName: String {
         projects.project(workspace.project.id)?.name ?? workspace.project.name
@@ -74,7 +76,18 @@ private struct WorkspaceContent: View {
                 .overlay(alignment: .bottomLeading) { undoRedo }
         }
         .onChange(of: workspace.tool) { openGroup = nil }
-        .onChange(of: model.selectionRevision) { openGroup = nil }
+        .onChange(of: model.selectionRevision) {
+            openGroup = nil
+            let hasSelection = model.selection != nil || !model.selectedEdges.isEmpty || !model.selectedBodies.isEmpty
+                || !model.selectedRegions.isEmpty
+            if !hasSelection { workspace.showsAllTools = false }
+        }
+        .photosPicker(isPresented: $workspace.isPickingImage, selection: $photoItem, matching: .images)
+        .onChange(of: photoItem) { _, item in
+            guard let item else { return }
+            photoItem = nil
+            Task { await insertImage(item) }
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active {
                 workspace.saveThumbnail()
@@ -188,6 +201,27 @@ private struct WorkspaceContent: View {
 
     private var bottomArea: some View {
         VStack(spacing: 10) {
+            if sketch.isActive, let notice = sketch.notice {
+                Button {
+                    sketch.notice = nil
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "info.circle.fill")
+                            .foregroundStyle(Color.accentColor)
+                        Text(notice)
+                            .multilineTextAlignment(.leading)
+                        Image(systemName: "xmark")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .font(.footnote)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(Color(.systemBackground), in: Capsule())
+                    .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
+                }
+                .buttonStyle(.plain)
+            }
             if let message = model.message {
                 Button {
                     model.message = nil
@@ -276,6 +310,27 @@ private struct WorkspaceContent: View {
             return
         }
         screenshot = Screenshot(image: image)
+    }
+
+    /// Foto als Bild (Canvas) einfügen: höchstens 2048 Pixel, Ausrichtung normalisiert.
+    private func insertImage(_ item: PhotosPickerItem) async {
+        guard let data = try? await item.loadTransferable(type: Data.self), let image = UIImage(data: data),
+              image.size.width > 0, image.size.height > 0 else {
+            model.message = "Bild konnte nicht geladen werden."
+            return
+        }
+        let scale = min(1, 2048 / max(image.size.width, image.size.height))
+        let size = CGSize(width: (image.size.width * scale).rounded(), height: (image.size.height * scale).rounded())
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let normalized = UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: size))
+        }
+        guard let jpeg = normalized.jpegData(compressionQuality: 0.85) else { return }
+        model.addCanvas(jpeg, aspect: Double(size.height / size.width))
+        if let canvas = model.canvases.last {
+            workspace.activate(.canvas(canvas.id))
+        }
     }
 
     private func export(_ data: Data, as type: UTType) {

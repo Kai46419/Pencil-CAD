@@ -11,7 +11,10 @@ enum SketchTool: String, CaseIterable, Identifiable {
     case spline = "Spline"
     case point = "Punkt"
     case text = "Text"
-    case offset = "Versatz"
+    case offset = "Kante versetzen"
+    case project = "Projizieren"
+    case trim = "Beschneiden"
+    case scale = "Skalieren"
 
     var id: Self { self }
 
@@ -27,19 +30,40 @@ enum SketchTool: String, CaseIterable, Identifiable {
         case .point: "smallcircle.filled.circle"
         case .text: "textformat"
         case .offset: "square.on.square.dashed"
+        case .project: "square.and.arrow.down.on.square"
+        case .trim: "scissors"
+        case .scale: "arrow.up.left.and.arrow.down.right"
         }
     }
 
     /// Untertitel in der Werkzeugleiste (Variante des Werkzeugs).
     var subtitle: String? {
         switch self {
-        case .polyline: "Linienzug"
-        case .rectangle: "Diagonal"
-        case .arc: "Enden, dann Wölbung"
-        case .spline: "Fit- oder Kontrollpunkte"
+        case .polyline: "Automatisch"
+        case .arc: "3 Punkte"
         case .text: "Schrift als Profil"
         case .offset: "Kurven versetzen"
+        case .project: "Körperkanten"
+        case .trim: "Bis zum Schnittpunkt"
+        case .scale: "Auswahl oder alles"
         default: nil
+        }
+    }
+}
+
+/// Varianten des Rechteck-Werkzeugs (wie Shapr3D).
+enum RectangleMode: String, CaseIterable, Identifiable {
+    case center = "Mitte"
+    case diagonal = "Diagonal"
+    case threePoint = "3 Punkte"
+
+    var id: Self { self }
+
+    var systemImage: String {
+        switch self {
+        case .center: "rectangle.center.inset.filled"
+        case .diagonal: "rectangle"
+        case .threePoint: "rectangle.portrait.rotate"
         }
     }
 }
@@ -160,6 +184,8 @@ struct SketchDimension: Identifiable {
     var position: Point2
     var direction: Point2
     var isEditable: Bool
+    /// Gemessene Punkte (lokal) für die Maßlinie mit Pfeilen; leer = nur Etikett.
+    var span: [Point2] = []
 
     var id: Kind { kind }
 
@@ -222,6 +248,18 @@ final class SketchController: ObservableObject {
     @Published var splineKind: SplineKind = .fit {
         didSet { changed() }
     }
+    @Published var rectangleMode: RectangleMode = .diagonal {
+        didSet {
+            rectangleBase = nil
+            changed()
+        }
+    }
+    /// Faktor für das Skalieren-Werkzeug.
+    @Published var scaleFactor: Double = 2
+    /// Neue Elemente als Konstruktionsgeometrie (zählen nicht als Profil).
+    @Published var constructionMode = false
+    /// Hinweis für die Oberfläche (z. B. Einschränkung nicht möglich).
+    @Published var notice: String?
     @Published var offsetKind: OffsetKind = .loop {
         didSet {
             offsetTarget = nil
@@ -239,6 +277,11 @@ final class SketchController: ObservableObject {
     @Published var pendingTextAnchor: Point2?
 
     @Published private(set) var entities: [SketchEntity] = []
+    @Published private(set) var constraints: [SketchConstraint] = []
+    /// Indizes der Konstruktionselemente
+    @Published private(set) var construction: Set<Int> = []
+    /// Ausgewählte Punkte und Kurven (Finger antippen), in Auswahlreihenfolge
+    @Published private(set) var selection: [SketchRef] = []
     /// Geschlossene Bereiche (Außenkontur mit Löchern), größter zuerst.
     @Published private(set) var regions: [SketchRegion] = []
     @Published private(set) var offsetPreview: [SketchEntity] = []
@@ -266,6 +309,18 @@ final class SketchController: ObservableObject {
     private var offsetTarget: OffsetTarget?
     /// Zuletzt gezeichnetes Element, dessen Maße noch änderbar sind.
     private var editableIndex: Int?
+    /// Rechteck mit 3 Punkten: erste Kante steht, Höhe folgt.
+    private var rectangleBase: (start: Point2, end: Point2)?
+
+    /// Stand vor jeder Änderung (für Rückgängig).
+    private struct Snapshot {
+        var entities: [SketchEntity]
+        var constraints: [SketchConstraint]
+        var construction: Set<Int>
+        var chainStart: Point2?
+        var chainEnd: Point2?
+    }
+    private var undoStack: [Snapshot] = []
 
     private static let snapKindsKey = "snapKinds"
 
@@ -278,8 +333,11 @@ final class SketchController: ObservableObject {
 
     var hasProfile: Bool { !regions.isEmpty }
     var isEmpty: Bool { entities.isEmpty && !isInProgress }
-    var canUndo: Bool { !entities.isEmpty || isInProgress || offsetTarget != nil }
-    var isInProgress: Bool { dragStart != nil || chainEnd != nil || arcChord != nil || !splinePoints.isEmpty }
+    var canUndo: Bool { !undoStack.isEmpty || isInProgress || offsetTarget != nil }
+    var isInProgress: Bool {
+        dragStart != nil || chainEnd != nil || arcChord != nil || !splinePoints.isEmpty || rectangleBase != nil
+    }
+    var isWaitingForRectangleHeight: Bool { rectangleBase != nil }
     var hasOpenChain: Bool { chainEnd != nil }
     var hasOpenSpline: Bool { !splinePoints.isEmpty }
     var isWaitingForArcBulge: Bool { arcChord != nil }
@@ -310,11 +368,15 @@ final class SketchController: ObservableObject {
     }
 
     /// Gespeicherte Skizze zum Bearbeiten laden.
-    func load(plane: SketchPlane, entities: [SketchEntity]) {
+    func load(plane: SketchPlane, entities: [SketchEntity], constraints: [SketchConstraint] = [],
+              construction: Set<Int> = []) {
         isChoosingPlane = false
         if let base = plane.base { basePlane = base }
         self.plane = plane
         self.entities = entities
+        self.constraints = constraints
+        self.construction = construction
+        undoStack = []
         entitiesChanged()
     }
 
@@ -351,10 +413,7 @@ final class SketchController: ObservableObject {
 
         switch tool {
         case .rectangle:
-            let size = end - start
-            if size.x != 0, size.y != 0 {
-                add(.rectangle(corner: start, size: size), editable: true)
-            }
+            endRectangleStroke(start: start, end: end)
         case .circle:
             let radius = simd_distance(start, end)
             if radius > 0 {
@@ -391,8 +450,41 @@ final class SketchController: ObservableObject {
             pendingTextAnchor = end
         case .offset:
             pickOffset(at: end, tolerance: tolerance)
+        case .trim:
+            // Ungefangener Punkt: der Fang würde auf Schnittpunkte springen
+            trim(at: point, tolerance: tolerance)
+        case .project, .scale:
+            // Projizieren übernimmt der Viewport (braucht die Körperkanten), Skalieren die Parameterkarte
+            break
         }
         changed()
+    }
+
+    /// Rechteck je nach Variante: Diagonal (Ecke zu Ecke), Mitte (Mitte zu Ecke), 3 Punkte (Kante, dann Höhe).
+    private func endRectangleStroke(start: Point2, end: Point2) {
+        switch rectangleMode {
+        case .diagonal:
+            let size = end - start
+            if size.x != 0, size.y != 0 { add(.rectangle(corner: start, size: size), editable: true) }
+        case .center:
+            let half = end - start
+            if half.x != 0, half.y != 0 { add(.rectangle(corner: start - half, size: half * 2), editable: true) }
+        case .threePoint:
+            if let base = rectangleBase {
+                rectangleBase = nil
+                let corners = Self.threePointCorners(base.start, base.end, end)
+                if abs(signedArea(corners)) > 1e-9 { add(.polyline(corners, closed: true)) }
+            } else if simd_distance(start, end) > 1e-6 {
+                rectangleBase = (start, end)
+            }
+        }
+    }
+
+    /// Ecken eines gedrehten Rechtecks: Kante a–b, Höhe bis zur Lotlinie durch p.
+    private static func threePointCorners(_ a: Point2, _ b: Point2, _ p: Point2) -> [Point2] {
+        let n = rightNormal(b - a)
+        let h = simd_dot(p - a, n)
+        return [a, b, b + n * h, a + n * h]
     }
 
     func cancelStroke() {
@@ -407,6 +499,7 @@ final class SketchController: ObservableObject {
         switch tool {
         case .polyline: chainEnd ?? dragStart
         case .arc: arcChord == nil ? dragStart : nil
+        case .rectangle: rectangleMode == .threePoint && rectangleBase == nil ? dragStart : nil
         case .spline: splinePoints.last ?? dragStart
         case .circle, .polygon: dragStart
         default: nil
@@ -553,7 +646,10 @@ final class SketchController: ObservableObject {
         offsetTarget = nil
         offsetPreview = []
         editableIndex = nil
+        remember()
+        let first = entities.count
         entities += added
+        if constructionMode { construction.formUnion(first..<entities.count) }
         entitiesChanged()
     }
 
@@ -574,10 +670,16 @@ final class SketchController: ObservableObject {
         offsetTarget = nil
         offsetPreview = []
         editableIndex = nil
+        rectangleBase = nil
         activeSnap = nil
         hoverSnap = nil
         hoverNodes = []
         entities = []
+        constraints = []
+        construction = []
+        selection = []
+        undoStack = []
+        notice = nil
         entitiesChanged()
     }
 
@@ -594,10 +696,11 @@ final class SketchController: ObservableObject {
         offsetPreview = []
         pendingTextAnchor = nil
         editableIndex = nil
+        rectangleBase = nil
         changed()
     }
 
-    /// Nimmt den letzten Schritt zurück: Punkt, Bogenenden oder zuletzt gezeichnetes Element.
+    /// Nimmt den letzten Schritt zurück: laufende Eingabe, sonst den letzten Stand der Skizze.
     func undo() {
         if dragStart != nil {
             cancelStroke()
@@ -609,8 +712,9 @@ final class SketchController: ObservableObject {
             changed()
             return
         }
-        if arcChord != nil {
+        if arcChord != nil || rectangleBase != nil {
             arcChord = nil
+            rectangleBase = nil
             changed()
             return
         }
@@ -618,20 +722,18 @@ final class SketchController: ObservableObject {
             cancelOffset()
             return
         }
-        guard let last = entities.popLast() else { return }
-        editableIndex = nil
-        if case .line(let a, let b) = last, let end = chainEnd, simd_distance(end, b) < 1e-6 {
-            if let first = chainStart, simd_distance(first, a) < 1e-6 {
-                chainStart = nil
-                chainEnd = nil
-            } else {
-                chainEnd = a
-            }
-        } else {
-            chainStart = nil
-            chainEnd = nil
+        guard let snapshot = undoStack.popLast() else {
+            if chainEnd != nil { endChain() }
+            return
         }
-        entitiesChanged()
+        restore(snapshot)
+    }
+
+    /// Stand vor einer Änderung merken.
+    private func remember() {
+        undoStack.append(Snapshot(entities: entities, constraints: constraints, construction: construction,
+                                  chainStart: chainStart, chainEnd: chainEnd))
+        if undoStack.count > 200 { undoStack.removeFirst() }
     }
 
     // MARK: Maße am Element
@@ -644,6 +746,13 @@ final class SketchController: ObservableObject {
                 return Self.lineDimensions(from, current, editable: false)
             }
             if tool == .arc, arcChord == nil {
+                return Self.lineDimensions(start, current, editable: false)
+            }
+            if tool == .rectangle, rectangleMode == .threePoint {
+                if let base = rectangleBase {
+                    let corners = Self.threePointCorners(base.start, base.end, current)
+                    return Self.lineDimensions(corners[1], corners[2], editable: false)
+                }
                 return Self.lineDimensions(start, current, editable: false)
             }
             if tool == .arc, let chord = arcChord {
@@ -693,7 +802,19 @@ final class SketchController: ObservableObject {
             break
         }
         guard let updated else { return }
+        let before = entities
+        remember()
         entities[index] = updated
+        // Verbundene Elemente folgen über die Einschränkungen
+        if !constraints.isEmpty {
+            if let solved = ConstraintSolver.solve(entities, constraints: constraints, locked: [index]) {
+                entities = solved
+            } else {
+                entities = before
+                undoStack.removeLast()
+                notice = "Maß widerspricht den Einschränkungen."
+            }
+        }
         entitiesChanged()
     }
 
@@ -702,7 +823,7 @@ final class SketchController: ObservableObject {
         var normal = rightNormal(b - a)
         if normal.y < 0 || (normal.y == 0 && normal.x < 0) { normal = -normal }
         return [SketchDimension(kind: .length, value: simd_distance(a, b), position: (a + b) / 2, direction: normal,
-                                isEditable: editable)]
+                                isEditable: editable, span: [a, b])]
     }
 
     private static func dimensions(of entity: SketchEntity, editable: Bool) -> [SketchDimension] {
@@ -711,25 +832,27 @@ final class SketchController: ObservableObject {
             let lo = simd_min(corner, corner + size), hi = simd_max(corner, corner + size)
             return [
                 SketchDimension(kind: .width, value: abs(size.x), position: Point2((lo.x + hi.x) / 2, lo.y),
-                                direction: Point2(0, -1), isEditable: editable),
+                                direction: Point2(0, -1), isEditable: editable, span: [lo, Point2(hi.x, lo.y)]),
                 SketchDimension(kind: .height, value: abs(size.y), position: Point2(hi.x, (lo.y + hi.y) / 2),
-                                direction: Point2(1, 0), isEditable: editable),
+                                direction: Point2(1, 0), isEditable: editable, span: [Point2(hi.x, lo.y), hi]),
             ]
         case .circle(let center, let radius):
             let d = Point2(1, 1) / sqrt(2.0)
             return [SketchDimension(kind: .diameter, value: 2 * radius, position: center + d * radius, direction: d,
-                                    isEditable: editable)]
+                                    isEditable: editable, span: [center - d * radius, center + d * radius])]
         case .ellipse(let center, let radii):
             return [
                 SketchDimension(kind: .width, value: 2 * radii.x, position: center - Point2(0, radii.y),
-                                direction: Point2(0, -1), isEditable: editable),
+                                direction: Point2(0, -1), isEditable: editable,
+                                span: [center - Point2(radii.x, radii.y), center + Point2(radii.x, -radii.y)]),
                 SketchDimension(kind: .height, value: 2 * radii.y, position: center + Point2(radii.x, 0),
-                                direction: Point2(1, 0), isEditable: editable),
+                                direction: Point2(1, 0), isEditable: editable,
+                                span: [center + Point2(radii.x, -radii.y), center + radii]),
             ]
         case .regularPolygon(let center, let radius, _, let angle):
             let d = Point2(cos(angle), sin(angle))
             return [SketchDimension(kind: .radius, value: radius, position: center + d * radius / 2,
-                                    direction: rightNormal(d) * -1, isEditable: editable)]
+                                    direction: rightNormal(d) * -1, isEditable: editable, span: [center, center + d * radius])]
         case .line(let a, let b):
             return lineDimensions(a, b, editable: editable)
         case .arc(let a, let m, let b):
@@ -737,7 +860,8 @@ final class SketchController: ObservableObject {
             let samples = SketchSegment.arc(a, m, b).samples
             let mid = samples[samples.count / 2]
             return [SketchDimension(kind: .radius, value: circle.radius, position: mid,
-                                    direction: simd_normalize(mid - circle.center), isEditable: editable)]
+                                    direction: simd_normalize(mid - circle.center), isEditable: editable,
+                                    span: [circle.center, mid])]
         default:
             return []
         }
@@ -756,11 +880,451 @@ final class SketchController: ObservableObject {
         return middle + side * (isMajor ? radius + h : radius - h)
     }
 
+    // MARK: Beschneiden
+
+    /// Element, dessen Kurve dem Punkt am nächsten liegt (höchstens tolerance entfernt).
+    private func nearestEntity(to p: Point2, tolerance: Double, among candidates: [Int]? = nil) -> Int? {
+        var best: (distance: Double, index: Int)?
+        for index in candidates ?? Array(entities.indices) {
+            let distance = entities[index].drawing
+                .map { polylineDistance(from: p, to: $0, closed: false).distance }
+                .min() ?? .infinity
+            if distance <= tolerance, distance < (best?.distance ?? .infinity) { best = (distance, index) }
+        }
+        return best?.index
+    }
+
+    /// Angetipptes Stück bis zu den nächsten Schnittpunkten entfernen (Rechtecke und Polygone werden dazu
+    /// in Linien zerlegt). Ohne Schnittpunkte wird das ganze Element gelöscht.
+    func trim(at p: Point2, tolerance: Double) {
+        guard let index = nearestEntity(to: p, tolerance: tolerance) else { return }
+        if case .text = entities[index] {
+            notice = "Text lässt sich nur als Ganzes löschen."
+            return
+        }
+        remember()
+        var target = index
+        if let lines = entities[index].exploded {
+            let first = replaceEntity(index, with: lines)
+            target = nearestEntity(to: p, tolerance: .infinity, among: Array(first..<entities.count)) ?? first
+        }
+        let cutters = entities.indices.filter { $0 != target }.flatMap { entities[$0].trimPrimitives }
+        guard let pieces = SketchTrim.trim(entities[target], at: p, cutters: cutters) else {
+            if let snapshot = undoStack.popLast() { restore(snapshot) }
+            notice = "Ellipsen und Splines mit Schnittpunkten lassen sich nicht beschneiden – nur ganz löschen."
+            return
+        }
+        replaceEntity(target, with: pieces)
+        notice = nil
+        entitiesChanged()
+    }
+
+    /// Element durch neue ersetzen (hinten angehängt, Konstruktionsart bleibt). Liefert den ersten neuen Index.
+    @discardableResult
+    private func replaceEntity(_ index: Int, with replacement: [SketchEntity]) -> Int {
+        let wasConstruction = construction.contains(index)
+        removeEntities([index])
+        let first = entities.count
+        for entity in replacement {
+            entities.append(entity)
+            if wasConstruction { construction.insert(entities.count - 1) }
+            connect(entities.count - 1)
+        }
+        return first
+    }
+
+    /// Elemente entfernen; Einschränkungen, Konstruktionsart und Auswahl werden angepasst.
+    private func removeEntities(_ removed: Set<Int>) {
+        var map: [Int: Int] = [:]
+        var kept: [SketchEntity] = []
+        for (index, entity) in entities.enumerated() where !removed.contains(index) {
+            map[index] = kept.count
+            kept.append(entity)
+        }
+        entities = kept
+        constraints = constraints.compactMap { $0.remapped { map[$0] } }
+        construction = Set(construction.compactMap { map[$0] })
+        selection = []
+        editableIndex = nil
+    }
+
+    private func restore(_ snapshot: Snapshot) {
+        entities = snapshot.entities
+        constraints = snapshot.constraints
+        construction = snapshot.construction
+        chainStart = snapshot.chainStart
+        chainEnd = snapshot.chainEnd
+        editableIndex = nil
+        selection = []
+        entitiesChanged()
+    }
+
+    // MARK: Projizieren und Skalieren
+
+    /// Projizierte Körperkanten (lokale Linienzüge) als Skizzenelemente übernehmen.
+    func addProjected(_ polylines: [[Point2]]) {
+        let shapes = polylines.compactMap(SketchTrim.entity(fromProjected:))
+        guard !shapes.isEmpty else {
+            notice = "Keine Kante zum Projizieren gefunden."
+            return
+        }
+        remember()
+        for shape in shapes {
+            entities.append(shape)
+            if constructionMode { construction.insert(entities.count - 1) }
+            connect(entities.count - 1)
+        }
+        notice = nil
+        editableIndex = nil
+        entitiesChanged()
+    }
+
+    /// Auswahl (sonst alle Elemente) um die Mitte ihres Hüllrechtecks skalieren.
+    func applyScale() {
+        guard scaleFactor > 0, scaleFactor != 1, !entities.isEmpty else { return }
+        let chosen = selectedEntities.isEmpty ? Set(entities.indices) : selectedEntities
+        let points = chosen.flatMap { entities[$0].handlePoints + entities[$0].drawing.flatMap { $0 } }
+        guard let first = points.first else { return }
+        let lo = points.reduce(first) { simd_min($0, $1) }, hi = points.reduce(first) { simd_max($0, $1) }
+        let center = (lo + hi) / 2
+        remember()
+        for index in chosen { entities[index] = entities[index].scaled(about: center, by: scaleFactor) }
+        constraints = constraints.map { constraint in
+            guard case .lock(let ref, let at) = constraint.variant, chosen.contains(ref.entity) else { return constraint }
+            return SketchConstraint(variant: .lock(ref, at: center + (at - center) * scaleFactor))
+        }
+        if let solved = ConstraintSolver.solve(entities, constraints: constraints, locked: chosen) { entities = solved }
+        editableIndex = nil
+        entitiesChanged()
+    }
+
+    // MARK: Auswahl
+
+    var selectedEntities: Set<Int> { Set(selection.map(\.entity)) }
+
+    /// Punkt (Ende, Ecke, Mitte) oder Kurve unter dem Finger; Punkte haben Vorrang.
+    func pick(at p: Point2, tolerance: Double) -> SketchRef? {
+        var bestPoint: (distance: Double, ref: SketchPointRef)?
+        for (index, entity) in entities.enumerated() {
+            if case .text = entity { continue }
+            for (k, q) in entity.handlePoints.enumerated() {
+                let d = simd_distance(p, q)
+                if d <= tolerance * 0.6, d < (bestPoint?.distance ?? .infinity) {
+                    bestPoint = (d, SketchPointRef(entity: index, index: k))
+                }
+            }
+        }
+        if let bestPoint { return .point(bestPoint.ref) }
+        var bestCurve: (distance: Double, ref: SketchCurveRef)?
+        for (index, entity) in entities.enumerated() {
+            for k in 0..<entity.curveCount {
+                let ref = SketchCurveRef(entity: index, index: k)
+                guard let line = curvePolyline(ref) else { continue }
+                let d = polylineDistance(from: p, to: line, closed: false).distance
+                if d <= tolerance, d < (bestCurve?.distance ?? .infinity) { bestCurve = (d, ref) }
+            }
+        }
+        return bestCurve.map { .curve($0.ref) }
+    }
+
+    /// Finger antippen: Element zur Auswahl hinzufügen bzw. entfernen; ins Leere tippen leert die Auswahl.
+    func select(at p: Point2, tolerance: Double) {
+        if let ref = pick(at: p, tolerance: tolerance) {
+            if let index = selection.firstIndex(of: ref) {
+                selection.remove(at: index)
+            } else {
+                selection.append(ref)
+            }
+        } else {
+            selection = []
+        }
+        notice = nil
+        changed()
+    }
+
+    func clearSelection() {
+        selection = []
+        changed()
+    }
+
+    func deleteSelection() {
+        guard !selection.isEmpty else {
+            notice = "Elemente mit dem Finger antippen, dann „Löschen“."
+            return
+        }
+        remember()
+        removeEntities(selectedEntities)
+        notice = nil
+        entitiesChanged()
+    }
+
+    /// „Konstruktion erstellen“: Auswahl zu Konstruktionsgeometrie (oder zurück).
+    func toggleConstruction() {
+        let chosen = selectedEntities
+        guard !chosen.isEmpty else {
+            notice = "Elemente antippen, die zu Konstruktionsgeometrie werden sollen."
+            return
+        }
+        remember()
+        if chosen.isSubset(of: construction) {
+            construction.subtract(chosen)
+        } else {
+            construction.formUnion(chosen)
+        }
+        selection = []
+        entitiesChanged()
+    }
+
+    /// „Trennen“: Einschränkungen der Auswahl lösen.
+    func detachSelection() {
+        let chosen = selectedEntities
+        guard !chosen.isEmpty else {
+            notice = "Elemente antippen, deren Verbindungen gelöst werden sollen."
+            return
+        }
+        let points = Set(selection.compactMap { ref -> SketchPointRef? in
+            if case .point(let p) = ref { return p }
+            return nil
+        })
+        remember()
+        let before = constraints.count
+        constraints.removeAll { constraint in
+            if !points.isEmpty, case .coincident(let a, let b) = constraint.variant {
+                return points.contains(a) || points.contains(b)
+            }
+            return points.isEmpty && !chosen.isDisjoint(with: constraint.entities)
+        }
+        if constraints.count == before {
+            undoStack.removeLast()
+            notice = "An der Auswahl hängen keine Einschränkungen."
+        } else {
+            notice = nil
+            selection = []
+        }
+        changed()
+    }
+
+    // MARK: Einschränkungen
+
+    /// Ob die Einschränkung zur aktuellen Auswahl passt.
+    func canApply(_ kind: ConstraintKind) -> Bool {
+        !variants(for: kind).isEmpty
+    }
+
+    /// Einschränkung auf die Auswahl anwenden. Das zuerst gewählte Element bleibt stehen.
+    func applyConstraint(_ kind: ConstraintKind) {
+        let new = variants(for: kind)
+        guard !new.isEmpty else {
+            notice = kind.selectionHint
+            return
+        }
+        remember()
+        let before = entities, beforeConstraints = constraints
+        constraints += new.map { SketchConstraint(variant: $0) }
+        let involved = Set(new.flatMap { SketchConstraint(variant: $0).entities })
+        let anchor: Set<Int> = involved.count > 1 ? Set(selection.prefix(1).map(\.entity)) : []
+        if let solved = ConstraintSolver.solve(entities, constraints: constraints, locked: anchor)
+            ?? ConstraintSolver.solve(entities, constraints: constraints) {
+            entities = solved
+            selection = []
+            notice = nil
+        } else {
+            entities = before
+            constraints = beforeConstraints
+            undoStack.removeLast()
+            notice = "„\(kind.rawValue)“ widerspricht den vorhandenen Einschränkungen."
+        }
+        editableIndex = nil
+        entitiesChanged()
+    }
+
+    private func variants(for kind: ConstraintKind) -> [SketchConstraint.Variant] {
+        let points = selection.compactMap { ref -> SketchPointRef? in
+            if case .point(let p) = ref { return p }
+            return nil
+        }
+        let curves = selection.compactMap { ref -> SketchCurveRef? in
+            if case .curve(let c) = ref { return c }
+            return nil
+        }
+        func curve(_ ref: SketchCurveRef) -> ConstraintCurve { ConstraintSolver.curve(ref, entities) }
+        func isLine(_ ref: SketchCurveRef) -> Bool {
+            if case .line = curve(ref) { return true }
+            return false
+        }
+        func isCircle(_ ref: SketchCurveRef) -> Bool {
+            if case .circle = curve(ref) { return true }
+            return false
+        }
+        let lines = curves.filter(isLine), circles = curves.filter(isCircle)
+        switch kind {
+        case .parallel:
+            guard points.isEmpty, lines.count >= 2, lines.count == curves.count else { return [] }
+            return lines.dropFirst().map { .parallel(lines[0], $0) }
+        case .perpendicular:
+            guard points.isEmpty, lines.count == 2, curves.count == 2 else { return [] }
+            return [.perpendicular(lines[0], lines[1])]
+        case .tangent:
+            guard points.isEmpty, curves.count == 2, !circles.isEmpty else { return [] }
+            var outside = true
+            if case .circle(let c1, let r1) = curve(curves[0]), case .circle(let c2, let r2) = curve(curves[1]) {
+                outside = simd_distance(c1, c2) > max(r1, r2)
+            }
+            return [.tangent(curves[0], curves[1], outside: outside)]
+        case .coincident:
+            if curves.isEmpty, points.count >= 2 {
+                return points.dropFirst().map { .coincident(points[0], $0) }
+            }
+            if points.count == 1, curves.count == 1, isLine(curves[0]) || isCircle(curves[0]) {
+                return [.pointOnCurve(points[0], curves[0])]
+            }
+            return []
+        case .midpoint:
+            guard points.count == 1, lines.count == 1, curves.count == 1 else { return [] }
+            return [.midpoint(points[0], lines[0])]
+        case .concentric:
+            guard points.isEmpty, circles.count >= 2, circles.count == curves.count else { return [] }
+            return circles.dropFirst().map { .concentric(circles[0], $0) }
+        case .horizontalVertical:
+            if points.isEmpty, !lines.isEmpty, lines.count == curves.count {
+                return lines.map { ref -> SketchConstraint.Variant in
+                    guard case .line(let a, let b) = curve(ref) else { return .horizontal(ref) }
+                    return abs(b.x - a.x) >= abs(b.y - a.y) ? .horizontal(ref) : .vertical(ref)
+                }
+            }
+            if curves.isEmpty, points.count == 2,
+               let p = ConstraintSolver.point(points[0], entities), let q = ConstraintSolver.point(points[1], entities) {
+                return abs(q.x - p.x) >= abs(q.y - p.y)
+                    ? [.horizontalPoints(points[0], points[1])] : [.verticalPoints(points[0], points[1])]
+            }
+            return []
+        case .equal:
+            guard points.isEmpty, curves.count >= 2 else { return [] }
+            if lines.count == curves.count { return lines.dropFirst().map { .equalLength(lines[0], $0) } }
+            if circles.count == curves.count { return circles.dropFirst().map { .equalRadius(circles[0], $0) } }
+            return []
+        case .symmetric:
+            // Zwei Punkte und eine Linie als Achse, oder zwei Kreise/Linien und zuletzt die Achse
+            if points.count == 2, lines.count == 1, curves.count == 1 {
+                return [.symmetric(points[0], points[1], axis: lines[0])]
+            }
+            guard points.isEmpty, curves.count == 3, isLine(curves[2]) else { return [] }
+            let axis = curves[2], a = curves[0], b = curves[1]
+            if isCircle(a), isCircle(b) {
+                let ca = SketchPointRef(entity: a.entity, index: centerIndex(of: a.entity)),
+                    cb = SketchPointRef(entity: b.entity, index: centerIndex(of: b.entity))
+                return [.symmetric(ca, cb, axis: axis)]
+            }
+            if isLine(a), isLine(b), case .line(let a0, let a1) = curve(a), case .line(let b0, let b1) = curve(b),
+               case .line(let s0, let s1) = curve(axis) {
+                // Enden so zuordnen, dass sie nach dem Spiegeln am nächsten liegen
+                let mirror = { (p: Point2) -> Point2 in
+                    let d = simd_normalize(s1 - s0)
+                    let foot = s0 + d * simd_dot(p - s0, d)
+                    return foot * 2 - p
+                }
+                let straight = simd_distance(mirror(a0), b0) + simd_distance(mirror(a1), b1)
+                let crossed = simd_distance(mirror(a0), b1) + simd_distance(mirror(a1), b0)
+                guard let ia = lineEndIndices(a), let ib = lineEndIndices(b) else { return [] }
+                let pa0 = SketchPointRef(entity: a.entity, index: ia.0), pa1 = SketchPointRef(entity: a.entity, index: ia.1)
+                let pb0 = SketchPointRef(entity: b.entity, index: ib.0), pb1 = SketchPointRef(entity: b.entity, index: ib.1)
+                return straight <= crossed
+                    ? [.symmetric(pa0, pb0, axis: axis), .symmetric(pa1, pb1, axis: axis)]
+                    : [.symmetric(pa0, pb1, axis: axis), .symmetric(pa1, pb0, axis: axis)]
+            }
+            return []
+        case .lock:
+            var result: [SketchConstraint.Variant] = points.compactMap { ref -> SketchConstraint.Variant? in
+                guard let p = ConstraintSolver.point(ref, entities) else { return nil }
+                return .lock(ref, at: p)
+            }
+            for ref in curves where entities.indices.contains(ref.entity) {
+                for (k, p) in entities[ref.entity].handlePoints.enumerated() {
+                    result.append(.lock(SketchPointRef(entity: ref.entity, index: k), at: p))
+                }
+            }
+            return result
+        }
+    }
+
+    /// Index des Mittelpunkts unter den Griffpunkten (Kreis 0, Bogen 2).
+    private func centerIndex(of entity: Int) -> Int {
+        if case .arc = entities[entity] { return 2 }
+        return 0
+    }
+
+    /// Griffpunkt-Indizes der beiden Enden einer Linie bzw. Kante.
+    private func lineEndIndices(_ ref: SketchCurveRef) -> (Int, Int)? {
+        switch entities[ref.entity] {
+        case .line: return (0, 1)
+        case .rectangle: return (ref.index % 4, (ref.index + 1) % 4)
+        case .regularPolygon(_, _, let n, _): return (1 + ref.index % n, 1 + (ref.index + 1) % n)
+        case .polyline(let points, _): return (ref.index % points.count, (ref.index + 1) % points.count)
+        default: return nil
+        }
+    }
+
     // MARK: Darstellung
 
-    /// Linienzüge der fertigen Elemente (lokal).
+    /// Linienzüge der fertigen Elemente (lokal), ohne Konstruktionsgeometrie.
     var entityPolylines: [[Point2]] {
-        entities.flatMap(\.drawing)
+        entities.indices.filter { !construction.contains($0) }.flatMap { entities[$0].drawing }
+    }
+
+    /// Konstruktionsgeometrie (gestrichelt dargestellt).
+    var constructionPolylines: [[Point2]] {
+        construction.sorted().filter { entities.indices.contains($0) }.flatMap { entities[$0].drawing }
+    }
+
+    /// Ausgewählte Kurven und Punkte zum Hervorheben.
+    var selectionPolylines: [[Point2]] {
+        selection.compactMap { ref -> [Point2]? in
+            guard case .curve(let c) = ref else { return nil }
+            return curvePolyline(c)
+        }
+    }
+
+    var selectionPoints: [Point2] {
+        selection.compactMap { ref -> Point2? in
+            guard case .point(let p) = ref else { return nil }
+            return ConstraintSolver.point(p, entities)
+        }
+    }
+
+    /// Kurzzeichen der Einschränkungen mit Position (lokal).
+    var constraintBadges: [(position: Point2, text: String)] {
+        var used: [Point2] = []
+        return constraints.compactMap { constraint -> (Point2, String)? in
+            guard var position = badgePosition(constraint) else { return nil }
+            // Übereinanderliegende Zeichen leicht versetzen
+            while used.contains(where: { simd_distance($0, position) < 1e-6 }) { position.x += 1e-3 }
+            used.append(position)
+            return (position, constraint.kind.badge)
+        }
+    }
+
+    private func badgePosition(_ constraint: SketchConstraint) -> Point2? {
+        switch constraint.variant {
+        case .parallel(let c, _), .perpendicular(let c, _), .tangent(let c, _, _), .concentric(let c, _),
+             .horizontal(let c), .vertical(let c), .equalLength(let c, _), .equalRadius(let c, _):
+            guard let line = curvePolyline(c), !line.isEmpty else { return nil }
+            return line[line.count / 2]
+        case .coincident(let p, _), .pointOnCurve(let p, _), .midpoint(let p, _), .horizontalPoints(let p, _),
+             .verticalPoints(let p, _), .symmetric(let p, _, _), .lock(let p, _):
+            return ConstraintSolver.point(p, entities)
+        }
+    }
+
+    /// Kurve als Linienzug (für Auswahl, Hervorhebung, Abstand).
+    func curvePolyline(_ ref: SketchCurveRef) -> [Point2]? {
+        guard entities.indices.contains(ref.entity) else { return nil }
+        let entity = entities[ref.entity]
+        switch entity.constraintCurve(ref.index) {
+        case .line(let a, let b):
+            return [a, b]
+        default:
+            return entity.drawing.first
+        }
     }
 
     /// Linienzüge der laufenden Eingabe und der Versatz-Vorschau (lokal).
@@ -769,6 +1333,17 @@ final class SketchController: ObservableObject {
         // Beim Schweben zeigt der Linienzug, Bogen bzw. Spline schon das nächste Stück
         let current = dragCurrent ?? hoverSnap?.point
         switch tool {
+        case .rectangle where rectangleMode == .threePoint:
+            if let base = rectangleBase {
+                if let current {
+                    let corners = Self.threePointCorners(base.start, base.end, current)
+                    polylines.append(corners + [corners[0]])
+                } else {
+                    polylines.append([base.start, base.end])
+                }
+            } else if let start = dragStart, let current = dragCurrent {
+                polylines.append([start, current])
+            }
         case .rectangle, .circle, .ellipse, .polygon:
             if let start = dragStart, let current = dragCurrent, let preview = shapePreview(from: start, to: current) {
                 polylines += preview.drawing
@@ -795,7 +1370,7 @@ final class SketchController: ObservableObject {
                 polylines += preview.drawing
                 if splineKind == .control { polylines.append(points) }
             }
-        case .point, .text, .offset:
+        case .point, .text, .offset, .project, .trim, .scale:
             break
         }
         return polylines
@@ -809,6 +1384,10 @@ final class SketchController: ObservableObject {
     private func shapePreview(from start: Point2, to current: Point2) -> SketchEntity? {
         switch tool {
         case .rectangle:
+            if rectangleMode == .center {
+                let half = current - start
+                return .rectangle(corner: start - half, size: half * 2)
+            }
             return .rectangle(corner: start, size: current - start)
         case .circle:
             return .circle(center: start, radius: simd_distance(start, current))
@@ -844,13 +1423,33 @@ final class SketchController: ObservableObject {
     }
 
     private func add(_ entity: SketchEntity, editable: Bool = false) {
+        remember()
         entities.append(entity)
-        editableIndex = editable ? entities.count - 1 : nil
+        let index = entities.count - 1
+        if constructionMode { construction.insert(index) }
+        connect(index)
+        editableIndex = editable ? index : nil
         entitiesChanged()
     }
 
+    /// Wie bei Shapr3D bleiben gefangene Enden verbunden: Zusammenfallend mit gleichen Punkten anderer Elemente.
+    private func connect(_ index: Int) {
+        let points = entities[index].handlePoints
+        for (k, p) in points.enumerated() {
+            for other in entities.indices where other != index {
+                if case .text = entities[other] { continue }
+                if let j = entities[other].handlePoints.firstIndex(where: { simd_distance($0, p) < 1e-6 }) {
+                    constraints.append(SketchConstraint(variant: .coincident(SketchPointRef(entity: other, index: j),
+                                                                             SketchPointRef(entity: index, index: k))))
+                    break
+                }
+            }
+        }
+    }
+
     private func entitiesChanged() {
-        let found = findRegions(in: entities)
+        let profile = entities.indices.filter { !construction.contains($0) }.map { entities[$0] }
+        let found = findRegions(in: profile)
         regions = found.regions
         loops = found.loops
         snapIndex = SnapIndex(entities: entities)

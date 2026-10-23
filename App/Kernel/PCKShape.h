@@ -74,6 +74,23 @@ NS_ASSUME_NONNULL_BEGIN
 + (nullable PCKShape *)faceWithProfileWires:(NSArray<NSArray<NSNumber *> *> *)wires
     NS_SWIFT_NAME(face(profileWires:));
 
+/// Torus um center, Achse axis; minorRadius < majorRadius.
++ (nullable PCKShape *)torusWithCenter:(simd_double3)center axis:(simd_double3)axis
+                           majorRadius:(double)majorRadius minorRadius:(double)minorRadius
+    NS_SWIFT_NAME(torus(center:axis:majorRadius:minorRadius:));
+
+/// Rotationskörper eines Skizzenprofils um eine Achse; Winkel im Bogenmaß (negativ = Gegenrichtung, max. 2π).
++ (nullable PCKShape *)revolveProfileWires:(NSArray<NSArray<NSNumber *> *> *)wires axisOrigin:(simd_double3)origin
+                             axisDirection:(simd_double3)direction angle:(double)radians
+    NS_SWIFT_NAME(revolve(profileWires:axisOrigin:axisDirection:angle:));
+
+/// Profil entlang eines offenen Pfads ziehen (Pfad kodiert wie eine Kontur).
++ (nullable PCKShape *)sweepProfileWires:(NSArray<NSArray<NSNumber *> *> *)wires path:(NSArray<NSNumber *> *)path
+    NS_SWIFT_NAME(sweep(profileWires:path:));
+
+/// Übergangskörper durch mehrere geschlossene Konturen (in Reihenfolge).
++ (nullable PCKShape *)loftThroughWires:(NSArray<NSArray<NSNumber *> *> *)sections NS_SWIFT_NAME(loft(sections:));
+
 /// Fasst mehrere Körper zu einem Verbund zusammen (ohne Kernel: nur der erste).
 + (nullable PCKShape *)compoundOfShapes:(NSArray<PCKShape *> *)shapes NS_SWIFT_NAME(compound(_:));
 
@@ -96,6 +113,21 @@ NS_ASSUME_NONNULL_BEGIN
     NS_SWIFT_NAME(rotated(origin:axis:angle:));
 - (nullable PCKShape *)mirroredAtPlaneOrigin:(simd_double3)origin normal:(simd_double3)normal
     NS_SWIFT_NAME(mirrored(planeOrigin:normal:));
+
+/// Skalieren um center, je Achse ein Faktor (gleiche Faktoren = gleichmäßig).
+- (nullable PCKShape *)scaledAboutPoint:(simd_double3)center factors:(simd_double3)factors
+    NS_SWIFT_NAME(scaled(center:factors:));
+
+/// Teilt den Körper an einer Ebene in zwei Körper; nil, wenn die Ebene ihn nicht schneidet.
+- (nullable NSArray<PCKShape *> *)splitAtPlaneOrigin:(simd_double3)origin normal:(simd_double3)normal
+    NS_SWIFT_NAME(split(planeOrigin:normal:));
+
+/// Messwerte (mm, mm², mm³); 0 ohne Kernel.
+@property (nonatomic, readonly) double volume;
+- (double)lengthOfEdge:(NSInteger)edge NS_SWIFT_NAME(length(ofEdge:));
+- (double)areaOfFace:(NSInteger)face NS_SWIFT_NAME(area(ofFace:));
+/// Kantennummern einer Fläche (ohne Nahtkanten).
+- (NSArray<NSNumber *> *)edgeNumbersOfFace:(NSInteger)face NS_SWIFT_NAME(edgeNumbers(ofFace:));
 
 /// Rundet bzw. fast alle Kanten einer Fläche (Nummer aus faceIndexData). nil bei Fehler.
 - (nullable PCKShape *)filletingEdgesOfFace:(NSInteger)face radius:(double)radius
