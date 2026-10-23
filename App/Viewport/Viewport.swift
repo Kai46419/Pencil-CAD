@@ -1,15 +1,18 @@
 import MetalKit
 import SwiftUI
 
-/// 3D-Ansicht. Finger navigieren (1 Finger drehen, 2 Finger verschieben, Pinch zoomen).
-/// Der Apple Pencil ist bewusst ausgenommen: er wird in Phase 2 zum Skizzieren genutzt.
+/// 3D-Ansicht. Finger navigieren (1 Finger drehen, 2 Finger verschieben, Pinch zoomen, tippen wählt).
+/// Der Apple Pencil skizziert im Skizzenmodus; Ziehpfeile lassen sich mit Pencil und Finger ziehen.
 struct Viewport: UIViewRepresentable {
-    let mesh: Mesh
-    let revision: Int
+    @ObservedObject var workspace: Workspace
+    @ObservedObject var model: ModelStore
+    @ObservedObject var sketch: SketchController
 
     final class Coordinator {
         var renderer: Renderer?
-        var revision = -1
+        var meshRevision = -1
+        var selectionRevision = -1
+        var commandID = 0
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -22,34 +25,85 @@ struct Viewport: UIViewRepresentable {
             view.delegate = renderer
             view.renderer = renderer
             context.coordinator.renderer = renderer
+            renderer.willDraw = { [weak view] in view?.syncIfNeeded() }
         }
+        view.workspace = workspace
+        workspace.snapshot = { [weak view] size in view?.snapshot(size: size) }
         return view
     }
 
     func updateUIView(_ view: ViewportView, context: Context) {
-        guard context.coordinator.revision != revision else { return }
-        context.coordinator.revision = revision
-        context.coordinator.renderer?.update(mesh: mesh)
-        view.setNeedsDisplay()
+        let coordinator = context.coordinator
+        let renderer = coordinator.renderer
+        if coordinator.meshRevision != model.revision {
+            coordinator.meshRevision = model.revision
+            renderer?.update(mesh: model.mesh)
+            coordinator.selectionRevision = -1
+        }
+        if coordinator.selectionRevision != model.selectionRevision {
+            coordinator.selectionRevision = model.selectionRevision
+            renderer?.updateSelection(indices: model.selectionIndices, edges: model.edgeHighlight)
+        }
+        renderer?.displayMode = workspace.displayMode
+        // Im Skizzenmodus flach: Parallelprojektion, kein Drehen
+        let orthographic = workspace.isOrthographic || (sketch.isActive && !sketch.isChoosingPlane)
+        if renderer?.camera.isOrthographic != orthographic {
+            renderer?.camera.isOrthographic = orthographic
+        }
+        if coordinator.commandID != workspace.viewCommand.id {
+            coordinator.commandID = workspace.viewCommand.id
+            view.run(workspace.viewCommand.kind)
+        }
+        view.refresh()
     }
 }
 
-final class ViewportView: MTKView, UIGestureRecognizerDelegate {
+final class ViewportView: MTKView {
     weak var renderer: Renderer?
+    weak var workspace: Workspace?
+
+    private var orbitGesture: UIPanGestureRecognizer?
+    private var tapGesture: UITapGestureRecognizer?
+    private var holdGesture: UILongPressGestureRecognizer?
+    private var sketchTouch: UITouch?
+    private var handleDrag: HandleDragState?
+    private let valueLabel = PaddedLabel()
+    private var planeLabels: [PaddedLabel] = []
+    private var dimensionFields: [String: DimensionField] = [:]
+    /// Kurzzeichen der Einschränkungen am Element
+    private var badgeLabels: [PaddedLabel] = []
+    /// Geladene Bilder (Canvas) je Datei
+    private var canvasTextures: [String: MTLTexture] = [:]
+    /// Bereichsfüllungen der aktuellen Skizze, neu berechnet nur bei geänderter Geometrie.
+    private var sketchFillRevision = -1
+    private var sketchFills: [[SIMD3<Float>]] = []
+    private var needsSync = true
+
+    private struct HandleDragState {
+        let touch: UITouch
+        let handle: DragHandle
+        let startParameter: Float
+        let step: Double
+    }
+
+    private let fingersOnly = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+    private let fingersAndPencil = [NSNumber(value: UITouch.TouchType.direct.rawValue),
+                                    NSNumber(value: UITouch.TouchType.pencil.rawValue)]
+
+    private var model: ModelStore? { workspace?.model }
+    private var sketch: SketchController? { workspace?.sketch }
 
     override init(frame: CGRect, device: MTLDevice?) {
         super.init(frame: frame, device: device)
-        setUpGestures()
+        setUp()
     }
 
     required init(coder: NSCoder) {
         super.init(coder: coder)
-        setUpGestures()
+        setUp()
     }
 
-    private func setUpGestures() {
-        let fingersOnly = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
-
+    private func setUp() {
         let orbit = UIPanGestureRecognizer(target: self, action: #selector(handleOrbit))
         orbit.maximumNumberOfTouches = 1
         orbit.allowedTouchTypes = fingersOnly
@@ -57,37 +111,1179 @@ final class ViewportView: MTKView, UIGestureRecognizerDelegate {
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan))
         pan.minimumNumberOfTouches = 2
         pan.allowedTouchTypes = fingersOnly
-        pan.delegate = self
 
         let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch))
         pinch.allowedTouchTypes = fingersOnly
-        pinch.delegate = self
 
-        [orbit, pan, pinch].forEach(addGestureRecognizer)
+        let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
+        tap.allowedTouchTypes = fingersAndPencil
+
+        // Schwebender Stift (iPad Pro mit Apple Pencil Pro / 2. Gen.)
+        let hover = UIHoverGestureRecognizer(target: self, action: #selector(handleHover))
+
+        // 1 s halten (Stift oder Finger): Fangpunkt als Markierungspunkt merken
+        let hold = UILongPressGestureRecognizer(target: self, action: #selector(handleHold))
+        hold.minimumPressDuration = 1
+        hold.allowableMovement = 10
+        hold.allowedTouchTypes = fingersAndPencil
+
+        for recognizer in [orbit, pan, pinch, tap, hover, hold] as [UIGestureRecognizer] {
+            recognizer.delegate = self
+            addGestureRecognizer(recognizer)
+        }
+
+        // Drücken (Apple Pencil Pro) bzw. Doppeltippen öffnet das Werkzeugrad
+        let pencil = UIPencilInteraction()
+        pencil.delegate = self
+        addInteraction(pencil)
+        orbitGesture = orbit
+        tapGesture = tap
+        holdGesture = hold
+
+        valueLabel.font = .monospacedDigitSystemFont(ofSize: 15, weight: .semibold)
+        valueLabel.textColor = .black
+        valueLabel.backgroundColor = .white
+        valueLabel.layer.cornerRadius = 9
+        valueLabel.layer.borderWidth = 2
+        valueLabel.layer.borderColor = UIColor.systemBlue.cgColor
+        valueLabel.layer.masksToBounds = true
+        valueLabel.isHidden = true
+        addSubview(valueLabel)
+    }
+
+    // MARK: Kamera
+
+    func run(_ command: ViewCommand.Kind) {
+        guard let renderer else { return }
+        switch command {
+        case .alignToSketchPlane:
+            guard let plane = sketch?.plane else { return }
+            let normal = SIMD3<Float>(plane.normal)
+            let origin = SIMD3<Float>(plane.origin)
+            // Ziel auf die Ebene projizieren, damit der sichtbare Ausschnitt erhalten bleibt
+            let target = renderer.camera.target - simd_dot(renderer.camera.target - origin, normal) * normal
+            // Skizzenebene gerade: u waagerecht nach rechts, keine schräge Draufsicht
+            renderer.camera.look(along: normal, at: target, right: SIMD3<Float>(plane.u))
+        case .fitAll:
+            if let bounds = model?.mesh.bounds {
+                renderer.camera.frame(min: bounds.min, max: bounds.max)
+            }
+        case .look(let normal):
+            // Drauf- und Untersicht gerade ausrichten (X waagerecht)
+            let flat = abs(simd_normalize(normal).z) > 0.999
+            renderer.camera.look(along: normal, at: renderer.camera.target, right: flat ? SIMD3(1, 0, 0) : nil)
+        }
+        cameraMoved()
+    }
+
+    /// Meldet die Kamerawinkel an den ViewCube. Asynchron, weil run() aus updateUIView aufgerufen wird
+    /// und SwiftUI während eines Updates keine Änderungen veröffentlichen darf.
+    private func cameraMoved() {
+        if let camera = renderer?.camera {
+            DispatchQueue.main.async { [weak self] in
+                self?.workspace?.cameraChanged(yaw: camera.yaw, pitch: camera.pitch)
+            }
+        }
+        refresh()
+    }
+
+    func snapshot(size: CGSize) -> UIImage? {
+        renderer?.snapshot(width: Int(size.width * 2), height: Int(size.height * 2), viewHeight: size.height)
+    }
+
+    // MARK: Abgleich mit dem Zustand
+
+    /// Zustand hat sich geändert: beim nächsten Bild abgleichen. So wird auch bei bis zu 240 Stiftpunkten
+    /// pro Sekunde höchstens einmal je Bildschirmbild gerechnet und gezeichnet.
+    func refresh() {
+        needsSync = true
+        setNeedsDisplay()
+    }
+
+    func syncIfNeeded() {
+        guard needsSync else { return }
+        needsSync = false
+        sync()
+    }
+
+    /// Gleicht Renderer, Gesten, Linien, Ziehpfeile und Maße mit dem Zustand ab.
+    private func sync() {
+        guard let renderer, let sketch, let workspace else { return }
+        let choosing = sketch.isActive && sketch.isChoosingPlane
+        let sketching = sketch.isActive && !choosing
+        let fingerSketching = sketching && sketch.fingerDraws
+        orbitGesture?.isEnabled = !fingerSketching
+        tapGesture?.isEnabled = !fingerSketching
+        tapGesture?.allowedTouchTypes = sketching ? fingersOnly : fingersAndPencil
+        holdGesture?.isEnabled = sketching
+
+        let plane = sketch.plane
+        renderer.gridTransform = sketching && !sketch.showsGrid ? nil : sketching
+            ? float4x4(origin: SIMD3<Float>(plane.origin), u: SIMD3<Float>(plane.u),
+                       v: SIMD3<Float>(plane.v), n: SIMD3<Float>(plane.normal))
+            : matrix_identity_float4x4
+        renderer.clipPlane = workspace.clipPlane.map {
+            SIMD4<Float>(Float($0.normal.x), Float($0.normal.y), Float($0.normal.z), Float($0.distance))
+        } ?? .zero
+        updateLines()
+        refreshPlanes()
+        updateCanvases()
+        updateBadges()
+
+        let handles = workspace.handles
+        // Ein Pfeil, der knapp über dem Objekt schwebt; Ziehen in Gegenrichtung ergibt negative Werte
+        renderer.handles = handles.map { handle in
+            HandleGraphic(base: arrowBase(handle), direction: handle.pointing, color: handle.color)
+        }
+        updateValueLabel(handles)
+        updateDimensionFields()
+    }
+
+    // MARK: Linien und Bereiche
+
+    private static let sketchInk = SIMD3<Float>(0.05, 0.06, 0.09)
+    private static let previewBlue = SIMD3<Float>(0.05, 0.4, 0.98)
+    private static let snapOrange = SIMD3<Float>(0.98, 0.45, 0.05)
+    private static let constructionGray = SIMD3<Float>(0.4, 0.42, 0.48)
+    private static let selectionOrange = SIMD3<Float>(0.98, 0.5, 0.06)
+    private static let helperOrange = SIMD3<Float>(0.93, 0.55, 0.16)
+    private static let dimensionInk = SIMD3<Float>(0.18, 0.2, 0.26)
+    private static let axes: [(SIMD3<Float>, SIMD3<Float>)] = [
+        ([1, 0, 0], [0.78, 0.16, 0.11]),
+        ([0, 1, 0], [0.17, 0.52, 0.2]),
+        ([0, 0, 1], [0.1, 0.36, 0.88]),
+    ]
+
+    /// Skizzenlinien (dick, immer sichtbar), gespeicherte Skizzen, Konstruktionsgeometrie, Auswahl,
+    /// Maßlinien, Fangsymbole, Knoten und Bereichsfüllungen.
+    private func updateLines() {
+        guard let renderer, let sketch, let model, let workspace else { return }
+        let sketching = sketch.isActive && !sketch.isChoosingPlane
+        var groups: [LineGroup] = []
+        var fills: [FillGroup] = []
+        let perPoint = Double(renderer.camera.worldUnitsPerPoint(viewHeight: Float(bounds.height)))
+
+        // Achsen wie bei Shapr3D: X rot, Y grün, Z blau, vom Ursprung in positiver Richtung bis zum Horizont
+        if !sketching, workspace.showsOrigin {
+            let reach = max(renderer.camera.distance * 10, planeHalfSize * 20)
+            for (axis, color) in Self.axes {
+                groups.append(LineGroup(polylines: [[.zero, axis * reach]], color: color, width: 1, onTop: false))
+            }
+        }
+        // Ebenenwahl: drei kleine graue Felder neben dem Ursprung
+        if sketch.isActive, sketch.isChoosingPlane {
+            for square in basePlaneSquares {
+                let h = square.half
+                let corners = [square.center - square.u * h - square.v * h, square.center + square.u * h - square.v * h,
+                               square.center + square.u * h + square.v * h, square.center - square.u * h + square.v * h]
+                fills.append(FillGroup(triangles: [0, 1, 2, 0, 2, 3].map { corners[$0] },
+                                       color: SIMD4(0.28, 0.28, 0.29, 0.38)))
+            }
+        }
+
+        for (index, stored) in model.sketches.enumerated() where !stored.isHidden {
+            if sketch.isActive, index == workspace.editingSketchIndex { continue }
+            // Skizze, die gerade verschoben wird, an der neuen Stelle zeigen
+            let shift = !sketch.isActive && workspace.tool == .move && model.movingSketch == index
+                ? SIMD3<Float>(model.moveOffset) : SIMD3<Float>(0, 0, 0)
+            let move = { (line: [SIMD3<Float>]) in line.map { $0 + shift } }
+            groups.append(LineGroup(polylines: stored.lines.map(move),
+                                    color: sketching ? SIMD3(0.36, 0.38, 0.44) : SIMD3(0.12, 0.14, 0.2),
+                                    width: 1.8, onTop: false))
+            if !stored.constructionLines.isEmpty {
+                groups.append(LineGroup(polylines: stored.constructionLines.flatMap { dashed(move($0), dash: Float(4 * perPoint)) },
+                                        color: Self.constructionGray, width: 1.2, onTop: false))
+            }
+            guard !sketch.isActive else { continue }
+            for (region, triangles) in stored.fills.enumerated() {
+                let selected = model.selectedRegions.contains(RegionRef(sketch: index, region: region))
+                fills.append(FillGroup(triangles: triangles.map { $0 + shift },
+                                       color: selected ? SIMD4(0.98, 0.55, 0.15, 0.55) : SIMD4(0.2, 0.45, 0.95, 0.14)))
+            }
+        }
+
+        addConstructionItems(to: &groups, perPoint: perPoint, sketching: sketching)
+        if !sketch.isActive, workspace.tool == .measure, !workspace.measurePoints.isEmpty {
+            let points = workspace.measurePoints.map { SIMD3<Float>($0) }
+            groups.append(LineGroup(polylines: points.count == 2 ? [points] : [], color: Self.previewBlue, width: 2,
+                                    dots: points, dotRadius: 5))
+        }
+
+        if sketching {
+            let plane = sketch.plane
+            let world = { (p: Point2) in SIMD3<Float>(plane.world(p)) }
+            if sketchFillRevision != sketch.geometryRevision {
+                sketchFillRevision = sketch.geometryRevision
+                sketchFills = sketch.regions.map { regionTriangles($0, plane: plane) }
+            }
+            if sketch.showsProfiles {
+                fills += sketchFills.map { FillGroup(triangles: $0, color: SIMD4(0.2, 0.45, 0.95, 0.16)) }
+            }
+            groups.append(LineGroup(polylines: sketch.entityPolylines.map { $0.map(world) }, color: Self.sketchInk,
+                                    width: 2.6))
+            // Punkte wie in Fusion 360: Enden und Ecken als kleine Punkte
+            if sketch.showsPoints {
+                let points = sketch.entityPoints
+                if !points.isEmpty {
+                    groups.append(LineGroup(polylines: [], color: Self.sketchInk, width: 0,
+                                            dots: points.map(world), dotRadius: 2.6))
+                }
+            }
+            let construction = sketch.showsConstruction
+                ? sketch.constructionPolylines.flatMap { dashed($0, dash: 5 * perPoint) } : []
+            if !construction.isEmpty {
+                groups.append(LineGroup(polylines: construction.map { $0.map(world) }, color: Self.constructionGray,
+                                        width: 1.8))
+            }
+            let selected = sketch.selectionPolylines
+            let selectedPoints = sketch.selectionPoints
+            if !selected.isEmpty || !selectedPoints.isEmpty {
+                groups.append(LineGroup(polylines: selected.map { $0.map(world) }, color: Self.selectionOrange,
+                                        width: 4.2, dots: selectedPoints.map(world), dotRadius: 6))
+            }
+            let preview = sketch.previewPolylines
+            if !preview.isEmpty {
+                groups.append(LineGroup(polylines: preview.map { $0.map(world) }, color: Self.previewBlue, width: 2.6))
+            }
+            let dimensionLines = sketch.visibleDimensions.flatMap { dimensionGeometry($0, perPoint: perPoint).lines }
+            if !dimensionLines.isEmpty {
+                groups.append(LineGroup(polylines: dimensionLines.map { $0.map(world) }, color: Self.dimensionInk,
+                                        width: 1.2))
+            }
+            // Hilfspunkte (Mitten gewählter Punkte) als kleine Dreiecke, gewählte orange
+            if !sketch.marks.isEmpty {
+                let size = 5 * perPoint
+                let triangle = { (p: Point2) -> [Point2] in
+                    [p + Point2(0, size), p + Point2(-0.87 * size, -0.5 * size), p + Point2(0.87 * size, -0.5 * size),
+                     p + Point2(0, size)]
+                }
+                let selectedMarks = Set(sketch.selectedMarks)
+                let plain = sketch.marks.indices.filter { !selectedMarks.contains($0) }.map { triangle(sketch.marks[$0]) }
+                let chosen = sketch.selectedMarkPoints.map(triangle)
+                groups.append(LineGroup(polylines: plain.map { $0.map(world) }, color: Self.previewBlue, width: 1.6))
+                if !chosen.isEmpty {
+                    groups.append(LineGroup(polylines: chosen.map { $0.map(world) }, color: Self.selectionOrange, width: 2.4))
+                }
+            }
+            // Gleicher Winkel wie eine vorhandene Linie: diese leuchtet grün
+            if !sketch.parallelLines.isEmpty {
+                groups.append(LineGroup(polylines: sketch.parallelLines.map { $0.map(world) },
+                                        color: SIMD3(0.08, 0.62, 0.2), width: 4))
+            }
+            // Gemerkte Punkte (1 s gehalten) als orange Kreuze
+            if !sketch.capturedPoints.isEmpty {
+                let s = 5 * perPoint
+                let crosses = sketch.capturedPoints.flatMap { p -> [[Point2]] in
+                    [[p - Point2(s, s), p + Point2(s, s)], [p - Point2(s, -s), p + Point2(s, -s)]]
+                }
+                groups.append(LineGroup(polylines: crosses.map { $0.map(world) }, color: Self.selectionOrange, width: 2.4))
+            }
+            // Schwebender Stift: Fadenkreuz am (gefangenen) Punkt, damit man sieht, wo der Strich ansetzt
+            if let hover = sketch.hoverSnap?.point {
+                let arm = 9 * perPoint, gap = 2.5 * perPoint
+                let cross: [[Point2]] = [
+                    [hover + Point2(gap, 0), hover + Point2(arm, 0)], [hover - Point2(gap, 0), hover - Point2(arm, 0)],
+                    [hover + Point2(0, gap), hover + Point2(0, arm)], [hover - Point2(0, gap), hover - Point2(0, arm)],
+                ]
+                groups.append(LineGroup(polylines: cross.map { $0.map(world) }, color: Self.sketchInk, width: 1.3,
+                                        dots: [world(hover)], dotRadius: 1.4))
+            }
+            if !sketch.hoverNodes.isEmpty {
+                groups.append(LineGroup(polylines: [], color: Self.previewBlue, width: 0,
+                                        dots: sketch.hoverNodes.map(world), dotRadius: 3.5))
+            }
+            if let snap = sketch.currentSnap, let kind = snap.kind {
+                let guides = snap.guides.flatMap { dashed([$0.0, $0.1], dash: 5 * perPoint) }
+                if !guides.isEmpty {
+                    groups.append(LineGroup(polylines: guides.map { $0.map(world) }, color: Self.snapOrange, width: 1.3))
+                }
+                groups.append(LineGroup(polylines: snapMarker(kind, at: snap.point, size: 6 * perPoint).map { $0.map(world) },
+                                        color: Self.snapOrange, width: 2.2))
+            }
+        } else {
+            sketchFillRevision = -1
+            sketchFills = []
+        }
+        renderer.lineGroups = groups
+        renderer.fills = fills
+    }
+
+    /// Konstruktionsachsen (gestrichelt) und -punkte; Ebenen zeichnet refreshPlanes.
+    private func addConstructionItems(to groups: inout [LineGroup], perPoint: Double, sketching: Bool) {
+        guard let model else { return }
+        let reach = Double(planeHalfSize) * 1.6
+        var axes: [[SIMD3<Float>]] = []
+        var points: [SIMD3<Float>] = []
+        for item in model.constructions where !item.isHidden {
+            switch item.kind {
+            case .axis:
+                let a = SIMD3<Float>(item.origin - item.direction * reach)
+                let b = SIMD3<Float>(item.origin + item.direction * reach)
+                axes += dashed([a, b], dash: Float(6 * perPoint))
+            case .point:
+                points.append(SIMD3<Float>(item.origin))
+            case .plane:
+                break
+            }
+        }
+        if !axes.isEmpty || !points.isEmpty {
+            groups.append(LineGroup(polylines: axes, color: Self.helperOrange, width: 1.6, dots: points,
+                                    dotRadius: 4.5, onTop: !sketching))
+        }
+    }
+
+    /// Gestrichelter Linienzug (lokal) als einzelne Striche entlang der Länge.
+    private func dashed(_ points: [Point2], dash: Double) -> [[Point2]] {
+        guard points.count >= 2, dash > 0 else { return [] }
+        var result: [[Point2]] = []
+        var current: [Point2] = [points[0]]
+        var drawing = true
+        var left = dash
+        for i in 0..<(points.count - 1) {
+            var a = points[i]
+            let b = points[i + 1]
+            var length = simd_distance(a, b)
+            while length > 1e-12 {
+                let step = min(left, length)
+                let p = a + (b - a) / length * step
+                if drawing { current.append(p) }
+                left -= step
+                length -= step
+                a = p
+                if left <= 1e-12 {
+                    if drawing, current.count >= 2 { result.append(current) }
+                    drawing.toggle()
+                    current = drawing ? [a] : []
+                    left = dash
+                    if result.count > 2000 { return result }
+                }
+            }
+        }
+        if drawing, current.count >= 2 { result.append(current) }
+        return result
+    }
+
+    private func dashed(_ points: [SIMD3<Float>], dash: Float) -> [[SIMD3<Float>]] {
+        guard points.count >= 2, dash > 0 else { return [] }
+        var result: [[SIMD3<Float>]] = []
+        var drawing = true
+        var left = dash
+        var current: [SIMD3<Float>] = [points[0]]
+        for i in 0..<(points.count - 1) {
+            var a = points[i]
+            let b = points[i + 1]
+            var length = simd_distance(a, b)
+            while length > 1e-9 {
+                let step = min(left, length)
+                let p = a + (b - a) / length * step
+                if drawing { current.append(p) }
+                left -= step
+                length -= step
+                a = p
+                if left <= 1e-9 {
+                    if drawing, current.count >= 2 { result.append(current) }
+                    drawing.toggle()
+                    current = drawing ? [a] : []
+                    left = dash
+                    if result.count > 2000 { return result }
+                }
+            }
+        }
+        if drawing, current.count >= 2 { result.append(current) }
+        return result
+    }
+
+    /// Maßlinie mit Hilfslinien und Pfeilen (lokal) und Lage des Maßfelds.
+    private func dimensionGeometry(_ dimension: SketchDimension, perPoint: Double)
+        -> (lines: [[Point2]], label: Point2, onLine: Bool) {
+        let arrow = 8 * perPoint, wing = 3 * perPoint
+        func arrowHead(at tip: Point2, from tail: Point2) -> [Point2] {
+            let t = simd_normalize(tip - tail), n = Point2(-t.y, t.x)
+            return [tip - t * arrow + n * wing, tip, tip - t * arrow - n * wing]
+        }
+        guard dimension.span.count == 2, simd_distance(dimension.span[0], dimension.span[1]) > 1e-9 else {
+            return ([], dimension.position + dimension.direction * 10 * perPoint, false)
+        }
+        let a = dimension.span[0], b = dimension.span[1]
+        switch dimension.kind {
+        case .width, .height, .length, .distance:
+            let n = dimension.direction
+            let offset = 28 * perPoint
+            let a2 = a + n * offset, b2 = b + n * offset
+            let lines = [[a + n * 3 * perPoint, a2 + n * 5 * perPoint], [b + n * 3 * perPoint, b2 + n * 5 * perPoint],
+                         [a2, b2], arrowHead(at: a2, from: b2), arrowHead(at: b2, from: a2)]
+            return (lines, (a2 + b2) / 2, true)
+        case .diameter:
+            return ([[a, b], arrowHead(at: a, from: b), arrowHead(at: b, from: a)],
+                    b + dimension.direction * 6 * perPoint, false)
+        case .radius:
+            return ([[a, b], arrowHead(at: b, from: a)], b + dimension.direction * 6 * perPoint, false)
+        case .angle:
+            return ([], dimension.position, true)
+        }
+    }
+
+    // MARK: Maße am Element
+
+    /// Maße des Elements beim Aufziehen (nur Anzeige) und danach als Eingabefelder direkt am Element.
+    private func updateDimensionFields() {
+        guard let renderer, let sketch else { return }
+        let dimensions = sketch.isActive && !sketch.isChoosingPlane ? sketch.visibleDimensions : []
+        let plane = sketch.plane
+        let perPoint = Double(renderer.camera.worldUnitsPerPoint(viewHeight: Float(bounds.height)))
+        var shown = Set<String>()
+        for dimension in dimensions {
+            let field = dimensionFields[dimension.id] ?? makeDimensionField(dimension.id)
+            let geometry = dimensionGeometry(dimension, perPoint: perPoint)
+            let anchorWorld = SIMD3<Float>(plane.world(geometry.label))
+            let tipWorld = SIMD3<Float>(plane.world(geometry.label + dimension.direction * perPoint * 10))
+            guard let anchor = renderer.camera.project(anchorWorld, viewSize: bounds.size),
+                  let tip = renderer.camera.project(tipWorld, viewSize: bounds.size) else { continue }
+            shown.insert(dimension.id)
+            field.allowsEditing = dimension.isEditable
+            field.prefix = dimension.prefix
+            if !field.isFirstResponder {
+                field.text = dimension.value.formatted(.number.precision(.fractionLength(0...3)).grouping(.never))
+            }
+            field.sizeToFit()
+            var dx = tip.x - anchor.x, dy = tip.y - anchor.y
+            let length = max((dx * dx + dy * dy).squareRoot(), 1e-6)
+            dx /= length
+            dy /= length
+            // Auf der Maßlinie mittig, sonst neben das Element, Abstand passend zur Größe des Felds
+            let distance = geometry.onLine ? 0 : abs(dx) * field.bounds.width / 2 + abs(dy) * field.bounds.height / 2
+            field.center = CGPoint(x: anchor.x + dx * distance, y: anchor.y + dy * distance)
+            field.isHidden = false
+        }
+        for (id, field) in dimensionFields where !shown.contains(id) {
+            if field.isFirstResponder {
+                field.appliesOnEnd = false
+                field.resignFirstResponder()
+            }
+            field.isHidden = true
+        }
+    }
+
+    private func makeDimensionField(_ id: String) -> DimensionField {
+        let field = DimensionField(dimensionID: id)
+        field.delegate = self
+        field.isHidden = true
+        addSubview(field)
+        dimensionFields[id] = field
+        return field
+    }
+
+    private func apply(_ field: DimensionField) {
+        let text = (field.text ?? "").replacingOccurrences(of: ",", with: ".").trimmingCharacters(in: .whitespaces)
+        guard let value = Double(text), value > 0 else { return }
+        sketch?.setDimension(id: field.dimensionID, to: value)
+        refresh()
+    }
+
+    // MARK: Ebenenscheiben
+
+    /// Die drei Standardebenen durch den Ursprung (Normale, u, v).
+    private static let basePlanes: [(normal: SIMD3<Float>, u: SIMD3<Float>, v: SIMD3<Float>)] = [
+        ([0, 0, 1], [1, 0, 0], [0, 1, 0]),
+        ([0, 1, 0], [1, 0, 0], [0, 0, 1]),
+        ([1, 0, 0], [0, 1, 0], [0, 0, 1]),
+    ]
+
+    /// Halbe Kantenlänge der Scheiben, passend zur Modellgröße.
+    private var planeHalfSize: Float {
+        guard let bounds = model?.mesh.bounds else { return 30 }
+        let extent = max(simd_reduce_max(simd_abs(bounds.min)), simd_reduce_max(simd_abs(bounds.max)))
+        return max(30, extent * 1.1)
+    }
+
+    /// Welche Seite der Standardebene index die Kamera sieht.
+    private func facingSide(ofBasePlane index: Int) -> BasePlane {
+        let eye = renderer?.camera.position ?? SIMD3<Float>(1, -1, 1)
+        switch index {
+        case 0: return eye.z >= 0 ? .top : .bottom
+        case 1: return eye.y <= 0 ? .front : .back
+        default: return eye.x >= 0 ? .right : .left
+        }
+    }
+
+    /// Antippbare Felder der Standardebenen bei der Ebenenwahl, wie bei Shapr3D klein und neben dem Ursprung:
+    /// XY vorn rechts, XZ rechts oben, YZ vorn oben (Mittelpunkt, Richtungen, halbe Kantenlänge).
+    /// Die Größe richtet sich nach dem Bildschirm (etwa 80 Punkte), damit die Felder bei jedem Zoom gut zu treffen sind.
+    private var basePlaneSquares: [(index: Int, center: SIMD3<Float>, u: SIMD3<Float>, v: SIMD3<Float>, half: Float)] {
+        let perPoint = renderer?.camera.worldUnitsPerPoint(at: .zero, viewHeight: Float(max(bounds.height, 1))) ?? 0.3
+        let half = 40 * perPoint
+        let offset = half * 1.8
+        let sides: [SIMD2<Float>] = [[1, -1], [1, 1], [-1, 1]]
+        return Self.basePlanes.indices.map { index -> (index: Int, center: SIMD3<Float>, u: SIMD3<Float>, v: SIMD3<Float>, half: Float) in
+            let plane = Self.basePlanes[index]
+            let center = plane.u * sides[index].x * offset + plane.v * sides[index].y * offset
+            return (index, center, plane.u, plane.v, half)
+        }
+    }
+
+    /// Konstruktionsebenen zum Antippen; die Standardebenen zeichnet updateLines als Felder.
+    private func refreshPlanes() {
+        guard let renderer, let sketch else { return }
+        let half = planeHalfSize
+        var graphics: [PlaneGraphic] = []
+        var labels: [(text: String, position: SIMD3<Float>)] = []
+        // Konstruktionsebenen (beim Skizzieren ausgeblendet, bei der Ebenenwahl antippbar)
+        if !sketch.isActive || sketch.isChoosingPlane, let model {
+            for item in model.constructions where item.kind == .plane && !item.isHidden {
+                let frame = item.sketchPlane
+                graphics.append(PlaneGraphic(center: SIMD3<Float>(item.origin), u: SIMD3<Float>(frame.u),
+                                             v: SIMD3<Float>(frame.v), halfSize: half * 0.6,
+                                             color: SIMD3(0.95, 0.6, 0.2)))
+                labels.append((item.name, SIMD3<Float>(item.origin + (frame.u + frame.v) * Double(half) * 0.5)))
+            }
+        }
+        // Beim Skizzieren keine Scheibe: die ganze Ebene ist Zeichenfläche
+        renderer.planes = graphics
+
+        while planeLabels.count < labels.count {
+            let label = PaddedLabel()
+            label.font = .systemFont(ofSize: 13, weight: .semibold)
+            label.textColor = .white
+            label.backgroundColor = UIColor.systemBlue.withAlphaComponent(0.85)
+            label.layer.cornerRadius = 8
+            label.layer.masksToBounds = true
+            label.isUserInteractionEnabled = false
+            addSubview(label)
+            planeLabels.append(label)
+        }
+        for (index, label) in planeLabels.enumerated() {
+            guard index < labels.count,
+                  let point = renderer.camera.project(labels[index].position, viewSize: bounds.size) else {
+                label.isHidden = true
+                continue
+            }
+            label.text = labels[index].text
+            label.sizeToFit()
+            label.center = point
+            label.isHidden = false
+        }
+    }
+
+    /// Getroffene Standardebene (vorderstes Feld unter dem Finger) und Abstand entlang des Sehstrahls.
+    /// Die Trefferfläche ist etwas größer als das Feld, damit es sich mit dem Finger leicht treffen lässt.
+    private func basePlaneHit(ray: (origin: SIMD3<Float>, direction: SIMD3<Float>)) -> (side: BasePlane, t: Float)? {
+        var best: (side: BasePlane, t: Float)?
+        for square in basePlaneSquares {
+            let normal = Self.basePlanes[square.index].normal
+            let denominator = simd_dot(ray.direction, normal)
+            guard abs(denominator) > 1e-6 else { continue }
+            let t = -simd_dot(ray.origin, normal) / denominator
+            guard t > 0, t < (best?.t ?? .infinity) else { continue }
+            let d = ray.origin + t * ray.direction - square.center
+            let reach = square.half * 1.25
+            guard abs(simd_dot(d, square.u)) <= reach, abs(simd_dot(d, square.v)) <= reach else { continue }
+            best = (facingSide(ofBasePlane: square.index), t)
+        }
+        return best
+    }
+
+    /// Konstruktionsebene unter dem Sehstrahl (für die Skizzenebenen-Wahl).
+    private func constructionPlaneHit(ray: (origin: SIMD3<Float>, direction: SIMD3<Float>)) -> (plane: SketchPlane, t: Float)? {
+        guard let model else { return nil }
+        let half = planeHalfSize * 0.6
+        var best: (plane: SketchPlane, t: Float)?
+        for item in model.constructions where item.kind == .plane && !item.isHidden {
+            let frame = item.sketchPlane
+            let normal = SIMD3<Float>(frame.normal)
+            let denominator = simd_dot(ray.direction, normal)
+            guard abs(denominator) > 1e-6 else { continue }
+            let t = simd_dot(SIMD3<Float>(item.origin) - ray.origin, normal) / denominator
+            guard t > 0, t < (best?.t ?? .infinity) else { continue }
+            let d = ray.origin + t * ray.direction - SIMD3<Float>(item.origin)
+            guard abs(simd_dot(d, SIMD3<Float>(frame.u))) <= half, abs(simd_dot(d, SIMD3<Float>(frame.v))) <= half else {
+                continue
+            }
+            best = (frame, t)
+        }
+        return best
+    }
+
+    // MARK: Bilder und Kurzzeichen
+
+    /// Bilder (Canvas) als Texturen an den Renderer geben.
+    private func updateCanvases() {
+        guard let renderer, let model, let device else { return }
+        var graphics: [CanvasGraphic] = []
+        for canvas in model.canvases where !canvas.isHidden {
+            var texture = canvasTextures[canvas.fileName]
+            if texture == nil, let url = model.canvasURL(canvas) {
+                texture = try? MTKTextureLoader(device: device).newTexture(URL: url, options: [
+                    .SRGB: true, .origin: MTKTextureLoader.Origin.topLeft.rawValue,
+                ])
+                canvasTextures[canvas.fileName] = texture
+            }
+            guard let texture else { continue }
+            graphics.append(CanvasGraphic(texture: texture, corners: canvas.corners.map { SIMD3<Float>($0) },
+                                          opacity: Float(canvas.opacity)))
+        }
+        renderer.canvases = graphics
+    }
+
+    /// Kurzzeichen der Einschränkungen neben den Elementen.
+    private func updateBadges() {
+        guard let renderer, let sketch else { return }
+        let badges = sketch.isActive && !sketch.isChoosingPlane && sketch.showsConstraintBadges ? sketch.constraintBadges : []
+        while badgeLabels.count < badges.count {
+            let label = PaddedLabel()
+            label.font = .systemFont(ofSize: 11, weight: .bold)
+            label.textColor = UIColor(white: 0.25, alpha: 1)
+            label.backgroundColor = UIColor(white: 1, alpha: 0.9)
+            label.layer.cornerRadius = 7
+            label.layer.borderWidth = 1
+            label.layer.borderColor = UIColor(white: 0.7, alpha: 1).cgColor
+            label.layer.masksToBounds = true
+            label.isUserInteractionEnabled = false
+            addSubview(label)
+            badgeLabels.append(label)
+        }
+        let plane = sketch.plane
+        for (index, label) in badgeLabels.enumerated() {
+            guard index < badges.count,
+                  let point = renderer.camera.project(SIMD3<Float>(plane.world(badges[index].position)),
+                                                      viewSize: bounds.size) else {
+                label.isHidden = true
+                continue
+            }
+            label.text = badges[index].text
+            label.sizeToFit()
+            label.center = CGPoint(x: point.x + 14, y: point.y - 14)
+            label.isHidden = false
+        }
+    }
+
+    /// Maß-Etikett an der Pfeilspitze des ersten Ziehpfeils.
+    private func updateValueLabel(_ handles: [DragHandle]) {
+        guard let renderer, let handle = handles.first(where: { $0.value != 0 }) ?? handles.first,
+              !handle.isMove || handles.count == 3 else {
+            valueLabel.isHidden = true
+            return
+        }
+        let shown = handleDrag?.handle.kind ?? handle.kind
+        let active = handles.first { $0.kind == shown } ?? handle
+        let base = arrowBase(active)
+        let length = Renderer.handleLength * renderer.camera.worldUnitsPerPoint(at: base, viewHeight: Float(bounds.height))
+        guard let tip = renderer.camera.project(base + active.pointing * length * 1.25, viewSize: bounds.size) else {
+            valueLabel.isHidden = true
+            return
+        }
+        valueLabel.text = "\(active.value.formatted(.number.precision(.fractionLength(0...3)))) mm"
+        valueLabel.sizeToFit()
+        valueLabel.center = tip
+        valueLabel.isHidden = false
+    }
+
+    // MARK: Ziehpfeile
+
+    private func handleHit(at point: CGPoint) -> DragHandle? {
+        guard let renderer, let workspace else { return nil }
+        var best: (distance: CGFloat, handle: DragHandle)?
+        for handle in workspace.handles {
+            let base = arrowBase(handle)
+            let length = Renderer.handleLength * renderer.camera.worldUnitsPerPoint(at: base, viewHeight: Float(bounds.height))
+            guard let a = renderer.camera.project(base, viewSize: bounds.size),
+                  let b = renderer.camera.project(base + handle.pointing * length, viewSize: bounds.size) else {
+                continue
+            }
+            let distance = point.distance(toSegment: a, b)
+            if distance <= 30, distance < (best?.distance ?? .infinity) {
+                best = (distance, handle)
+            }
+        }
+        return best?.handle
+    }
+
+    /// Fuß des gezeichneten Pfeils: wie bei Shapr3D etwas über dem Objekt schwebend (Verschiebe-Pfeile am Mittelpunkt).
+    private func arrowBase(_ handle: DragHandle) -> SIMD3<Float> {
+        guard !handle.isMove, let renderer else { return handle.base }
+        let gap = 22 * renderer.camera.worldUnitsPerPoint(at: handle.base, viewHeight: Float(bounds.height))
+        return handle.base + handle.pointing * gap
+    }
+
+    /// Parameter entlang der Pfeilachse: nächster Punkt zwischen Sehstrahl und Achse.
+    private func axisParameter(at point: CGPoint, handle: DragHandle) -> Float? {
+        guard let renderer, let ray = renderer.camera.ray(through: point, viewSize: bounds.size) else { return nil }
+        let d = handle.direction, r = ray.direction
+        let w = handle.axisOrigin - ray.origin
+        let b = simd_dot(d, r)
+        let denominator = 1 - b * b
+        // Zeigt der Pfeil fast genau zur Kamera, ist die Lage entlang der Achse nicht bestimmbar.
+        guard denominator > 1e-4 else { return nil }
+        return (b * simd_dot(r, w) - simd_dot(d, w)) / denominator
+    }
+
+    /// Rastweite beim Ziehen, passend zum Zoom.
+    private func dragStep(at point: SIMD3<Float>) -> Double {
+        guard let renderer else { return 0.5 }
+        let perPoint = Double(renderer.camera.worldUnitsPerPoint(at: point, viewHeight: Float(bounds.height)))
+        return [0.001, 0.01, 0.1, 0.5, 1, 5, 10].first { $0 >= perPoint * 3 } ?? 10
+    }
+
+    // MARK: Skizze
+
+    private func acceptsForSketch(_ touch: UITouch) -> Bool {
+        guard let sketch, sketch.isActive, !sketch.isChoosingPlane else { return false }
+        return touch.type == .pencil || (sketch.fingerDraws && touch.type == .direct)
+    }
+
+    private func sketchPoint(for touch: UITouch) -> SIMD2<Double>? {
+        sketchPoint(at: touch.location(in: self))
+    }
+
+    /// Punkt der (unbegrenzten) Skizzenebene unter einem Bildschirmpunkt.
+    private func sketchPoint(at location: CGPoint) -> SIMD2<Double>? {
+        guard let renderer, let sketch else { return nil }
+        let plane = sketch.plane
+        let hit = renderer.camera.intersect(screenPoint: location, viewSize: bounds.size,
+                                            planeOrigin: SIMD3<Float>(plane.origin),
+                                            planeNormal: SIMD3<Float>(plane.normal))
+        return hit.map { plane.local(SIMD3<Double>($0)) }
+    }
+
+    /// Fangradius: etwa 20 Bildschirmpunkte in Weltmaß.
+    private var snapTolerance: Double {
+        Double((renderer?.camera.worldUnitsPerPoint(viewHeight: Float(bounds.height)) ?? 0.1) * 20)
+    }
+
+    // MARK: Berührungen
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if handleDrag == nil,
+           let touch = touches.first(where: { $0.type == .pencil || $0.type == .direct }),
+           let handle = handleHit(at: touch.location(in: self)),
+           let parameter = axisParameter(at: touch.location(in: self), handle: handle) {
+            handleDrag = HandleDragState(touch: touch, handle: handle, startParameter: parameter,
+                                         step: dragStep(at: handle.base))
+            return
+        }
+        guard sketchTouch == nil, let touch = touches.first(where: acceptsForSketch),
+              let point = sketchPoint(for: touch) else {
+            super.touchesBegan(touches, with: event)
+            return
+        }
+        sketchTouch = touch
+        // Ein offenes Maßfeld gehört zum vorigen Element: verwerfen statt auf das neue anwenden
+        for field in dimensionFields.values where field.isFirstResponder {
+            field.appliesOnEnd = false
+            field.resignFirstResponder()
+        }
+        sketch?.began(at: point, tolerance: snapTolerance)
+        refresh()
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if let drag = handleDrag, touches.contains(drag.touch) {
+            if let parameter = axisParameter(at: drag.touch.location(in: self), handle: drag.handle) {
+                let raw = drag.handle.value + Double(parameter - drag.startParameter)
+                let snapped = (raw / drag.step).rounded() * drag.step
+                workspace?.apply(drag.handle.kind, value: snapped)
+                refresh()
+            }
+            return
+        }
+        guard let touch = sketchTouch, touches.contains(touch) else {
+            super.touchesMoved(touches, with: event)
+            return
+        }
+        if let point = sketchPoint(for: touch) {
+            sketch?.moved(to: point, tolerance: snapTolerance)
+            refresh()
+        }
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if let drag = handleDrag, touches.contains(drag.touch) {
+            handleDrag = nil
+            refresh()
+            return
+        }
+        guard let touch = sketchTouch, touches.contains(touch) else {
+            super.touchesEnded(touches, with: event)
+            return
+        }
+        sketchTouch = nil
+        if let point = sketchPoint(for: touch) {
+            sketch?.ended(at: point, tolerance: snapTolerance)
+            if sketch?.tool == .project { project(at: touch.location(in: self)) }
+        } else {
+            sketch?.cancelStroke()
+        }
+        refresh()
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if let drag = handleDrag, touches.contains(drag.touch) {
+            handleDrag = nil
+            refresh()
+            return
+        }
+        guard let touch = sketchTouch, touches.contains(touch) else {
+            super.touchesCancelled(touches, with: event)
+            return
+        }
+        sketchTouch = nil
+        sketch?.cancelStroke()
+        refresh()
+    }
+
+    // MARK: Gesten
+
+    /// Tippen wählt Kanten (nah an einer Kante), Flächen oder Körper. Im Skizzenmodus wird eine ebene
+    /// Fläche zur Skizzenebene, Tippen ins Leere setzt die Skizze auf die Bodenebene zurück.
+    @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
+        let location = gesture.location(in: self)
+        guard handleHit(at: location) == nil,
+              let renderer, let model, let sketch, let workspace,
+              let ray = renderer.camera.ray(through: location, viewSize: bounds.size) else { return }
+        let hit = model.pick(origin: ray.origin, direction: ray.direction)
+
+        if sketch.isActive {
+            if sketch.isChoosingPlane {
+                chooseSketchPlane(ray: ray, faceHit: hit)
+                return
+            }
+            switch sketch.tool {
+            case .project:
+                project(at: location)
+                refresh()
+                return
+            case .trim:
+                if let point = sketchPoint(at: location) { sketch.trim(at: point, tolerance: snapTolerance) }
+                refresh()
+                return
+            case .fillet:
+                if let point = sketchPoint(at: location) { sketch.filletCorner(at: point, tolerance: snapTolerance) }
+                refresh()
+                return
+            default:
+                break
+            }
+            // Finger tippt Elemente an (Auswahl für Einschränkungen, Löschen, Konstruktion)
+            if !sketch.entities.isEmpty, let point = sketchPoint(at: location) {
+                sketch.select(at: point, tolerance: snapTolerance)
+                refresh()
+                return
+            }
+            // Ebene nur wechseln, solange noch nichts gezeichnet ist (der Wechsel leert die Skizze)
+            guard sketch.isEmpty else { return }
+            guard let hit else {
+                if sketch.plane.isOnFace { sketch.useBasePlane() }
+                refresh()
+                return
+            }
+            if let plane = model.plane(of: hit.face) {
+                workspace.chooseSketchPlane(plane)
+                model.message = nil
+            } else {
+                model.message = "Auf gekrümmten Flächen kann nicht skizziert werden."
+            }
+            refresh()
+            return
+        }
+        let edgeHit = pickEdge(at: location, ray: ray, faceHit: hit)
+        // Skizzenbereich vor der Fläche, auf der er liegt
+        var region: RegionRef?
+        if edgeHit == nil, let regionHit = model.pickRegion(origin: ray.origin, direction: ray.direction) {
+            let faceT = hit.map { simd_dot($0.point - ray.origin, ray.direction) } ?? .infinity
+            if regionHit.t <= faceT + max(faceT * 0.002, 0.05) {
+                region = regionHit.ref
+            }
+        }
+        workspace.tapped(face: hit?.face, edge: edgeHit?.edge, region: region, point: edgeHit?.point ?? hit?.point)
+    }
+
+    /// Projizieren: Körperkante (bzw. alle Kanten der Fläche) unter dem Punkt in die Skizze übernehmen.
+    private func project(at location: CGPoint) {
+        guard let renderer, let model, let sketch,
+              let ray = renderer.camera.ray(through: location, viewSize: bounds.size) else { return }
+        let hit = model.pick(origin: ray.origin, direction: ray.direction)
+        var polylines: [[SIMD3<Double>]] = []
+        if let edge = pickEdge(at: location, ray: ray, faceHit: hit)?.edge {
+            polylines = model.edgePolylines(edge)
+        } else if let hit {
+            polylines = model.edgePolylines(ofFace: hit.face)
+        }
+        guard !polylines.isEmpty else {
+            sketch.notice = "Eine Körperkante oder Fläche antippen."
+            return
+        }
+        let plane = sketch.plane
+        sketch.addProjected(polylines.map { $0.map(plane.local) })
+    }
+
+    /// Ebenenwahl: vorderste Standardebene oder ebene Körperfläche unter dem Finger.
+    private func chooseSketchPlane(ray: (origin: SIMD3<Float>, direction: SIMD3<Float>),
+                                   faceHit: (face: FaceRef, point: SIMD3<Float>)?) {
+        guard let model, let workspace else { return }
+        let planeHit = basePlaneHit(ray: ray)
+        if let construction = constructionPlaneHit(ray: ray),
+           construction.t < (planeHit?.t ?? .infinity),
+           construction.t < faceHit.map({ simd_dot($0.point - ray.origin, ray.direction) }) ?? .infinity {
+            workspace.chooseSketchPlane(construction.plane)
+            return
+        }
+        if let faceHit {
+            let faceT = simd_dot(faceHit.point - ray.origin, ray.direction)
+            if planeHit == nil || faceT < planeHit!.t {
+                if let plane = model.plane(of: faceHit.face) {
+                    model.message = nil
+                    workspace.chooseSketchPlane(plane)
+                } else {
+                    model.message = "Auf gekrümmten Flächen kann nicht skizziert werden."
+                }
+                return
+            }
+        }
+        if let planeHit {
+            workspace.chooseSketchPlane(planeHit.side)
+        }
+    }
+
+    /// Kante in Fingernähe, die nicht von einer Fläche verdeckt ist.
+    private func pickEdge(at location: CGPoint, ray: (origin: SIMD3<Float>, direction: SIMD3<Float>),
+                          faceHit: (face: FaceRef, point: SIMD3<Float>)?) -> (edge: EdgeRef, point: SIMD3<Float>)? {
+        guard let renderer, let model else { return nil }
+        let size = bounds.size
+        let camera = renderer.camera
+        guard let found = model.mesh.nearestEdge(to: location, tolerance: 16,
+                                                 project: { camera.project($0, viewSize: size) }) else { return nil }
+        if let faceHit {
+            let edgeDepth = simd_dot(found.point - ray.origin, ray.direction)
+            let faceDepth = simd_dot(faceHit.point - ray.origin, ray.direction)
+            if edgeDepth > faceDepth + max(faceDepth * 0.01, 0.5) {
+                return nil
+            }
+        }
+        return found
+    }
+
+    /// Während ein Ziehpfeil gezogen wird, drehen und wählen die Finger nicht.
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        if handleDrag != nil, gestureRecognizer === orbitGesture || gestureRecognizer === tapGesture {
+            return false
+        }
+        return super.gestureRecognizerShouldBegin(gestureRecognizer)
+    }
+
+    /// Schwebender Stift: Fangpunkt und Knoten zeigen, beim Linienzug schon das nächste Stück.
+    @objc private func handleHold(_ gesture: UILongPressGestureRecognizer) {
+        guard gesture.state == .began, let sketch, sketch.isActive, !sketch.isChoosingPlane,
+              let point = sketchPoint(at: gesture.location(in: self)) else { return }
+        // Ein angefangener Strich an derselben Stelle wird verworfen
+        if sketchTouch != nil {
+            sketchTouch = nil
+            sketch.cancelStroke()
+        }
+        sketch.capturePoint(at: point, tolerance: snapTolerance)
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        refresh()
+    }
+
+    @objc private func handleHover(_ gesture: UIHoverGestureRecognizer) {
+        guard let sketch else { return }
+        switch gesture.state {
+        case .began, .changed:
+            guard sketch.isActive, !sketch.isChoosingPlane, sketchTouch == nil,
+                  let point = sketchPoint(at: gesture.location(in: self)) else { return }
+            sketch.hover(at: point, tolerance: snapTolerance)
+        default:
+            sketch.endHover()
+        }
+        refresh()
+    }
+
+    /// Werkzeugrad an der Stiftspitze (bzw. in der Mitte, wenn der Stift nicht schwebt).
+    fileprivate func showQuickTools(at location: CGPoint?) {
+        guard let workspace else { return }
+        let point = location ?? CGPoint(x: bounds.midX, y: bounds.midY)
+        workspace.quickToolsLocation = workspace.quickToolsLocation == nil ? point : nil
     }
 
     @objc private func handleOrbit(_ gesture: UIPanGestureRecognizer) {
         let t = gesture.translation(in: self)
+        // Im Skizzenmodus keine 3D-Ansicht: ein Finger verschiebt nur
+        if let sketch, sketch.isActive, !sketch.isChoosingPlane {
+            renderer?.camera.pan(dx: Float(t.x), dy: Float(t.y), viewHeight: Float(bounds.height))
+            gesture.setTranslation(.zero, in: self)
+            refresh()
+            return
+        }
         renderer?.camera.orbit(dx: Float(t.x), dy: Float(t.y))
         gesture.setTranslation(.zero, in: self)
-        setNeedsDisplay()
+        cameraMoved()
     }
 
     @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
         let t = gesture.translation(in: self)
         renderer?.camera.pan(dx: Float(t.x), dy: Float(t.y), viewHeight: Float(bounds.height))
         gesture.setTranslation(.zero, in: self)
-        setNeedsDisplay()
+        refresh()
     }
 
     @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
         renderer?.camera.zoom(by: Float(gesture.scale))
         gesture.scale = 1
-        setNeedsDisplay()
+        refresh()
     }
+}
 
+extension ViewportView: UIGestureRecognizerDelegate {
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                            shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
         true
+    }
+
+    /// Antippen eines Maßfelds öffnet nur das Feld.
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        !(touch.view is UITextField)
+    }
+}
+
+extension ViewportView: UITextFieldDelegate {
+    func textFieldShouldBeginEditing(_ textField: UITextField) -> Bool {
+        (textField as? DimensionField)?.allowsEditing ?? false
+    }
+
+    func textFieldDidBeginEditing(_ textField: UITextField) {
+        (textField as? DimensionField)?.appliesOnEnd = true
+        textField.selectAll(nil)
+    }
+
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        textField.resignFirstResponder()
+        return false
+    }
+
+    func textFieldDidEndEditing(_ textField: UITextField) {
+        guard let field = textField as? DimensionField, field.appliesOnEnd else { return }
+        apply(field)
+    }
+}
+
+extension ViewportView: UIPencilInteractionDelegate {
+    /// Apple Pencil Pro: Drücken öffnet das Werkzeugrad (sofern in den Einstellungen nicht abgeschaltet).
+    @available(iOS 17.5, *)
+    func pencilInteraction(_ interaction: UIPencilInteraction, didReceiveSqueeze squeeze: UIPencilInteraction.Squeeze) {
+        guard squeeze.phase == .ended, UIPencilInteraction.preferredSqueezeAction != .ignore else { return }
+        showQuickTools(at: squeeze.hoverPose?.location)
+    }
+
+    @available(iOS 17.5, *)
+    func pencilInteraction(_ interaction: UIPencilInteraction, didReceiveTap tap: UIPencilInteraction.Tap) {
+        guard UIPencilInteraction.preferredTapAction != .ignore else { return }
+        showQuickTools(at: tap.hoverPose?.location)
+    }
+
+    /// Ältere Systeme: Doppeltippen auf den Apple Pencil (2. Gen.).
+    func pencilInteractionDidTap(_ interaction: UIPencilInteraction) {
+        guard UIPencilInteraction.preferredTapAction != .ignore else { return }
+        showQuickTools(at: nil)
+    }
+}
+
+private extension DragHandle {
+    var isMove: Bool {
+        if case .move = kind { return true }
+        return false
+    }
+}
+
+private extension CGPoint {
+    func distance(toSegment a: CGPoint, _ b: CGPoint) -> CGFloat {
+        let ab = CGPoint(x: b.x - a.x, y: b.y - a.y)
+        let lengthSquared = ab.x * ab.x + ab.y * ab.y
+        var t: CGFloat = 0
+        if lengthSquared > 0 {
+            t = min(max(((x - a.x) * ab.x + (y - a.y) * ab.y) / lengthSquared, 0), 1)
+        }
+        let dx = a.x + t * ab.x - x, dy = a.y + t * ab.y - y
+        return (dx * dx + dy * dy).squareRoot()
+    }
+}
+
+/// Etikett mit Innenabstand für das Maß am Ziehpfeil.
+final class PaddedLabel: UILabel {
+    private let insets = UIEdgeInsets(top: 4, left: 9, bottom: 4, right: 9)
+
+    override func drawText(in rect: CGRect) {
+        super.drawText(in: rect.inset(by: insets))
+    }
+
+    override func sizeThatFits(_ size: CGSize) -> CGSize {
+        let fitted = super.sizeThatFits(size)
+        return CGSize(width: fitted.width + insets.left + insets.right, height: fitted.height + insets.top + insets.bottom)
+    }
+}
+
+/// Maß direkt am Skizzenelement; antippen zum Ändern, Return übernimmt.
+final class DimensionField: UITextField {
+    /// Kennung des Maßes (SketchDimension.id)
+    let dimensionID: String
+    /// false, wenn das Feld geschlossen wird, weil sein Element nicht mehr das aktuelle ist.
+    var appliesOnEnd = true
+    var allowsEditing = false {
+        didSet { updateStyle() }
+    }
+    var prefix = "" {
+        didSet { prefixLabel.text = prefix.isEmpty ? nil : prefix }
+    }
+    private let prefixLabel = UILabel()
+
+    init(dimensionID: String) {
+        self.dimensionID = dimensionID
+        super.init(frame: .zero)
+        font = .monospacedDigitSystemFont(ofSize: 15, weight: .semibold)
+        textAlignment = .center
+        keyboardType = .decimalPad
+        returnKeyType = .done
+        autocorrectionType = .no
+        backgroundColor = .white
+        textColor = .black
+        layer.cornerRadius = 8
+        layer.borderWidth = 1.5
+        prefixLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        prefixLabel.textColor = .darkGray
+        leftView = prefixLabel
+        leftViewMode = .always
+        updateStyle()
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) wird nicht verwendet")
+    }
+
+    private func updateStyle() {
+        layer.borderColor = (allowsEditing ? UIColor.systemBlue : UIColor.systemGray3).cgColor
+        isUserInteractionEnabled = allowsEditing
+    }
+
+    override func sizeThatFits(_ size: CGSize) -> CGSize {
+        let text = (self.text ?? "") as NSString
+        let width = text.size(withAttributes: [.font: font ?? UIFont.systemFont(ofSize: 15)]).width
+        let prefixWidth = prefix.isEmpty ? 0 : prefixLabel.intrinsicContentSize.width + 2
+        return CGSize(width: max(width + prefixWidth + 22, 46), height: 30)
+    }
+
+    override func sizeToFit() {
+        bounds.size = sizeThatFits(.zero)
+    }
+
+    override func leftViewRect(forBounds bounds: CGRect) -> CGRect {
+        guard !prefix.isEmpty else { return .zero }
+        let width = prefixLabel.intrinsicContentSize.width
+        return CGRect(x: 9, y: 0, width: width, height: bounds.height)
+    }
+
+    override func textRect(forBounds bounds: CGRect) -> CGRect {
+        let left: CGFloat = prefix.isEmpty ? 8 : 9 + prefixLabel.intrinsicContentSize.width + 2
+        return bounds.inset(by: UIEdgeInsets(top: 0, left: left, bottom: 0, right: 8))
+    }
+
+    override func editingRect(forBounds bounds: CGRect) -> CGRect {
+        textRect(forBounds: bounds)
     }
 }
