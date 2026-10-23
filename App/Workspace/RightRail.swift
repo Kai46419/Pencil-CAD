@@ -447,6 +447,7 @@ struct ConstraintColumn: View {
             HStack(spacing: 8) {
                 RailLabel(title: row.id, dimmed: !active && !isEnabled)
                 Image(systemName: row.systemImage)
+                    .symbolRenderingMode(.hierarchical)
                     .font(.system(size: 16, weight: .medium))
                     .foregroundStyle(pending ? Color.white
                                      : active ? Color.accentColor : Color.primary.opacity(isEnabled ? 0.75 : 0.35))
