@@ -66,3 +66,8 @@ fragment float4 fragment_flat(VertexOut in [[stage_in]],
                               constant float4 &color [[buffer(2)]]) {
     return color;
 }
+
+/// Einfarbig in Vertexfarbe (breite Linien, Fangsymbole).
+fragment float4 fragment_color(VertexOut in [[stage_in]]) {
+    return float4(in.color, 1.0);
+}

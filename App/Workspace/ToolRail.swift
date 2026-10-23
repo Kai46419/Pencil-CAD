@@ -24,8 +24,8 @@ enum ToolGroup: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Extrudieren ist eine direkte Aktion ohne Untermenü.
-    var hasFlyout: Bool { self != .extrude }
+    /// Skizze und Extrudieren sind direkte Aktionen ohne Untermenü.
+    var hasFlyout: Bool { self != .extrude && self != .sketch }
 }
 
 /// Eintrag in einem Untermenü der Werkzeugleiste.
@@ -51,6 +51,38 @@ struct ToolRail: View {
     private let spacing: CGFloat = 10
 
     var body: some View {
+        if sketch.isActive {
+            sketchTools
+        } else {
+            modelTools
+        }
+    }
+
+    /// Im Skizzenmodus nur die Skizzenwerkzeuge (wie bei Shapr3D); die 3D-Werkzeuge kommen nach „Fertig“ zurück.
+    private var sketchTools: some View {
+        ViewThatFits(in: .vertical) {
+            sketchToolList
+            ScrollView(showsIndicators: false) { sketchToolList }
+        }
+    }
+
+    private var sketchToolList: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(SketchTool.allCases) { tool in
+                Button {
+                    sketch.tool = tool
+                } label: {
+                    RailTile(title: tool.rawValue, systemImage: tool.systemImage,
+                             isActive: sketch.tool == tool && !sketch.isChoosingPlane, size: tileSize)
+                }
+                .buttonStyle(.plain)
+                .disabled(sketch.isChoosingPlane)
+                .opacity(sketch.isChoosingPlane ? 0.5 : 1)
+            }
+        }
+    }
+
+    private var modelTools: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: spacing) {
                 ForEach(ToolGroup.allCases) { group in
@@ -77,7 +109,11 @@ struct ToolRail: View {
     private func tapped(_ group: ToolGroup) {
         guard group.hasFlyout else {
             openGroup = nil
-            startExtrude()
+            if group == .sketch {
+                workspace.startSketch()
+            } else {
+                startExtrude()
+            }
             return
         }
         openGroup = openGroup == group ? nil : group
@@ -100,23 +136,19 @@ struct ToolRail: View {
         case .visualize:
             return workspace.tool == .color
         case .extrude:
-            return (sketch.isActive && sketch.hasProfile) || (workspace.tool == .select && model.faceHandle != nil)
+            return workspace.tool == .select && (!model.selectedRegions.isEmpty || model.faceHandle != nil)
         }
     }
 
-    /// Wie bei Shapr3D: Profil oder ebene Fläche wählen, dann am Pfeil ziehen.
+    /// Wie bei Shapr3D: Skizzenbereich oder ebene Fläche antippen, dann am Pfeil ziehen.
     private func startExtrude() {
-        if sketch.isActive {
-            if !sketch.hasProfile {
-                model.message = "Erst ein geschlossenes Profil zeichnen, dann am Pfeil ziehen."
-            }
-            return
-        }
         if workspace.tool != .select {
             workspace.activate(.select)
         }
-        if model.faceHandle == nil {
-            model.message = "Ebene Fläche antippen und am blauen Pfeil ziehen."
+        if model.faceHandle == nil, model.selectedRegions.isEmpty {
+            model.message = model.sketches.isEmpty
+                ? "Erst eine Skizze mit geschlossenem Profil zeichnen, oder eine ebene Fläche antippen."
+                : "Skizzenbereich oder ebene Fläche antippen, dann am blauen Pfeil ziehen."
         }
     }
 

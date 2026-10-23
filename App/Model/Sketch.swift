@@ -45,7 +45,7 @@ enum SketchTool: String, CaseIterable, Identifiable {
 }
 
 /// Standardebenen durch den Ursprung. Die Normale zeigt zur Seite, von der aus man auf die Ebene blickt.
-enum BasePlane: String, CaseIterable, Identifiable {
+enum BasePlane: String, CaseIterable, Identifiable, Codable {
     case top = "Oben"
     case bottom = "Unten"
     case front = "Vorne"
@@ -68,7 +68,7 @@ enum BasePlane: String, CaseIterable, Identifiable {
 }
 
 /// Ebene im Raum mit lokalem 2D-Koordinatensystem (u, v) für die Skizze.
-struct SketchPlane {
+struct SketchPlane: Codable {
     var origin: SIMD3<Double>
     var u: SIMD3<Double>
     var v: SIMD3<Double>
@@ -148,7 +148,31 @@ private struct OffsetTarget {
     var direction: Point2
 }
 
-/// Zustand der aktuellen Skizze: Elemente, Werkzeugeingabe, geschlossene Bereiche.
+/// Maß am Element, das beim Aufziehen angezeigt und danach direkt geändert werden kann.
+struct SketchDimension: Identifiable {
+    enum Kind: Hashable {
+        case width, height, diameter, radius, length
+    }
+
+    var kind: Kind
+    var value: Double
+    /// Ansatz am Element (lokal) und Richtung, in die das Etikett abgesetzt wird.
+    var position: Point2
+    var direction: Point2
+    var isEditable: Bool
+
+    var id: Kind { kind }
+
+    var prefix: String {
+        switch kind {
+        case .diameter: "Ø "
+        case .radius: "R "
+        default: ""
+        }
+    }
+}
+
+/// Zustand der aktuellen Skizze: Elemente, Werkzeugeingabe, Fang, geschlossene Bereiche.
 /// Bekommt Punkte im lokalen System der Skizzenebene vom Viewport.
 @MainActor
 final class SketchController: ObservableObject {
@@ -168,7 +192,7 @@ final class SketchController: ObservableObject {
     @Published var tool: SketchTool = .rectangle {
         didSet { finishInput() }
     }
-    /// Für Geräte ohne Apple Pencil: ein Finger zeichnet statt zu drehen.
+    /// Für Geräte ohne Apple Pencil: ein Finger zeichnet statt zu verschieben.
     /// Im Simulator standardmäßig an, weil die Maus dort als Finger zählt.
     #if targetEnvironment(simulator)
     @Published var fingerDraws = true
@@ -179,8 +203,12 @@ final class SketchController: ObservableObject {
         didSet { reset() }
     }
     @Published var gridStep: Double = 1
-    /// Fang an Raster und Endpunkten (Schalter in der rechten Leiste)
+    /// Fang insgesamt (Magnet in der rechten Leiste)
     @Published var snapEnabled = true
+    /// Einzelne Fangarten; werden für die nächste Sitzung gemerkt.
+    @Published var snapKinds: Set<SnapKind> = SketchController.storedSnapKinds() {
+        didSet { UserDefaults.standard.set(snapKinds.map(\.rawValue), forKey: Self.snapKindsKey) }
+    }
     /// Eckenzahl für das Polygon-Werkzeug; ändert auch das zuletzt gezeichnete Polygon.
     @Published var polygonSides = 5 {
         didSet {
@@ -210,20 +238,25 @@ final class SketchController: ObservableObject {
     /// Gesetzt, wenn das Text-Werkzeug eine Position bekommen hat; die Oberfläche fragt dann den Inhalt ab.
     @Published var pendingTextAnchor: Point2?
 
-    /// Extrusion der geschlossenen Bereiche; der Ziehpfeil im Viewport ändert extrudeDistance.
-    @Published var extrudeDistance: Double = 10
-    @Published var extrudeMode: ExtrudeMode = .newBody
-
     @Published private(set) var entities: [SketchEntity] = []
     /// Geschlossene Bereiche (Außenkontur mit Löchern), größter zuerst.
     @Published private(set) var regions: [SketchRegion] = []
     @Published private(set) var offsetPreview: [SketchEntity] = []
     @Published private(set) var liveLabel: String?
+    /// Zählt jede Änderung; veröffentlicht wird nur außerhalb laufender Striche.
     @Published private(set) var revision = 0
-    /// Ändert sich nur, wenn sich die Elemente ändern (für die Extrusionsvorschau).
+    /// Ändert sich nur, wenn sich die Elemente ändern (für Bereichsfüllungen).
     @Published private(set) var geometryRevision = 0
 
+    /// Fang während eines Strichs bzw. beim Schweben des Stifts. Nicht veröffentlicht:
+    /// Schweben aktualisiert nur den Viewport, nicht die Oberfläche.
+    private(set) var activeSnap: SnapResult?
+    private(set) var hoverSnap: SnapResult?
+    /// Knoten in Stiftnähe (Enden, Mitten, Zentren, Schnittpunkte).
+    private(set) var hoverNodes: [Point2] = []
+
     private var loops: [SketchLoop] = []
+    private var snapIndex = SnapIndex()
     private var dragStart: Point2?
     private var dragCurrent: Point2?
     private var chainStart: Point2?
@@ -231,6 +264,15 @@ final class SketchController: ObservableObject {
     private var arcChord: (start: Point2, end: Point2)?
     private var splinePoints: [Point2] = []
     private var offsetTarget: OffsetTarget?
+    /// Zuletzt gezeichnetes Element, dessen Maße noch änderbar sind.
+    private var editableIndex: Int?
+
+    private static let snapKindsKey = "snapKinds"
+
+    private static func storedSnapKinds() -> Set<SnapKind> {
+        guard let raw = UserDefaults.standard.stringArray(forKey: snapKindsKey) else { return Set(SnapKind.allCases) }
+        return Set(raw.compactMap(SnapKind.init(rawValue:)))
+    }
 
     // MARK: Zustand
 
@@ -246,12 +288,6 @@ final class SketchController: ObservableObject {
     /// Ansatz und Richtung des Versatz-Pfeils (lokal).
     var offsetHandle: (anchor: Point2, direction: Point2)? {
         offsetTarget.map { ($0.anchor, $0.direction) }
-    }
-
-    /// Schwerpunkt des größten Bereichs (Ansatz des Extrudieren-Pfeils).
-    var profileCentroid: Point2? {
-        guard let polygon = regions.first?.polygon, !polygon.isEmpty else { return nil }
-        return polygon.reduce(.zero, +) / Double(polygon.count)
     }
 
     // MARK: Ebene
@@ -273,48 +309,67 @@ final class SketchController: ObservableObject {
         set { plane = .base(plane.base ?? basePlane, offset: newValue) }
     }
 
+    /// Gespeicherte Skizze zum Bearbeiten laden.
+    func load(plane: SketchPlane, entities: [SketchEntity]) {
+        isChoosingPlane = false
+        if let base = plane.base { basePlane = base }
+        self.plane = plane
+        self.entities = entities
+        entitiesChanged()
+    }
+
     // MARK: Eingabe
 
     func began(at point: Point2, tolerance: Double) {
-        let p = snap(point, tolerance: tolerance)
+        let anchor: Point2? = switch tool {
+        case .polyline: chainEnd
+        case .spline: splinePoints.last
+        default: nil
+        }
+        let p = snap(point, tolerance: tolerance, anchor: anchor)
         dragStart = p
         dragCurrent = p
+        hoverSnap = nil
+        hoverNodes = []
         changed()
     }
 
     func moved(to point: Point2, tolerance: Double) {
         guard dragStart != nil else { return }
-        dragCurrent = snap(point, tolerance: tolerance)
-        changed()
+        dragCurrent = snap(point, tolerance: tolerance, anchor: strokeAnchor)
+        // Der Stift liefert bis zu 240 Punkte pro Sekunde: nicht jedes Mal die Oberfläche neu aufbauen,
+        // der Viewport zeichnet selbst neu.
+        changed(publish: false)
     }
 
     func ended(at point: Point2, tolerance: Double) {
         guard let start = dragStart else { return }
-        let end = snap(point, tolerance: tolerance)
+        let end = snap(point, tolerance: tolerance, anchor: strokeAnchor)
         dragStart = nil
         dragCurrent = nil
+        activeSnap = nil
 
         switch tool {
         case .rectangle:
             let size = end - start
             if size.x != 0, size.y != 0 {
-                add(.rectangle(corner: start, size: size))
+                add(.rectangle(corner: start, size: size), editable: true)
             }
         case .circle:
             let radius = simd_distance(start, end)
             if radius > 0 {
-                add(.circle(center: start, radius: radius))
+                add(.circle(center: start, radius: radius), editable: true)
             }
         case .ellipse:
             let radii = simd_abs(end - start)
             if radii.x > 0, radii.y > 0 {
-                add(.ellipse(center: start, radii: radii))
+                add(.ellipse(center: start, radii: radii), editable: true)
             }
         case .polygon:
             let radius = simd_distance(start, end)
             if radius > 0 {
                 add(.regularPolygon(center: start, radius: radius, sides: polygonSides,
-                                    angle: atan2(end.y - start.y, end.x - start.x)))
+                                    angle: atan2(end.y - start.y, end.x - start.x)), editable: true)
             }
         case .polyline:
             endLineStroke(start: start, end: end)
@@ -323,7 +378,7 @@ final class SketchController: ObservableObject {
             if let chord = arcChord {
                 if circleThrough(chord.start, end, chord.end) != nil {
                     arcChord = nil
-                    add(.arc(start: chord.start, mid: end, end: chord.end))
+                    add(.arc(start: chord.start, mid: end, end: chord.end), editable: true)
                 }
             } else if simd_distance(start, end) > 1e-6 {
                 arcChord = (start, end)
@@ -343,7 +398,19 @@ final class SketchController: ObservableObject {
     func cancelStroke() {
         dragStart = nil
         dragCurrent = nil
+        activeSnap = nil
         changed()
+    }
+
+    /// Bezugspunkt für Winkelschritte während eines Strichs.
+    private var strokeAnchor: Point2? {
+        switch tool {
+        case .polyline: chainEnd ?? dragStart
+        case .arc: arcChord == nil ? dragStart : nil
+        case .spline: splinePoints.last ?? dragStart
+        case .circle, .polygon: dragStart
+        default: nil
+        }
     }
 
     /// Linie: Jeder Strich setzt den nächsten Punkt, zurück zum Startpunkt schließt den Linienzug.
@@ -351,13 +418,13 @@ final class SketchController: ObservableObject {
         guard let from = chainEnd else {
             chainStart = start
             if simd_distance(start, end) > 1e-6 {
-                add(.line(start, end))
+                add(.line(start, end), editable: true)
             }
             chainEnd = end
             return
         }
         guard simd_distance(from, end) > 1e-6 else { return }
-        add(.line(from, end))
+        add(.line(from, end), editable: true)
         if let first = chainStart, simd_distance(first, end) < 1e-6 {
             chainStart = nil
             chainEnd = nil
@@ -406,6 +473,31 @@ final class SketchController: ObservableObject {
                               alignment: textAlignment)
         guard !text.loops.isEmpty else { return }
         add(.text(text))
+    }
+
+    // MARK: Schweben des Stifts
+
+    /// Stift schwebt über der Ebene: Fangpunkt und Knoten in der Nähe zeigen.
+    func hover(at point: Point2, tolerance: Double) {
+        guard dragStart == nil else { return }
+        let anchor: Point2? = switch tool {
+        case .polyline: chainEnd
+        case .spline: splinePoints.last
+        default: nil
+        }
+        hoverSnap = snapEnabled
+            ? snapIndex.snap(point, tolerance: tolerance, kinds: snapKinds, extra: inputPoints, anchor: anchor,
+                             gridStep: gridStep)
+            : SnapResult(point: point, kind: nil)
+        let radius = tolerance * 5
+        hoverNodes = snapEnabled
+            ? (snapIndex.nodes.map { $0.point } + inputPoints).filter { simd_distance($0, point) <= radius }
+            : []
+    }
+
+    func endHover() {
+        hoverSnap = nil
+        hoverNodes = []
     }
 
     // MARK: Versatz
@@ -460,6 +552,7 @@ final class SketchController: ObservableObject {
         let added = offsetPreview
         offsetTarget = nil
         offsetPreview = []
+        editableIndex = nil
         entities += added
         entitiesChanged()
     }
@@ -480,6 +573,10 @@ final class SketchController: ObservableObject {
         splinePoints = []
         offsetTarget = nil
         offsetPreview = []
+        editableIndex = nil
+        activeSnap = nil
+        hoverSnap = nil
+        hoverNodes = []
         entities = []
         entitiesChanged()
     }
@@ -496,6 +593,7 @@ final class SketchController: ObservableObject {
         offsetTarget = nil
         offsetPreview = []
         pendingTextAnchor = nil
+        editableIndex = nil
         changed()
     }
 
@@ -521,6 +619,7 @@ final class SketchController: ObservableObject {
             return
         }
         guard let last = entities.popLast() else { return }
+        editableIndex = nil
         if case .line(let a, let b) = last, let end = chainEnd, simd_distance(end, b) < 1e-6 {
             if let first = chainStart, simd_distance(first, a) < 1e-6 {
                 chainStart = nil
@@ -535,74 +634,143 @@ final class SketchController: ObservableObject {
         entitiesChanged()
     }
 
-    // MARK: Exakte Maße nach dem Zeichnen (zuletzt gezeichnetes Element)
+    // MARK: Maße am Element
 
-    /// Breite/Tiefe des zuletzt gezeichneten Rechtecks. Die Startecke bleibt fest.
-    var rectangleSize: Point2? {
-        get {
-            guard case .rectangle(_, let size) = entities.last else { return nil }
-            return simd_abs(size)
-        }
-        set {
-            guard let newValue, newValue.x > 0, newValue.y > 0,
-                  case .rectangle(let corner, let size) = entities.last else { return }
-            let sign = Point2(size.x < 0 ? -1.0 : 1.0, size.y < 0 ? -1.0 : 1.0)
-            entities[entities.count - 1] = .rectangle(corner: corner, size: newValue * sign)
-            entitiesChanged()
-        }
-    }
-
-    var circleDiameter: Double? {
-        get {
-            guard case .circle(_, let radius) = entities.last else { return nil }
-            return 2 * radius
-        }
-        set {
-            guard let newValue, newValue > 0, case .circle(let center, _) = entities.last else { return }
-            entities[entities.count - 1] = .circle(center: center, radius: newValue / 2)
-            entitiesChanged()
-        }
-    }
-
-    // MARK: Extrudieren
-
-    /// Körper aus allen geschlossenen Bereichen. Beim Abziehen beginnt das Werkzeug minimal außerhalb,
-    /// damit keine hauchdünnen Restflächen bleiben.
-    func extrusion(distance: Double, mode: ExtrudeMode) -> PCKShape? {
-        guard !regions.isEmpty, distance != 0 else { return nil }
-        let plane = self.plane
-        let sign = plane.extrusionSign(mode: mode)
-        let from = mode == .cut ? -sign * 0.01 : 0
-        let base = plane.normal * from
-        let direction = plane.normal * (sign * distance - from)
-        let world = { (p: Point2) -> [NSNumber] in
-            let w = plane.world(p) + base
-            return [NSNumber(value: w.x), NSNumber(value: w.y), NSNumber(value: w.z)]
-        }
-        var shapes: [PCKShape] = []
-        for region in regions {
-            let shape: PCKShape?
-            if PCKShape.kernelAvailable {
-                let wires = ([region.outer] + region.holes).map { $0.code(normal: plane.normal, xAxis: plane.u, world: world) }
-                shape = PCKShape.prism(profileWires: wires, direction: direction)
-            } else {
-                shape = PCKShape.prism(pointsXYZ: region.polygon.flatMap(world), direction: direction)
+    /// Maße der laufenden Eingabe (nur Anzeige) bzw. des zuletzt gezeichneten Elements (änderbar).
+    var dimensions: [SketchDimension] {
+        if let start = dragStart, let current = dragCurrent {
+            if tool == .polyline {
+                let from = chainEnd ?? start
+                return Self.lineDimensions(from, current, editable: false)
             }
-            guard let shape else { return nil }
-            shapes.append(shape)
+            if tool == .arc, arcChord == nil {
+                return Self.lineDimensions(start, current, editable: false)
+            }
+            if tool == .arc, let chord = arcChord {
+                return Self.dimensions(of: .arc(start: chord.start, mid: current, end: chord.end), editable: false)
+            }
+            if let preview = shapePreview(from: start, to: current) {
+                return Self.dimensions(of: preview, editable: false)
+            }
+            return []
         }
-        return PCKShape.compound(shapes)
+        if tool == .polyline, let from = chainEnd, let hover = hoverSnap?.point, simd_distance(from, hover) > 1e-6 {
+            return Self.lineDimensions(from, hover, editable: false)
+        }
+        guard let index = editableIndex, entities.indices.contains(index), !isInProgress || chainEnd != nil else {
+            return []
+        }
+        return Self.dimensions(of: entities[index], editable: true)
+    }
+
+    /// Maß des zuletzt gezeichneten Elements setzen. Startecke, Mitte bzw. Startpunkt bleiben fest.
+    func setDimension(_ kind: SketchDimension.Kind, to value: Double) {
+        guard value > 0, let index = editableIndex, entities.indices.contains(index) else { return }
+        let entity = entities[index]
+        var updated: SketchEntity?
+        switch (entity, kind) {
+        case (.rectangle(let corner, let size), .width):
+            updated = .rectangle(corner: corner, size: Point2(size.x < 0 ? -value : value, size.y))
+        case (.rectangle(let corner, let size), .height):
+            updated = .rectangle(corner: corner, size: Point2(size.x, size.y < 0 ? -value : value))
+        case (.circle(let center, _), .diameter):
+            updated = .circle(center: center, radius: value / 2)
+        case (.ellipse(let center, let radii), .width):
+            updated = .ellipse(center: center, radii: Point2(value / 2, radii.y))
+        case (.ellipse(let center, let radii), .height):
+            updated = .ellipse(center: center, radii: Point2(radii.x, value / 2))
+        case (.regularPolygon(let center, _, let sides, let angle), .radius):
+            updated = .regularPolygon(center: center, radius: value, sides: sides, angle: angle)
+        case (.line(let a, let b), .length):
+            let direction = simd_normalize(b - a)
+            let newEnd = a + direction * value
+            updated = .line(a, newEnd)
+            // Laufender Linienzug geht am neuen Ende weiter
+            if let end = chainEnd, simd_distance(end, b) < 1e-6 { chainEnd = newEnd }
+        case (.arc(let a, let m, let b), .radius):
+            updated = Self.arc(a, m, b, radius: value).map { SketchEntity.arc(start: a, mid: $0, end: b) }
+        default:
+            break
+        }
+        guard let updated else { return }
+        entities[index] = updated
+        entitiesChanged()
+    }
+
+    private static func lineDimensions(_ a: Point2, _ b: Point2, editable: Bool) -> [SketchDimension] {
+        guard simd_distance(a, b) > 1e-6 else { return [] }
+        var normal = rightNormal(b - a)
+        if normal.y < 0 || (normal.y == 0 && normal.x < 0) { normal = -normal }
+        return [SketchDimension(kind: .length, value: simd_distance(a, b), position: (a + b) / 2, direction: normal,
+                                isEditable: editable)]
+    }
+
+    private static func dimensions(of entity: SketchEntity, editable: Bool) -> [SketchDimension] {
+        switch entity {
+        case .rectangle(let corner, let size):
+            let lo = simd_min(corner, corner + size), hi = simd_max(corner, corner + size)
+            return [
+                SketchDimension(kind: .width, value: abs(size.x), position: Point2((lo.x + hi.x) / 2, lo.y),
+                                direction: Point2(0, -1), isEditable: editable),
+                SketchDimension(kind: .height, value: abs(size.y), position: Point2(hi.x, (lo.y + hi.y) / 2),
+                                direction: Point2(1, 0), isEditable: editable),
+            ]
+        case .circle(let center, let radius):
+            let d = Point2(1, 1) / sqrt(2.0)
+            return [SketchDimension(kind: .diameter, value: 2 * radius, position: center + d * radius, direction: d,
+                                    isEditable: editable)]
+        case .ellipse(let center, let radii):
+            return [
+                SketchDimension(kind: .width, value: 2 * radii.x, position: center - Point2(0, radii.y),
+                                direction: Point2(0, -1), isEditable: editable),
+                SketchDimension(kind: .height, value: 2 * radii.y, position: center + Point2(radii.x, 0),
+                                direction: Point2(1, 0), isEditable: editable),
+            ]
+        case .regularPolygon(let center, let radius, _, let angle):
+            let d = Point2(cos(angle), sin(angle))
+            return [SketchDimension(kind: .radius, value: radius, position: center + d * radius / 2,
+                                    direction: rightNormal(d) * -1, isEditable: editable)]
+        case .line(let a, let b):
+            return lineDimensions(a, b, editable: editable)
+        case .arc(let a, let m, let b):
+            guard let circle = circleThrough(a, m, b) else { return [] }
+            let samples = SketchSegment.arc(a, m, b).samples
+            let mid = samples[samples.count / 2]
+            return [SketchDimension(kind: .radius, value: circle.radius, position: mid,
+                                    direction: simd_normalize(mid - circle.center), isEditable: editable)]
+        default:
+            return []
+        }
+    }
+
+    /// Neuer Punkt auf dem Bogen für einen anderen Radius bei festen Enden (auf derselben Seite der Sehne).
+    private static func arc(_ a: Point2, _ m: Point2, _ b: Point2, radius: Double) -> Point2? {
+        let chord = simd_distance(a, b)
+        guard radius >= chord / 2, let circle = circleThrough(a, m, b) else { return nil }
+        let middle = (a + b) / 2
+        var side = rightNormal(b - a)
+        if simd_dot(m - middle, side) < 0 { side = -side }
+        // Großer Bogen, wenn der Mittelpunkt auf der Seite des Bogens liegt
+        let isMajor = simd_dot(circle.center - middle, side) > 0
+        let h = (radius * radius - chord * chord / 4).squareRoot()
+        return middle + side * (isMajor ? radius + h : radius - h)
     }
 
     // MARK: Darstellung
 
-    /// Liniensegmente (Punktpaare, lokal) für den Renderer: Elemente und laufende Eingabe.
-    var segments: [Point2] {
-        var polylines = entities.flatMap(\.drawing) + offsetPreview.flatMap(\.drawing)
-        let current = dragCurrent
+    /// Linienzüge der fertigen Elemente (lokal).
+    var entityPolylines: [[Point2]] {
+        entities.flatMap(\.drawing)
+    }
+
+    /// Linienzüge der laufenden Eingabe und der Versatz-Vorschau (lokal).
+    var previewPolylines: [[Point2]] {
+        var polylines = offsetPreview.flatMap(\.drawing)
+        // Beim Schweben zeigt der Linienzug, Bogen bzw. Spline schon das nächste Stück
+        let current = dragCurrent ?? hoverSnap?.point
         switch tool {
         case .rectangle, .circle, .ellipse, .polygon:
-            if let start = dragStart, let current, let preview = shapePreview(from: start, to: current) {
+            if let start = dragStart, let current = dragCurrent, let preview = shapePreview(from: start, to: current) {
                 polylines += preview.drawing
                 if tool == .circle || tool == .polygon { polylines.append([start, current]) }
             }
@@ -615,13 +783,13 @@ final class SketchController: ObservableObject {
                 } else {
                     polylines.append([chord.start, chord.end])
                 }
-            } else if let start = dragStart, let current {
+            } else if let start = dragStart, let current = dragCurrent {
                 polylines.append([start, current])
             }
         case .spline:
             var points = splinePoints
-            if current != nil, points.isEmpty, let start = dragStart { points = [start] }
-            if let current { points.append(current) }
+            if dragCurrent != nil, points.isEmpty, let start = dragStart { points = [start] }
+            if let current, !points.isEmpty { points.append(current) }
             if points.count >= 2 {
                 let preview = SketchEntity.spline(points: points, kind: splineKind, closed: false)
                 polylines += preview.drawing
@@ -630,9 +798,12 @@ final class SketchController: ObservableObject {
         case .point, .text, .offset:
             break
         }
-        return polylines.flatMap { line in
-            zip(line, line.dropFirst()).flatMap { [$0, $1] }
-        }
+        return polylines
+    }
+
+    /// Aktueller Fang (Strich hat Vorrang vor Schweben).
+    var currentSnap: SnapResult? {
+        activeSnap ?? hoverSnap
     }
 
     private func shapePreview(from start: Point2, to current: Point2) -> SketchEntity? {
@@ -651,23 +822,30 @@ final class SketchController: ObservableObject {
         }
     }
 
-    // MARK: Fang und Maße
+    // MARK: Fang
 
-    /// Fang an Endpunkten, Ecken, Mittelpunkten und Punkten (innerhalb tolerance), sonst am Raster.
-    private func snap(_ p: Point2, tolerance: Double) -> Point2 {
-        guard snapEnabled else { return p }
-        var candidates = entities.flatMap(\.snapPoints) + splinePoints
-        if let chainStart { candidates.append(chainStart) }
-        if let arcChord { candidates += [arcChord.start, arcChord.end] }
-        if let nearest = candidates.min(by: { simd_distance($0, p) < simd_distance($1, p) }),
-           simd_distance(nearest, p) <= tolerance {
-            return nearest
-        }
-        return (p / gridStep).rounded(.toNearestOrAwayFromZero) * gridStep
+    /// Punkte der laufenden Eingabe, an denen ebenfalls gefangen wird.
+    private var inputPoints: [Point2] {
+        var points = splinePoints
+        if let chainStart { points.append(chainStart) }
+        if let arcChord { points += [arcChord.start, arcChord.end] }
+        return points
     }
 
-    private func add(_ entity: SketchEntity) {
+    private func snap(_ p: Point2, tolerance: Double, anchor: Point2?) -> Point2 {
+        guard snapEnabled else {
+            activeSnap = nil
+            return p
+        }
+        let result = snapIndex.snap(p, tolerance: tolerance, kinds: snapKinds, extra: inputPoints, anchor: anchor,
+                                    gridStep: gridStep)
+        activeSnap = result.kind == nil ? nil : result
+        return result.point
+    }
+
+    private func add(_ entity: SketchEntity, editable: Bool = false) {
         entities.append(entity)
+        editableIndex = editable ? entities.count - 1 : nil
         entitiesChanged()
     }
 
@@ -675,57 +853,41 @@ final class SketchController: ObservableObject {
         let found = findRegions(in: entities)
         regions = found.regions
         loops = found.loops
+        snapIndex = SnapIndex(entities: entities)
         geometryRevision += 1
         changed()
     }
 
-    private func changed() {
+    private func changed(publish: Bool = true) {
         updateLabel()
-        revision += 1
+        if publish { revision += 1 }
     }
 
     private func updateLabel() {
-        if let start = dragStart, let current = dragCurrent {
-            switch tool {
-            case .rectangle:
-                liveLabel = "\(format(abs(current.x - start.x))) × \(format(abs(current.y - start.y))) mm"
-            case .circle:
-                liveLabel = "Ø \(format(2 * simd_distance(start, current))) mm"
-            case .ellipse:
-                liveLabel = "\(format(2 * abs(current.x - start.x))) × \(format(2 * abs(current.y - start.y))) mm"
-            case .polygon:
-                liveLabel = "\(polygonSides) Seiten · R \(format(simd_distance(start, current))) mm"
-            case .polyline:
-                liveLabel = "\(format(simd_distance(chainEnd ?? start, current))) mm"
-            case .arc:
-                if let chord = arcChord, let circle = circleThrough(chord.start, current, chord.end) {
-                    liveLabel = "R \(format(circle.radius)) mm"
-                } else {
-                    liveLabel = "\(format(simd_distance(start, current))) mm"
-                }
-            case .spline:
-                liveLabel = "\(splinePoints.count + 1) Punkte"
-            case .point, .text, .offset:
-                liveLabel = nil
-            }
-            return
-        }
-        if tool == .offset, offsetTarget != nil {
-            liveLabel = "Versatz \(format(offsetDistance)) mm"
-        } else if !splinePoints.isEmpty {
-            liveLabel = "Spline, \(splinePoints.count) Punkte"
-        } else if case .rectangle(_, let size) = entities.last {
-            liveLabel = "\(format(abs(size.x))) × \(format(abs(size.y))) mm"
-        } else if case .circle(_, let radius) = entities.last {
-            liveLabel = "Ø \(format(2 * radius)) mm"
-        } else if !regions.isEmpty {
-            liveLabel = regions.count == 1 ? "1 geschlossener Bereich" : "\(regions.count) geschlossene Bereiche"
-        } else {
-            liveLabel = nil
-        }
+        let label = currentLabel
+        // @Published meldet jede Zuweisung, auch ohne Änderung
+        if label != liveLabel { liveLabel = label }
     }
 
-    private func format(_ value: Double) -> String {
-        value.formatted(.number.precision(.fractionLength(0...1)))
+    private var currentLabel: String? {
+        if dragStart != nil {
+            switch tool {
+            case .polygon:
+                return "\(polygonSides) Seiten"
+            case .spline:
+                return "\(splinePoints.count + 1) Punkte"
+            default:
+                return activeSnap?.kind.map { "Fang: \($0.rawValue)" }
+            }
+        }
+        if tool == .offset, offsetTarget != nil {
+            return "Versatz \(offsetDistance.formatted(.number.precision(.fractionLength(0...2)))) mm"
+        } else if !splinePoints.isEmpty {
+            return "Spline, \(splinePoints.count) Punkte"
+        } else if !regions.isEmpty {
+            return regions.count == 1 ? "1 geschlossener Bereich" : "\(regions.count) geschlossene Bereiche"
+        } else {
+            return nil
+        }
     }
 }

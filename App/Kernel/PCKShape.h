@@ -70,6 +70,10 @@ NS_ASSUME_NONNULL_BEGIN
 + (nullable PCKShape *)prismWithProfileWires:(NSArray<NSArray<NSNumber *> *> *)wires direction:(simd_double3)direction
     NS_SWIFT_NAME(prism(profileWires:direction:));
 
+/// Ebene Fläche aus einem Skizzenprofil (Kodierung wie oben), z. B. zum Einfärben eines Bereichs.
++ (nullable PCKShape *)faceWithProfileWires:(NSArray<NSArray<NSNumber *> *> *)wires
+    NS_SWIFT_NAME(face(profileWires:));
+
 /// Fasst mehrere Körper zu einem Verbund zusammen (ohne Kernel: nur der erste).
 + (nullable PCKShape *)compoundOfShapes:(NSArray<PCKShape *> *)shapes NS_SWIFT_NAME(compound(_:));
 

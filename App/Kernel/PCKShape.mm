@@ -466,23 +466,41 @@ static TopoDS_Wire wireFromCode(const std::vector<double> &code) {
     return wire.IsDone() ? wire.Wire() : TopoDS_Wire();
 }
 
+/// Ebene Fläche aus Außenkontur und Löchern (Kodierung wie prismWithProfileWires:). Null bei Fehler.
+static TopoDS_Face faceFromWires(NSArray<NSArray<NSNumber *> *> *wires) {
+    if (wires.count == 0) return TopoDS_Face();
+    const TopoDS_Wire outer = wireFromCode(toVector(wires[0]));
+    if (outer.IsNull()) return TopoDS_Face();
+    BRepBuilderAPI_MakeFace face(outer, Standard_True);
+    if (!face.IsDone()) return TopoDS_Face();
+    for (NSUInteger k = 1; k < wires.count; ++k) {
+        const TopoDS_Wire hole = wireFromCode(toVector(wires[k]));
+        if (!hole.IsNull()) face.Add(hole);
+    }
+    // Umlaufrichtung der Löcher passend zur Außenkontur
+    ShapeFix_Face fix(face.Face());
+    fix.Perform();
+    return fix.Face();
+}
+
 + (nullable PCKShape *)prismWithProfileWires:(NSArray<NSArray<NSNumber *> *> *)wires direction:(simd_double3)direction {
-    if (wires.count == 0 || simd_length(direction) == 0) return nil;
+    if (simd_length(direction) == 0) return nil;
     try {
-        const TopoDS_Wire outer = wireFromCode(toVector(wires[0]));
-        if (outer.IsNull()) return nil;
-        BRepBuilderAPI_MakeFace face(outer, Standard_True);
-        if (!face.IsDone()) return nil;
-        for (NSUInteger k = 1; k < wires.count; ++k) {
-            const TopoDS_Wire hole = wireFromCode(toVector(wires[k]));
-            if (!hole.IsNull()) face.Add(hole);
-        }
-        // Umlaufrichtung der Löcher passend zur Außenkontur
-        ShapeFix_Face fix(face.Face());
-        fix.Perform();
-        BRepPrimAPI_MakePrism prism(fix.Face(), gp_Vec(direction.x, direction.y, direction.z));
+        const TopoDS_Face face = faceFromWires(wires);
+        if (face.IsNull()) return nil;
+        BRepPrimAPI_MakePrism prism(face, gp_Vec(direction.x, direction.y, direction.z));
         if (!prism.IsDone()) return nil;
         return [[PCKShape alloc] initWithShape:prism.Shape()];
+    } catch (const Standard_Failure &) {
+        return nil;
+    }
+}
+
++ (nullable PCKShape *)faceWithProfileWires:(NSArray<NSArray<NSNumber *> *> *)wires {
+    try {
+        const TopoDS_Face face = faceFromWires(wires);
+        if (face.IsNull()) return nil;
+        return [[PCKShape alloc] initWithShape:face];
     } catch (const Standard_Failure &) {
         return nil;
     }
@@ -883,6 +901,10 @@ static std::vector<TopoDS_Edge> edgesFromNumbers(const TopTools_IndexedMapOfShap
 }
 
 + (nullable PCKShape *)prismWithProfileWires:(NSArray<NSArray<NSNumber *> *> *)wires direction:(simd_double3)direction {
+    return nil;
+}
+
++ (nullable PCKShape *)faceWithProfileWires:(NSArray<NSArray<NSNumber *> *> *)wires {
     return nil;
 }
 

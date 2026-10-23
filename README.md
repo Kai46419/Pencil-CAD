@@ -12,11 +12,20 @@ Oberfläche nach dem Aufbau von Shapr3D (eigene Symbole, kein Shapr3D-Material):
   Untermenüs, rechte Leiste (Fang, Rastergröße, ViewCube, Einpassen, Anzeigemodi, Screenshot, Verlauf, Elemente),
   „Abbrechen/Fertig“ unten, Rückgängig/Wiederholen unten links, Maß-Etikett am Ziehpfeil
 - **Skizze** (Pencil): Linie, Rechteck, Kreis, Ellipse, Polygon, Bogen, Spline (Fit- oder Kontrollpunkte), Punkt,
-  Text (Schrift als Profil), Versatz (Schleife oder einzeln, mit Ziehpfeil); Fang an Endpunkten, Ecken und Mittelpunkten.
-  Mehrere Kurven je Skizze, geschlossene Bereiche (auch mit Löchern) werden automatisch erkannt und exakt extrudiert.
+  Text (Schrift als Profil), Versatz (Schleife oder einzeln, mit Ziehpfeil). Dicke Linien, Maße erscheinen beim
+  Aufziehen direkt am Element und lassen sich dort antippen und ändern. Mehrere Kurven je Skizze, geschlossene
+  Bereiche (auch mit Löchern) werden automatisch erkannt und eingefärbt.
+- **Fang** (Magnet rechts): Endpunkte, Mittelpunkte, Zentren, Schnittpunkte, Auf Kurve, Waagerecht/Senkrecht zu
+  vorhandenen Punkten (Hilfslinien), Winkel in 15°-Schritten, Raster – einzeln schaltbar. Schwebt der Pencil über der
+  Skizze, zeigt er Fangpunkt und Knoten in der Nähe; beim Linienzug schon das nächste Stück.
+- **Skizzenmodus:** links nur Skizzenwerkzeuge, flache Ansicht senkrecht auf die Ebene (kein Drehen, ein Finger
+  verschiebt), die ganze Ebene ist Zeichenfläche. „Fertig“ übernimmt die Skizze ins Modell und schaltet zurück in die
+  3D-Ansicht mit den 3D-Werkzeugen. Skizzen lassen sich unter „Elemente“ ausblenden, bearbeiten und löschen.
 - **Skizzenebene:** beim Start antippbare Ebenenscheiben (Oben, Unten, Vorne, Hinten, Rechts, Links) oder eine ebene
-  Fläche; die Ansicht dreht sich senkrecht auf die Ebene, die aktive Ebene bleibt als Scheibe sichtbar
-- **Extrudieren** mit Ziehpfeil: Skizzenprofil (Neuer Körper, Vereinigen, Abziehen) oder ebene Fläche eines Körpers
+  Fläche; die Ansicht dreht sich senkrecht auf die Ebene
+- **Extrudieren** mit Ziehpfeil (wie bei Shapr3D nach dem Skizzieren): Skizzenbereich(e) antippen (Neuer Körper,
+  Vereinigen, Abziehen; auf einer Fläche: herausziehen vereinigt, hineindrücken zieht ab) oder ebene Fläche eines Körpers
+- **Werkzeugrad am Pencil:** Apple Pencil Pro drücken bzw. Doppeltippen (Pencil 2) öffnet Werkzeuge an der Stiftspitze
 - **Abrunden und Fase** mit Ziehpfeil: einzelne Kanten antippen, mehrere gleichzeitig
 - **Einfügen:** Quader, Zylinder, Kugel, Kegel, STEP-Datei
 - **Boolesch:** Vereinigen, Abziehen, Schneiden
@@ -30,6 +39,7 @@ Oberfläche nach dem Aufbau von Shapr3D (eigene Symbole, kein Shapr3D-Material):
 
 Grau dargestellt und noch nicht umgesetzt: Projizieren, Trimmen, Ebenen/Achsen, Muster, Skalieren,
 Rotieren/Sweep/Loft, Kante versetzen, Beschneiden, Teilen, Schnittansicht, Messen, Einschränkungen.
+Bereiche entstehen aus geschlossenen Konturen; sich kreuzende Linien teilen Bereiche noch nicht auf.
 
 ## Bedienung
 
@@ -41,17 +51,20 @@ Rotieren/Sweep/Loft, Kante versetzen, Beschneiden, Teilen, Schnittansicht, Messe
 | Tippen auf eine Kante | Kante wählen bzw. abwählen (mehrere möglich), Pfeil zum Abrunden erscheint |
 | Tippen auf eine Fläche | Fläche wählen, bei ebenen Flächen erscheint der Pfeil zum Extrudieren |
 | Pfeil ziehen (Pencil oder Finger) | Wert ändern, rastet je nach Zoom auf 0,1/0,5/1/5/10 mm |
-| Pencil im Skizzenmodus | Zeichnen; der erste Strich auf einer ebenen Fläche legt die Skizzenebene fest |
+| Pencil im Skizzenmodus | Zeichnen; schweben zeigt Fangpunkte und Knoten |
+| Tippen auf einen Skizzenbereich | Bereich wählen (mehrere möglich), Pfeil zum Extrudieren erscheint |
+| Maß am Element antippen | Wert eingeben, Return übernimmt |
+| Pencil drücken / doppeltippen | Werkzeugrad |
 | ViewCube antippen | Ansicht senkrecht auf diese Seite |
 
 **Typischer Ablauf:**
 
 1. Startseite › „Neues Projekt“.
-2. Links „Skizze › Rechteck“, Ebene „Oben“ antippen (Draufsicht), mit dem Pencil ein Rechteck ziehen,
-   unten Breite/Länge eintragen.
-3. Am blauen Pfeil auf 20 mm ziehen, „Fertig“.
-4. „Skizze › Kreis“, den Strich auf der Oberseite beginnen, Modus „Abziehen“, Pfeil ziehen → Bohrung.
-5. „Fertig“ (Skizze beenden), zwei Kanten oben antippen, am Pfeil ziehen → Rundung, „Fertig“.
+2. Links „Skizze“, Ebene „Oben“ antippen (Draufsicht), „Rechteck“, mit dem Pencil ein Rechteck ziehen,
+   die Maße am Rechteck antippen und eintragen, „Fertig“.
+3. Den Bereich des Rechtecks antippen, am blauen Pfeil auf 20 mm ziehen, „Fertig“.
+4. Oberseite antippen, „Skizze“, Kreis zeichnen, „Fertig“; Kreisbereich antippen, Pfeil nach unten ziehen → Bohrung.
+5. Zwei Kanten oben antippen, am Pfeil ziehen → Rundung, „Fertig“.
 6. Titelleiste › „⋯“ › „Als STEP exportieren …“ oder „Als STL exportieren …“.
 
 Werkzeuge im Detail:

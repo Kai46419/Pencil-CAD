@@ -44,6 +44,28 @@ struct PlaneGraphic {
     var color: SIMD3<Float>
 }
 
+/// Linienzüge in Weltkoordinaten, mit fester Bildschirmbreite gezeichnet.
+struct LineGroup {
+    var polylines: [[SIMD3<Float>]]
+    var color: SIMD3<Float>
+    /// Breite in Bildschirmpunkten
+    var width: Float
+    /// Punkte (z. B. Knoten beim Schweben) mit Radius in Bildschirmpunkten
+    var dots: [SIMD3<Float>] = []
+    var dotRadius: Float = 0
+    /// true = immer sichtbar, false = von Körpern verdeckt
+    var onTop = true
+}
+
+/// Halbtransparente Füllung (Skizzenbereiche), Dreiecke in Weltkoordinaten.
+struct FillGroup {
+    var triangles: [SIMD3<Float>]
+    var color: SIMD4<Float>
+}
+
+/// Hintergrund wie bei Shapr3D: mittleres Grau, damit helle Körper und dunkle Linien gut zu sehen sind.
+let viewportBackground = MTLClearColor(red: 0.74, green: 0.75, blue: 0.78, alpha: 1)
+
 final class Renderer: NSObject, MTKViewDelegate {
     /// Länge eines Ziehpfeils in Bildschirmpunkten.
     static let handleLength: Float = 64
@@ -54,6 +76,10 @@ final class Renderer: NSObject, MTKViewDelegate {
     var displayMode: DisplayMode = .shaded
     var handles: [HandleGraphic] = []
     var planes: [PlaneGraphic] = []
+    var lineGroups: [LineGroup] = []
+    var fills: [FillGroup] = []
+    /// Wird vor jedem Bild aufgerufen; der Viewport gleicht dort seinen Zustand ab (höchstens einmal je Bild).
+    var willDraw: (() -> Void)?
 
     private let device: MTLDevice
     private let queue: MTLCommandQueue
@@ -64,6 +90,9 @@ final class Renderer: NSObject, MTKViewDelegate {
     private let xrayPipeline: MTLRenderPipelineState
     private let overlayPipeline: MTLRenderPipelineState
     private let linePipeline: MTLRenderPipelineState
+    private let colorPipeline: MTLRenderPipelineState
+    private let colorOverlayPipeline: MTLRenderPipelineState
+    private let fillPipeline: MTLRenderPipelineState
     private let depthState: MTLDepthStencilState
     private let readOnlyDepthState: MTLDepthStencilState
     private let alwaysDepthState: MTLDepthStencilState
@@ -77,16 +106,6 @@ final class Renderer: NSObject, MTKViewDelegate {
     private var edgeCount = 0
     private var edgeHighlightBuffer: MTLBuffer?
     private var edgeHighlightCount = 0
-    private let gridBuffer: MTLBuffer?
-    private let gridCount: Int
-    private var sketchBuffer: MTLBuffer?
-    private var sketchCount = 0
-    private var previewVertexBuffer: MTLBuffer?
-    private var previewIndexBuffer: MTLBuffer?
-    private var previewIndexCount = 0
-    private var previewEdgeBuffer: MTLBuffer?
-    private var previewEdgeCount = 0
-    private var previewFilled = true
     private var hasFramedOnce = false
 
     init?(view: MTKView) {
@@ -98,7 +117,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         view.colorPixelFormat = .bgra8Unorm_srgb
         view.depthStencilPixelFormat = .depth32Float
         view.sampleCount = 4
-        view.clearColor = MTLClearColor(red: 0.925, green: 0.925, blue: 0.93, alpha: 1)
+        view.clearColor = viewportBackground
 
         func pipeline(vertex: String, fragment: String, blended: Bool = false) -> MTLRenderPipelineState? {
             let descriptor = MTLRenderPipelineDescriptor()
@@ -129,22 +148,25 @@ final class Renderer: NSObject, MTKViewDelegate {
               let xrayPipeline = pipeline(vertex: "vertex_main", fragment: "fragment_xray", blended: true),
               let overlayPipeline = pipeline(vertex: "vertex_overlay", fragment: "fragment_flat"),
               let linePipeline = pipeline(vertex: "vertex_main", fragment: "fragment_flat"),
+              let colorPipeline = pipeline(vertex: "vertex_main", fragment: "fragment_color"),
+              let colorOverlayPipeline = pipeline(vertex: "vertex_overlay", fragment: "fragment_color"),
+              let fillPipeline = pipeline(vertex: "vertex_overlay", fragment: "fragment_flat", blended: true),
               let depthState = depth(.lessEqual, write: true),
               let readOnlyDepthState = depth(.lessEqual, write: false),
               let alwaysDepthState = depth(.always, write: false) else { return nil }
 
-        let grid = Renderer.makeGrid(halfSize: 200, step: 10)
         self.device = device
         self.queue = queue
         self.solidPipeline = solidPipeline
         self.xrayPipeline = xrayPipeline
         self.overlayPipeline = overlayPipeline
         self.linePipeline = linePipeline
+        self.colorPipeline = colorPipeline
+        self.colorOverlayPipeline = colorOverlayPipeline
+        self.fillPipeline = fillPipeline
         self.depthState = depthState
         self.readOnlyDepthState = readOnlyDepthState
         self.alwaysDepthState = alwaysDepthState
-        self.gridBuffer = device.makeBuffer(bytes: grid, length: MemoryLayout<Vertex>.stride * grid.count)
-        self.gridCount = grid.count
         super.init()
     }
 
@@ -174,25 +196,6 @@ final class Renderer: NSObject, MTKViewDelegate {
         edgeHighlightCount = edgeVertices.count
     }
 
-    /// Skizzenlinien als Punktpaare in Weltkoordinaten.
-    func updateSketch(points: [SIMD3<Float>]) {
-        let vertices = points.map { Vertex(position: $0, normal: SIMD3(0, 0, 1)) }
-        sketchBuffer = makeBuffer(vertices)
-        sketchCount = vertices.count
-    }
-
-    /// Vorschau der Extrusion einer Skizze; filled = als Körper, sonst nur Kanten (Abziehen).
-    func updatePreview(_ mesh: Mesh?, filled: Bool) {
-        let tinted = mesh?.vertices.map { Vertex(position: $0.position, normal: $0.normal, color: SIMD3(0.45, 0.62, 0.95)) }
-        previewVertexBuffer = tinted.flatMap { makeBuffer($0) }
-        previewIndexBuffer = mesh.flatMap { makeBuffer($0.indices) }
-        previewIndexCount = mesh?.indices.count ?? 0
-        let edges = (mesh?.edges ?? []).map { Vertex(position: $0, normal: SIMD3(0, 0, 1)) }
-        previewEdgeBuffer = makeBuffer(edges)
-        previewEdgeCount = edges.count
-        previewFilled = filled
-    }
-
     private func makeBuffer<T>(_ array: [T]) -> MTLBuffer? {
         guard !array.isEmpty else { return nil }
         return array.withUnsafeBytes { bytes in
@@ -200,16 +203,86 @@ final class Renderer: NSObject, MTKViewDelegate {
         }
     }
 
-    private static func makeGrid(halfSize: Float, step: Float) -> [Vertex] {
-        var vertices: [Vertex] = []
+    /// Raster um den sichtbaren Ausschnitt (lokal in der Rasterebene): Weite passend zum Zoom,
+    /// jede fünfte Linie kräftiger. Liefert feine und kräftige Linien als Punktpaare.
+    private func gridLines(transform: float4x4, viewWidth: Float, viewHeight: Float) -> (minor: [Vertex], major: [Vertex]) {
+        let origin = SIMD3<Float>(transform.columns.3.x, transform.columns.3.y, transform.columns.3.z)
+        let u = SIMD3<Float>(transform.columns.0.x, transform.columns.0.y, transform.columns.0.z)
+        let v = SIMD3<Float>(transform.columns.1.x, transform.columns.1.y, transform.columns.1.z)
+        let perPoint = camera.worldUnitsPerPoint(viewHeight: viewHeight)
+        let steps: [Float] = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000]
+        let step = steps.first { $0 / perPoint >= 14 } ?? 2000
+        // Mitte: Ziel der Kamera, auf die Ebene projiziert
+        let d = camera.target - origin
+        let center = SIMD2<Float>(simd_dot(d, u), simd_dot(d, v))
+        let reach = max(viewWidth, viewHeight) * perPoint * (camera.isOrthographic ? 0.8 : 3)
+        let half = min(reach, step * 160)
+        let lo = ((center - half) / step).rounded(.down), hi = ((center + half) / step).rounded(.up)
         let up = SIMD3<Float>(0, 0, 1)
-        for v in stride(from: -halfSize, through: halfSize, by: step) {
-            vertices += [Vertex(position: SIMD3(v, -halfSize, 0), normal: up),
-                         Vertex(position: SIMD3(v, halfSize, 0), normal: up),
-                         Vertex(position: SIMD3(-halfSize, v, 0), normal: up),
-                         Vertex(position: SIMD3(halfSize, v, 0), normal: up)]
+        var minor: [Vertex] = [], major: [Vertex] = []
+        for i in stride(from: lo.x, through: hi.x, by: 1) {
+            let line = [Vertex(position: SIMD3(i * step, lo.y * step, 0), normal: up),
+                        Vertex(position: SIMD3(i * step, hi.y * step, 0), normal: up)]
+            if Int(i) % 5 == 0 { major += line } else { minor += line }
         }
-        return vertices
+        for j in stride(from: lo.y, through: hi.y, by: 1) {
+            let line = [Vertex(position: SIMD3(lo.x * step, j * step, 0), normal: up),
+                        Vertex(position: SIMD3(hi.x * step, j * step, 0), normal: up)]
+            if Int(j) % 5 == 0 { major += line } else { minor += line }
+        }
+        return (minor, major)
+    }
+
+    /// Breite Linien als Dreiecke in der Bildschirmebene, Ecken gerundet.
+    private func lineTriangles(_ group: LineGroup, viewHeight: Float) -> [Vertex] {
+        let forward = camera.forward
+        let right = simd_normalize(simd_cross(forward, SIMD3<Float>(0, 0, 1)))
+        let up = simd_cross(right, forward)
+        let color = group.color
+        let normal = -forward
+        var out: [Vertex] = []
+        func scale(_ p: SIMD3<Float>) -> Float {
+            camera.worldUnitsPerPoint(at: p, viewHeight: viewHeight)
+        }
+        func disc(_ p: SIMD3<Float>, radius: Float, segments: Int) {
+            for k in 0..<segments {
+                let a0 = Float(k) / Float(segments) * 2 * .pi, a1 = Float(k + 1) / Float(segments) * 2 * .pi
+                out += [Vertex(position: p, normal: normal, color: color),
+                        Vertex(position: p + (cos(a0) * right + sin(a0) * up) * radius, normal: normal, color: color),
+                        Vertex(position: p + (cos(a1) * right + sin(a1) * up) * radius, normal: normal, color: color)]
+            }
+        }
+        for line in group.polylines where line.count >= 2 {
+            var previous: SIMD2<Float>?
+            for i in 0..<(line.count - 1) {
+                let a = line[i], b = line[i + 1]
+                let d = b - a
+                let screen = SIMD2<Float>(simd_dot(d, right), simd_dot(d, up))
+                let length = simd_length(screen)
+                guard length > 1e-9 else { continue }
+                let direction = screen / length
+                let halfWidth = group.width / 2 * scale((a + b) / 2)
+                let side = (-direction.y * right + direction.x * up) * halfWidth
+                out += [Vertex(position: a - side, normal: normal, color: color),
+                        Vertex(position: b - side, normal: normal, color: color),
+                        Vertex(position: b + side, normal: normal, color: color),
+                        Vertex(position: a - side, normal: normal, color: color),
+                        Vertex(position: b + side, normal: normal, color: color),
+                        Vertex(position: a + side, normal: normal, color: color)]
+                // Rund an Enden und deutlichen Knicken, damit keine Lücken entstehen
+                if previous == nil || simd_dot(previous!, direction) < 0.94 {
+                    disc(a, radius: halfWidth, segments: 8)
+                }
+                previous = direction
+            }
+            if let last = line.last {
+                disc(last, radius: group.width / 2 * scale(last), segments: 8)
+            }
+        }
+        for dot in group.dots {
+            disc(dot, radius: group.dotRadius * scale(dot), segments: 12)
+        }
+        return out
     }
 
     /// Pfeil aus Schaft und Spitze, length in Weltmaß.
@@ -264,6 +337,7 @@ final class Renderer: NSObject, MTKViewDelegate {
     }
 
     func draw(in view: MTKView) {
+        willDraw?()
         guard let pass = view.currentRenderPassDescriptor,
               let drawable = view.currentDrawable,
               let commandBuffer = queue.makeCommandBuffer(),
@@ -298,7 +372,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         pass.colorAttachments[0].resolveTexture = resolve
         pass.colorAttachments[0].loadAction = .clear
         pass.colorAttachments[0].storeAction = .multisampleResolve
-        pass.colorAttachments[0].clearColor = MTLClearColor(red: 0.925, green: 0.925, blue: 0.93, alpha: 1)
+        pass.colorAttachments[0].clearColor = viewportBackground
         pass.depthAttachment.texture = depthTexture
         pass.depthAttachment.loadAction = .clear
         pass.depthAttachment.storeAction = .dontCare
@@ -355,15 +429,19 @@ final class Renderer: NSObject, MTKViewDelegate {
         }
 
         // Raster zuerst, damit es hinter halbtransparenten Körpern liegt
-        if let gridBuffer, let gridTransform {
+        if let gridTransform {
+            let grid = gridLines(transform: gridTransform, viewWidth: viewHeight * aspect, viewHeight: viewHeight)
             var gridUniforms = uniforms
             gridUniforms.model = gridTransform
             encoder.setRenderPipelineState(linePipeline)
             encoder.setDepthStencilState(depthState)
-            encoder.setVertexBuffer(gridBuffer, offset: 0, index: 0)
             setUniforms(&gridUniforms)
-            setColor(0.78, 0.79, 0.81)
-            encoder.drawPrimitives(type: .line, vertexStart: 0, vertexCount: gridCount)
+            for (lines, shade) in [(grid.minor, Float(0.69)), (grid.major, Float(0.62))] {
+                guard let buffer = makeBuffer(lines) else { continue }
+                encoder.setVertexBuffer(buffer, offset: 0, index: 0)
+                setColor(shade, shade + 0.01, shade + 0.03)
+                encoder.drawPrimitives(type: .line, vertexStart: 0, vertexCount: lines.count)
+            }
         }
 
         // Körper
@@ -446,32 +524,26 @@ final class Renderer: NSObject, MTKViewDelegate {
             encoder.drawPrimitives(type: .line, vertexStart: 0, vertexCount: edgeHighlightCount)
         }
 
-        // Vorschau der Extrusion
-        if previewFilled, let previewVertexBuffer, let previewIndexBuffer, previewIndexCount > 0 {
-            encoder.setRenderPipelineState(xrayPipeline)
+        // Skizzenbereiche: halbtransparent, auf Flächen nicht flimmernd
+        for fill in fills {
+            guard let buffer = makeBuffer(fill.triangles.map { Vertex(position: $0, normal: SIMD3(0, 0, 1)) }) else { continue }
+            encoder.setRenderPipelineState(fillPipeline)
             encoder.setDepthStencilState(readOnlyDepthState)
-            encoder.setVertexBuffer(previewVertexBuffer, offset: 0, index: 0)
+            encoder.setVertexBuffer(buffer, offset: 0, index: 0)
             setUniforms(&uniforms)
-            encoder.drawIndexedPrimitives(type: .triangle, indexCount: previewIndexCount, indexType: .uint32,
-                                          indexBuffer: previewIndexBuffer, indexBufferOffset: 0)
-        }
-        if let previewEdgeBuffer, previewEdgeCount > 0 {
-            encoder.setRenderPipelineState(linePipeline)
-            encoder.setDepthStencilState(alwaysDepthState)
-            encoder.setVertexBuffer(previewEdgeBuffer, offset: 0, index: 0)
-            setUniforms(&uniforms)
-            setColor(0.1, 0.4, 0.95)
-            encoder.drawPrimitives(type: .line, vertexStart: 0, vertexCount: previewEdgeCount)
+            setColor(fill.color.x, fill.color.y, fill.color.z, fill.color.w)
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: fill.triangles.count)
         }
 
-        // Skizze immer obenauf
-        if let sketchBuffer, sketchCount > 0 {
-            encoder.setRenderPipelineState(linePipeline)
-            encoder.setDepthStencilState(alwaysDepthState)
-            encoder.setVertexBuffer(sketchBuffer, offset: 0, index: 0)
+        // Skizzenlinien, Fangsymbole und Knoten mit fester Breite in Bildschirmpunkten
+        for group in lineGroups {
+            let triangles = lineTriangles(group, viewHeight: viewHeight)
+            guard let buffer = makeBuffer(triangles) else { continue }
+            encoder.setRenderPipelineState(group.onTop ? colorPipeline : colorOverlayPipeline)
+            encoder.setDepthStencilState(group.onTop ? alwaysDepthState : readOnlyDepthState)
+            encoder.setVertexBuffer(buffer, offset: 0, index: 0)
             setUniforms(&uniforms)
-            setColor(0.05, 0.4, 0.95)
-            encoder.drawPrimitives(type: .line, vertexStart: 0, vertexCount: sketchCount)
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: triangles.count)
         }
 
         // Ziehpfeile obenauf, Größe bleibt auf dem Bildschirm gleich

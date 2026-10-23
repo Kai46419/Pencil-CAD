@@ -27,7 +27,7 @@ enum ModelTool: Equatable {
 
 /// Welcher Ziehpfeil gerade gezogen wird.
 enum HandleKind: Equatable {
-    case extrude
+    case region
     case face
     case edge
     case move(axis: Int)
@@ -82,6 +82,10 @@ final class Workspace: ObservableObject {
     @Published var isOrthographic = false
     @Published private(set) var viewCommand = ViewCommand()
     @Published private(set) var sketchNumber = 0
+    /// Gespeicherte Skizze, die gerade bearbeitet wird (nil = neue Skizze).
+    @Published private(set) var editingSketchIndex: Int?
+    /// Werkzeugrad (Stift drücken bzw. doppeltippen) an dieser Stelle des Viewports.
+    @Published var quickToolsLocation: CGPoint?
 
     // Werkzeugparameter
     @Published var insertSize: SIMD3<Double> = Primitive.box.defaultSize
@@ -115,6 +119,7 @@ final class Workspace: ObservableObject {
     /// Neue Skizze: auf der gewählten ebenen Fläche, sonst zuerst eine Standardebene antippen lassen.
     func startSketch() {
         tool = .select
+        editingSketchIndex = nil
         model.commitPreview()
         if let face = model.selection, let plane = model.plane(of: face) {
             sketch.plane = plane
@@ -143,15 +148,37 @@ final class Workspace: ObservableObject {
         send(.alignToSketchPlane)
     }
 
+    /// Skizze verlassen, ohne zu speichern; danach wieder 3D-Ansicht.
     func endSketch() {
         sketch.isActive = false
+        editingSketchIndex = nil
+        send(.look(SIMD3<Float>(1, -1, 0.85)))
     }
 
-    func extrudeSketch() {
-        guard sketch.hasProfile, sketch.extrudeDistance != 0 else { return }
-        model.extrude(sketch.extrusion(distance: sketch.extrudeDistance, mode: sketch.extrudeMode),
-                      on: sketch.plane, mode: sketch.extrudeMode)
-        sketch.reset()
+    /// „Fertig“ im Skizzenmodus: Skizze bleibt im Modell, Bereiche lassen sich danach antippen und extrudieren.
+    func finishSketch() {
+        let entities = sketch.entities
+        let hasRegions = sketch.hasProfile
+        if !entities.isEmpty {
+            model.storeSketch(plane: sketch.plane, entities: entities, replacing: editingSketchIndex)
+        }
+        endSketch()
+        if hasRegions {
+            model.message = "Bereich antippen und am Pfeil ziehen zum Extrudieren."
+        }
+    }
+
+    /// Gespeicherte Skizze wieder öffnen.
+    func editSketch(_ index: Int) {
+        guard model.sketches.indices.contains(index) else { return }
+        tool = .select
+        model.commitPreview()
+        model.resetSelection()
+        let stored = model.sketches[index]
+        sketch.isActive = true
+        sketch.load(plane: stored.plane, entities: stored.entities)
+        editingSketchIndex = index
+        send(.alignToSketchPlane)
     }
 
     // MARK: Werkzeuge
@@ -222,10 +249,8 @@ final class Workspace: ObservableObject {
                 chooseSketchPlane(.top)
             } else if sketch.hasOffsetTarget {
                 sketch.applyOffset()
-            } else if sketch.hasProfile {
-                extrudeSketch()
             } else {
-                endSketch()
+                finishSketch()
             }
             return
         }
@@ -247,7 +272,8 @@ final class Workspace: ObservableObject {
         if sketch.isActive {
             if sketch.hasOffsetTarget {
                 sketch.cancelOffset()
-            } else if !sketch.isEmpty {
+            } else if !sketch.isEmpty, editingSketchIndex == nil {
+                // Neue Skizze: erst leeren, ein zweites „Abbrechen“ verlässt den Skizzenmodus
                 sketch.reset()
             } else {
                 endSketch()
@@ -266,10 +292,7 @@ final class Workspace: ObservableObject {
     }
 
     var canFinish: Bool {
-        if sketch.isActive {
-            if sketch.isChoosingPlane || sketch.hasOffsetTarget || !sketch.hasProfile { return true }
-            return sketch.extrudeDistance != 0
-        }
+        if sketch.isActive { return true }
         switch tool {
         case .boolean: return model.selectedBodies.count > 1
         case .color: return true
@@ -280,12 +303,14 @@ final class Workspace: ObservableObject {
     // MARK: Antippen im Viewport
 
     /// Tippen im Modellierbereich (nicht im Skizzenmodus).
-    func tapped(face: FaceRef?, edge: EdgeRef?) {
+    func tapped(face: FaceRef?, edge: EdgeRef?, region: RegionRef? = nil) {
         model.message = nil
         switch tool {
         case .select:
             if let edge {
                 model.toggleEdge(edge)
+            } else if let region {
+                model.toggleRegion(region)
             } else if let face {
                 model.select(face: face)
             } else {
@@ -316,14 +341,15 @@ final class Workspace: ObservableObject {
                                    direction: SIMD3<Float>(simd_normalize(plane.world(direction: handle.direction))),
                                    value: sketch.offsetDistance, color: blue)]
             }
-            guard !sketch.isChoosingPlane, let centroid = sketch.profileCentroid else { return [] }
-            let sign = plane.extrusionSign(mode: sketch.extrudeMode)
-            return [DragHandle(kind: .extrude, axisOrigin: SIMD3<Float>(plane.world(centroid)),
-                               direction: SIMD3<Float>(plane.normal * sign), value: sketch.extrudeDistance,
-                               color: blue)]
+            return []
         }
         switch tool {
         case .select:
+            if let handle = model.regionHandle {
+                return [DragHandle(kind: .region, axisOrigin: SIMD3<Float>(handle.origin),
+                                   direction: simd_normalize(SIMD3<Float>(handle.direction)),
+                                   value: model.regionValue, color: blue)]
+            }
             if let handle = model.edgeHandle {
                 return [DragHandle(kind: .edge, axisOrigin: SIMD3<Float>(handle.origin),
                                    direction: simd_normalize(SIMD3<Float>(handle.direction)),
@@ -354,8 +380,8 @@ final class Workspace: ObservableObject {
 
     func apply(_ kind: HandleKind, value: Double) {
         switch kind {
-        case .extrude:
-            if value != sketch.extrudeDistance { sketch.extrudeDistance = value }
+        case .region:
+            if value != model.regionValue { model.setRegionValue(value) }
         case .offset:
             if value != sketch.offsetDistance { sketch.offsetDistance = value }
         case .face:
@@ -380,6 +406,7 @@ final class Workspace: ObservableObject {
         switch tool {
         case .select:
             if !model.selectedEdges.isEmpty { return "Pfeil ziehen · weitere Kanten antippen" }
+            if !model.selectedRegions.isEmpty { return "Pfeil ziehen · weitere Bereiche antippen" }
             if model.selection != nil {
                 return model.faceHandle != nil ? "Pfeil ziehen zum Extrudieren" : "Fläche gewählt"
             }
@@ -418,7 +445,7 @@ final class Workspace: ObservableObject {
         default:
             break
         }
-        if sketch.hasProfile { return "Pfeil ziehen oder Höhe eingeben, dann „Fertig“" }
+        if sketch.hasProfile { return "„Fertig“ übernimmt die Skizze – danach Bereich antippen und extrudieren" }
         return "Zeichnen auf \(sketch.plane.isOnFace ? "der Fläche" : "der Ebene „\(sketch.plane.name)“")"
     }
 

@@ -81,7 +81,7 @@ struct OrbitCamera {
 
     mutating func orbit(dx: Float, dy: Float) {
         yaw -= dx * 0.008
-        pitch = min(max(pitch + dy * 0.008, -1.55), 1.55)
+        pitch = min(max(pitch + dy * 0.008, -Self.maxPitch), Self.maxPitch)
     }
 
     /// Verschiebt das Ziel so, dass der Inhalt dem Finger folgt.
@@ -103,12 +103,20 @@ struct OrbitCamera {
         distance = max(radius / sin(fieldOfView / 2) * 1.2, 5)
     }
 
+    /// Fast senkrecht; genau 90° würde die Blickrichtung mit der Hochachse zusammenfallen lassen.
+    static let maxPitch: Float = 1.5695
+
     /// Blickt senkrecht auf eine Ebene (Kamera auf der Seite der Normale).
-    mutating func look(along normal: SIMD3<Float>, at point: SIMD3<Float>) {
+    /// right: Richtung, die auf dem Bildschirm waagerecht nach rechts zeigen soll (muss waagerecht liegen).
+    /// Ohne right bleibt die Drehung bei Drauf- und Untersicht erhalten.
+    mutating func look(along normal: SIMD3<Float>, at point: SIMD3<Float>, right: SIMD3<Float>? = nil) {
         let n = simd_normalize(normal)
         target = point
-        pitch = min(max(asin(n.z), -1.55), 1.55)
-        if abs(n.z) < 0.999 {
+        pitch = min(max(asin(min(max(n.z, -1), 1)), -Self.maxPitch), Self.maxPitch)
+        if let right, abs(right.z) < 0.01, simd_length(right) > 0 {
+            // Bildschirm-rechts ist (−sin yaw, cos yaw, 0)
+            yaw = atan2(-right.x, right.y)
+        } else if abs(n.z) < 0.999 {
             yaw = atan2(n.y, n.x)
         }
     }

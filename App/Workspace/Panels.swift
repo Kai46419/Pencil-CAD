@@ -67,6 +67,8 @@ struct ParameterCard: View {
             case .select:
                 if !model.selectedEdges.isEmpty {
                     edgeCard
+                } else if !model.selectedRegions.isEmpty {
+                    regionCard
                 } else if model.selection != nil, model.faceHandle != nil {
                     faceCard
                 }
@@ -109,23 +111,6 @@ struct ParameterCard: View {
                         }
                     }
                     toolOptions
-                    if sketch.hasProfile, !sketch.hasOffsetTarget {
-                        HStack(spacing: 16) {
-                            if let size = sketch.rectangleSize {
-                                NumberField(title: "Breite", value: size.x) { sketch.rectangleSize = SIMD2($0, size.y) }
-                                NumberField(title: "Länge", value: size.y) { sketch.rectangleSize = SIMD2(size.x, $0) }
-                            } else if let diameter = sketch.circleDiameter {
-                                NumberField(title: "Ø", value: diameter) { sketch.circleDiameter = $0 }
-                            }
-                            NumberField(title: sketch.extrudeMode == .cut ? "Tiefe" : "Höhe",
-                                        value: sketch.extrudeDistance) { sketch.extrudeDistance = $0 }
-                        }
-                        Picker("Modus", selection: $sketch.extrudeMode) {
-                            ForEach(ExtrudeMode.allCases) { Text($0.rawValue).tag($0) }
-                        }
-                        .pickerStyle(.segmented)
-                        .frame(maxWidth: 380)
-                    }
                 }
             }
         }
@@ -248,6 +233,25 @@ struct ParameterCard: View {
                     model.setEdgeValue($0)
                 }
                 Text(model.selectedEdges.count == 1 ? "1 Kante" : "\(model.selectedEdges.count) Kanten")
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+            }
+        }
+    }
+
+    /// Gewählte Skizzenbereiche extrudieren (Pfeil oder Wert).
+    private var regionCard: some View {
+        Card {
+            HStack(spacing: 16) {
+                Label("Extrudieren", systemImage: "square.stack.3d.up")
+                    .font(.callout.weight(.semibold))
+                Picker("Modus", selection: $model.regionMode) {
+                    ForEach(ExtrudeMode.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
+                NumberField(title: "Abstand", value: model.regionValue) { model.setRegionValue($0) }
+                Text(model.selectedRegions.count == 1 ? "1 Bereich" : "\(model.selectedRegions.count) Bereiche")
                     .foregroundStyle(.secondary)
                     .fixedSize()
             }
@@ -480,10 +484,17 @@ struct ElementsPanel: View {
 
     var body: some View {
         SidePanelFrame(title: "Elemente", close: close) {
-            if model.bodies.isEmpty {
-                Text("Noch keine Körper")
+            if model.bodies.isEmpty && model.sketches.isEmpty {
+                Text("Noch keine Körper oder Skizzen")
                     .foregroundStyle(.secondary)
                     .padding(8)
+            }
+            if !model.sketches.isEmpty {
+                sectionTitle("Skizzen")
+                ForEach(model.sketches.indices, id: \.self) { index in
+                    sketchRow(index)
+                }
+                if !model.bodies.isEmpty { sectionTitle("Körper") }
             }
             ForEach(model.bodies.indices, id: \.self) { index in
                 let item = model.bodies[index]
@@ -529,6 +540,46 @@ struct ElementsPanel: View {
             Button("Umbenennen") {
                 if let renaming { model.rename(body: renaming, to: newName) }
             }
+        }
+    }
+
+    private func sectionTitle(_ title: String) -> some View {
+        Text(title)
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 8)
+            .padding(.top, 6)
+    }
+
+    /// Skizze: antippen öffnet sie zum Bearbeiten, Auge blendet sie aus.
+    private func sketchRow(_ index: Int) -> some View {
+        let item = model.sketches[index]
+        return HStack(spacing: 10) {
+            Image(systemName: "pencil.and.outline")
+                .foregroundStyle(.secondary)
+                .frame(width: 14)
+            Text(item.name)
+                .lineLimit(1)
+                .foregroundStyle(item.isHidden ? Color.secondary : Color.primary)
+            Spacer(minLength: 0)
+            Button {
+                model.setSketchHidden(!item.isHidden, sketch: index)
+            } label: {
+                Image(systemName: item.isHidden ? "eye.slash" : "eye")
+                    .foregroundStyle(.secondary)
+                    .frame(width: 30, height: 30)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.vertical, 4)
+        .padding(.horizontal, 8)
+        .background(model.selectedRegions.first?.sketch == index ? Color.accentColor.opacity(0.15) : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 8))
+        .contentShape(Rectangle())
+        .onTapGesture { workspace.editSketch(index) }
+        .contextMenu {
+            Button("Bearbeiten", systemImage: "pencil") { workspace.editSketch(index) }
+            Button("Löschen", systemImage: "trash", role: .destructive) { model.deleteSketch(index) }
         }
     }
 

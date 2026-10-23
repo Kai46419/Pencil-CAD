@@ -90,15 +90,82 @@ struct SceneBody {
     }
 
     static let palette: [SIMD3<Float>] = [
-        [0.62, 0.66, 0.72], [0.36, 0.55, 0.85], [0.85, 0.52, 0.30], [0.40, 0.70, 0.45],
+        [0.86, 0.87, 0.89], [0.36, 0.55, 0.85], [0.85, 0.52, 0.30], [0.40, 0.70, 0.45],
         [0.80, 0.38, 0.45], [0.62, 0.48, 0.80], [0.85, 0.75, 0.35], [0.30, 0.30, 0.33],
     ]
+}
+
+/// Fertige Skizze im Modell. Ihre geschlossenen Bereiche lassen sich antippen und extrudieren.
+struct StoredSketch: Codable {
+    var name: String
+    var plane: SketchPlane
+    var entities: [SketchEntity]
+    var isHidden = false
+
+    // Abgeleitet, nicht gespeichert
+    private(set) var regions: [SketchRegion] = []
+    /// Linienzüge in Weltkoordinaten
+    private(set) var lines: [[SIMD3<Float>]] = []
+    /// Je Bereich: Dreiecke (Weltpunkte, je drei) zum Einfärben
+    private(set) var fills: [[SIMD3<Float>]] = []
+
+    private enum CodingKeys: String, CodingKey {
+        case name, plane, entities, isHidden
+    }
+
+    init(name: String, plane: SketchPlane, entities: [SketchEntity]) {
+        self.name = name
+        self.plane = plane
+        self.entities = entities
+        rebuild()
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decode(String.self, forKey: .name)
+        plane = try container.decode(SketchPlane.self, forKey: .plane)
+        entities = try container.decode([SketchEntity].self, forKey: .entities)
+        isHidden = try container.decodeIfPresent(Bool.self, forKey: .isHidden) ?? false
+        rebuild()
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(name, forKey: .name)
+        try container.encode(plane, forKey: .plane)
+        try container.encode(entities, forKey: .entities)
+        try container.encode(isHidden, forKey: .isHidden)
+    }
+
+    private mutating func rebuild() {
+        regions = findRegions(in: entities).regions
+        let plane = self.plane
+        lines = entities.flatMap(\.drawing).map { $0.map { SIMD3<Float>(plane.world($0)) } }
+        fills = regions.map { regionTriangles($0, plane: plane) }
+    }
+
+    /// Kleinster Bereich, der den lokalen Punkt enthält (Löcher ausgenommen).
+    func region(containing p: Point2) -> Int? {
+        var best: (index: Int, area: Double)?
+        for (index, region) in regions.enumerated() where polygonContains(region.polygon, p) {
+            guard !region.holes.contains(where: { polygonContains($0.polygon, p) }) else { continue }
+            if region.area < (best?.area ?? .infinity) { best = (index, region.area) }
+        }
+        return best?.index
+    }
+}
+
+/// Bereich einer gespeicherten Skizze.
+struct RegionRef: Hashable {
+    var sketch: Int
+    var region: Int
 }
 
 /// Ein Schritt im Verlauf: Name der Operation und der Zustand davor.
 struct HistoryEntry {
     let name: String
     let bodies: [SceneBody]
+    var sketches: [StoredSketch] = []
 }
 
 /// Körper, Auswahl, Vorschau, Verlauf und Speichern eines Projekts.
@@ -107,12 +174,15 @@ final class ModelStore: ObservableObject {
     @Published private(set) var mesh: Mesh = .empty
     @Published private(set) var revision = 0
     @Published private(set) var bodies: [SceneBody] = []
+    @Published private(set) var sketches: [StoredSketch] = []
     @Published var message: String?
 
     // Auswahl
     @Published private(set) var selection: FaceRef?
     @Published private(set) var selectedEdges: [EdgeRef] = []
     @Published private(set) var selectedBodies: [Int] = []
+    /// Gewählte Skizzenbereiche (alle aus derselben Skizze).
+    @Published private(set) var selectedRegions: [RegionRef] = []
     @Published private(set) var selectionIndices: [UInt32] = []
     @Published private(set) var edgeHighlight: [SIMD3<Float>] = []
     @Published private(set) var selectionRevision = 0
@@ -131,6 +201,13 @@ final class ModelStore: ObservableObject {
     @Published private(set) var faceHandle: (origin: SIMD3<Double>, direction: SIMD3<Double>)?
     @Published private(set) var faceValue: Double = 0
     @Published private(set) var moveOffset: SIMD3<Double> = .zero
+    /// Extrusion gewählter Skizzenbereiche: Wert in mm entlang der Normale der Skizze.
+    @Published private(set) var regionValue: Double = 0
+    @Published var regionMode: ExtrudeMode = .newBody {
+        didSet {
+            if regionValue != 0 { setRegionValue(regionValue) }
+        }
+    }
 
     // Vorschau und Verlauf
     @Published private(set) var previewName: String?
@@ -143,12 +220,26 @@ final class ModelStore: ObservableObject {
 
     var canUndo: Bool { !history.isEmpty || previewBodies != nil }
     var canRedo: Bool { !future.isEmpty }
-    var isEmpty: Bool { bodies.isEmpty }
+    var isEmpty: Bool { bodies.isEmpty && sketches.isEmpty }
     var hasPreview: Bool { previewBodies != nil }
 
     /// Körper der aktuellen Auswahl (Fläche, Kanten oder Körper).
     var selectedBody: Int? { selection?.body ?? selectedEdges.first?.body ?? selectedBodies.first }
     var hasSelection: Bool { selectedBody != nil }
+
+    /// Ansatz und Richtung des Pfeils für gewählte Skizzenbereiche.
+    var regionHandle: (origin: SIMD3<Double>, direction: SIMD3<Double>)? {
+        guard let first = selectedRegions.first, sketches.indices.contains(first.sketch) else { return nil }
+        let sketch = sketches[first.sketch]
+        let points = selectedRegions.compactMap { ref -> Point2? in
+            guard sketch.regions.indices.contains(ref.region) else { return nil }
+            let polygon = sketch.regions[ref.region].polygon
+            return polygon.isEmpty ? nil : polygon.reduce(.zero, +) / Double(polygon.count)
+        }
+        guard !points.isEmpty else { return nil }
+        let center = points.reduce(.zero, +) / Double(points.count)
+        return (sketch.plane.world(center), sketch.plane.normal * sketch.plane.extrusionSign(mode: regionMode))
+    }
 
     init(folder: URL?) {
         self.folder = folder
@@ -225,6 +316,48 @@ final class ModelStore: ObservableObject {
         mesh.pick(origin: origin, direction: direction)
     }
 
+    /// Skizzenbereich unter dem Sehstrahl; t = Abstand entlang des Strahls.
+    func pickRegion(origin: SIMD3<Float>, direction: SIMD3<Float>, skipping skipped: Int? = nil) -> (ref: RegionRef, t: Float)? {
+        var best: (ref: RegionRef, t: Float)?
+        for (index, sketch) in sketches.enumerated() where !sketch.isHidden && index != skipped {
+            let normal = SIMD3<Float>(sketch.plane.normal)
+            let denominator = simd_dot(direction, normal)
+            guard abs(denominator) > 1e-6 else { continue }
+            let t = simd_dot(SIMD3<Float>(sketch.plane.origin) - origin, normal) / denominator
+            guard t > 0, t < (best?.t ?? .infinity) else { continue }
+            let local = sketch.plane.local(SIMD3<Double>(origin + t * direction))
+            if let region = sketch.region(containing: local) {
+                best = (RegionRef(sketch: index, region: region), t)
+            }
+        }
+        return best
+    }
+
+    /// Bereich antippen: zur Auswahl hinzufügen bzw. entfernen. Bereiche einer anderen Skizze beginnen neu.
+    func toggleRegion(_ ref: RegionRef) {
+        var chosen = selectedRegions
+        if chosen.first?.sketch != ref.sketch { chosen = [] }
+        if let index = chosen.firstIndex(of: ref) {
+            chosen.remove(at: index)
+        } else {
+            chosen.append(ref)
+        }
+        let value = regionValue
+        let keepPreview = previewName == Self.regionPreviewName && !selectedRegions.isEmpty && !chosen.isEmpty
+        if !keepPreview { commitPreview() }
+        clearSelectionState()
+        selectedRegions = chosen
+        if sketches.indices.contains(ref.sketch), sketches[ref.sketch].plane.isOnFace, !keepPreview {
+            // Auf einer Fläche: Herausziehen vereinigt, Hineindrücken zieht ab (wie bei Shapr3D)
+            regionMode = .union
+        }
+        if keepPreview {
+            setRegionValue(value)
+        } else {
+            refreshHighlight()
+        }
+    }
+
     /// Skizzenebene auf einer planaren Fläche; nil bei gekrümmten Flächen.
     func plane(of face: FaceRef) -> SketchPlane? {
         guard bodies.indices.contains(face.body),
@@ -283,6 +416,36 @@ final class ModelStore: ObservableObject {
         var preview = bodies
         preview[face.body] = preview[face.body].with(result)
         showPreview(preview, name: "Extrudieren")
+    }
+
+    private static let regionPreviewName = "Extrudieren"
+
+    /// Gewählte Skizzenbereiche um value mm entlang der Skizzennormale extrudieren (Vorschau).
+    func setRegionValue(_ value: Double) {
+        regionValue = value
+        guard let first = selectedRegions.first, sketches.indices.contains(first.sketch) else { return }
+        guard value != 0 else {
+            dropPreview()
+            refreshHighlight()
+            return
+        }
+        let sketch = sketches[first.sketch]
+        let regions = selectedRegions.compactMap { sketch.regions.indices.contains($0.region) ? sketch.regions[$0.region] : nil }
+        var mode = regionMode
+        var distance = value
+        // Auf einer Fläche ins Material gedrückt: abziehen
+        if sketch.plane.isOnFace, mode == .union, value < 0 {
+            mode = .cut
+            distance = -value
+        }
+        guard mode == .newBody || requireKernel() else { return }
+        guard let solid = extrudeRegions(regions, plane: sketch.plane, distance: distance, mode: mode) else {
+            message = "Bereich lässt sich nicht extrudieren."
+            return
+        }
+        guard let result = extrusionResult(solid, sourceBody: sketch.plane.sourceBody, mode: mode) else { return }
+        message = nil
+        showPreview(result, name: Self.regionPreviewName)
     }
 
     /// Gewählte Körper verschieben (Vorschau).
@@ -421,6 +584,7 @@ final class ModelStore: ObservableObject {
         dropPreview()
         edgeValue = 0
         faceValue = 0
+        regionValue = 0
         moveOffset = .zero
         message = nil
     }
@@ -440,7 +604,7 @@ final class ModelStore: ObservableObject {
 
     func clear() {
         dropPreview()
-        commit([], name: "Alles löschen")
+        commit([], sketches: [], name: "Alles löschen")
     }
 
     func setColor(_ color: SIMD3<Float>, of indices: [Int]) {
@@ -472,43 +636,69 @@ final class ModelStore: ObservableObject {
         save()
     }
 
-    // MARK: Skizze extrudieren
+    // MARK: Skizzen
 
-    /// Fertigen Skizzenkörper (siehe SketchController.extrusion) übernehmen.
-    func extrude(_ solid: PCKShape?, on plane: SketchPlane, mode: ExtrudeMode) {
+    /// Fertige Skizze ins Modell übernehmen (index = bestehende Skizze ersetzen).
+    func storeSketch(plane: SketchPlane, entities: [SketchEntity], replacing index: Int?) {
         commitPreview()
-        guard mode == .newBody || requireKernel() else { return }
-        guard let solid else {
-            message = "Profil lässt sich nicht extrudieren."
-            return
+        var result = sketches
+        if let index, result.indices.contains(index) {
+            var sketch = StoredSketch(name: result[index].name, plane: plane, entities: entities)
+            sketch.isHidden = result[index].isHidden
+            result[index] = sketch
+            commit(bodies, sketches: result, name: "Skizze bearbeiten")
+        } else {
+            let number = (sketches.count) + 1
+            result.append(StoredSketch(name: "Skizze \(number)", plane: plane, entities: entities))
+            commit(bodies, sketches: result, name: "Skizze \(number)")
         }
+    }
+
+    func deleteSketch(_ index: Int) {
+        guard sketches.indices.contains(index) else { return }
+        dropPreview()
+        var result = sketches
+        let name = result.remove(at: index).name
+        commit(bodies, sketches: result, name: "\(name) löschen")
+    }
+
+    func setSketchHidden(_ hidden: Bool, sketch index: Int) {
+        guard sketches.indices.contains(index) else { return }
+        commitPreview()
+        sketches[index].isHidden = hidden
+        if hidden, selectedRegions.first?.sketch == index {
+            clearSelectionState()
+        }
+        refreshHighlight()
+        save()
+    }
+
+    /// Ergebnis einer Extrusion je Modus: neuer Körper, mit dem Flächenkörper vereinigt oder von allen abgezogen.
+    private func extrusionResult(_ solid: PCKShape, sourceBody: Int?, mode: ExtrudeMode) -> [SceneBody]? {
         switch mode {
         case .newBody:
-            commit(bodies + [newBody(solid, name: "Körper")], name: "Extrudieren")
+            return bodies + [newBody(solid, name: "Körper")]
         case .union:
             // Mit dem Körper der Skizzenfläche vereinigen, sonst mit dem zuletzt erzeugten.
-            let target = plane.sourceBody.flatMap { bodies.indices.contains($0) ? $0 : nil } ?? bodies.indices.last
-            guard let target else {
-                commit([newBody(solid, name: "Körper")], name: "Extrudieren")
-                return
-            }
+            let target = sourceBody.flatMap { bodies.indices.contains($0) ? $0 : nil } ?? bodies.indices.last
+            guard let target else { return [newBody(solid, name: "Körper")] }
             guard let fused = bodies[target].shape.fusing(solid) else {
                 message = "Vereinigen fehlgeschlagen."
-                return
+                return nil
             }
             var result = bodies
             result[target] = result[target].with(fused)
-            commit(result, name: "Extrudieren (vereinigen)")
+            return result
         case .cut:
             var result: [SceneBody] = []
             for body in bodies {
                 guard let cut = body.shape.cutting(solid) else {
                     message = "Abziehen fehlgeschlagen."
-                    return
+                    return nil
                 }
                 result.append(body.with(cut))
             }
-            commit(result, name: "Extrudieren (abziehen)")
+            return result
         }
     }
 
@@ -520,16 +710,18 @@ final class ModelStore: ObservableObject {
             return
         }
         guard let entry = history.popLast() else { return }
-        future.append(HistoryEntry(name: entry.name, bodies: bodies))
+        future.append(HistoryEntry(name: entry.name, bodies: bodies, sketches: sketches))
         bodies = entry.bodies
+        sketches = entry.sketches
         afterChange()
     }
 
     func redo() {
         dropPreview()
         guard let entry = future.popLast() else { return }
-        history.append(HistoryEntry(name: entry.name, bodies: bodies))
+        history.append(HistoryEntry(name: entry.name, bodies: bodies, sketches: sketches))
         bodies = entry.bodies
+        sketches = entry.sketches
         afterChange()
     }
 
@@ -607,10 +799,11 @@ final class ModelStore: ObservableObject {
         refreshHighlight()
     }
 
-    private func commit(_ newBodies: [SceneBody], name: String) {
-        history.append(HistoryEntry(name: name, bodies: bodies))
+    private func commit(_ newBodies: [SceneBody], sketches newSketches: [StoredSketch]? = nil, name: String) {
+        history.append(HistoryEntry(name: name, bodies: bodies, sketches: sketches))
         future.removeAll()
         bodies = newBodies
+        if let newSketches { sketches = newSketches }
         afterChange()
     }
 
@@ -628,6 +821,8 @@ final class ModelStore: ObservableObject {
         selection = nil
         selectedEdges = []
         selectedBodies = []
+        selectedRegions = []
+        regionValue = 0
         edgeHandle = nil
         faceHandle = nil
         edgeValue = 0
@@ -666,8 +861,13 @@ final class ModelStore: ObservableObject {
 
     private var modelURL: URL? { folder?.appending(path: "model.step") }
     private var metaURL: URL? { folder?.appending(path: "bodies.json") }
+    private var sketchesURL: URL? { folder?.appending(path: "sketches.json") }
 
     private func load() {
+        if let url = sketchesURL, let data = try? Data(contentsOf: url),
+           let stored = try? JSONDecoder().decode([StoredSketch].self, from: data) {
+            sketches = stored
+        }
         guard PCKShape.stepAvailable, let modelURL,
               FileManager.default.fileExists(atPath: modelURL.path(percentEncoded: false)),
               let shapes = PCKShape.readSTEP(path: modelURL.path(percentEncoded: false)) else { return }
@@ -684,6 +884,9 @@ final class ModelStore: ObservableObject {
     }
 
     private func save() {
+        if let sketchesURL, let data = try? JSONEncoder().encode(sketches) {
+            try? data.write(to: sketchesURL)
+        }
         guard PCKShape.stepAvailable, let modelURL, let metaURL else { return }
         let path = modelURL.path(percentEncoded: false)
         if bodies.isEmpty {

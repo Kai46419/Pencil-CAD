@@ -9,6 +9,101 @@ enum SidePanel: String, Identifiable {
     var id: Self { self }
 }
 
+/// Fang-Symbol: Hufeisenmagnet (gibt es nicht als SF Symbol).
+struct MagnetShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        let w = rect.width, h = rect.height
+        let radius = w * 0.3
+        let bottom = CGPoint(x: rect.midX, y: rect.minY + h * 0.58)
+        var path = Path()
+        path.move(to: CGPoint(x: rect.midX - radius, y: rect.minY + h * 0.1))
+        path.addLine(to: CGPoint(x: rect.midX - radius, y: bottom.y))
+        path.addArc(center: bottom, radius: radius, startAngle: .degrees(180), endAngle: .degrees(0), clockwise: true)
+        path.addLine(to: CGPoint(x: rect.midX + radius, y: rect.minY + h * 0.1))
+        return path
+    }
+}
+
+/// Polenden des Magneten (abgesetzt dargestellt).
+struct MagnetPoles: Shape {
+    func path(in rect: CGRect) -> Path {
+        let w = rect.width, h = rect.height
+        let radius = w * 0.3
+        var path = Path()
+        for x in [rect.midX - radius, rect.midX + radius] {
+            path.move(to: CGPoint(x: x, y: rect.minY + h * 0.1))
+            path.addLine(to: CGPoint(x: x, y: rect.minY + h * 0.3))
+        }
+        return path
+    }
+}
+
+struct MagnetRailIcon: View {
+    var isActive: Bool
+
+    var body: some View {
+        let ink = isActive ? Color.white : Color.primary
+        ZStack {
+            MagnetShape()
+                .stroke(ink, style: StrokeStyle(lineWidth: 4.5, lineCap: .butt))
+            MagnetPoles()
+                .stroke(isActive ? Color.white.opacity(0.55) : Color.red.opacity(0.8),
+                        style: StrokeStyle(lineWidth: 4.5, lineCap: .butt))
+        }
+        .frame(width: 20, height: 22)
+        .frame(width: 44, height: 44)
+        .background(isActive ? Color.accentColor : Color(.systemBackground), in: Circle())
+        .shadow(color: .black.opacity(0.12), radius: 4, y: 1)
+    }
+}
+
+/// Fangeinstellungen: Hauptschalter, einzelne Fangarten, Rastermaß.
+struct SnapMenu: View {
+    @ObservedObject var sketch: SketchController
+    let gridSteps: [Double]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle(isOn: $sketch.snapEnabled) {
+                Text("Fang")
+                    .font(.headline)
+            }
+            Divider()
+            ForEach(SnapKind.allCases) { kind in
+                Toggle(isOn: Binding(get: { sketch.snapKinds.contains(kind) }, set: { on in
+                    if on { sketch.snapKinds.insert(kind) } else { sketch.snapKinds.remove(kind) }
+                })) {
+                    HStack(spacing: 10) {
+                        Image(systemName: kind.systemImage)
+                            .frame(width: 22)
+                            .foregroundStyle(.orange)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(kind.rawValue)
+                            Text(kind.detail)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .disabled(!sketch.snapEnabled)
+            Divider()
+            Picker("Raster", selection: $sketch.gridStep) {
+                ForEach(gridSteps, id: \.self) { step in
+                    Text("\(step.formatted()) mm").tag(step)
+                }
+            }
+            .pickerStyle(.segmented)
+            Text("Schwebt der Stift über der Skizze, zeigt er Fangpunkte und Knoten an.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .font(.callout)
+        .padding(16)
+        .frame(width: 320)
+    }
+}
+
 /// Rechte Leiste: Fang, Rastergröße, ViewCube, Einpassen, Anzeigemodus, Screenshot, Verlauf, Elemente.
 struct RightRail: View {
     @ObservedObject var workspace: Workspace
@@ -17,11 +112,19 @@ struct RightRail: View {
     let screenshot: () -> Void
 
     private static let gridSteps: [Double] = [0.1, 0.5, 1, 5, 10]
+    @State private var isSnapMenuShown = false
 
     var body: some View {
         VStack(spacing: 10) {
-            RailButton(systemImage: "square.grid.3x3.topleft.filled", label: "Fang", isActive: sketch.snapEnabled) {
-                sketch.snapEnabled.toggle()
+            Button {
+                isSnapMenuShown = true
+            } label: {
+                MagnetRailIcon(isActive: sketch.snapEnabled)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Fang")
+            .popover(isPresented: $isSnapMenuShown, arrowEdge: .trailing) {
+                SnapMenu(sketch: sketch, gridSteps: Self.gridSteps)
             }
             Menu {
                 Picker("Raster", selection: $sketch.gridStep) {
@@ -56,6 +159,9 @@ struct RightRail: View {
                 workspace.send(.look(normal))
             }
             .padding(.vertical, 4)
+            // Im Skizzenmodus bleibt die Ansicht senkrecht auf der Skizzenebene
+            .disabled(sketch.isActive && !sketch.isChoosingPlane)
+            .opacity(sketch.isActive && !sketch.isChoosingPlane ? 0.4 : 1)
 
             RailButton(systemImage: "arrow.up.left.and.arrow.down.right", label: "Einpassen") {
                 workspace.send(.fitAll)

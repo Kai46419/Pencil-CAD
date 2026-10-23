@@ -306,7 +306,7 @@ struct SketchRegion {
 
 // MARK: Elemente
 
-enum SplineKind: String, CaseIterable, Identifiable {
+enum SplineKind: String, CaseIterable, Identifiable, Codable {
     case fit = "Fit-Punkte"
     case control = "Kontrollpunkte"
 
@@ -320,7 +320,7 @@ enum OffsetKind: String, CaseIterable, Identifiable {
     var id: Self { self }
 }
 
-enum TextAlignmentOption: String, CaseIterable, Identifiable {
+enum TextAlignmentOption: String, CaseIterable, Identifiable, Codable {
     case left = "Links"
     case center = "Mitte"
     case right = "Rechts"
@@ -329,7 +329,7 @@ enum TextAlignmentOption: String, CaseIterable, Identifiable {
 }
 
 /// Text als Skizzenprofil: Umrisse der Buchstaben aus der Schrift.
-struct SketchText {
+struct SketchText: Codable {
     var string: String
     var anchor: Point2
     var height: Double
@@ -349,6 +349,29 @@ struct SketchText {
         Font(name: "Futura-Bold", title: "Futura Fett"), Font(name: "Georgia-Bold", title: "Georgia Fett"),
         Font(name: "Courier-Bold", title: "Courier Fett"), Font(name: "Menlo-Bold", title: "Menlo Fett"),
     ]
+
+    private enum CodingKeys: String, CodingKey {
+        case string, anchor, height, fontName, alignment
+    }
+
+    /// Die Umrisse werden nicht gespeichert, sondern beim Laden aus der Schrift neu erzeugt.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(string: try container.decode(String.self, forKey: .string),
+                  anchor: try container.decode(Point2.self, forKey: .anchor),
+                  height: try container.decode(Double.self, forKey: .height),
+                  fontName: try container.decode(String.self, forKey: .fontName),
+                  alignment: try container.decode(TextAlignmentOption.self, forKey: .alignment))
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(string, forKey: .string)
+        try container.encode(anchor, forKey: .anchor)
+        try container.encode(height, forKey: .height)
+        try container.encode(fontName, forKey: .fontName)
+        try container.encode(alignment, forKey: .alignment)
+    }
 
     init(string: String, anchor: Point2, height: Double, fontName: String, alignment: TextAlignmentOption) {
         self.string = string
@@ -448,7 +471,7 @@ struct SketchText {
 }
 
 /// Ein Element der Skizze.
-enum SketchEntity {
+enum SketchEntity: Codable {
     case line(Point2, Point2)
     case rectangle(corner: Point2, size: Point2)
     case circle(center: Point2, radius: Double)
@@ -705,4 +728,53 @@ enum SketchOffset {
             return p + miter * d * scale
         }
     }
+}
+
+// MARK: Profile für den Kernel
+
+/// Außenkontur und Löcher eines Bereichs als Kernel-Kodierung, um offset entlang der Normale verschoben.
+func profileWires(_ region: SketchRegion, plane: SketchPlane, offset: Double = 0) -> [[NSNumber]] {
+    let base = plane.normal * offset
+    let world = { (p: Point2) -> [NSNumber] in
+        let w = plane.world(p) + base
+        return [NSNumber(value: w.x), NSNumber(value: w.y), NSNumber(value: w.z)]
+    }
+    return ([region.outer] + region.holes).map { $0.code(normal: plane.normal, xAxis: plane.u, world: world) }
+}
+
+/// Körper aus Bereichen einer Skizze. Beim Abziehen beginnt das Werkzeug minimal außerhalb,
+/// damit keine hauchdünnen Restflächen bleiben.
+func extrudeRegions(_ regions: [SketchRegion], plane: SketchPlane, distance: Double, mode: ExtrudeMode) -> PCKShape? {
+    guard !regions.isEmpty, distance != 0 else { return nil }
+    let sign = plane.extrusionSign(mode: mode)
+    let from = mode == .cut ? -sign * 0.01 : 0
+    let direction = plane.normal * (sign * distance - from)
+    var shapes: [PCKShape] = []
+    for region in regions {
+        let shape: PCKShape?
+        if PCKShape.kernelAvailable {
+            shape = PCKShape.prism(profileWires: profileWires(region, plane: plane, offset: from), direction: direction)
+        } else {
+            let xyz = region.polygon.flatMap { p -> [NSNumber] in
+                let w = plane.world(p) + plane.normal * from
+                return [NSNumber(value: w.x), NSNumber(value: w.y), NSNumber(value: w.z)]
+            }
+            shape = PCKShape.prism(pointsXYZ: xyz, direction: direction)
+        }
+        guard let shape else { return nil }
+        shapes.append(shape)
+    }
+    return PCKShape.compound(shapes)
+}
+
+/// Dreiecke (Weltpunkte, je drei) zum Einfärben eines Bereichs.
+func regionTriangles(_ region: SketchRegion, plane: SketchPlane) -> [SIMD3<Float>] {
+    if PCKShape.kernelAvailable, let face = PCKShape.face(profileWires: profileWires(region, plane: plane)) {
+        let mesh = Mesh(face.triangulate(deflection: 0.05), body: -1)
+        return mesh.indices.map { mesh.vertices[Int($0)].position }
+    }
+    // Ohne Kernel: Fächer, nur für konvexe Bereiche korrekt
+    let points = region.polygon.map { SIMD3<Float>(plane.world($0)) }
+    guard points.count >= 3 else { return [] }
+    return (1..<(points.count - 1)).flatMap { [points[0], points[$0], points[$0 + 1]] }
 }

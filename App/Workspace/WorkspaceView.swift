@@ -37,6 +37,12 @@ private struct WorkspaceContent: View {
     var body: some View {
         ZStack {
             Viewport(workspace: workspace, model: model, sketch: sketch)
+                .overlay {
+                    if let location = workspace.quickToolsLocation {
+                        QuickToolsPalette(workspace: workspace, sketch: sketch, location: location)
+                    }
+                }
+                .animation(.spring(duration: 0.2), value: workspace.quickToolsLocation)
                 .ignoresSafeArea()
             // Leisten innerhalb des sicheren Bereichs; die leere Fläche lässt Berührungen zum Viewport durch.
             Color.clear
