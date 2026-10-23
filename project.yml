@@ -13,7 +13,9 @@ targets:
       - App
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.example.pencilcad
+        # Werden von scripts/generate-project.sh gesetzt (signing.env oder Zertifikat im Schlüsselbund)
+        PRODUCT_BUNDLE_IDENTIFIER: ${PENCILCAD_BUNDLE_ID}
+        DEVELOPMENT_TEAM: ${PENCILCAD_TEAM}
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "1"
         TARGETED_DEVICE_FAMILY: "2"

@@ -66,8 +66,11 @@ Auf dem iPad zeichnet nur der Pencil, die Finger navigieren.
 open PencilCAD.xcodeproj
 ```
 
-In Xcode: Target **PencilCAD** → *Signing & Capabilities* → eigenes **Team** wählen und ggf. die Bundle-ID
-(`com.example.pencilcad`) ändern. Dann iPad auswählen und starten.
+**Echtes iPad:** Einmal in Xcode unter Target **PencilCAD** › *Signing & Capabilities* das eigene **Team** wählen und
+`./scripts/generate-project.sh` erneut ausführen. Das Skript liest die Team-ID danach selbst aus dem Schlüsselbund,
+die Einstellung geht beim Neuerzeugen also nicht mehr verloren. Bundle-ID: `de.kai46419.pencilcad`. Eigene Werte
+optional in `signing.env` (`PENCILCAD_TEAM=…`, `PENCILCAD_BUNDLE_ID=…`). Auf dem iPad den Entwicklermodus einschalten
+(Einstellungen › Datenschutz & Sicherheit).
 
 **Wichtig:** Das Xcode-Projekt wird nicht eingecheckt, sondern erzeugt. Nach jedem `git pull` oder Branch-Wechsel, der
 neue Dateien bringt, `./scripts/generate-project.sh` erneut ausführen (beendet Xcode selbst und öffnet das Projekt neu). Sonst meldet Xcode
