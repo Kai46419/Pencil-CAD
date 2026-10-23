@@ -55,7 +55,7 @@ Oberfläche nach dem Aufbau von Shapr3D (eigene Symbole, kein Shapr3D-Material):
 - **Visualisieren:** Schnittansicht (Ebene, Versatz, Seite), Messen (Kantenlänge, Fläche, Volumen, Abstand zweier
   Punkte), Isolieren; **Einfügen:** Torus und Bild (aus Fotos, als Vorlage auf einer Ebene)
 
-Bereiche entstehen aus geschlossenen Konturen; sich kreuzende Linien teilen Bereiche noch nicht auf.
+Bereiche entstehen wie bei Shapr3D aus allen Kurven der Skizze: Überschneidungen teilen sie in Teilflächen (z. B. die Schnittlinse zweier Kreise), jede lässt sich einzeln extrudieren.
 
 ### Vorbild und Dokumentation der Werkzeuge
 

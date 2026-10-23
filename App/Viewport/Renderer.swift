@@ -72,8 +72,8 @@ struct FillGroup {
     var color: SIMD4<Float>
 }
 
-/// Hintergrund wie bei Shapr3D: helles Grau, etwas dunkler als Weiß, damit helle Körper sichtbar bleiben.
-let viewportBackground = MTLClearColor(red: 0.84, green: 0.85, blue: 0.87, alpha: 1)
+/// Hintergrund wie bei Shapr3D: neutrales helles Grau (linear, ergibt etwa sRGB 237).
+let viewportBackground = MTLClearColor(red: 0.845, green: 0.845, blue: 0.845, alpha: 1)
 
 final class Renderer: NSObject, MTKViewDelegate {
     /// Länge eines Ziehpfeils in Bildschirmpunkten.
@@ -454,10 +454,10 @@ final class Renderer: NSObject, MTKViewDelegate {
             encoder.setRenderPipelineState(linePipeline)
             encoder.setDepthStencilState(depthState)
             setUniforms(&gridUniforms)
-            for (lines, shade) in [(grid.minor, Float(0.78)), (grid.major, Float(0.69))] {
+            for (lines, shade) in [(grid.minor, Float(0.74)), (grid.major, Float(0.67))] {
                 guard let buffer = makeBuffer(lines) else { continue }
                 encoder.setVertexBuffer(buffer, offset: 0, index: 0)
-                setColor(shade, shade + 0.01, shade + 0.03)
+                setColor(shade, shade, shade)
                 encoder.drawPrimitives(type: .line, vertexStart: 0, vertexCount: lines.count)
             }
         }

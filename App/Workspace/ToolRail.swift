@@ -46,6 +46,8 @@ private struct RailEntry: Identifiable {
     var subtitle: String?
     let systemImage: String
     var isActive = false
+    /// Ausgegraut und nicht antippbar (z. B. „Keine aktive Ebene“, „Löschen“ ohne Auswahl)
+    var isEnabled = true
     var flyout: [ToolItem]?
     var action: () -> Void = {}
 }
@@ -100,8 +102,8 @@ struct ToolRail: View {
                              isActive: entry.isActive, isOpen: openEntry == entry.id, size: tile)
                 }
                 .buttonStyle(.plain)
-                .disabled(sketch.isActive && sketch.isChoosingPlane && entry.id != "sketch.finish")
-                .opacity(sketch.isActive && sketch.isChoosingPlane && entry.id != "sketch.finish" ? 0.5 : 1)
+                .disabled(!entry.isEnabled)
+                .opacity(entry.isEnabled ? 1 : 0.45)
             }
         }
         return HStack(alignment: .top, spacing: 12) {
@@ -156,12 +158,22 @@ struct ToolRail: View {
         }
     }
 
+    /// Name der Skizzenebene: Standardebene, sonst Fläche bzw. Konstruktionsebene.
+    private var activePlaneName: String {
+        guard !sketch.plane.isOnFace else { return "Fläche" }
+        return BasePlane.allCases.first { $0.normal == sketch.plane.normal }?.rawValue ?? "Ebene"
+    }
+
     private var sketchEntries: [RailEntry] {
         let lineTool = sketch.tool == .arc ? SketchTool.arc : .polyline
         return [
-            RailEntry(id: "sketch.finish", title: "Skizzieren beenden", systemImage: "checkmark.circle") {
+            RailEntry(id: "sketch.finish", title: "Skizzieren beenden", systemImage: "xmark") {
                 workspace.finishSketch()
             },
+            // Wie bei Shapr3D: Werkzeuge lassen sich schon vor der Ebenenwahl wählen
+            RailEntry(id: "sketch.plane", title: sketch.isChoosingPlane ? "Keine aktive Ebene" : "Aktive Ebene",
+                      subtitle: sketch.isChoosingPlane ? nil : activePlaneName,
+                      systemImage: "square.dashed", isEnabled: false),
             RailEntry(id: "sketch.line", title: "Linie/Bogen", subtitle: lineTool.subtitle,
                       systemImage: lineTool.systemImage, isActive: sketch.tool == .polyline || sketch.tool == .arc,
                       flyout: [toolItem(.polyline, title: "Linie"), toolItem(.arc, title: "Bogen")]),
@@ -193,7 +205,7 @@ struct ToolRail: View {
                       flyout: [toolItem(.point), toolItem(.text), toolItem(.scale)]),
             toolEntry(.trim),
             RailEntry(id: "sketch.delete", title: "Löschen", subtitle: sketch.selection.isEmpty ? nil : "Auswahl",
-                      systemImage: "trash") {
+                      systemImage: "trash", isEnabled: !sketch.selection.isEmpty) {
                 sketch.deleteSelection()
             },
             RailEntry(id: "sketch.construction", title: "Konstruktion", subtitle: sketch.constructionMode ? "Ein" : "Aus",

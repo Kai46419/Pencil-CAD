@@ -118,11 +118,10 @@ struct ParameterCard: View {
 
     // MARK: Skizze
 
+    /// Vor der Ebenenwahl keine Karte (wie bei Shapr3D): Die Felder der Standardebenen liegen im Viewport.
     @ViewBuilder
     private var sketchCard: some View {
-        if sketch.isChoosingPlane {
-            planeChoiceCard
-        } else {
+        if !sketch.isChoosingPlane {
             Card {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(spacing: 14) {
@@ -142,42 +141,6 @@ struct ParameterCard: View {
                 }
             }
         }
-    }
-
-    /// Ebenenwahl beim Start einer Skizze.
-    private var planeChoiceCard: some View {
-        Card {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Skizzenebene wählen")
-                    .font(.callout.weight(.semibold))
-                Text("Eine Ebene im Modell oder eine ebene Fläche antippen – oder hier wählen:")
-                    .foregroundStyle(.secondary)
-                    .font(.footnote)
-                Grid(horizontalSpacing: 8, verticalSpacing: 8) {
-                    GridRow {
-                        planeButton(.top)
-                        planeButton(.front)
-                        planeButton(.right)
-                    }
-                    GridRow {
-                        planeButton(.bottom)
-                        planeButton(.back)
-                        planeButton(.left)
-                    }
-                }
-            }
-        }
-    }
-
-    private func planeButton(_ side: BasePlane) -> some View {
-        Button {
-            workspace.chooseSketchPlane(side)
-        } label: {
-            Text(side.rawValue)
-                .font(.callout.weight(.medium))
-                .frame(width: 92, height: 38)
-        }
-        .buttonStyle(.bordered)
     }
 
     /// Aktuelle Ebene; Wechsel auf eine Standardebene leert die Skizze.

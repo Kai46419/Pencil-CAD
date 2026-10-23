@@ -241,6 +241,11 @@ final class ViewportView: MTKView {
     private static let selectionOrange = SIMD3<Float>(0.98, 0.5, 0.06)
     private static let helperOrange = SIMD3<Float>(0.93, 0.55, 0.16)
     private static let dimensionInk = SIMD3<Float>(0.18, 0.2, 0.26)
+    private static let axes: [(SIMD3<Float>, SIMD3<Float>)] = [
+        ([1, 0, 0], [0.78, 0.16, 0.11]),
+        ([0, 1, 0], [0.17, 0.52, 0.2]),
+        ([0, 0, 1], [0.1, 0.36, 0.88]),
+    ]
 
     /// Skizzenlinien (dick, immer sichtbar), gespeicherte Skizzen, Konstruktionsgeometrie, Auswahl,
     /// Maßlinien, Fangsymbole, Knoten und Bereichsfüllungen.
@@ -250,6 +255,24 @@ final class ViewportView: MTKView {
         var groups: [LineGroup] = []
         var fills: [FillGroup] = []
         let perPoint = Double(renderer.camera.worldUnitsPerPoint(viewHeight: Float(bounds.height)))
+
+        // Achsen wie bei Shapr3D: X rot, Y grün, Z blau, vom Ursprung in positiver Richtung bis zum Horizont
+        if !sketching {
+            let reach = max(renderer.camera.distance * 10, planeHalfSize * 20)
+            for (axis, color) in Self.axes {
+                groups.append(LineGroup(polylines: [[.zero, axis * reach]], color: color, width: 1.3, onTop: false))
+            }
+        }
+        // Ebenenwahl: drei kleine graue Felder neben dem Ursprung
+        if sketch.isActive, sketch.isChoosingPlane {
+            for square in basePlaneSquares {
+                let h = square.half
+                let corners = [square.center - square.u * h - square.v * h, square.center + square.u * h - square.v * h,
+                               square.center + square.u * h + square.v * h, square.center - square.u * h + square.v * h]
+                fills.append(FillGroup(triangles: [0, 1, 2, 0, 2, 3].map { corners[$0] },
+                                       color: SIMD4(0.3, 0.3, 0.31, 0.33)))
+            }
+        }
 
         for (index, stored) in model.sketches.enumerated() where !stored.isHidden {
             if sketch.isActive, index == workspace.editingSketchIndex { continue }
@@ -525,19 +548,25 @@ final class ViewportView: MTKView {
         }
     }
 
-    /// Ebenenwahl: drei antippbare Scheiben.
+    /// Antippbare Felder der Standardebenen bei der Ebenenwahl, wie bei Shapr3D klein und neben dem Ursprung:
+    /// XY vorn rechts, XZ rechts oben, YZ vorn oben (Mittelpunkt, Richtungen, halbe Kantenlänge).
+    private var basePlaneSquares: [(index: Int, center: SIMD3<Float>, u: SIMD3<Float>, v: SIMD3<Float>, half: Float)] {
+        let half = planeHalfSize * 0.3
+        let offset = half * 1.8
+        let sides: [SIMD2<Float>] = [[1, -1], [1, 1], [-1, 1]]
+        return Self.basePlanes.indices.map { index -> (index: Int, center: SIMD3<Float>, u: SIMD3<Float>, v: SIMD3<Float>, half: Float) in
+            let plane = Self.basePlanes[index]
+            let center = plane.u * sides[index].x * offset + plane.v * sides[index].y * offset
+            return (index, center, plane.u, plane.v, half)
+        }
+    }
+
+    /// Konstruktionsebenen zum Antippen; die Standardebenen zeichnet updateLines als Felder.
     private func refreshPlanes() {
         guard let renderer, let sketch else { return }
         let half = planeHalfSize
         var graphics: [PlaneGraphic] = []
         var labels: [(text: String, position: SIMD3<Float>)] = []
-        if sketch.isActive, sketch.isChoosingPlane {
-            for (index, plane) in Self.basePlanes.enumerated() {
-                graphics.append(PlaneGraphic(center: .zero, u: plane.u, v: plane.v, halfSize: half,
-                                             color: SIMD3(0.35, 0.55, 0.95)))
-                labels.append((facingSide(ofBasePlane: index).rawValue, (plane.u + plane.v) * half * 0.8))
-            }
-        }
         // Konstruktionsebenen (beim Skizzieren ausgeblendet, bei der Ebenenwahl antippbar)
         if !sketch.isActive || sketch.isChoosingPlane, let model {
             for item in model.constructions where item.kind == .plane && !item.isHidden {
@@ -575,18 +604,20 @@ final class ViewportView: MTKView {
         }
     }
 
-    /// Getroffene Standardebene (vorderste Scheibe unter dem Finger) und Abstand entlang des Sehstrahls.
+    /// Getroffene Standardebene (vorderstes Feld unter dem Finger) und Abstand entlang des Sehstrahls.
+    /// Die Trefferfläche ist etwas größer als das Feld, damit es sich mit dem Finger leicht treffen lässt.
     private func basePlaneHit(ray: (origin: SIMD3<Float>, direction: SIMD3<Float>)) -> (side: BasePlane, t: Float)? {
-        let half = planeHalfSize
         var best: (side: BasePlane, t: Float)?
-        for (index, plane) in Self.basePlanes.enumerated() {
-            let denominator = simd_dot(ray.direction, plane.normal)
+        for square in basePlaneSquares {
+            let normal = Self.basePlanes[square.index].normal
+            let denominator = simd_dot(ray.direction, normal)
             guard abs(denominator) > 1e-6 else { continue }
-            let t = -simd_dot(ray.origin, plane.normal) / denominator
+            let t = -simd_dot(ray.origin, normal) / denominator
             guard t > 0, t < (best?.t ?? .infinity) else { continue }
-            let p = ray.origin + t * ray.direction
-            guard abs(simd_dot(p, plane.u)) <= half, abs(simd_dot(p, plane.v)) <= half else { continue }
-            best = (facingSide(ofBasePlane: index), t)
+            let d = ray.origin + t * ray.direction - square.center
+            let reach = square.half * 1.25
+            guard abs(simd_dot(d, square.u)) <= reach, abs(simd_dot(d, square.v)) <= reach else { continue }
+            best = (facingSide(ofBasePlane: square.index), t)
         }
         return best
     }

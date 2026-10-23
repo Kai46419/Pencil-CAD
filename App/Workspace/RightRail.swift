@@ -40,6 +40,8 @@ struct MagnetPoles: Shape {
 
 struct MagnetRailIcon: View {
     var isActive: Bool
+    /// false in einer gemeinsamen Säule (RailGroup), die selbst den Schatten trägt
+    var shadowed = true
 
     var body: some View {
         let ink = isActive ? Color.white : Color.primary
@@ -53,7 +55,7 @@ struct MagnetRailIcon: View {
         .frame(width: 20, height: 22)
         .frame(width: 44, height: 44)
         .background(isActive ? Color.accentColor : Color(.systemBackground), in: Circle())
-        .shadow(color: .black.opacity(0.12), radius: 4, y: 1)
+        .shadow(color: .black.opacity(shadowed ? 0.12 : 0), radius: 4, y: 1)
     }
 }
 
@@ -114,13 +116,142 @@ struct RightRail: View {
     private static let gridSteps: [Double] = [0.1, 0.5, 1, 5, 10]
     @State private var isSnapMenuShown = false
 
+    @State private var showsConstraints = true
+
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            if sketch.isActive, !sketch.isChoosingPlane {
-                ConstraintColumn(sketch: sketch)
+        if sketch.isActive {
+            ViewThatFits(in: .vertical) {
+                sketchColumn
+                ScrollView(showsIndicators: false) { sketchColumn }
             }
+        } else {
             mainColumn
         }
+    }
+
+    /// Skizzenmodus wie bei Shapr3D: Fang, Raster, Ausrichten und Finger in einer Säule, daneben der Würfel;
+    /// darunter Anzeigemodi, Screenshot, Verlauf und die Einschränkungen (vor der Ebenenwahl ausgegraut).
+    private var sketchColumn: some View {
+        VStack(alignment: .trailing, spacing: 10) {
+            HStack(alignment: .top, spacing: 8) {
+                ViewCube(camera: workspace.camera) { normal in
+                    workspace.send(.look(normal))
+                }
+                // Nach der Ebenenwahl bleibt die Ansicht senkrecht auf der Skizzenebene
+                .disabled(!sketch.isChoosingPlane)
+                .opacity(sketch.isChoosingPlane ? 1 : 0.4)
+                RailGroup {
+                    Button {
+                        isSnapMenuShown = true
+                    } label: {
+                        MagnetRailIcon(isActive: sketch.snapEnabled, shadowed: false)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Fang")
+                    .popover(isPresented: $isSnapMenuShown, arrowEdge: .trailing) {
+                        SnapMenu(sketch: sketch, gridSteps: Self.gridSteps)
+                    }
+                    gridMenu(stacked: true)
+                    Button {
+                        workspace.send(.alignToSketchPlane)
+                    } label: {
+                        RailIcon(systemImage: "cube.transparent", shadowed: false)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Normal zu Skizze")
+                    .disabled(sketch.isChoosingPlane)
+                    .opacity(sketch.isChoosingPlane ? 0.4 : 1)
+                    Button {
+                        sketch.fingerDraws.toggle()
+                    } label: {
+                        RailIcon(systemImage: sketch.fingerDraws ? "hand.draw.fill" : "hand.draw",
+                                 isActive: sketch.fingerDraws, shadowed: false)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Finger zeichnet")
+                }
+            }
+
+            Menu {
+                displayModePicker
+            } label: {
+                HStack(spacing: 8) {
+                    RailLabel(title: "Anzeigemodi", subtitle: workspace.displayMode.rawValue)
+                    RailIcon(systemImage: workspace.displayMode.systemImage)
+                }
+            }
+            .accessibilityLabel("Anzeigemodus")
+            labeledButton("Screenshot", systemImage: "camera", action: screenshot)
+            labeledButton("Verlauf", systemImage: "clock.arrow.circlepath", isActive: panel == .history) {
+                panel = panel == .history ? nil : .history
+            }
+
+            Capsule()
+                .fill(Color.secondary.opacity(0.35))
+                .frame(width: 30, height: 3)
+                .frame(width: 44)
+            labeledButton("Einschränkungen", systemImage: "gearshape.fill", isActive: false) {
+                withAnimation(.easeOut(duration: 0.15)) { showsConstraints.toggle() }
+            }
+            if showsConstraints {
+                ConstraintColumn(sketch: sketch, isEnabled: !sketch.isChoosingPlane)
+            }
+        }
+    }
+
+    private func labeledButton(_ title: String, subtitle: String? = nil, systemImage: String, isActive: Bool = false,
+                               action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                RailLabel(title: title, subtitle: subtitle)
+                RailIcon(systemImage: systemImage, isActive: isActive)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+    }
+
+    /// Rastermaß; im Skizzenmodus wie bei Shapr3D zweizeilig („50“ über „mm“).
+    private func gridMenu(stacked: Bool) -> some View {
+        Menu {
+            Picker("Raster", selection: $sketch.gridStep) {
+                ForEach(Self.gridSteps, id: \.self) { step in
+                    Text("\(step.formatted()) mm").tag(step)
+                }
+            }
+        } label: {
+            Group {
+                if stacked {
+                    VStack(spacing: -1) {
+                        Text(sketch.gridStep.formatted())
+                            .font(.system(size: 12, weight: .semibold).monospacedDigit())
+                        Text("mm")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .frame(width: 44, height: 44)
+                } else {
+                    Text(sketch.gridStep.formatted())
+                        .font(.system(size: 13, weight: .semibold).monospacedDigit())
+                        .frame(width: 44, height: 44)
+                        .background(Color(.systemBackground), in: Circle())
+                        .shadow(color: .black.opacity(0.12), radius: 4, y: 1)
+                }
+            }
+            .foregroundStyle(.primary)
+            .accessibilityLabel("Rastergröße")
+        }
+    }
+
+    @ViewBuilder
+    private var displayModePicker: some View {
+        Picker("Anzeigemodus", selection: $workspace.displayMode) {
+            ForEach(DisplayMode.allCases) { mode in
+                Label(mode.rawValue, systemImage: mode.systemImage).tag(mode)
+            }
+        }
+        Divider()
+        Toggle("Orthografisch", systemImage: "cube.transparent", isOn: $workspace.isOrthographic)
     }
 
     private var mainColumn: some View {
@@ -135,51 +266,18 @@ struct RightRail: View {
             .popover(isPresented: $isSnapMenuShown, arrowEdge: .trailing) {
                 SnapMenu(sketch: sketch, gridSteps: Self.gridSteps)
             }
-            Menu {
-                Picker("Raster", selection: $sketch.gridStep) {
-                    ForEach(Self.gridSteps, id: \.self) { step in
-                        Text("\(step.formatted()) mm").tag(step)
-                    }
-                }
-            } label: {
-                Text(sketch.gridStep.formatted())
-                    .font(.system(size: 13, weight: .semibold).monospacedDigit())
-                    .frame(width: 44, height: 44)
-                    .foregroundStyle(.primary)
-                    .background(Color(.systemBackground), in: Circle())
-                    .shadow(color: .black.opacity(0.12), radius: 4, y: 1)
-                    .accessibilityLabel("Rastergröße")
-            }
-
-            if sketch.isActive {
-                RailButton(systemImage: "scope", label: "Normal zu Skizze") {
-                    workspace.send(.alignToSketchPlane)
-                }
-                RailButton(systemImage: sketch.fingerDraws ? "hand.draw.fill" : "hand.draw",
-                           label: "Finger zeichnet", isActive: sketch.fingerDraws) {
-                    sketch.fingerDraws.toggle()
-                }
-            }
+            gridMenu(stacked: false)
 
             ViewCube(camera: workspace.camera) { normal in
                 workspace.send(.look(normal))
             }
             .padding(.vertical, 4)
-            // Im Skizzenmodus bleibt die Ansicht senkrecht auf der Skizzenebene
-            .disabled(sketch.isActive && !sketch.isChoosingPlane)
-            .opacity(sketch.isActive && !sketch.isChoosingPlane ? 0.4 : 1)
 
             RailButton(systemImage: "arrow.up.left.and.arrow.down.right", label: "Einpassen") {
                 workspace.send(.fitAll)
             }
             Menu {
-                Picker("Anzeigemodus", selection: $workspace.displayMode) {
-                    ForEach(DisplayMode.allCases) { mode in
-                        Label(mode.rawValue, systemImage: mode.systemImage).tag(mode)
-                    }
-                }
-                Divider()
-                Toggle("Orthografisch", systemImage: "cube.transparent", isOn: $workspace.isOrthographic)
+                displayModePicker
             } label: {
                 RailIcon(systemImage: workspace.displayMode.systemImage)
                     .accessibilityLabel("Anzeigemodus")
@@ -196,62 +294,108 @@ struct RightRail: View {
 }
 
 /// „Einschränkungen“ im Skizzenmodus (wie Shapr3D): wirken auf die mit dem Finger gewählten Elemente.
-/// Passende Einschränkungen sind blau umrandet; andere zeigen beim Antippen, was zu wählen ist.
+/// Die Symbole stehen in weißen Säulen, die Namen links daneben. Passende Einschränkungen sind blau,
+/// andere grau; Antippen zeigt dann, was zu wählen ist. Vor der Ebenenwahl ist alles ausgegraut.
 struct ConstraintColumn: View {
     @ObservedObject var sketch: SketchController
+    var isEnabled = true
 
-    var body: some View {
-        let list = VStack(alignment: .trailing, spacing: 7) {
-            Text("Einschränkungen")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background(.regularMaterial, in: Capsule())
-            ForEach(ConstraintKind.allCases) { kind in
-                row(kind.rawValue, kind.systemImage, applicable: sketch.canApply(kind)) {
-                    sketch.applyConstraint(kind)
-                }
-                if kind == .symmetric {
-                    row("Trennen", "scissors", applicable: !sketch.selection.isEmpty) { sketch.detachSelection() }
-                }
-            }
-            row("Konstruktion erstellen", "line.diagonal.arrow", applicable: !sketch.selection.isEmpty) {
-                sketch.toggleConstruction()
-            }
-        }
-        ViewThatFits(in: .vertical) {
-            list
-            ScrollView(showsIndicators: false) { list }
-        }
+    private struct Row: Identifiable {
+        let id: String
+        let systemImage: String
+        let applicable: Bool
+        let action: () -> Void
     }
 
-    private func row(_ title: String, _ systemImage: String, applicable: Bool,
-                     action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                Text(title)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.primary)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 4)
-                    .background(.regularMaterial, in: Capsule())
-                Image(systemName: systemImage)
-                    .font(.system(size: 16, weight: .medium))
-                    .frame(width: 40, height: 40)
-                    .foregroundStyle(applicable ? Color.accentColor : Color.primary)
-                    .background(Color(.systemBackground), in: Circle())
-                    .overlay {
-                        if applicable {
-                            Circle().strokeBorder(Color.accentColor, lineWidth: 2)
-                        }
+    private var groups: [[Row]] {
+        let hasSelection = !sketch.selection.isEmpty
+        let kinds = ConstraintKind.allCases.filter { $0 != .lock }.map { kind in
+            Row(id: kind.rawValue, systemImage: kind.systemImage, applicable: sketch.canApply(kind)) {
+                sketch.applyConstraint(kind)
+            }
+        }
+        return [
+            kinds,
+            [Row(id: "Trennen", systemImage: "link.badge.plus", applicable: hasSelection) { sketch.detachSelection() }],
+            [Row(id: ConstraintKind.lock.rawValue, systemImage: ConstraintKind.lock.systemImage,
+                 applicable: sketch.canApply(.lock)) { sketch.applyConstraint(.lock) },
+             Row(id: "Konstruktion erstellen", systemImage: "square.dashed", applicable: hasSelection) {
+                 sketch.toggleConstruction()
+             }],
+        ]
+    }
+
+    var body: some View {
+        let groups = self.groups
+        VStack(alignment: .trailing, spacing: 8) {
+            ForEach(groups.indices, id: \.self) { index in
+                VStack(alignment: .trailing, spacing: 0) {
+                    ForEach(groups[index]) { row in
+                        rowView(row)
                     }
-                    .shadow(color: .black.opacity(0.12), radius: 4, y: 1)
+                }
+                .padding(.vertical, 2)
+                .background(alignment: .trailing) {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Color(.systemBackground))
+                        .frame(width: 44)
+                        .shadow(color: .black.opacity(0.12), radius: 4, y: 1)
+                }
+            }
+        }
+        .disabled(!isEnabled)
+    }
+
+    private func rowView(_ row: Row) -> some View {
+        let active = isEnabled && row.applicable
+        return Button(action: row.action) {
+            HStack(spacing: 8) {
+                RailLabel(title: row.id, dimmed: !active)
+                Image(systemName: row.systemImage)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(active ? Color.accentColor : Color.secondary.opacity(isEnabled ? 1 : 0.6))
+                    .frame(width: 44, height: 38)
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(title)
+        .accessibilityLabel(row.id)
+    }
+}
+
+/// Säule mit mehreren Knöpfen auf gemeinsamem weißem Grund (rechte Leiste im Skizzenmodus).
+struct RailGroup<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(spacing: 0) {
+            content
+        }
+        .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .shadow(color: .black.opacity(0.12), radius: 4, y: 1)
+    }
+}
+
+/// Name neben einem Knopf der rechten Leiste, wie bei Shapr3D als helles Schild.
+struct RailLabel: View {
+    let title: String
+    var subtitle: String?
+    var dimmed = false
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 0) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(dimmed ? Color.secondary : Color.primary)
+            if let subtitle {
+                Text(subtitle)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 4)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
     }
 }
 
@@ -274,6 +418,7 @@ struct RailButton: View {
 struct RailIcon: View {
     let systemImage: String
     var isActive = false
+    var shadowed = true
 
     var body: some View {
         Image(systemName: systemImage)
@@ -281,7 +426,7 @@ struct RailIcon: View {
             .frame(width: 44, height: 44)
             .foregroundStyle(isActive ? Color.white : Color.primary)
             .background(isActive ? Color.accentColor : Color(.systemBackground), in: Circle())
-            .shadow(color: .black.opacity(0.12), radius: 4, y: 1)
+            .shadow(color: .black.opacity(shadowed ? 0.12 : 0), radius: 4, y: 1)
     }
 }
 

@@ -570,7 +570,7 @@ enum SketchEntity: Codable {
 
 // MARK: Bereiche finden
 
-/// Verkettet offene Segmente zu geschlossenen Konturen und ordnet Löcher ihren Außenkonturen zu.
+/// Bereiche der Skizze (Teilflächen aller Kurven) und die geschlossenen Konturen.
 func findRegions(in entities: [SketchEntity]) -> (regions: [SketchRegion], loops: [SketchLoop]) {
     var loops = entities.flatMap(\.loops)
     var unused = entities.flatMap(\.openSegments)
@@ -592,6 +592,11 @@ func findRegions(in entities: [SketchEntity]) -> (regions: [SketchRegion], loops
         if samePoint(chain[chain.count - 1].end, chain[0].start), chain.count >= 2 || !startsWithLine {
             loops.append(.chain(chain))
         }
+    }
+
+    // Teilflächen wie bei Shapr3D (Überschneidungen teilen Bereiche); verschachtelte Konturen nur als Rückfall
+    if let arranged = SketchArrangement.regions(entities), !arranged.isEmpty || loops.isEmpty {
+        return (arranged, loops)
     }
 
     let polygons = loops.map(\.polygon)
