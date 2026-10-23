@@ -165,8 +165,53 @@ struct ToolRail: View {
         return BasePlane.allCases.first { $0.normal == sketch.plane.normal }?.rawValue ?? "Ebene"
     }
 
+    private var arcItems: [ToolItem] {
+        ArcMode.allCases.map { mode in
+            ToolItem(id: "arc.\(mode.rawValue)", title: "Bogen", subtitle: mode.rawValue, systemImage: mode.systemImage,
+                     isActive: sketch.tool == .arc && sketch.arcMode == mode) {
+                sketch.tool = .arc
+                sketch.arcMode = mode
+            }
+        }
+    }
+
+    private var circleItems: [ToolItem] {
+        CircleMode.allCases.map { mode in
+            ToolItem(id: "circle.\(mode.rawValue)", title: mode.rawValue, subtitle: "Kreis", systemImage: mode.systemImage,
+                     isActive: sketch.tool == .circle && sketch.circleMode == mode) {
+                sketch.tool = .circle
+                sketch.circleMode = mode
+            }
+        }
+    }
+
+    private var polygonItems: [ToolItem] {
+        PolygonMode.allCases.map { mode in
+            ToolItem(id: "polygon.\(mode.rawValue)", title: "Radius bis \(mode.rawValue)",
+                     subtitle: mode == .inscribed ? "Innen (Umkreis)" : "Außen (Inkreis)",
+                     systemImage: SketchTool.polygon.systemImage,
+                     isActive: sketch.tool == .polygon && sketch.polygonMode == mode) {
+                sketch.tool = .polygon
+                sketch.polygonMode = mode
+            }
+        }
+    }
+
+    private var slotItems: [ToolItem] {
+        SlotMode.allCases.map { mode in
+            ToolItem(id: "slot.\(mode.rawValue)", title: mode.rawValue, subtitle: "Langloch", systemImage: mode.systemImage,
+                     isActive: sketch.tool == .slot && sketch.slotMode == mode) {
+                sketch.tool = .slot
+                sketch.slotMode = mode
+            }
+        }
+    }
+
     private var sketchEntries: [RailEntry] {
         let lineTool = sketch.tool == .arc ? SketchTool.arc : .polyline
+        let lineItems: [ToolItem] = [toolItem(.polyline, title: "Linie")] + arcItems
+        let lineSubtitle = lineTool == .arc ? "Bogen \(sketch.arcMode.rawValue)" : lineTool.subtitle
+        let polygonSubtitle = "\(Self.polygonName(sketch.polygonSides)) · \(sketch.polygonMode.rawValue)"
         return [
             RailEntry(id: "sketch.finish", title: "Skizzieren beenden", systemImage: "xmark") {
                 workspace.finishSketch()
@@ -180,9 +225,9 @@ struct ToolRail: View {
             RailEntry(id: "sketch.plane", title: sketch.isChoosingPlane ? "Keine aktive Ebene" : "Aktive Ebene",
                       subtitle: sketch.isChoosingPlane ? nil : activePlaneName,
                       systemImage: "square.dashed", isEnabled: false),
-            RailEntry(id: "sketch.line", title: "Linie/Bogen", subtitle: lineTool.subtitle,
+            RailEntry(id: "sketch.line", title: "Linie/Bogen", subtitle: lineSubtitle,
                       systemImage: lineTool.systemImage, isActive: sketch.tool == .polyline || sketch.tool == .arc,
-                      flyout: [toolItem(.polyline, title: "Linie"), toolItem(.arc, title: "Bogen")]),
+                      flyout: lineItems),
             RailEntry(id: "sketch.spline", title: "Spline", subtitle: sketch.splineKind.rawValue,
                       systemImage: SketchTool.spline.systemImage, isActive: sketch.tool == .spline,
                       flyout: SplineKind.allCases.map { kind in
@@ -201,14 +246,26 @@ struct ToolRail: View {
                               sketch.rectangleMode = mode
                           }
                       }),
-            toolEntry(.circle),
+            RailEntry(id: "sketch.circle", title: "Kreis", subtitle: sketch.circleMode.rawValue,
+                      systemImage: SketchTool.circle.systemImage, isActive: sketch.tool == .circle,
+                      flyout: circleItems),
             toolEntry(.ellipse),
-            toolEntry(.polygon, subtitle: Self.polygonName(sketch.polygonSides)),
+            RailEntry(id: "sketch.polygon", title: "Polygon", subtitle: polygonSubtitle,
+                      systemImage: SketchTool.polygon.systemImage, isActive: sketch.tool == .polygon,
+                      flyout: polygonItems),
+            RailEntry(id: "sketch.slot", title: "Langloch", subtitle: sketch.slotMode.rawValue,
+                      systemImage: SketchTool.slot.systemImage, isActive: sketch.tool == .slot,
+                      flyout: slotItems),
             toolEntry(.project),
             toolEntry(.offset),
+            RailEntry(id: "sketch.modify", title: "Ändern", systemImage: "slider.horizontal.3",
+                      isActive: [SketchTool.fillet, .chamfer, .extend, .breakCurve, .scale].contains(sketch.tool),
+                      flyout: [toolItem(.fillet), toolItem(.chamfer), toolItem(.extend), toolItem(.breakCurve),
+                               toolItem(.scale)]),
             RailEntry(id: "sketch.more", title: "Mehr", systemImage: "ellipsis.circle",
-                      isActive: [SketchTool.point, .text, .scale, .fillet].contains(sketch.tool),
-                      flyout: [toolItem(.fillet), toolItem(.point), toolItem(.text), toolItem(.scale)]),
+                      isActive: [SketchTool.point, .text, .mirror, .rectPattern, .circPattern].contains(sketch.tool),
+                      flyout: [toolItem(.mirror), toolItem(.rectPattern), toolItem(.circPattern),
+                               toolItem(.point), toolItem(.text)]),
             toolEntry(.trim),
             RailEntry(id: "sketch.delete", title: "Löschen", subtitle: sketch.selection.isEmpty ? nil : "Auswahl",
                       systemImage: "trash", isEnabled: !sketch.selection.isEmpty) {
@@ -322,6 +379,24 @@ struct ToolRail: View {
                                      systemImage: "arrow.triangle.2.circlepath") {
                 workspace.activate(.revolve)
             })
+            // Wie Shapr3D nach beendeter Skizze: Profil weiterverarbeiten oder die Skizze öffnen
+            entries.append(RailEntry(id: "context.sweep", title: "Sweep",
+                                     systemImage: "point.3.connected.trianglepath.dotted") {
+                workspace.activate(.sweep)
+            })
+            entries.append(RailEntry(id: "context.loft", title: "Loft", systemImage: "square.3.layers.3d") {
+                workspace.activate(.loft)
+            })
+            if let sketchIndex = model.selectedRegions.first?.sketch, model.sketches.indices.contains(sketchIndex) {
+                entries.append(RailEntry(id: "context.editSketch", title: "Skizze bearbeiten",
+                                         subtitle: model.sketches[sketchIndex].name, systemImage: "pencil.line") {
+                    workspace.editSketch(sketchIndex)
+                })
+                entries.append(RailEntry(id: "context.hideSketch", title: "Ausblenden", systemImage: "eye.slash") {
+                    model.resetSelection()
+                    model.setSketchHidden(true, sketch: sketchIndex)
+                })
+            }
         }
         entries += [
             RailEntry(id: "context.more", title: "Mehr", systemImage: "ellipsis.circle") {

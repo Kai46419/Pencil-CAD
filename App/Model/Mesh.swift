@@ -44,9 +44,23 @@ struct Mesh {
                    normal: SIMD3(floats[i + 3], floats[i + 4], floats[i + 5]),
                    color: color)
         }
-        indices = kernelMesh.indexData.withUnsafeBytes { Array($0.bindMemory(to: UInt32.self)) }
+        let rawIndices: [UInt32] = kernelMesh.indexData.withUnsafeBytes { Array($0.bindMemory(to: UInt32.self)) }
         let faces: [UInt32] = kernelMesh.faceIndexData.withUnsafeBytes { Array($0.bindMemory(to: UInt32.self)) }
-        triangleFaces = faces.map { FaceRef(body: body, face: Int($0)) }
+        // Nur vollständige Dreiecke mit gültigen Punkten und Flächennummer: ein fehlerhaftes Netz vom
+        // Kernel darf nicht zu Zugriffen außerhalb der Felder führen (Absturz beim Antippen/Zeichnen)
+        let count = UInt32(vertices.count)
+        var kept: [UInt32] = []
+        var keptFaces: [FaceRef] = []
+        kept.reserveCapacity(rawIndices.count)
+        keptFaces.reserveCapacity(faces.count)
+        for t in 0..<min(rawIndices.count / 3, faces.count) {
+            let a = rawIndices[t * 3], b = rawIndices[t * 3 + 1], c = rawIndices[t * 3 + 2]
+            guard a < count, b < count, c < count else { continue }
+            kept += [a, b, c]
+            keptFaces.append(FaceRef(body: body, face: Int(faces[t])))
+        }
+        indices = kept
+        triangleFaces = keptFaces
         let edgeFloats: [Float] = kernelMesh.edgeData.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
         edges = stride(from: 0, to: edgeFloats.count - 2, by: 3).map { i in
             SIMD3(edgeFloats[i], edgeFloats[i + 1], edgeFloats[i + 2])

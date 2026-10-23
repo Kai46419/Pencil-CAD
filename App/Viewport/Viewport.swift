@@ -581,8 +581,11 @@ final class ViewportView: MTKView {
                          [a2, b2], arrowHead(at: a2, from: b2), arrowHead(at: b2, from: a2)]
             return (lines, (a2 + b2) / 2, true)
         case .diameter:
-            return ([[a, b], arrowHead(at: a, from: b), arrowHead(at: b, from: a)],
-                    b + dimension.direction * 6 * perPoint, false)
+            // Außen: Führungslinie von außen mit Pfeil auf den Rand, gegenüber ein zweiter Pfeil von außen
+            let n = simd_normalize(b - a), leader = 24 * perPoint
+            let outB = b + n * leader, outA = a - n * arrow * 1.6
+            return ([[b, outB], arrowHead(at: b, from: outB), [a, outA], arrowHead(at: a, from: outA)],
+                    outB, false)
         case .radius:
             return ([[a, b], arrowHead(at: b, from: a)], b + dimension.direction * 6 * perPoint, false)
         case .angle:
@@ -1123,8 +1126,18 @@ final class ViewportView: MTKView {
                 if let point = sketchPoint(at: location) { sketch.trim(at: point, tolerance: snapTolerance) }
                 refresh()
                 return
-            case .fillet:
-                if let point = sketchPoint(at: location) { sketch.filletCorner(at: point, tolerance: snapTolerance) }
+            case .fillet, .chamfer:
+                if let point = sketchPoint(at: location) {
+                    sketch.filletCorner(at: point, tolerance: snapTolerance, chamfer: sketch.tool == .chamfer)
+                }
+                refresh()
+                return
+            case .extend:
+                if let point = sketchPoint(at: location) { sketch.extendLine(at: point, tolerance: snapTolerance) }
+                refresh()
+                return
+            case .breakCurve:
+                if let point = sketchPoint(at: location) { sketch.breakCurve(at: point, tolerance: snapTolerance) }
                 refresh()
                 return
             default:
@@ -1155,13 +1168,16 @@ final class ViewportView: MTKView {
         let edgeHit = pickEdge(at: location, ray: ray, faceHit: hit)
         // Skizzenbereich vor der Fläche, auf der er liegt
         var region: RegionRef?
+        var regionPoint: SIMD3<Float>?
         if edgeHit == nil, let regionHit = model.pickRegion(origin: ray.origin, direction: ray.direction) {
             let faceT = hit.map { simd_dot($0.point - ray.origin, ray.direction) } ?? .infinity
             if regionHit.t <= faceT + max(faceT * 0.002, 0.05) {
                 region = regionHit.ref
+                regionPoint = ray.origin + ray.direction * regionHit.t
             }
         }
-        workspace.tapped(face: hit?.face, edge: edgeHit?.edge, region: region, point: edgeHit?.point ?? hit?.point)
+        workspace.tapped(face: hit?.face, edge: edgeHit?.edge, region: region,
+                         point: edgeHit?.point ?? hit?.point ?? regionPoint)
     }
 
     /// Projizieren: Körperkante (bzw. alle Kanten der Fläche) unter dem Punkt in die Skizze übernehmen.

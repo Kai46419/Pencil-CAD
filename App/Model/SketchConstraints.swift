@@ -33,6 +33,8 @@ enum SketchRef: Hashable {
 
 enum ConstraintKind: String, CaseIterable, Identifiable, Codable {
     case parallel = "Parallel"
+    /// Linien auf einer gemeinsamen Geraden (Fusion 360 „Collinear“): parallel und auf der Geraden der ersten
+    case collinear = "Kollinear"
     case perpendicular = "Senkrecht"
     case tangent = "Tangential"
     case coincident = "Zusammenfallend"
@@ -51,6 +53,7 @@ enum ConstraintKind: String, CaseIterable, Identifiable, Codable {
     var badge: String {
         switch self {
         case .parallel: "∥"
+        case .collinear: "—"
         case .perpendicular: "⊥"
         case .tangent: "T"
         case .coincident: "•"
@@ -68,6 +71,7 @@ enum ConstraintKind: String, CaseIterable, Identifiable, Codable {
     var selectionHint: String {
         switch self {
         case .parallel: "Parallel: zwei oder mehr Linien antippen."
+        case .collinear: "Kollinear: zwei oder mehr Linien antippen – sie kommen auf die Gerade der ersten."
         case .perpendicular: "Senkrecht: zwei Linien antippen."
         case .tangent: "Tangential: Linie und Kreis/Bogen oder zwei Kreise antippen."
         case .coincident: "Zusammenfallend: zwei Punkte oder einen Punkt und eine Kurve antippen."
@@ -84,6 +88,7 @@ enum ConstraintKind: String, CaseIterable, Identifiable, Codable {
     var systemImage: String {
         switch self {
         case .parallel: "line.diagonal"
+        case .collinear: "line.3.horizontal"
         case .perpendicular: "angle"
         case .tangent: "circle.and.line.horizontal"
         case .coincident: "smallcircle.filled.circle"

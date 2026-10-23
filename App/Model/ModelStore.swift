@@ -5,6 +5,20 @@ enum ExtrudeMode: String, CaseIterable, Identifiable {
     case newBody = "Neuer Körper"
     case union = "Vereinigen"
     case cut = "Abziehen"
+    /// Nur was Werkzeug und Körper gemeinsam haben (Fusion 360 „Intersect“)
+    case intersect = "Schnittmenge"
+
+    var id: Self { self }
+}
+
+/// Wie weit extrudiert wird (Fusion 360 „Extent“).
+enum ExtrudeExtent: String, CaseIterable, Identifiable {
+    /// Wert bzw. Pfeil
+    case distance = "Abstand"
+    /// Bis zu einer angetippten Fläche (plus Versatz)
+    case toObject = "Bis Objekt"
+    /// Durch alle Körper
+    case all = "Alle"
 
     var id: Self { self }
 }
@@ -267,6 +281,15 @@ final class ModelStore: ObservableObject {
                 && !sketches[ref.sketch].regions[ref.region].holes.isEmpty
         }
     }
+    /// Ausmaß wie in Fusion 360: Abstand, bis zu einer Fläche oder durch alles
+    @Published var regionExtent: ExtrudeExtent = .distance {
+        didSet {
+            if regionExtent == .all { extrudeThroughAll() }
+            if regionExtent == .toObject { message = "Fläche oder Kante antippen, bis zu der extrudiert wird." }
+        }
+    }
+    /// Abstand zur angetippten Fläche bei „Bis Objekt“ (positiv = darüber hinaus)
+    @Published var regionExtentOffset: Double = 0
     /// Verjüngungswinkel in Grad (0 = gerade Wände)
     @Published var regionTaper: Double = 0 {
         didSet {
@@ -526,6 +549,30 @@ final class ModelStore: ObservableObject {
             j = i
         }
         return inside
+    }
+
+    /// „Alle“: so weit, dass das Profil durch alle sichtbaren Körper reicht (in Pfeilrichtung, sonst dagegen).
+    func extrudeThroughAll() {
+        guard let handle = regionHandle, simd_length(handle.direction) > 1e-12 else { return }
+        let direction = simd_normalize(handle.direction)
+        var ahead = 0.0, behind = 0.0
+        for body in bodies.indices where !bodies[body].isHidden {
+            guard let box = mesh.bounds(ofBody: body) else { continue }
+            for k in 0..<8 {
+                let corner = SIMD3<Double>(Double(k & 1 == 0 ? box.min.x : box.max.x),
+                                           Double(k & 2 == 0 ? box.min.y : box.max.y),
+                                           Double(k & 4 == 0 ? box.min.z : box.max.z))
+                let t = simd_dot(corner - handle.origin, direction)
+                ahead = max(ahead, t)
+                behind = min(behind, t)
+            }
+        }
+        let value = ahead > 1e-6 ? ahead + 1 : behind < -1e-6 ? behind - 1 : 0
+        guard value != 0 else {
+            message = "Kein Körper in Richtung des Profils."
+            return
+        }
+        setRegionValue((value * 1000).rounded() / 1000)
     }
 
     /// Gewählte Skizzenbereiche um value mm entlang der Skizzennormale extrudieren (Vorschau).
@@ -919,6 +966,23 @@ final class ModelStore: ObservableObject {
                     return nil
                 }
                 result.append(body.with(cut))
+            }
+            return result
+        case .intersect:
+            // Körper, die das Werkzeug berührt, behalten nur den gemeinsamen Teil; die übrigen bleiben
+            var result: [SceneBody] = []
+            var touched = false
+            for body in bodies {
+                if let common = body.shape.intersecting(solid), common.volume > 1e-9 {
+                    result.append(body.with(common))
+                    touched = true
+                } else {
+                    result.append(body)
+                }
+            }
+            guard touched else {
+                message = "Schnittmenge leer – das Profil berührt keinen Körper."
+                return nil
             }
             return result
         }

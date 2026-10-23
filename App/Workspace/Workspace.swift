@@ -692,7 +692,11 @@ final class Workspace: ObservableObject {
     /// Fläche (z. B. der Deckfläche eines extrudierten Körpers) die Höhe genau bis dorthin – auch ohne vorher
     /// am Pfeil zu ziehen. Läuft schon eine Extrusion, zählt jede angetippte Fläche oder Kante.
     private func extrudeToTapped(_ point: SIMD3<Float>?, face: FaceRef?, region: RegionRef?) -> Bool {
-        guard let point, region == nil else { return false }
+        guard let point else { return false }
+        // Ein Bereich in derselben Ebene wird wie gewohnt dazugewählt; liegt er (bzw. eine Skizze auf der
+        // angetippten Fläche) höher oder tiefer, gibt er die Höhe vor. Früher schluckte jeder getroffene
+        // Skizzenbereich das Antippen, sobald auf Körperflächen skizziert worden war.
+        if let region, model.selectedRegions.contains(region) { return false }
         let target = SIMD3<Double>(point)
         func extent(from handle: (origin: SIMD3<Double>, direction: SIMD3<Double>)) -> Double? {
             guard simd_length(handle.direction) > 1e-12 else { return nil }
@@ -703,8 +707,22 @@ final class Workspace: ObservableObject {
         func report(_ value: Double) {
             model.message = "Bis zur angetippten Stelle: \(value.formatted(.number.precision(.fractionLength(0...3)))) mm"
         }
+        if !model.selectedRegions.isEmpty, let handle = model.regionHandle, model.regionExtent == .toObject {
+            // Fusion 360 „Bis Objekt“: jede angetippte Fläche, Kante oder Skizze gibt die Höhe vor (plus Versatz)
+            if let region, model.selectedRegions.first?.sketch == region.sketch { return false }
+            guard let value = extent(from: handle) else { return false }
+            let target = value + (value >= 0 ? 1 : -1) * model.regionExtentOffset
+            model.setRegionValue(target)
+            report(target)
+            return true
+        }
         if !model.selectedRegions.isEmpty, let handle = model.regionHandle {
-            if model.regionValue == 0 {
+            if let region {
+                // Bereich einer parallelen Skizze in anderer Höhe
+                guard model.sketches.indices.contains(region.sketch),
+                      abs(simd_dot(simd_normalize(model.sketches[region.sketch].plane.normal),
+                                   simd_normalize(handle.direction))) > 0.999 else { return false }
+            } else if model.regionValue == 0 {
                 // Noch nicht gezogen: nur parallele ebene Flächen, sonst wählt Antippen wie gewohnt
                 guard let face, let plane = model.plane(of: face),
                       abs(simd_dot(simd_normalize(plane.normal), simd_normalize(handle.direction))) > 0.999 else {
@@ -716,7 +734,8 @@ final class Workspace: ObservableObject {
             report(value)
             return true
         }
-        if model.faceValue != 0, let handle = model.faceHandle, face != model.selection, let value = extent(from: handle) {
+        if region == nil, model.faceValue != 0, let handle = model.faceHandle, face != model.selection,
+           let value = extent(from: handle) {
             model.setFaceValue(value)
             report(value)
             return true
@@ -1010,8 +1029,30 @@ final class Workspace: ObservableObject {
             return "Nächsten Punkt setzen · Finger auflegen: tangentialer Bogen · zurück zum Start schließt"
         case .polyline:
             return "Ziehen: Linie · rund ziehen: Kreis oder Bogen · Kritzeln über Elemente löscht sie"
+        case .arc where sketch.arcMode == .center:
+            return sketch.isWaitingForSecondStep ? "Zum Ende ziehen – der Bogen folgt dem Stift (auch über 180°)"
+                : "Vom Mittelpunkt zum Startpunkt ziehen"
         case .arc:
             return sketch.isWaitingForArcBulge ? "Wölbung ziehen" : "Von einem Ende zum anderen ziehen"
+        case .circle where sketch.circleMode == .twoPoint:
+            return "Durchmesser ziehen: von einem Randpunkt zum gegenüberliegenden"
+        case .circle where sketch.circleMode == .threePoint:
+            return sketch.isWaitingForSecondStep ? "Dritten Punkt ziehen bzw. antippen" : "Ersten und zweiten Punkt ziehen"
+        case .slot:
+            if sketch.isWaitingForSecondStep { return "Breite ziehen" }
+            switch sketch.slotMode {
+            case .centerToCenter: return "Von einem Bogenmittelpunkt zum anderen ziehen"
+            case .overall: return "Gesamtlänge von Ende zu Ende ziehen"
+            case .centerPoint: return "Von der Mitte zu einem Bogenmittelpunkt ziehen"
+            }
+        case .chamfer:
+            return "Ecke antippen, an der zwei Linien zusammenstoßen – Abstand unten eingeben"
+        case .extend:
+            return "Linie nahe dem Ende antippen – sie wächst bis zur nächsten Kurve"
+        case .breakCurve:
+            return "Kurve antippen – sie wird an den nächsten Schnittpunkten geteilt"
+        case .mirror, .rectPattern, .circPattern:
+            return sketch.transformStatus
         case .spline where sketch.hasOpenSpline:
             return "Punkte setzen · auf dem Start schließen · letzten Punkt erneut antippen beendet"
         case .spline:

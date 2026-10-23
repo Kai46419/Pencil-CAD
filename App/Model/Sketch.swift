@@ -19,6 +19,20 @@ enum SketchTool: String, CaseIterable, Identifiable {
     /// Ecke zweier Linien mit einem Bogen abrunden (Skizzenverrundung wie in Fusion 360)
     case fillet = "Abrunden"
     case scale = "Skalieren"
+    /// Langloch (Fusion 360 „Slot“): Mittellinie ziehen, dann die Breite
+    case slot = "Langloch"
+    /// Ecke zweier Linien mit einer Fase abschneiden (Fusion 360 „Sketch Chamfer“)
+    case chamfer = "Fase"
+    /// Linienende bis zur nächsten Kurve verlängern (Fusion 360 „Extend“)
+    case extend = "Verlängern"
+    /// Kurve an den Schnittpunkten teilen, ohne etwas zu löschen (Fusion 360 „Break“)
+    case breakCurve = "Unterbrechen"
+    /// Gewählte Elemente an einer Linie spiegeln (Fusion 360 „Mirror“)
+    case mirror = "Spiegeln"
+    /// Gewählte Elemente in Zeilen und Spalten vervielfältigen (Fusion 360 „Rectangular Pattern“)
+    case rectPattern = "Rechteckmuster"
+    /// Gewählte Elemente um einen Punkt vervielfältigen (Fusion 360 „Circular Pattern“)
+    case circPattern = "Kreismuster"
 
     var id: Self { self }
 
@@ -39,6 +53,13 @@ enum SketchTool: String, CaseIterable, Identifiable {
         case .trim: "scissors"
         case .fillet: "app"
         case .scale: "arrow.up.left.and.arrow.down.right"
+        case .slot: "capsule"
+        case .chamfer: "octagon"
+        case .extend: "arrow.right.to.line"
+        case .breakCurve: "divide"
+        case .mirror: "arrow.left.and.right.righttriangle.left.righttriangle.right"
+        case .rectPattern: "square.grid.3x3"
+        case .circPattern: "circle.grid.cross"
         }
     }
 
@@ -54,6 +75,11 @@ enum SketchTool: String, CaseIterable, Identifiable {
         case .trim: "Bis zum Schnittpunkt"
         case .fillet: "Ecke antippen"
         case .scale: "Auswahl oder alles"
+        case .chamfer: "Ecke antippen"
+        case .extend: "Linienende antippen"
+        case .breakCurve: "An Schnittpunkten teilen"
+        case .mirror: "Auswahl, zuletzt Achse"
+        case .rectPattern, .circPattern: "Auswahl vervielfältigen"
         default: nil
         }
     }
@@ -316,6 +342,35 @@ final class SketchController: ObservableObject {
     @Published var scaleFactor: Double = 2
     /// Radius für das Abrunden-Werkzeug (mm)
     @Published var filletRadius: Double = 2
+    /// Abstand für das Fasen-Werkzeug (mm, auf beiden Linien gleich)
+    @Published var chamferDistance: Double = 2
+    @Published var circleMode: CircleMode = .center {
+        didSet {
+            stepBase = nil
+            changed()
+        }
+    }
+    @Published var arcMode: ArcMode = .threePoint {
+        didSet {
+            stepBase = nil
+            arcChord = nil
+            changed()
+        }
+    }
+    @Published var polygonMode: PolygonMode = .inscribed
+    @Published var slotMode: SlotMode = .centerToCenter {
+        didSet {
+            stepBase = nil
+            changed()
+        }
+    }
+    // Muster der Auswahl (Rechteck: Spalten entlang x, Zeilen entlang y; Kreis: um einen gewählten Punkt)
+    @Published var patternColumns = 3 { didSet { changed() } }
+    @Published var patternRows = 1 { didSet { changed() } }
+    @Published var patternSpacingX: Double = 10 { didSet { changed() } }
+    @Published var patternSpacingY: Double = 10 { didSet { changed() } }
+    @Published var circularCount = 6 { didSet { changed() } }
+    @Published var circularAngle: Double = 360 { didSet { changed() } }
     /// Neue Elemente als Konstruktionsgeometrie (zählen nicht als Profil).
     @Published var constructionMode = false
     // Skizzenpalette (wie in Fusion 360): was beim Skizzieren angezeigt wird
@@ -405,6 +460,11 @@ final class SketchController: ObservableObject {
     private var chainStart: Point2?
     private var chainEnd: Point2?
     private var arcChord: (start: Point2, end: Point2)?
+    /// Zweistufige Werkzeuge (Kreis 3 Punkte, Bogen um Mittelpunkt, Langloch): erster Zug steht, der zweite folgt
+    private var stepBase: (start: Point2, end: Point2)?
+    /// Bogen um Mittelpunkt: überstrichener Winkel des zweiten Zugs (folgt dem Stift, auch über 180°)
+    private var arcSweep = 0.0
+    private var arcLastAngle = 0.0
     private var splinePoints: [Point2] = []
     private var offsetTarget: OffsetTarget?
     /// Zuletzt gezeichnetes Element, dessen Maße noch änderbar sind.
@@ -440,7 +500,10 @@ final class SketchController: ObservableObject {
     var canUndo: Bool { !undoStack.isEmpty || isInProgress || offsetTarget != nil }
     var isInProgress: Bool {
         dragStart != nil || chainEnd != nil || arcChord != nil || !splinePoints.isEmpty || rectangleBase != nil
+            || stepBase != nil
     }
+    /// Zweiter Schritt eines zweistufigen Werkzeugs steht aus
+    var isWaitingForSecondStep: Bool { stepBase != nil }
     var isWaitingForRectangleHeight: Bool { rectangleBase != nil }
     var hasOpenChain: Bool { chainEnd != nil }
     var hasOpenSpline: Bool { !splinePoints.isEmpty }
@@ -511,6 +574,11 @@ final class SketchController: ObservableObject {
         strokeShape = nil
         strokeTolerance = tolerance
         arcLatched = arcModifier
+        if tool == .arc, arcMode == .center, let base = stepBase {
+            let a0 = atan2(base.end.y - base.start.y, base.end.x - base.start.x)
+            arcLastAngle = atan2(p.y - base.start.y, p.x - base.start.x)
+            arcSweep = remainder(arcLastAngle - a0, 2 * .pi)
+        }
         hoverSnap = nil
         hoverNodes = []
         changed()
@@ -525,6 +593,12 @@ final class SketchController: ObservableObject {
         dragCurrent = snap(point, tolerance: tolerance, anchor: strokeAnchor)
         if strokeSamples.count < 4000 { strokeSamples.append(point) }
         if tool == .polyline, strokeSamples.count % 4 == 0 { strokeShape = recognizedShape() }
+        if tool == .arc, arcMode == .center, let base = stepBase, let current = dragCurrent,
+           simd_distance(current, base.start) > 1e-9 {
+            let angle = atan2(current.y - base.start.y, current.x - base.start.x)
+            arcSweep += remainder(angle - arcLastAngle, 2 * .pi)
+            arcLastAngle = angle
+        }
         if tool == .circle, let center = dragStart {
             circleInference = nil
             if !Self.isPointSnap(activeSnap?.kind), let found = inferCircle(center: center, raw: point, tolerance: tolerance) {
@@ -558,7 +632,7 @@ final class SketchController: ObservableObject {
         strokeShape = nil
 
         // Kritzeln über Elemente löscht sie (in allen Zeichenwerkzeugen)
-        if Self.scribbleTools.contains(tool), arcChord == nil, StrokeGesture.isScribble(samples, tolerance: tolerance) {
+        if Self.scribbleTools.contains(tool), arcChord == nil, stepBase == nil, StrokeGesture.isScribble(samples, tolerance: tolerance) {
             eraseScribbled(samples, tolerance: tolerance)
             changed()
             return
@@ -567,6 +641,15 @@ final class SketchController: ObservableObject {
         switch tool {
         case .rectangle:
             endRectangleStroke(start: start, end: end)
+        case .circle where circleMode == .twoPoint:
+            if let circle = SketchShapes.circle(diameterFrom: start, to: end) { add(circle, editable: true) }
+        case .circle where circleMode == .threePoint:
+            if let base = stepBase {
+                stepBase = nil
+                if let circle = SketchShapes.circle(through: base.start, end, base.end) { add(circle, editable: true) }
+            } else if simd_distance(start, end) > 1e-6 {
+                stepBase = (start, end)
+            }
         case .circle:
             var radius = simd_distance(start, end)
             let inference = Self.isPointSnap(endKind) ? nil : inferCircle(center: start, raw: point, tolerance: tolerance)
@@ -582,10 +665,8 @@ final class SketchController: ObservableObject {
                 inferConstraints(forNew: entities.count - 1, center: start, inference: nil)
             }
         case .polygon:
-            let radius = simd_distance(start, end)
-            if radius > 0 {
-                add(.regularPolygon(center: start, radius: radius, sides: polygonSides,
-                                    angle: atan2(end.y - start.y, end.x - start.x)), editable: true)
+            if let polygon = SketchShapes.polygon(center: start, through: end, sides: polygonSides, mode: polygonMode) {
+                add(polygon, editable: true)
                 inferConstraints(forNew: entities.count - 1, center: start, inference: nil)
             }
         case .polyline:
@@ -594,6 +675,16 @@ final class SketchController: ObservableObject {
             // Rund gezogen: Kreis bzw. Bogen statt Linie
             if !endShapeStroke(samples, start: start, end: end, tolerance: tolerance) {
                 endLineStroke(start: start, end: end)
+            }
+        case .arc where arcMode == .center:
+            // Fusion 360: Mittelpunkt zum Start ziehen, dann das Ende (der Bogen folgt dem Stift)
+            if let base = stepBase {
+                stepBase = nil
+                if let arc = SketchShapes.arc(center: base.start, start: base.end, sweep: arcSweep) {
+                    add(arc, editable: true)
+                }
+            } else if simd_distance(start, end) > 1e-6 {
+                stepBase = (start, end)
             }
         case .arc:
             // Shapr3D: Enden aufziehen, dann die Wölbung ziehen
@@ -618,6 +709,22 @@ final class SketchController: ObservableObject {
             trim(at: point, tolerance: tolerance)
         case .fillet:
             filletCorner(at: point, tolerance: tolerance)
+        case .chamfer:
+            filletCorner(at: point, tolerance: tolerance, chamfer: true)
+        case .slot:
+            if let base = stepBase {
+                stepBase = nil
+                if let shapes = slotEntities(base: base, through: end) { addGroup(shapes) }
+            } else if simd_distance(start, end) > 1e-6 {
+                stepBase = (start, end)
+            }
+        case .extend:
+            extendLine(at: point, tolerance: tolerance)
+        case .breakCurve:
+            breakCurve(at: point, tolerance: tolerance)
+        case .mirror, .rectPattern, .circPattern:
+            // Antippen wählt Elemente (bzw. beim Spiegeln zuletzt die Achse), angewendet wird über die Karte
+            select(at: point, tolerance: tolerance)
         case .project, .scale, .select:
             // Projizieren übernimmt der Viewport (braucht die Körperkanten), Skalieren die Parameterkarte
             break
@@ -1024,13 +1131,13 @@ final class SketchController: ObservableObject {
 
     /// Ecke antippen: die beiden Linien werden gekürzt und durch einen tangentialen Bogen mit filletRadius
     /// verbunden. Rechtecke und Linienzüge werden dafür in einzelne Linien zerlegt.
-    func filletCorner(at p: Point2, tolerance: Double) {
+    func filletCorner(at p: Point2, tolerance: Double, chamfer: Bool = false) {
         guard let corner = nearestCorner(to: p, tolerance: tolerance * 1.5) else {
             notice = "Ecke antippen, an der zwei Linien zusammenstoßen."
             changed()
             return
         }
-        let radius = filletRadius
+        let radius = chamfer ? chamferDistance : filletRadius
         guard radius > 0 else { return }
         let before = (entities: entities, constraints: constraints, construction: construction)
         remember()
@@ -1067,9 +1174,10 @@ final class SketchController: ObservableObject {
             fail("Die Linien liegen in einer Flucht – keine Ecke zum Abrunden.")
             return
         }
-        let t = radius / tan(theta / 2)
+        // Fase: gleicher Abstand auf beiden Linien; Rundung: Tangentenlänge aus dem Radius
+        let t = chamfer ? radius : radius / tan(theta / 2)
         guard t < simd_distance(far1, corner) - 1e-6, t < simd_distance(far2, corner) - 1e-6 else {
-            fail("Radius zu groß für diese Ecke.")
+            fail(chamfer ? "Fase zu groß für diese Ecke." : "Radius zu groß für diese Ecke.")
             return
         }
         let t1 = corner + u1 * t, t2 = corner + u2 * t
@@ -1084,7 +1192,7 @@ final class SketchController: ObservableObject {
             if case .coincident = constraint.variant { return Set(constraint.entities) == pair }
             return false
         }
-        entities.append(.arc(start: t1, mid: mid, end: t2))
+        entities.append(chamfer ? .line(t1, t2) : .arc(start: t1, mid: mid, end: t2))
         let arc = entities.count - 1
         if construction.contains(lines[0]) { construction.insert(arc) }
         connect(arc)
@@ -1303,9 +1411,11 @@ final class SketchController: ObservableObject {
     private var strokeAnchor: Point2? {
         switch tool {
         case .polyline: chainEnd ?? dragStart
-        case .arc: arcChord == nil ? dragStart : nil
+        case .arc: arcChord == nil && stepBase == nil ? dragStart : nil
+        case .slot: stepBase == nil ? dragStart : nil
         case .rectangle: rectangleMode == .threePoint && rectangleBase == nil ? dragStart : nil
         case .spline: splinePoints.last ?? dragStart
+        case .circle where circleMode == .threePoint && stepBase != nil: nil
         case .circle, .polygon: dragStart
         default: nil
         }
@@ -1472,6 +1582,7 @@ final class SketchController: ObservableObject {
         chainStart = nil
         chainEnd = nil
         arcChord = nil
+        stepBase = nil
         splinePoints = []
         offsetTarget = nil
         offsetPreview = []
@@ -1504,6 +1615,7 @@ final class SketchController: ObservableObject {
         chainStart = nil
         chainEnd = nil
         arcChord = nil
+        stepBase = nil
         offsetTarget = nil
         offsetPreview = []
         pendingTextAnchor = nil
@@ -1524,9 +1636,10 @@ final class SketchController: ObservableObject {
             changed()
             return
         }
-        if arcChord != nil || rectangleBase != nil {
+        if arcChord != nil || rectangleBase != nil || stepBase != nil {
             arcChord = nil
             rectangleBase = nil
+            stepBase = nil
             changed()
             return
         }
@@ -1555,11 +1668,60 @@ final class SketchController: ObservableObject {
     /// eines Rechtecks teilten sich ein einziges Feld im Viewport (nur ein Maß sichtbar).
     var dimensions: [SketchDimension] {
         rawDimensions.enumerated().map { pair -> SketchDimension in
-            guard pair.element.id.isEmpty else { return pair.element }
-            var copy = pair.element
-            copy.id = "live-\(pair.offset)"
+            var copy = placedOutside(pair.element)
+            if copy.id.isEmpty { copy.id = "live-\(pair.offset)" }
             return copy
         }
+    }
+
+    /// Längenmaße immer außerhalb des Objekts (Kai): Maßlinie auf die Seite ohne Fläche, bei offenen
+    /// Linienzügen weg von der Mitte der zusammenhängenden Kurven.
+    private func placedOutside(_ dimension: SketchDimension) -> SketchDimension {
+        let linear: Set<SketchDimension.Kind> = [.length, .distance, .width, .height]
+        guard linear.contains(dimension.kind), dimension.span.count == 2 else { return dimension }
+        let a = dimension.span[0], b = dimension.span[1]
+        let length = simd_distance(a, b)
+        guard length > 1e-9 else { return dimension }
+        let mid = (a + b) / 2
+        let n = dimension.direction
+        let probe = max(length * 0.02, 1e-4)
+        func filled(_ p: Point2) -> Bool {
+            regions.contains { region in
+                polygonContains(region.polygon, p) && !region.holes.contains { polygonContains($0.polygon, p) }
+            }
+        }
+        var copy = dimension
+        let ahead = filled(mid + n * probe), behind = filled(mid - n * probe)
+        if ahead != behind {
+            if ahead { copy.direction = -n }
+            return copy
+        }
+        if let center = connectedCenter(touching: [a, b]), simd_dot(center - mid, n) > length * 0.01 {
+            copy.direction = -n
+        }
+        return copy
+    }
+
+    /// Mitte der Kurven, die über gemeinsame Endpunkte mit den Punkten zusammenhängen (nil = keine).
+    private func connectedCenter(touching points: [Point2]) -> Point2? {
+        guard entities.count <= 400 else { return nil }
+        let reach = 1e-5 + strokeTolerance * 0.01
+        var frontier = points
+        var used = Set<Int>()
+        var changedSet = true
+        while changedSet {
+            changedSet = false
+            for index in entities.indices where !used.contains(index) && !construction.contains(index) {
+                let ends = entities[index].drawing.flatMap { line in [line.first, line.last].compactMap { $0 } }
+                guard ends.contains(where: { end in frontier.contains { simd_distance($0, end) <= reach } }) else { continue }
+                used.insert(index)
+                frontier += ends
+                changedSet = true
+            }
+        }
+        let samples = used.flatMap { entities[$0].drawing.joined() }
+        guard !samples.isEmpty else { return nil }
+        return samples.reduce(Point2.zero, +) / Double(samples.count)
     }
 
     private var rawDimensions: [SketchDimension] {
@@ -1575,7 +1737,24 @@ final class SketchController: ObservableObject {
                 // Wie in Fusion 360: beim Ziehen Länge und Winkel zur Waagrechten
                 return Self.lineDimensions(from, current, editable: false) + Self.lineAngle(from, current)
             }
+            if let base = stepBase, let shapes = stepPreview(base: base, current: current) {
+                if tool == .slot, let first = shapes.first, case .line(let a, let b) = first {
+                    // Länge zwischen den Mitten und Breite
+                    let half = SketchShapes.slotHalfWidth(base.start, base.end, through: current)
+                    let n = rightNormal(b - a)
+                    return Self.lineDimensions(a, b, editable: false)
+                        + Self.lineDimensions(a, a + n * 2 * half, editable: false)
+                }
+                return shapes.first.map { Self.dimensions(of: $0, editable: false) } ?? []
+            }
+            if tool == .arc, arcMode == .center, let base = stepBase,
+               let arc = SketchShapes.arc(center: base.start, start: base.end, sweep: arcSweep) {
+                return Self.dimensions(of: arc, editable: false)
+            }
             if tool == .arc, arcChord == nil {
+                return Self.lineDimensions(start, current, editable: false)
+            }
+            if tool == .slot || (tool == .circle && circleMode == .threePoint) {
                 return Self.lineDimensions(start, current, editable: false)
             }
             if tool == .rectangle, rectangleMode == .threePoint {
@@ -1874,8 +2053,9 @@ final class SketchController: ObservableObject {
             ]
         case .regularPolygon(let center, let radius, _, let angle):
             let d = Point2(cos(angle), sin(angle))
-            return [SketchDimension(kind: .radius, value: radius, position: center + d * radius / 2,
-                                    direction: rightNormal(d) * -1, isEditable: editable, span: [center, center + d * radius])]
+            // Etikett außen hinter der Ecke
+            return [SketchDimension(kind: .radius, value: radius, position: center + d * radius,
+                                    direction: d, isEditable: editable, span: [center, center + d * radius])]
         case .line(let a, let b):
             return lineDimensions(a, b, editable: editable)
         case .arc(let a, let m, let b):
@@ -2279,6 +2459,13 @@ final class SketchController: ObservableObject {
         case .parallel:
             guard points.isEmpty, lines.count >= 2, lines.count == curves.count else { return [] }
             return lines.dropFirst().map { .parallel(lines[0], $0) }
+        case .collinear:
+            // Parallel zur ersten Linie und mit einem Ende auf ihrer Geraden
+            guard points.isEmpty, lines.count >= 2, lines.count == curves.count else { return [] }
+            return lines.dropFirst().flatMap { other -> [SketchConstraint.Variant] in
+                guard let ends = lineEndIndices(other) else { return [] }
+                return [.parallel(lines[0], other), .pointOnCurve(SketchPointRef(entity: other.entity, index: ends.0), lines[0])]
+            }
         case .perpendicular:
             guard points.isEmpty, lines.count == 2, curves.count == 2 else { return [] }
             return [.perpendicular(lines[0], lines[1])]
@@ -2483,6 +2670,30 @@ final class SketchController: ObservableObject {
             } else if let start = dragStart, let current = dragCurrent {
                 polylines.append([start, current])
             }
+        case .circle where circleMode == .threePoint, .slot:
+            if let base = stepBase {
+                if let current, let shapes = stepPreview(base: base, current: current) {
+                    polylines += shapes.flatMap(\.drawing)
+                } else {
+                    polylines.append([base.start, base.end])
+                }
+            } else if let start = dragStart, let current = dragCurrent {
+                polylines.append([start, current])
+            }
+        case .arc where arcMode == .center:
+            if let base = stepBase {
+                polylines.append([base.start, base.end])
+                if dragStart != nil, let arc = SketchShapes.arc(center: base.start, start: base.end, sweep: arcSweep) {
+                    polylines += arc.drawing
+                } else if let current {
+                    polylines.append([base.start, current])
+                }
+            } else if let start = dragStart, let current = dragCurrent {
+                polylines.append([start, current])
+                polylines += SketchEntity.circle(center: start, radius: simd_distance(start, current)).drawing
+            }
+        case .mirror, .rectPattern, .circPattern:
+            polylines += transformPreview.flatMap(\.drawing)
         case .rectangle, .circle, .ellipse, .polygon:
             if let start = dragStart, let current = dragCurrent, let preview = shapePreview(from: start, to: current) {
                 polylines += preview.drawing
@@ -2515,7 +2726,7 @@ final class SketchController: ObservableObject {
                 polylines += preview.drawing
                 if splineKind == .control { polylines.append(points) }
             }
-        case .point, .text, .offset, .project, .trim, .scale, .select, .fillet:
+        case .point, .text, .offset, .project, .trim, .scale, .select, .fillet, .chamfer, .extend, .breakCurve:
             break
         }
         return polylines
@@ -2534,13 +2745,14 @@ final class SketchController: ObservableObject {
                 return .rectangle(corner: start - half, size: half * 2)
             }
             return .rectangle(corner: start, size: current - start)
+        case .circle where circleMode == .twoPoint:
+            return SketchShapes.circle(diameterFrom: start, to: current)
         case .circle:
             return .circle(center: start, radius: simd_distance(start, current))
         case .ellipse:
             return .ellipse(center: start, radii: simd_abs(current - start))
         case .polygon:
-            return .regularPolygon(center: start, radius: simd_distance(start, current), sides: polygonSides,
-                                   angle: atan2(current.y - start.y, current.x - start.x))
+            return SketchShapes.polygon(center: start, through: current, sides: polygonSides, mode: polygonMode)
         default:
             return nil
         }
@@ -2679,5 +2891,186 @@ final class SketchController: ObservableObject {
         } else {
             return nil
         }
+    }
+}
+
+// MARK: Werkzeuge nach Fusion 360 (Langloch, Verlängern, Unterbrechen, Spiegeln, Muster)
+
+extension SketchController {
+    /// Vorschau des zweiten Schritts (Kreis durch 3 Punkte, Langloch).
+    private func stepPreview(base: (start: Point2, end: Point2), current: Point2) -> [SketchEntity]? {
+        switch tool {
+        case .circle where circleMode == .threePoint:
+            return SketchShapes.circle(through: base.start, current, base.end).map { [$0] }
+        case .slot:
+            return slotEntities(base: base, through: current)
+        default:
+            return nil
+        }
+    }
+
+    private func slotEntities(base: (start: Point2, end: Point2), through p: Point2) -> [SketchEntity]? {
+        let half = SketchShapes.slotHalfWidth(base.start, base.end, through: p)
+        guard let centers = SketchShapes.slotCenters(base.start, base.end, half: half, mode: slotMode) else { return nil }
+        return SketchShapes.slot(centers.0, centers.1, half: half)
+    }
+
+    /// Mehrere Elemente als ein Schritt (ein Rückgängig).
+    private func addGroup(_ shapes: [SketchEntity], keepConstruction source: [Int]? = nil) {
+        guard !shapes.isEmpty else { return }
+        remember()
+        for (k, shape) in shapes.enumerated() {
+            entities.append(shape)
+            let index = entities.count - 1
+            let fromConstruction = source.map { construction.contains($0[k]) } ?? constructionMode
+            if fromConstruction { construction.insert(index) }
+            connect(index)
+        }
+        editableIndex = nil
+        entitiesChanged()
+    }
+
+    /// Linienende antippen: bis zur nächsten Kurve in Verlängerung.
+    func extendLine(at p: Point2, tolerance: Double) {
+        guard let index = nearestEntity(to: p, tolerance: tolerance) else {
+            notice = "Linie nahe dem Ende antippen, das verlängert werden soll."
+            return
+        }
+        guard case .line = entities[index] else {
+            notice = "Verlängern geht mit einzelnen Linien (Rechtecke vorher mit „Unterbrechen“ teilen)."
+            return
+        }
+        let cutters = entities.indices.filter { $0 != index }.flatMap { entities[$0].trimPrimitives }
+        guard let longer = SketchTrim.extend(entities[index], at: p, cutters: cutters) else {
+            notice = "In dieser Richtung liegt keine Kurve, bis zu der verlängert werden kann."
+            return
+        }
+        remember()
+        replaceEntity(index, with: [longer])
+        notice = nil
+        entitiesChanged()
+    }
+
+    /// Kurve an den Schnittpunkten um die angetippte Stelle teilen (nichts wird gelöscht).
+    func breakCurve(at p: Point2, tolerance: Double) {
+        guard let index = nearestEntity(to: p, tolerance: tolerance) else { return }
+        remember()
+        var target = index
+        if let lines = entities[index].exploded {
+            let first = replaceEntity(index, with: lines)
+            target = nearestEntity(to: p, tolerance: .infinity, among: Array(first..<entities.count)) ?? first
+        }
+        let cutters = entities.indices.filter { $0 != target }.flatMap { entities[$0].trimPrimitives }
+        guard let pieces = SketchTrim.split(entities[target], at: p, cutters: cutters), pieces.count >= 2 else {
+            if let snapshot = undoStack.popLast() { restore(snapshot) }
+            notice = "Ellipsen, Splines und Text lassen sich nicht unterbrechen."
+            return
+        }
+        replaceEntity(target, with: pieces)
+        notice = "In \(pieces.count) Stücke geteilt – einzeln wählbar, verlängerbar und bemaßbar."
+        entitiesChanged()
+    }
+
+    // MARK: Spiegeln und Muster
+
+    /// Spiegelachse: die zuletzt gewählte Linie.
+    private var mirrorAxis: (ref: SketchCurveRef, a: Point2, b: Point2)? {
+        guard case .curve(let ref)? = selection.last, entities.indices.contains(ref.entity),
+              case .line(let a, let b) = entities[ref.entity].constraintCurve(ref.index),
+              simd_distance(a, b) > 1e-9 else { return nil }
+        return (ref, a, b)
+    }
+
+    /// Elemente, die gespiegelt bzw. vervielfältigt werden (ohne Achse bzw. Mittelpunkt).
+    private var transformSources: [Int] {
+        var refs = selection
+        switch tool {
+        case .mirror:
+            if mirrorAxis != nil { refs.removeLast() }
+        case .circPattern:
+            if case .point? = refs.last { refs.removeLast() }
+        default:
+            break
+        }
+        var seen = Set<Int>()
+        return refs.map(\.entity).filter { entities.indices.contains($0) && seen.insert($0).inserted }
+    }
+
+    /// Mitte des Kreismusters: zuletzt gewählter Punkt, sonst der Ursprung der Skizze.
+    private var patternCenter: Point2 {
+        if case .point(let ref)? = selection.last, let p = ConstraintSolver.point(ref, entities) { return p }
+        return .zero
+    }
+
+    /// Neue Elemente des Spiegelns bzw. Musters mit ihrem Ursprungselement.
+    private var transformCopies: [(source: Int, entity: SketchEntity)] {
+        let sources = transformSources
+        guard !sources.isEmpty else { return [] }
+        switch tool {
+        case .mirror:
+            guard let axis = mirrorAxis else { return [] }
+            return sources.compactMap { index in
+                entities[index].mirrored(through: axis.a, direction: axis.b - axis.a).map { (source: index, entity: $0) }
+            }
+        case .rectPattern:
+            var result: [(source: Int, entity: SketchEntity)] = []
+            for row in 0..<max(patternRows, 1) {
+                for column in 0..<max(patternColumns, 1) where row != 0 || column != 0 {
+                    let offset = Point2(Double(column) * patternSpacingX, Double(row) * patternSpacingY)
+                    result += sources.map { (source: $0, entity: entities[$0].translated(by: offset)) }
+                }
+            }
+            return result
+        case .circPattern:
+            let count = max(circularCount, 2)
+            let full = abs(abs(circularAngle) - 360) < 1e-9
+            let step = (circularAngle * .pi / 180) / Double(full ? count : count - 1)
+            let center = patternCenter
+            var result: [(source: Int, entity: SketchEntity)] = []
+            for k in 1..<count {
+                result += sources.compactMap { index in
+                    entities[index].rotated(about: center, by: step * Double(k)).map { (source: index, entity: $0) }
+                }
+            }
+            return result
+        default:
+            return []
+        }
+    }
+
+    /// Vorschau der Kopien (gestrichelt wie die übrige Eingabe).
+    var transformPreview: [SketchEntity] { transformCopies.map(\.entity) }
+
+    /// Was beim Spiegeln bzw. Muster gerade gewählt ist (für die Karte).
+    var transformStatus: String {
+        let count = transformSources.count
+        switch tool {
+        case .mirror:
+            if count == 0 { return "Elemente antippen, zuletzt die Spiegellinie" }
+            return mirrorAxis == nil ? "\(count) gewählt – jetzt die Spiegellinie antippen"
+                : "\(count) Element\(count == 1 ? "" : "e") an der Linie gespiegelt (Vorschau)"
+        case .circPattern:
+            if count == 0 { return "Elemente antippen, zuletzt den Mittelpunkt (sonst Ursprung)" }
+            if case .point? = selection.last { return "\(count) gewählt, um den gewählten Punkt" }
+            return "\(count) gewählt, um den Ursprung – Punkt antippen für eine andere Mitte"
+        default:
+            return count == 0 ? "Elemente antippen" : "\(count) gewählt"
+        }
+    }
+
+    var canApplyTransform: Bool { !transformCopies.isEmpty }
+
+    /// Spiegeln bzw. Muster übernehmen.
+    func applyTransform() {
+        let copies = transformCopies
+        guard !copies.isEmpty else {
+            notice = transformStatus
+            return
+        }
+        addGroup(copies.map(\.entity), keepConstruction: copies.map(\.source))
+        selection = []
+        selectedMarks = []
+        notice = "\(copies.count) Element\(copies.count == 1 ? "" : "e") erstellt."
+        changed()
     }
 }

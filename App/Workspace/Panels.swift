@@ -162,8 +162,83 @@ struct ParameterCard: View {
     private var toolOptions: some View {
         switch sketch.tool {
         case .polygon:
-            Stepper("\(sketch.polygonSides) Seiten", value: $sketch.polygonSides, in: 3...24)
+            HStack(spacing: 14) {
+                Stepper("\(sketch.polygonSides) Seiten", value: $sketch.polygonSides, in: 3...24)
+                    .fixedSize()
+                Picker("Radius bis", selection: $sketch.polygonMode) {
+                    ForEach(PolygonMode.allCases) { Text("Radius bis \($0.rawValue)").tag($0) }
+                }
+                .pickerStyle(.segmented)
                 .fixedSize()
+                .hoverTip("Polygon", "Ecke: der gezogene Radius endet an einer Ecke (innen, wie „Inscribed“ in Fusion 360). Kante: er endet in der Kantenmitte (außen, „Circumscribed“).")
+            }
+        case .circle:
+            Picker("Art", selection: $sketch.circleMode) {
+                ForEach(CircleMode.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .fixedSize()
+        case .arc:
+            Picker("Art", selection: $sketch.arcMode) {
+                ForEach(ArcMode.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .fixedSize()
+        case .slot:
+            Picker("Art", selection: $sketch.slotMode) {
+                ForEach(SlotMode.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .fixedSize()
+        case .chamfer:
+            HStack(spacing: 14) {
+                NumberField(title: "Abstand", value: sketch.chamferDistance) { value in
+                    if value > 0 { sketch.chamferDistance = value }
+                }
+                Text("Ecke antippen")
+                    .foregroundStyle(.secondary)
+            }
+        case .extend:
+            Text("Linie nahe dem Ende antippen – sie wächst bis zur nächsten Kurve")
+                .foregroundStyle(.secondary)
+        case .breakCurve:
+            Text("Kurve antippen – sie wird an den nächsten Schnittpunkten geteilt")
+                .foregroundStyle(.secondary)
+        case .mirror:
+            HStack(spacing: 14) {
+                Text(sketch.transformStatus)
+                    .foregroundStyle(.secondary)
+                Button("Spiegeln", systemImage: "checkmark", action: sketch.applyTransform)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!sketch.canApplyTransform)
+            }
+        case .rectPattern:
+            HStack(spacing: 14) {
+                Stepper("\(sketch.patternColumns) Spalten", value: $sketch.patternColumns, in: 1...50)
+                    .fixedSize()
+                NumberField(title: "Abstand X", value: sketch.patternSpacingX, width: 56) { sketch.patternSpacingX = $0 }
+                Stepper("\(sketch.patternRows) Zeilen", value: $sketch.patternRows, in: 1...50)
+                    .fixedSize()
+                NumberField(title: "Abstand Y", value: sketch.patternSpacingY, width: 56) { sketch.patternSpacingY = $0 }
+                Text(sketch.transformStatus)
+                    .foregroundStyle(.secondary)
+                Button("Erstellen", systemImage: "checkmark", action: sketch.applyTransform)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!sketch.canApplyTransform)
+            }
+        case .circPattern:
+            HStack(spacing: 14) {
+                Stepper("\(sketch.circularCount) Stück", value: $sketch.circularCount, in: 2...72)
+                    .fixedSize()
+                NumberField(title: "Winkel", value: sketch.circularAngle, unit: "°", width: 56) { value in
+                    if value != 0 { sketch.circularAngle = max(-360, min(360, value)) }
+                }
+                Text(sketch.transformStatus)
+                    .foregroundStyle(.secondary)
+                Button("Erstellen", systemImage: "checkmark", action: sketch.applyTransform)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!sketch.canApplyTransform)
+            }
         case .rectangle:
             Picker("Art", selection: $sketch.rectangleMode) {
                 ForEach(RectangleMode.allCases) { Text($0.rawValue).tag($0) }
@@ -287,6 +362,15 @@ struct ParameterCard: View {
                     .pickerStyle(.menu)
                     .fixedSize()
                     .hoverTip("Innere Konturen", "Aussparen: ein Kreis im Rechteck bleibt ein Loch, extrudiert wird nur drum herum. Durchgehend: die ganze Außenkontur wird extrudiert, als wäre innen nichts.")
+                }
+                Picker("Ausmaß", selection: $model.regionExtent) {
+                    ForEach(ExtrudeExtent.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.menu)
+                .fixedSize()
+                .hoverTip("Ausmaß", "Wie in Fusion 360: Abstand (Pfeil oder Wert), Bis Objekt (Fläche oder Kante antippen, optional mit Versatz) oder Alle (durch alle Körper).")
+                if model.regionExtent == .toObject {
+                    NumberField(title: "Versatz", value: model.regionExtentOffset, width: 56) { model.regionExtentOffset = $0 }
                 }
                 NumberField(title: model.regionDirection == .symmetric ? "Je Seite" : "Abstand",
                             value: model.regionValue) { model.setRegionValue($0) }

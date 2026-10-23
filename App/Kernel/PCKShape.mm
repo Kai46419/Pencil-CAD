@@ -6,6 +6,12 @@
 #include <utility>
 #include <vector>
 
+// Hinweise aus den OpenCASCADE-Headern (Doku-Kommentare, sprintf) ausblenden – sie betreffen nicht unseren Code
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdocumentation"
+#pragma clang diagnostic ignored "-Wdocumentation-html"
+#pragma clang diagnostic ignored "-Wdocumentation-unknown-command"
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 #if __has_include(<BRepPrimAPI_MakeBox.hxx>)
 #define PCK_HAS_OCCT 1
 #include <BRepAdaptor_Curve.hxx>
@@ -44,6 +50,7 @@
 #include <BRep_Tool.hxx>
 #include <GC_MakeArcOfCircle.hxx>
 #include <Geom_BSplineCurve.hxx>
+#include <Geom_Ellipse.hxx>
 #include <Geom_TrimmedCurve.hxx>
 #include <ShapeFix_Face.hxx>
 #include <TColStd_Array1OfInteger.hxx>
@@ -83,6 +90,7 @@
 #else
 #define PCK_HAS_STEP 0
 #endif
+#pragma clang diagnostic pop
 
 namespace {
 
@@ -298,6 +306,20 @@ static gp_Dir toDir(simd_double3 d) {
     return gp_Dir(d.x, d.y, d.z);
 }
 
+/// Geschlossene Einzelkurve (Ellipse, geschlossener Spline) als zwei Hälften: die erste kommt sofort in den
+/// Draht, die zweite zurück. Ohne Naht mitten auf der Seitenfläche lassen sich die Kanten extrudierter
+/// Ellipsen und Splines verrunden und fasen (BRepFilletAPI scheitert sonst an der geschlossenen Kante).
+static bool addHalves(BRepBuilderAPI_MakeWire &wire, const Handle(Geom_Curve) &curve, TopoDS_Edge &second) {
+    const double u0 = curve->FirstParameter(), u1 = curve->LastParameter(), um = 0.5 * (u0 + u1);
+    BRepBuilderAPI_MakeEdge first(curve, u0, um);
+    BRepBuilderAPI_MakeEdge last(curve, um, u1);
+    if (!first.IsDone() || !last.IsDone()) return false;
+    wire.Add(first.Edge());
+    if (!wire.IsDone()) return false;
+    second = last.Edge();
+    return true;
+}
+
 + (nullable PCKShape *)sphereWithCenter:(simd_double3)center radius:(double)radius {
     if (radius <= 0) return nil;
     try {
@@ -333,9 +355,11 @@ static gp_Dir toDir(simd_double3 d) {
             std::swap(rMajor, rMinor);
         }
         const gp_Elips ellipse(gp_Ax2(toPnt(center), toDir(normal), toDir(major)), rMajor, rMinor);
-        BRepBuilderAPI_MakeEdge edge(ellipse);
-        if (!edge.IsDone()) return nil;
-        BRepBuilderAPI_MakeWire wire(edge.Edge());
+        // Zwei Hälften statt einer geschlossenen Kante: sonst lassen sich die Kanten nicht verrunden
+        BRepBuilderAPI_MakeWire wire;
+        TopoDS_Edge second;
+        if (!addHalves(wire, new Geom_Ellipse(ellipse), second)) return nil;
+        wire.Add(second);
         if (!wire.IsDone()) return nil;
         BRepBuilderAPI_MakeFace face(wire.Wire(), Standard_True);
         if (!face.IsDone()) return nil;
@@ -445,7 +469,11 @@ static TopoDS_Wire wireFromCode(const std::vector<double> &code) {
             for (size_t k = 0; k < n; ++k) poles.push_back(point());
             const Handle(Geom_BSplineCurve) curve = makeBSpline(poles, type == 6, type == 2);
             if (curve.IsNull()) return TopoDS_Wire();
-            edge = BRepBuilderAPI_MakeEdge(curve).Edge();
+            if (type == 6 || (poles.size() > 2 && poles.front().Distance(poles.back()) < 1e-7)) {
+                if (!addHalves(wire, curve, edge)) return TopoDS_Wire();
+            } else {
+                edge = BRepBuilderAPI_MakeEdge(curve).Edge();
+            }
             break;
         }
         case 3: {
@@ -465,7 +493,8 @@ static TopoDS_Wire wireFromCode(const std::vector<double> &code) {
                 major = normal.Crossed(major);
                 std::swap(rx, ry);
             }
-            edge = BRepBuilderAPI_MakeEdge(gp_Elips(gp_Ax2(c, normal, major), rx, ry)).Edge();
+            const Handle(Geom_Curve) curve = new Geom_Ellipse(gp_Elips(gp_Ax2(c, normal, major), rx, ry));
+            if (!addHalves(wire, curve, edge)) return TopoDS_Wire();
             break;
         }
         default:
@@ -996,6 +1025,10 @@ static std::vector<TopoDS_Edge> edgesFromNumbers(const TopTools_IndexedMapOfShap
     }
 
     for (int f = 1; f <= _faces.Extent(); ++f) {
+      // Stand vor der Fläche: schlägt sie mittendrin fehl, wird sie ganz zurückgenommen, damit Dreiecke,
+      // Flächennummern und Punkte zusammenpassen (sonst greift die App über das Punktfeld hinaus)
+      const size_t vertexMark = buffers.vertices.size(), indexMark = buffers.indices.size();
+      const size_t faceMark = buffers.triangleFaces.size();
       try {
         const TopoDS_Face face = TopoDS::Face(_faces(f));
         TopLoc_Location location;
@@ -1014,13 +1047,18 @@ static std::vector<TopoDS_Edge> edgesFromNumbers(const TopTools_IndexedMapOfShap
             if (reversed) n.Reverse();
             buffers.addVertex(simd_make_double3(p.X(), p.Y(), p.Z()), simd_make_double3(n.X(), n.Y(), n.Z()));
         }
+        const int nodes = triangulation->NbNodes();
         for (int i = 1; i <= triangulation->NbTriangles(); ++i) {
             int a, b, c;
             triangulation->Triangle(i).Get(a, b, c);
+            if (a < 1 || b < 1 || c < 1 || a > nodes || b > nodes || c > nodes) continue;
             if (reversed) std::swap(b, c);
             buffers.addTriangle(base + a - 1, base + b - 1, base + c - 1, uint32_t(f));
         }
       } catch (...) {
+        buffers.vertices.resize(vertexMark);
+        buffers.indices.resize(indexMark);
+        buffers.triangleFaces.resize(faceMark);
         continue;
       }
     }
