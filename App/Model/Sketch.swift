@@ -474,8 +474,11 @@ final class SketchController: ObservableObject {
         guard !arcLatched else { return }
         arcLatched = true
         guard tool == .polyline, let start = dragStart, let current = dragCurrent else { return }
-        let from = chainEnd ?? start
-        guard simd_distance(from, current) > strokeTolerance else { return }
+        // Nur wenn der Stift seit dem Aufsetzen wirklich ein Stück gerade gezogen hat – und zwar am Ende des
+        // Linienzugs weiter. Vorher wurde vom Linienzug-Ende gemessen: Setzte der Stift am Anfang an (Bogen zum
+        // Schließen), entstand sofort eine Gerade quer zum Anfang und der Bogen war unmöglich.
+        guard simd_distance(start, current) > strokeTolerance else { return }
+        if let end = chainEnd, simd_distance(end, start) > 1e-6 { return }
         endLineStroke(start: start, end: current)
         guard chainEnd != nil else { return }
         dragStart = current
@@ -1099,23 +1102,37 @@ final class SketchController: ObservableObject {
         return (.arc(start: from, mid: mid, end: end), nil)
     }
 
+    /// Tangential-Einschränkung zwischen dem gerade angefügten Bogen und dem Element, an das er ansetzt.
+    private func addArcTangent(previous: Int?) {
+        guard let previous else { return }
+        let index = entities.count - 1
+        let variant = SketchConstraint.Variant.tangent(SketchCurveRef(entity: previous, index: 0),
+                                                       SketchCurveRef(entity: index, index: 0), outside: true)
+        constraints.append(SketchConstraint(variant: variant))
+        if ConstraintSolver.solve(entities, constraints: constraints, locked: Set(entities.indices)) == nil {
+            constraints.removeLast()
+        }
+    }
+
     /// Tangentialen Bogen übernehmen; der Linienzug geht an seinem Ende weiter.
     private func commitTangentArc(_ arc: (entity: SketchEntity, previous: Int?)) {
-        guard case .arc(_, _, let end) = arc.entity else { return }
+        guard case .arc(let arcBegin, _, let end) = arc.entity else { return }
+        // Rückwärts geschlossen: vom Anfang des Linienzugs zu seinem Ende gezogen
+        if let first = chainStart, let last = chainEnd, simd_distance(first, arcBegin) < 1e-6,
+           simd_distance(last, end) < 1e-6 {
+            add(arc.entity, editable: true)
+            addArcTangent(previous: arc.previous)
+            chainStart = nil
+            chainEnd = nil
+            entitiesChanged()
+            return
+        }
         // Bogen an einem anderen Ende angesetzt: dort beginnt ein neuer Linienzug
         if case .arc(let arcStart, _, _) = arc.entity, chainEnd.map({ simd_distance($0, arcStart) > 1e-6 }) ?? true {
             chainStart = arcStart
         }
         add(arc.entity, editable: true)
-        let index = entities.count - 1
-        if let previous = arc.previous {
-            let variant = SketchConstraint.Variant.tangent(SketchCurveRef(entity: previous, index: 0),
-                                                           SketchCurveRef(entity: index, index: 0), outside: true)
-            constraints.append(SketchConstraint(variant: variant))
-            if ConstraintSolver.solve(entities, constraints: constraints, locked: Set(entities.indices)) == nil {
-                constraints.removeLast()
-            }
-        }
+        addArcTangent(previous: arc.previous)
         if let first = chainStart, simd_distance(first, end) < 1e-6 {
             chainStart = nil
             chainEnd = nil
