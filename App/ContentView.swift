@@ -70,8 +70,10 @@ struct ContentView: View {
                 Label("Skizze", systemImage: "pencil.and.outline")
             }
             .toggleStyle(.button)
+            .labelStyle(.titleAndIcon)
 
             Button("Quader", systemImage: "cube", action: model.newBlock)
+                .labelStyle(.titleAndIcon)
 
             Menu {
                 Button("Kanten runden …", systemImage: "app") {
@@ -87,9 +89,11 @@ struct ContentView: View {
             } label: {
                 Label("Kanten", systemImage: "square.on.square.squareshape.controlhandles")
             }
+            .labelStyle(.titleAndIcon)
             .disabled(model.selection == nil)
 
-            Button("Körper löschen", systemImage: "trash", action: model.deleteSelectedBody)
+            Button("Löschen", systemImage: "trash", action: model.deleteSelectedBody)
+                .labelStyle(.titleAndIcon)
                 .disabled(model.selection == nil)
         }
 
@@ -119,6 +123,7 @@ struct ContentView: View {
             } label: {
                 Label("Datei", systemImage: "doc")
             }
+            .labelStyle(.titleAndIcon)
         }
     }
 
@@ -241,6 +246,8 @@ struct ContentView: View {
                      : "Pencil zeichnet · Finger-Tipp auf eine ebene Fläche skizziert darauf")
             } else if model.selection != nil {
                 Text("Fläche gewählt: Kanten runden/fasen, Körper löschen oder „Skizze“ tippen, um darauf zu zeichnen")
+            } else {
+                Text("Start: oben „Skizze“ tippen und ein Rechteck aufziehen · Fläche antippen = auswählen")
             }
             Text(PCKShape.kernelAvailable
                  ? "\(model.mesh.triangleCount) Dreiecke · Kernel: OpenCASCADE"
