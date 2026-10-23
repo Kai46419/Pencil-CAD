@@ -144,6 +144,9 @@ final class ViewportView: MTKView {
     }
 
     private func setUp() {
+        // Ohne das erhält die Ansicht nur die erste Berührung: ein zum Stift aufgelegter Finger (Bogen-Taste)
+        // kam in touchesBegan nie an, der Strich blieb gerade.
+        isMultipleTouchEnabled = true
         let orbit = UIPanGestureRecognizer(target: self, action: #selector(handleOrbit))
         orbit.maximumNumberOfTouches = 1
         orbit.allowedTouchTypes = fingersOnly
@@ -974,7 +977,9 @@ final class ViewportView: MTKView {
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         updateHeldFingers(began: touches)
-        if handleDrag == nil,
+        // Ziehpfeil und Rahmen nur mit der ersten Berührung (nicht der zweite Finger beim Zoomen)
+        let alone = (event?.allTouches?.count ?? touches.count) == touches.count && touches.count == 1
+        if handleDrag == nil, alone,
            let touch = touches.first(where: { $0.type == .pencil || $0.type == .direct }),
            let handle = handleHit(at: touch.location(in: self)),
            let parameter = axisParameter(at: touch.location(in: self), handle: handle) {
@@ -982,7 +987,7 @@ final class ViewportView: MTKView {
                                          step: dragStep(at: handle.base))
             return
         }
-        if boxTouch == nil, let touch = touches.first(where: acceptsForBox) {
+        if boxTouch == nil, alone, let touch = touches.first(where: acceptsForBox) {
             boxTouch = touch
             boxStart = touch.location(in: self)
             return
