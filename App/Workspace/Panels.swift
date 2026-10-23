@@ -362,52 +362,60 @@ struct ParameterCard: View {
         }
     }
 
-    /// Gewählte Skizzenbereiche extrudieren (Pfeil oder Wert).
+    /// Gewählte Skizzenbereiche extrudieren (Pfeil oder Wert). Kompakt in zwei Zeilen: In einer Zeile
+    /// war alles breiter als der Bildschirm, SwiftUI hat den Titel zusammengequetscht und die Karte riesig
+    /// hoch gemacht (Kai: „Fenster zu groß“).
     private var regionCard: some View {
         Card {
-            HStack(spacing: 16) {
-                Label("Extrudieren", systemImage: "square.stack.3d.up")
-                    .font(.callout.weight(.semibold))
-                Picker("Modus", selection: $model.regionMode) {
-                    ForEach(ExtrudeMode.allCases) { Text($0.rawValue).tag($0) }
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 12) {
+                    Label("Extrudieren", systemImage: "square.stack.3d.up")
+                        .font(.callout.weight(.semibold))
+                        .fixedSize()
+                    Picker("Modus", selection: $model.regionMode) {
+                        ForEach(ExtrudeMode.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .fixedSize()
+                    Text(model.selectedRegions.count == 1 ? "1 Profil" : "\(model.selectedRegions.count) Profile")
+                        .foregroundStyle(.secondary)
+                        .fixedSize()
                 }
-                .pickerStyle(.segmented)
-                .fixedSize()
-                Picker("Richtung", selection: $model.regionDirection) {
-                    ForEach(ExtrudeDirection.allCases) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.menu)
-                .fixedSize()
-                .hoverTip("Richtung", "Eine Seite, symmetrisch (gleich weit nach beiden Seiten) oder zwei Seiten mit eigenem Abstand – wie in Fusion 360.")
-                if model.selectedRegionsHaveHoles {
-                    Picker("Innen", selection: $model.regionThroughHoles) {
-                        Text("Innen aussparen").tag(false)
-                        Text("Durchgehend").tag(true)
+                HStack(spacing: 12) {
+                    Picker("Richtung", selection: $model.regionDirection) {
+                        ForEach(ExtrudeDirection.allCases) { Text($0.rawValue).tag($0) }
                     }
                     .pickerStyle(.menu)
                     .fixedSize()
-                    .hoverTip("Innere Konturen", "Aussparen: ein Kreis im Rechteck bleibt ein Loch, extrudiert wird nur drum herum. Durchgehend: die ganze Außenkontur wird extrudiert, als wäre innen nichts.")
-                }
-                Picker("Ausmaß", selection: $model.regionExtent) {
-                    ForEach(ExtrudeExtent.allCases) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.menu)
-                .fixedSize()
-                .hoverTip("Ausmaß", "Wie in Fusion 360: Abstand (Pfeil oder Wert), Bis Objekt (Fläche oder Kante antippen, optional mit Versatz) oder Alle (durch alle Körper).")
-                if model.regionExtent == .toObject {
-                    NumberField(title: "Versatz", value: model.regionExtentOffset, width: 56) { model.regionExtentOffset = $0 }
-                }
-                NumberField(title: model.regionDirection == .symmetric ? "Je Seite" : "Abstand",
-                            value: model.regionValue) { model.setRegionValue($0) }
-                if model.regionDirection == .twoSides {
-                    NumberField(title: "Seite 2", value: model.regionSecondValue) { model.regionSecondValue = abs($0) }
-                }
-                NumberField(title: "Verjüngung", value: model.regionTaper, unit: "°", width: 52) { model.regionTaper = $0 }
-                    .hoverTip("Verjüngung", "Neigt die Seitenwände um diesen Winkel (Entformungsschräge). Positiv und negativ ausprobieren: eine Richtung wird schmaler, die andere breiter.")
-                Text(model.selectedRegions.count == 1 ? "1 Profil" : "\(model.selectedRegions.count) Profile")
-                    .foregroundStyle(.secondary)
+                    .hoverTip("Richtung", "Eine Seite, symmetrisch (gleich weit nach beiden Seiten) oder zwei Seiten mit eigenem Abstand – wie in Fusion 360.")
+                    if model.selectedRegionsHaveHoles {
+                        Picker("Innen", selection: $model.regionThroughHoles) {
+                            Text("Innen aussparen").tag(false)
+                            Text("Durchgehend").tag(true)
+                        }
+                        .pickerStyle(.menu)
+                        .fixedSize()
+                        .hoverTip("Innere Konturen", "Aussparen: ein Kreis im Rechteck bleibt ein Loch, extrudiert wird nur drum herum. Durchgehend: die ganze Außenkontur wird extrudiert, als wäre innen nichts.")
+                    }
+                    Picker("Ausmaß", selection: $model.regionExtent) {
+                        ForEach(ExtrudeExtent.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.menu)
                     .fixedSize()
+                    .hoverTip("Ausmaß", "Wie in Fusion 360: Abstand (Pfeil oder Wert), Bis Objekt (Fläche oder Kante antippen, optional mit Versatz) oder Alle (durch alle Körper).")
+                    if model.regionExtent == .toObject {
+                        NumberField(title: "Versatz", value: model.regionExtentOffset, width: 56) { model.regionExtentOffset = $0 }
+                    }
+                    NumberField(title: model.regionDirection == .symmetric ? "Je Seite" : "Abstand",
+                                value: model.regionValue) { model.setRegionValue($0) }
+                    if model.regionDirection == .twoSides {
+                        NumberField(title: "Seite 2", value: model.regionSecondValue) { model.regionSecondValue = abs($0) }
+                    }
+                    NumberField(title: "Verjüngung", value: model.regionTaper, unit: "°", width: 52) { model.regionTaper = $0 }
+                        .hoverTip("Verjüngung", "Neigt die Seitenwände um diesen Winkel (Entformungsschräge). Positiv und negativ ausprobieren: eine Richtung wird schmaler, die andere breiter.")
+                }
             }
+            .fixedSize()
         }
     }
 
