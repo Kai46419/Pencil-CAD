@@ -55,6 +55,21 @@ struct HomeView: View {
         }
     }
 
+    /// „Version 0.1.0 · Build 47 · 6447eb0 · 23.10.2026 20:47“: Build und Stand schreibt
+    /// scripts/generate-project.sh (Build-Nummer = Anzahl der Commits, Stand in BuildInfo.txt)
+    private static let versionText: String = {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "?"
+        let build = info?["CFBundleVersion"] as? String ?? "?"
+        var text = "Version \(version) · Build \(build)"
+        if let url = Bundle.main.url(forResource: "BuildInfo", withExtension: "txt"),
+           let stand = try? String(contentsOf: url, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines),
+           !stand.isEmpty {
+            text += " · \(stand)"
+        }
+        return text
+    }()
+
     private var header: some View {
         HStack(alignment: .center, spacing: 14) {
             Image(systemName: "pencil.and.outline")
@@ -62,8 +77,13 @@ struct HomeView: View {
                 .foregroundStyle(.white)
                 .frame(width: 48, height: 48)
                 .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 12))
-            Text("PencilCAD")
-                .font(.largeTitle.weight(.bold))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("PencilCAD")
+                    .font(.largeTitle.weight(.bold))
+                Text(Self.versionText)
+                    .font(.footnote.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
             Spacer()
             Button {
                 isImporting = true

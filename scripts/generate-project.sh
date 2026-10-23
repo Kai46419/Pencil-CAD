@@ -40,6 +40,12 @@ else
   echo "ein Team wählen und dieses Skript erneut starten (oder PENCILCAD_TEAM in signing.env eintragen)."
 fi
 
+# Versionsnummer für den Startbildschirm: Build = Anzahl der Commits, dazu Commit und Datum
+export PENCILCAD_BUILD="$(git rev-list --count HEAD 2>/dev/null || echo 1)"
+build_info="$(git log -1 --format='%h · %cd' --date=format:'%d.%m.%Y %H:%M' 2>/dev/null || true)"
+printf '%s\n' "${build_info:-unbekannter Stand}" > App/BuildInfo.txt
+echo "Version: Build $PENCILCAD_BUILD (${build_info:-ohne Git})"
+
 # Altes Projekt komplett entfernen, damit keine veralteten Dateilisten übrig bleiben
 rm -rf PencilCAD.xcodeproj
 
