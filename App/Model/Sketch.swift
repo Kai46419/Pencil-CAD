@@ -2812,12 +2812,13 @@ final class SketchController: ObservableObject {
             let distance = simd_distance(projected, p)
             if distance <= tolerance, distance < (best?.distance ?? .infinity) { best = (distance, projected) }
         }
-        guard let best else { return snapped }
+        guard let best else { return snapped.kind == .angle ? alignedOnRay(snapped, anchor: anchor, tolerance: tolerance) : snapped }
         if snapped.kind != .angle {
             result.point = best.point
             result.kind = .angle
             result.guides = [(anchor, best.point)]
         }
+        result = alignedOnRay(result, anchor: anchor, tolerance: tolerance)
         // Alle Linien mit diesem Winkel leuchten grün
         let current = result.point - anchor
         guard simd_length(current) > 1e-9 else { return result }
@@ -2827,6 +2828,33 @@ final class SketchController: ObservableObject {
             return abs(d.x * direction.y - d.y * direction.x) < 1e-4
         }.map { [$0.0, $0.1] }
         return result
+    }
+
+    /// Fluchtlinie auf dem eingerasteten Strahl: Die Länge rastet dort ein, wo ein vorhandener Punkt
+    /// (z. B. der Anfang der ersten Linie) rechtwinklig, senkrecht oder waagerecht daneben liegt.
+    private func alignedOnRay(_ result: SnapResult, anchor: Point2, tolerance: Double) -> SnapResult {
+        guard snapKinds.contains(.alignment) else { return result }
+        let ray = result.point - anchor
+        let length = simd_length(ray)
+        guard length > tolerance else { return result }
+        let d = ray / length
+        var nearest: (distance: Double, point: Point2, source: Point2)?
+        for k in snapIndex.endpoints + snapIndex.centers + inputPoints where simd_distance(k, anchor) > 1e-6 {
+            var lengths = [simd_dot(k - anchor, d)]
+            if abs(d.x) > 1e-6 { lengths.append((k.x - anchor.x) / d.x) }
+            if abs(d.y) > 1e-6 { lengths.append((k.y - anchor.y) / d.y) }
+            for t in lengths where t > tolerance {
+                let distance = abs(t - length)
+                if distance <= tolerance, distance < (nearest?.distance ?? .infinity) {
+                    nearest = (distance, anchor + d * t, k)
+                }
+            }
+        }
+        guard let nearest else { return result }
+        var aligned = result
+        aligned.point = nearest.point
+        aligned.guides = [(anchor, nearest.point), (nearest.source, nearest.point)]
+        return aligned
     }
 
     private func add(_ entity: SketchEntity, editable: Bool = false) {

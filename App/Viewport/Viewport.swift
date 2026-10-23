@@ -85,6 +85,8 @@ final class ViewportView: MTKView {
     private var heldFingers = Set<UITouch>()
     /// Der aufgelegte Finger hat als Bogen-Taste gedient: sein Loslassen ist kein Antippen
     private var suppressFingerTap = false
+    /// Ende des letzten Stiftstrichs: Drücken/Doppeltippen direkt danach war meist ein festerer Griff, kein Merken
+    private var strokeEndedAt: TimeInterval = 0
 
     private func updateHeldFingers(began: Set<UITouch> = [], ended: Set<UITouch> = []) {
         guard let sketch else { return }
@@ -98,6 +100,7 @@ final class ViewportView: MTKView {
         if wasHeld, heldFingers.isEmpty, let touch = sketchTouch, sketch.tool == .polyline, sketch.arcActive {
             suppressFingerTap = true
             sketchTouch = nil
+            strokeEndedAt = CACurrentMediaTime()
             if let point = sketchPoint(for: touch) {
                 sketch.ended(at: point, tolerance: snapTolerance)
             } else {
@@ -1069,6 +1072,7 @@ final class ViewportView: MTKView {
             return
         }
         sketchTouch = nil
+        strokeEndedAt = CACurrentMediaTime()
         if sketch?.arcActive == true || !heldFingers.isEmpty { suppressFingerTap = true }
         if let point = sketchPoint(for: touch) {
             sketch?.ended(at: point, tolerance: snapTolerance)
@@ -1096,6 +1100,7 @@ final class ViewportView: MTKView {
             return
         }
         sketchTouch = nil
+        strokeEndedAt = CACurrentMediaTime()
         sketch?.cancelStroke()
         refresh()
     }
@@ -1262,12 +1267,17 @@ final class ViewportView: MTKView {
 
     /// Stift drücken bzw. doppeltippen: Schwebt der Stift im Skizzenmodus über einem Fangpunkt, wird er gemerkt
     /// (zwei gemerkte Punkte ergeben Mitte und Mittellinie). Sonst öffnet sich das Werkzeugrad.
+    /// Während und kurz nach einem Strich (bzw. mit aufgelegtem Finger) wird nichts ausgelöst: Ein festerer
+    /// Griff beim Zeichnen meldet der Pencil Pro als Drücken, das hat ungewollt „Punkt 1 gemerkt“ ergeben.
+    /// Gemerkt wird nur, wenn der Stift gerade wirklich über dem Punkt schwebt.
     fileprivate func pencilAction(at location: CGPoint?) {
-        let spot = location ?? lastHoverLocation
-        if let sketch, sketch.isActive, !sketch.isChoosingPlane, let spot,
-           let point = sketchPoint(at: spot), sketch.captureHovered(at: point, tolerance: snapTolerance) {
-            refresh()
-            return
+        if let sketch, sketch.isActive {
+            guard sketchTouch == nil, heldFingers.isEmpty, CACurrentMediaTime() - strokeEndedAt > 0.8 else { return }
+            if !sketch.isChoosingPlane, let location,
+               let point = sketchPoint(at: location), sketch.captureHovered(at: point, tolerance: snapTolerance) {
+                refresh()
+                return
+            }
         }
         showQuickTools(at: location)
     }
