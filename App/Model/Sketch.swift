@@ -385,6 +385,13 @@ final class SketchController: ObservableObject {
     private(set) var strokeShape: SketchEntity?
     /// Kreis aufziehen: erkannte Abhängigkeit (tangential, gleicher Radius, durch Punkt)
     private var circleInference: CircleInference?
+    /// Finger liegt auf dem Bildschirm, während der Stift zeichnet (wie Shapr3D): das Linienwerkzeug
+    /// zeichnet dann einen tangentialen Bogen am Ende des Linienzugs.
+    var arcModifier = false {
+        didSet {
+            if arcModifier != oldValue { changed() }
+        }
+    }
     /// Fangradius des laufenden Strichs
     private var strokeTolerance = 1.0
     /// Hilfslinien zu gemerkten Punktpaaren: Verbindung und Mittelsenkrechte („Mittellinie“), nur Anzeige
@@ -573,6 +580,8 @@ final class SketchController: ObservableObject {
                 inferConstraints(forNew: entities.count - 1, center: start, inference: nil)
             }
         case .polyline:
+            // Finger aufgelegt: tangentialer Bogen am Ende des Linienzugs
+            if arcModifier, endTangentArc(to: end) { break }
             // Rund gezogen: Kreis bzw. Bogen statt Linie
             if !endShapeStroke(samples, start: start, end: end, tolerance: tolerance) {
                 endLineStroke(start: start, end: end)
@@ -787,6 +796,72 @@ final class SketchController: ObservableObject {
             || (tool == .rectangle && rectangleMode == .center)
         guard snapEnabled, centered, dragStart == nil else { return [] }
         return snapIndex.centers.map { ($0, SnapKind.center) } + snapIndex.midpoints.map { ($0, SnapKind.midpoint) }
+    }
+
+    // MARK: Tangentialer Bogen (Finger aufgelegt)
+
+    /// Richtung am Ende des Linienzugs: letzte Linie bzw. Bogen, die dort endet.
+    private var chainTangent: (direction: Point2, entity: Int)? {
+        guard let end = chainEnd, let index = entities.indices.last else { return nil }
+        switch entities[index] {
+        case .line(let a, let b) where simd_distance(b, end) < 1e-6 && simd_distance(a, b) > 1e-9:
+            return (simd_normalize(b - a), index)
+        case .arc(let a, let m, let b) where simd_distance(b, end) < 1e-6:
+            guard let circle = circleThrough(a, m, b) else { return nil }
+            let radial = b - circle.center
+            let counterClockwise = cross2D(m - a, b - m) > 0
+            let tangent = counterClockwise ? Point2(-radial.y, radial.x) : Point2(radial.y, -radial.x)
+            return simd_length(tangent) > 1e-12 ? (simd_normalize(tangent), index) : nil
+        default:
+            return nil
+        }
+    }
+
+    private func cross2D(_ a: Point2, _ b: Point2) -> Double { a.x * b.y - a.y * b.x }
+
+    /// Bogen vom Ende des Linienzugs nach end, tangential an das letzte Stück.
+    private func tangentArc(to end: Point2) -> (entity: SketchEntity, previous: Int)? {
+        guard let start = chainEnd, let tangent = chainTangent else { return nil }
+        let d = end - start
+        let normal = Point2(-tangent.direction.y, tangent.direction.x)
+        let side = simd_dot(d, normal)
+        // Fast gerade weiter: kein Bogen
+        guard simd_length(d) > 1e-6, abs(side) > simd_length(d) * 0.02 else { return nil }
+        let radius = simd_length_squared(d) / (2 * side)
+        let center = start + normal * radius
+        let a0 = atan2(start.y - center.y, start.x - center.x)
+        let a1 = atan2(end.y - center.y, end.x - center.x)
+        var sweep = a1 - a0
+        if radius > 0 {
+            while sweep <= 0 { sweep += 2 * .pi }
+        } else {
+            while sweep >= 0 { sweep -= 2 * .pi }
+        }
+        let middle = a0 + sweep / 2
+        let mid = center + Point2(cos(middle), sin(middle)) * abs(radius)
+        guard circleThrough(start, mid, end) != nil else { return nil }
+        return (.arc(start: start, mid: mid, end: end), tangent.entity)
+    }
+
+    /// Tangentialen Bogen übernehmen; der Linienzug geht an seinem Ende weiter.
+    private func endTangentArc(to end: Point2) -> Bool {
+        guard let arc = tangentArc(to: end) else { return false }
+        add(arc.entity, editable: true)
+        let index = entities.count - 1
+        let variant = SketchConstraint.Variant.tangent(SketchCurveRef(entity: arc.previous, index: 0),
+                                                       SketchCurveRef(entity: index, index: 0), outside: true)
+        constraints.append(SketchConstraint(variant: variant))
+        if ConstraintSolver.solve(entities, constraints: constraints, locked: Set(entities.indices)) == nil {
+            constraints.removeLast()
+        }
+        if let first = chainStart, simd_distance(first, end) < 1e-6 {
+            chainStart = nil
+            chainEnd = nil
+        } else {
+            chainEnd = end
+        }
+        entitiesChanged()
+        return true
     }
 
     // MARK: Stiftgesten
@@ -1440,6 +1515,9 @@ final class SketchController: ObservableObject {
 
     private var rawDimensions: [SketchDimension] {
         if let start = dragStart, let current = dragCurrent {
+            if tool == .polyline, arcModifier, let arc = tangentArc(to: current) {
+                return Self.dimensions(of: arc.entity, editable: false)
+            }
             if tool == .polyline, let shape = strokeShape {
                 return Self.dimensions(of: shape, editable: false)
             }
@@ -2362,7 +2440,9 @@ final class SketchController: ObservableObject {
                 if tool == .circle || tool == .polygon { polylines.append([start, current]) }
             }
         case .polyline:
-            if let shape = strokeShape, dragStart != nil {
+            if arcModifier, let current, let arc = tangentArc(to: current) {
+                polylines += arc.entity.drawing
+            } else if let shape = strokeShape, dragStart != nil {
                 polylines += shape.drawing
             } else if let from = chainEnd ?? dragStart, let current {
                 polylines.append([from, current])

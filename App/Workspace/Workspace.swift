@@ -1006,7 +1006,8 @@ final class Workspace: ObservableObject {
             }
             return "Antippen wählt · Ecke/Ende ziehen ändert die Größe · über einem Punkt Stift drücken merkt ihn (zwei → Mitte)"
         case .polyline where sketch.hasOpenChain:
-            return "Nächsten Punkt setzen · rund ziehen ergibt einen Bogen · zurück zum Start schließt"
+            if sketch.arcModifier { return "Finger liegt auf: der Strich wird ein tangentialer Bogen" }
+            return "Nächsten Punkt setzen · Finger auflegen: tangentialer Bogen · zurück zum Start schließt"
         case .polyline:
             return "Ziehen: Linie · rund ziehen: Kreis oder Bogen · Kritzeln über Elemente löscht sie"
         case .arc:

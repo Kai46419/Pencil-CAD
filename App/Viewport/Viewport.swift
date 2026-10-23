@@ -80,6 +80,26 @@ final class ViewportView: MTKView {
     private var needsSync = true
     /// Letzte Position des schwebenden Stifts (für Drücken/Doppeltippen ohne eigene Position)
     private var lastHoverLocation: CGPoint?
+    /// Aufgelegte Finger beim Skizzieren mit dem Stift (Finger auflegen = tangentialer Bogen)
+    private var heldFingers = Set<UITouch>()
+    /// Der aufgelegte Finger hat als Bogen-Taste gedient: sein Loslassen ist kein Antippen
+    private var suppressFingerTap = false
+
+    private func updateHeldFingers(began: Set<UITouch> = [], ended: Set<UITouch> = []) {
+        guard let sketch else { return }
+        if sketch.isActive, !sketch.isChoosingPlane, !sketch.fingerDraws {
+            heldFingers.formUnion(began.filter { $0.type == .direct })
+        }
+        heldFingers.subtract(ended)
+        if heldFingers.isEmpty, suppressFingerTap, !ended.isEmpty {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.suppressFingerTap = false }
+        }
+        let held = !heldFingers.isEmpty && sketch.isActive
+        if sketch.arcModifier != held {
+            sketch.arcModifier = held
+            refresh()
+        }
+    }
     /// Rahmenauswahl: Berührung, Startpunkt und gezeichneter Rahmen
     private var boxTouch: UITouch?
     private var boxStart: CGPoint = .zero
@@ -942,6 +962,7 @@ final class ViewportView: MTKView {
     // MARK: Berührungen
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        updateHeldFingers(began: touches)
         if handleDrag == nil,
            let touch = touches.first(where: { $0.type == .pencil || $0.type == .direct }),
            let handle = handleHit(at: touch.location(in: self)),
@@ -998,6 +1019,7 @@ final class ViewportView: MTKView {
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        updateHeldFingers(ended: touches)
         if let drag = handleDrag, touches.contains(drag.touch) {
             handleDrag = nil
             refresh()
@@ -1021,6 +1043,7 @@ final class ViewportView: MTKView {
             return
         }
         sketchTouch = nil
+        if sketch?.arcModifier == true { suppressFingerTap = true }
         if let point = sketchPoint(for: touch) {
             sketch?.ended(at: point, tolerance: snapTolerance)
             if sketch?.tool == .project { project(at: touch.location(in: self)) }
@@ -1031,6 +1054,7 @@ final class ViewportView: MTKView {
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        updateHeldFingers(ended: touches)
         if let drag = handleDrag, touches.contains(drag.touch) {
             handleDrag = nil
             refresh()
@@ -1066,6 +1090,7 @@ final class ViewportView: MTKView {
                 chooseSketchPlane(ray: ray, faceHit: hit)
                 return
             }
+            if suppressFingerTap { return }
             switch sketch.tool {
             case .project:
                 project(at: location)
