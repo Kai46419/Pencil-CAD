@@ -1430,8 +1430,7 @@ final class SketchController: ObservableObject {
     /// Bezugspunkt für Winkelschritte während eines Strichs.
     private var strokeAnchor: Point2? {
         switch tool {
-        // Bogen (Finger aufgelegt): keine Winkel- und Parallelstrahlen, die zögen das Ende auf die Tangente
-        case .polyline: arcActive ? nil : chainEnd ?? dragStart
+        case .polyline: chainEnd ?? dragStart
         case .arc: arcChord == nil && stepBase == nil ? dragStart : nil
         case .slot: stepBase == nil ? dragStart : nil
         case .rectangle: rectangleMode == .threePoint && rectangleBase == nil ? dragStart : nil
@@ -1510,7 +1509,7 @@ final class SketchController: ObservableObject {
     func hover(at point: Point2, tolerance: Double) {
         guard dragStart == nil else { return }
         let anchor: Point2? = switch tool {
-        case .polyline: arcActive ? nil : chainEnd
+        case .polyline: chainEnd
         case .spline: splinePoints.last
         default: nil
         }
@@ -2795,9 +2794,16 @@ final class SketchController: ObservableObject {
             activeSnap = nil
             return p
         }
-        let result = withParallel(snapIndex.snap(p, tolerance: tolerance, kinds: snapKinds, extra: inputPoints,
+        var result = withParallel(snapIndex.snap(p, tolerance: tolerance, kinds: snapKinds, extra: inputPoints,
                                                  anchor: anchor, gridStep: gridStep),
                                   raw: p, anchor: anchor, tolerance: tolerance)
+        // Bogen (Finger aufgelegt): Winkelschritte wie 90° zum Linienende bleiben samt Hilfslinie, nur ein Strahl
+        // genau entlang der Tangente fällt weg – auf ihm gäbe es keinen Bogen, nur eine gerade Linie
+        if tool == .polyline, arcActive, result.kind == .angle, tangentArc(to: result.point) == nil {
+            parallelLines = []
+            result = snapIndex.snap(p, tolerance: tolerance, kinds: snapKinds.subtracting([.angle]), extra: inputPoints,
+                                    anchor: nil, gridStep: gridStep)
+        }
         activeSnap = result.kind == nil ? nil : result
         return result.point
     }
