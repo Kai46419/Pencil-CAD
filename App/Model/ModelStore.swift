@@ -616,14 +616,8 @@ final class ModelStore: ObservableObject {
         guard let preview = previewBodies, let name = previewName else { return }
         previewBodies = nil
         previewName = nil
-        // Wie bei Fusion 360: Die verbrauchte Skizze wird ausgeblendet, damit der Körper geschlossen wirkt
-        // (unter „Elemente“ wieder einblendbar).
-        if name == Self.regionPreviewName, let index = selectedRegions.first?.sketch, sketches.indices.contains(index) {
-            var newSketches = sketches
-            newSketches[index].isHidden = true
-            commit(preview, sketches: newSketches, name: name)
-            return
-        }
+        // Die Skizze bleibt sichtbar, damit weitere Bereiche (z. B. bei sich überschneidenden Kreisen)
+        // extrudiert werden können; ausblenden über „Sichtbarkeit“ bzw. „Elemente“.
         commit(preview, name: name)
     }
 
@@ -720,6 +714,38 @@ final class ModelStore: ObservableObject {
             clearSelectionState()
         }
         refreshHighlight()
+        save()
+    }
+
+    // MARK: Sichtbarkeit
+
+    var showsSketches: Bool { sketches.contains { !$0.isHidden } }
+    var showsCanvases: Bool { canvases.contains { !$0.isHidden } }
+    var showsConstructions: Bool { constructions.contains { !$0.isHidden } }
+
+    /// Alle Skizzen ein- oder ausblenden.
+    func setSketchesHidden(_ hidden: Bool) {
+        guard !sketches.isEmpty else { return }
+        commitPreview()
+        for index in sketches.indices { sketches[index].isHidden = hidden }
+        if hidden, !selectedRegions.isEmpty { clearSelectionState() }
+        refreshHighlight()
+        save()
+    }
+
+    /// Alle Bilder ein- oder ausblenden.
+    func setCanvasesHidden(_ hidden: Bool) {
+        guard !canvases.isEmpty else { return }
+        for index in canvases.indices { canvases[index].isHidden = hidden }
+        selectionRevision += 1
+        save()
+    }
+
+    /// Alle Konstruktionsebenen, -achsen und -punkte ein- oder ausblenden.
+    func setConstructionsHidden(_ hidden: Bool) {
+        guard !constructions.isEmpty else { return }
+        for index in constructions.indices { constructions[index].isHidden = hidden }
+        selectionRevision += 1
         save()
     }
 

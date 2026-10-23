@@ -186,6 +186,15 @@ struct RightRail: View {
             labeledButton("Verlauf", systemImage: "clock.arrow.circlepath", isActive: panel == .history) {
                 panel = panel == .history ? nil : .history
             }
+            Menu {
+                visibilityItems
+            } label: {
+                HStack(spacing: 8) {
+                    RailLabel(title: "Sichtbarkeit")
+                    RailIcon(systemImage: "eye")
+                }
+            }
+            .accessibilityLabel("Sichtbarkeit")
 
             Capsule()
                 .fill(Color.secondary.opacity(0.35))
@@ -244,6 +253,25 @@ struct RightRail: View {
         }
     }
 
+    /// Skizzen, Bilder und Konstruktionsgeometrie gesammelt ein- und ausblenden; einzeln unter „Elemente“.
+    @ViewBuilder
+    private var visibilityItems: some View {
+        let model = workspace.model
+        Toggle("Skizzen", systemImage: "pencil.and.outline",
+               isOn: Binding(get: { model.showsSketches }, set: { model.setSketchesHidden(!$0) }))
+            .disabled(model.sketches.isEmpty)
+        Toggle("Bilder", systemImage: "photo",
+               isOn: Binding(get: { model.showsCanvases }, set: { model.setCanvasesHidden(!$0) }))
+            .disabled(model.canvases.isEmpty)
+        Toggle("Konstruktion", systemImage: "square.dashed",
+               isOn: Binding(get: { model.showsConstructions }, set: { model.setConstructionsHidden(!$0) }))
+            .disabled(model.constructions.isEmpty)
+        Divider()
+        Button("Einzeln in „Elemente“ …", systemImage: "square.3.layers.3d") {
+            panel = .elements
+        }
+    }
+
     @ViewBuilder
     private var displayModePicker: some View {
         Picker("Anzeigemodus", selection: $workspace.displayMode) {
@@ -286,6 +314,12 @@ struct RightRail: View {
             RailButton(systemImage: "camera", label: "Screenshot", action: screenshot)
             RailButton(systemImage: "clock.arrow.circlepath", label: "Verlauf", isActive: panel == .history) {
                 panel = panel == .history ? nil : .history
+            }
+            Menu {
+                visibilityItems
+            } label: {
+                RailIcon(systemImage: "eye")
+                    .accessibilityLabel("Sichtbarkeit")
             }
             RailButton(systemImage: "square.3.layers.3d", label: "Elemente", isActive: panel == .elements) {
                 panel = panel == .elements ? nil : .elements
