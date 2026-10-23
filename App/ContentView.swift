@@ -23,9 +23,8 @@ struct ContentView: View {
         NavigationStack {
             Viewport(model: model, sketch: sketch, command: viewCommand)
                 .ignoresSafeArea(edges: .bottom)
-                .overlay(alignment: .bottomLeading) { statusBar }
                 .overlay(alignment: .top) { if sketch.isActive { sketchBar } }
-                .overlay(alignment: .bottom) { if sketch.profile != nil { extrudePanel } }
+                .overlay(alignment: .bottom) { bottomBar }
                 .navigationTitle("PencilCAD")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar { toolbarContent }
@@ -67,13 +66,13 @@ struct ContentView: View {
     private var toolbarContent: some ToolbarContent {
         ToolbarItemGroup(placement: .topBarLeading) {
             Toggle(isOn: $sketch.isActive) {
-                Label("Skizze", systemImage: "pencil.and.outline")
+                toolbarLabel("Skizze", "pencil.and.outline")
             }
             .toggleStyle(.button)
-            .labelStyle(.titleAndIcon)
 
-            Button("Quader", systemImage: "cube", action: model.newBlock)
-                .labelStyle(.titleAndIcon)
+            Button(action: model.newBlock) {
+                toolbarLabel("Quader", "cube")
+            }
 
             Menu {
                 Button("Kanten runden …", systemImage: "app") {
@@ -87,14 +86,14 @@ struct ContentView: View {
                     isEdgeDialogShown = true
                 }
             } label: {
-                Label("Kanten", systemImage: "square.on.square.squareshape.controlhandles")
+                toolbarLabel("Kanten", "square.on.square.squareshape.controlhandles")
             }
-            .labelStyle(.titleAndIcon)
             .disabled(model.selection == nil)
 
-            Button("Löschen", systemImage: "trash", action: model.deleteSelectedBody)
-                .labelStyle(.titleAndIcon)
-                .disabled(model.selection == nil)
+            Button(action: model.deleteSelectedBody) {
+                toolbarLabel("Löschen", "trash")
+            }
+            .disabled(model.selection == nil)
         }
 
         ToolbarItemGroup(placement: .topBarTrailing) {
@@ -121,10 +120,18 @@ struct ContentView: View {
                     Label("Alles löschen …", systemImage: "trash")
                 }
             } label: {
-                Label("Datei", systemImage: "doc")
+                toolbarLabel("Datei", "doc")
             }
-            .labelStyle(.titleAndIcon)
         }
+    }
+
+    /// Symbol plus Text als feste Ansicht; ein Label zeigt in der iPadOS-Toolbar sonst nur das Symbol.
+    private func toolbarLabel(_ title: String, _ systemImage: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: systemImage)
+            Text(title)
+        }
+        .fixedSize()
     }
 
     // MARK: Skizzenleiste
@@ -174,52 +181,72 @@ struct ContentView: View {
         .padding(.top, 8)
     }
 
-    // MARK: Extrudieren
+    // MARK: Unten: Extrudieren + Status
+
+    private var bottomBar: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if sketch.profile != nil {
+                extrudePanel
+                    .frame(maxWidth: .infinity)
+            }
+            statusBar
+        }
+        .padding()
+    }
 
     private var extrudePanel: some View {
-        HStack(spacing: 14) {
-            if sketch.rectangleSize != nil {
-                numberField("B", value: rectangleBinding(\.x))
-                numberField("T", value: rectangleBinding(\.y))
-            } else if sketch.circleDiameter != nil {
-                numberField("Ø", value: Binding(
-                    get: { sketch.circleDiameter ?? 0 },
-                    set: { sketch.circleDiameter = $0 }
-                ))
-            }
-
-            Picker("Modus", selection: $extrudeMode) {
-                ForEach(ExtrudeMode.allCases) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .frame(maxWidth: 330)
-
-            numberField(extrudeMode == .cut ? "Tiefe" : "Höhe", value: $extrudeDistance)
-
-            Button("Verwerfen", role: .destructive, action: sketch.reset)
-            Button("Extrudieren") {
-                if let profile = sketch.profile {
-                    model.extrude(profile, on: sketch.plane, distance: extrudeDistance, mode: extrudeMode)
-                    sketch.reset()
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 18) {
+                if sketch.rectangleSize != nil {
+                    numberField("Breite", value: rectangleBinding(\.x))
+                    numberField("Tiefe", value: rectangleBinding(\.y))
+                } else if sketch.circleDiameter != nil {
+                    numberField("Ø", value: Binding(
+                        get: { sketch.circleDiameter ?? 0 },
+                        set: { sketch.circleDiameter = $0 }
+                    ))
                 }
+                numberField(extrudeMode == .cut ? "Abziehen um" : "Höhe", value: $extrudeDistance)
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(extrudeDistance == 0)
+
+            HStack(spacing: 14) {
+                Picker("Modus", selection: $extrudeMode) {
+                    ForEach(ExtrudeMode.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
+
+                Spacer(minLength: 0)
+
+                Button("Verwerfen", role: .destructive, action: sketch.reset)
+                    .fixedSize()
+                Button("Extrudieren") {
+                    if let profile = sketch.profile {
+                        model.extrude(profile, on: sketch.plane, distance: extrudeDistance, mode: extrudeMode)
+                        sketch.reset()
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .fixedSize()
+                .disabled(extrudeDistance == 0)
+            }
         }
         .font(.callout)
         .padding(12)
+        .frame(maxWidth: 560)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
-        .padding(.bottom, 24)
     }
 
     private func numberField(_ title: String, value: Binding<Double>) -> some View {
         HStack(spacing: 4) {
             Text(title)
+                .fixedSize()
             TextField(title, value: value, format: .number)
                 .keyboardType(.numbersAndPunctuation)
                 .frame(width: 64)
                 .textFieldStyle(.roundedBorder)
             Text("mm")
+                .fixedSize()
         }
     }
 
@@ -257,7 +284,6 @@ struct ContentView: View {
         .font(.footnote)
         .padding(10)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
-        .padding()
     }
 
     // MARK: Hilfen
