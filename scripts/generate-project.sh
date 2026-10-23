@@ -1,13 +1,21 @@
 #!/usr/bin/env bash
 # Erzeugt PencilCAD.xcodeproj mit XcodeGen (brew install xcodegen).
 # Mit OpenCASCADE, wenn Vendor/OCCT.xcframework existiert, sonst im Fallback-Modus.
-# Xcode vorher schließen.
+# Ein laufendes Xcode wird vorher beendet und das Projekt danach geöffnet.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 if pgrep -x Xcode >/dev/null; then
-  echo "Hinweis: Xcode läuft. Bitte Xcode schließen und das Skript erneut starten."
-  exit 1
+  echo "Xcode läuft – wird beendet …"
+  osascript -e 'quit app "Xcode"' || true
+  for _ in $(seq 1 30); do
+    pgrep -x Xcode >/dev/null || break
+    sleep 1
+  done
+  if pgrep -x Xcode >/dev/null; then
+    echo "Xcode ließ sich nicht beenden (ungesicherte Änderungen?). Bitte Xcode mit ⌘Q schließen und erneut starten."
+    exit 1
+  fi
 fi
 
 # Altes Projekt komplett entfernen, damit keine veralteten Dateilisten übrig bleiben
@@ -35,4 +43,4 @@ if [ "$missing" -ne 0 ]; then
   exit 1
 fi
 echo "Projekt vollständig: $(find App -type f \( -name '*.swift' -o -name '*.mm' -o -name '*.metal' \) | wc -l | tr -d ' ') Quelldateien."
-echo "Jetzt: open PencilCAD.xcodeproj"
+open PencilCAD.xcodeproj

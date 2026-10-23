@@ -69,7 +69,7 @@ In Xcode: Target **PencilCAD** → *Signing & Capabilities* → eigenes **Team**
 (`com.example.pencilcad`) ändern. Dann iPad auswählen und starten.
 
 **Wichtig:** Das Xcode-Projekt wird nicht eingecheckt, sondern erzeugt. Nach jedem `git pull` oder Branch-Wechsel, der
-neue Dateien bringt, Xcode schließen und `./scripts/generate-project.sh` erneut ausführen. Sonst meldet Xcode
+neue Dateien bringt, `./scripts/generate-project.sh` erneut ausführen (beendet Xcode selbst und öffnet das Projekt neu). Sonst meldet Xcode
 „Cannot find '…' in scope“. Gleiches gilt nach Schritt 1.
 
 Falls schon eine ältere OpenCASCADE-Version gebaut wurde: `rm -rf build/occt Vendor` und Schritt 1 wiederholen.
