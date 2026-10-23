@@ -75,8 +75,7 @@ struct FillGroup {
 }
 
 /// Hintergrund wie bei Shapr3D: neutrales helles Grau (linear, ergibt etwa sRGB 237).
-/// Etwas dunkler als zuvor (Kai), damit die Skizzenlinien mit hellem Saum leuchten
-let viewportBackground = MTLClearColor(red: 0.70, green: 0.71, blue: 0.73, alpha: 1)
+let viewportBackground = MTLClearColor(red: 0.845, green: 0.845, blue: 0.845, alpha: 1)
 
 final class Renderer: NSObject, MTKViewDelegate {
     /// Länge eines Ziehpfeils in Bildschirmpunkten.
@@ -507,7 +506,7 @@ final class Renderer: NSObject, MTKViewDelegate {
             encoder.setRenderPipelineState(linePipeline)
             encoder.setDepthStencilState(depthState)
             setUniforms(&gridUniforms)
-            for (lines, shade) in [(grid.minor, Float(0.64)), (grid.major, Float(0.56))] {
+            for (lines, shade) in [(grid.minor, Float(0.74)), (grid.major, Float(0.67))] {
                 guard let buffer = makeBuffer(lines) else { continue }
                 encoder.setVertexBuffer(buffer, offset: 0, index: 0)
                 setColor(shade, shade, shade)

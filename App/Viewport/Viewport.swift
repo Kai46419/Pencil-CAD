@@ -294,9 +294,7 @@ final class ViewportView: MTKView {
 
     // MARK: Linien und Bereiche
 
-    private static let sketchInk = SIMD3<Float>(0.02, 0.03, 0.07)
-    /// Heller Saum unter den Skizzenlinien: auf dem dunkleren Hintergrund leuchten sie
-    private static let sketchGlow = SIMD3<Float>(0.97, 0.98, 1.0)
+    private static let sketchInk = SIMD3<Float>(0.05, 0.06, 0.09)
     private static let previewBlue = SIMD3<Float>(0.05, 0.4, 0.98)
     private static let snapOrange = SIMD3<Float>(0.98, 0.45, 0.05)
     private static let constructionGray = SIMD3<Float>(0.4, 0.42, 0.48)
@@ -374,9 +372,8 @@ final class ViewportView: MTKView {
             if sketch.showsProfiles {
                 fills += sketchFills.map { FillGroup(triangles: $0, color: SIMD4(0.2, 0.45, 0.95, 0.16)) }
             }
-            let entityLines = sketch.entityPolylines.map { $0.map(world) }
-            groups.append(LineGroup(polylines: entityLines, color: Self.sketchGlow, width: 6.5))
-            groups.append(LineGroup(polylines: entityLines, color: Self.sketchInk, width: 2.8))
+            groups.append(LineGroup(polylines: sketch.entityPolylines.map { $0.map(world) }, color: Self.sketchInk,
+                                    width: 2.6))
             // Punkte wie in Fusion 360: Enden und Ecken als kleine Punkte
             if sketch.showsPoints {
                 let points = sketch.entityPoints
