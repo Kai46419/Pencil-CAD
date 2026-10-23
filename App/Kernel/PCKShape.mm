@@ -9,32 +9,47 @@
 #define PCK_HAS_OCCT 1
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
+#include <BRepAlgoAPI_Common.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
+#include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
+#include <BRepBuilderAPI_MakeWire.hxx>
+#include <BRepBuilderAPI_Transform.hxx>
 #include <BRepFilletAPI_MakeChamfer.hxx>
 #include <BRepFilletAPI_MakeFillet.hxx>
+#include <BRepGProp_Face.hxx>
 #include <BRepLib_ToolTriangulatedShape.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
+#include <BRepOffsetAPI_MakeThickSolid.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
+#include <BRepPrimAPI_MakeCone.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
+#include <BRepPrimAPI_MakeSphere.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
 #include <GCPnts_TangentialDeflection.hxx>
+#include <Geom2d_Curve.hxx>
 #include <Poly_Triangulation.hxx>
+#include <ShapeUpgrade_UnifySameDomain.hxx>
 #include <Standard_Failure.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopTools_ListIteratorOfListOfShape.hxx>
+#include <TopTools_ListOfShape.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Compound.hxx>
 #include <TopoDS_Shape.hxx>
+#include <gp_Ax1.hxx>
 #include <gp_Ax2.hxx>
+#include <gp_Elips.hxx>
+#include <gp_Trsf.hxx>
 #include <gp_Pln.hxx>
+#include <gp_Pnt2d.hxx>
 #else
 #define PCK_HAS_OCCT 0
 #endif
@@ -56,6 +71,7 @@ struct MeshBuffers {
     std::vector<uint32_t> indices;
     std::vector<uint32_t> triangleFaces;
     std::vector<float> edges; // Punktpaare
+    std::vector<uint32_t> edgeNumbers; // je Punktpaar
 
     uint32_t addVertex(simd_double3 p, simd_double3 n) {
         const uint32_t index = static_cast<uint32_t>(vertices.size() / 6);
@@ -68,8 +84,9 @@ struct MeshBuffers {
         triangleFaces.push_back(face);
     }
 
-    void addEdge(simd_double3 a, simd_double3 b) {
+    void addEdge(simd_double3 a, simd_double3 b, uint32_t number = 0) {
         edges.insert(edges.end(), {float(a.x), float(a.y), float(a.z), float(b.x), float(b.y), float(b.z)});
+        edgeNumbers.push_back(number);
     }
 };
 
@@ -199,6 +216,8 @@ std::vector<simd_double3> circlePoints(simd_double3 base, simd_double3 axis, dou
         _faceIndexData = [NSData dataWithBytes:buffers.triangleFaces.data()
                                         length:buffers.triangleFaces.size() * sizeof(uint32_t)];
         _edgeData = [NSData dataWithBytes:buffers.edges.data() length:buffers.edges.size() * sizeof(float)];
+        _edgeIndexData = [NSData dataWithBytes:buffers.edgeNumbers.data()
+                                        length:buffers.edgeNumbers.size() * sizeof(uint32_t)];
     }
     return self;
 }
@@ -209,6 +228,7 @@ std::vector<simd_double3> circlePoints(simd_double3 base, simd_double3 axis, dou
 #if PCK_HAS_OCCT
     TopoDS_Shape _shape;
     TopTools_IndexedMapOfShape _faces;
+    TopTools_IndexedMapOfShape _edges;
 #else
     FallbackBody _fallback;
 #endif
@@ -228,6 +248,7 @@ std::vector<simd_double3> circlePoints(simd_double3 base, simd_double3 axis, dou
     if ((self = [super init])) {
         _shape = shape;
         TopExp::MapShapes(_shape, TopAbs_FACE, _faces);
+        TopExp::MapShapes(_shape, TopAbs_EDGE, _edges);
     }
     return self;
 }
@@ -244,6 +265,63 @@ std::vector<simd_double3> circlePoints(simd_double3 base, simd_double3 axis, dou
         BRepPrimAPI_MakeCylinder maker(gp_Ax2(gp_Pnt(base.x, base.y, base.z), gp_Dir(axis.x, axis.y, axis.z)),
                                        radius, height);
         return [[PCKShape alloc] initWithShape:maker.Shape()];
+    } catch (const Standard_Failure &) {
+        return nil;
+    }
+}
+
+static gp_Pnt toPnt(simd_double3 p) {
+    return gp_Pnt(p.x, p.y, p.z);
+}
+
+static gp_Dir toDir(simd_double3 d) {
+    return gp_Dir(d.x, d.y, d.z);
+}
+
++ (nullable PCKShape *)sphereWithCenter:(simd_double3)center radius:(double)radius {
+    if (radius <= 0) return nil;
+    try {
+        BRepPrimAPI_MakeSphere maker(toPnt(center), radius);
+        return [[PCKShape alloc] initWithShape:maker.Shape()];
+    } catch (const Standard_Failure &) {
+        return nil;
+    }
+}
+
++ (nullable PCKShape *)coneWithBase:(simd_double3)base axis:(simd_double3)axis
+                       bottomRadius:(double)bottomRadius topRadius:(double)topRadius height:(double)height {
+    if (bottomRadius < 0 || topRadius < 0 || bottomRadius + topRadius <= 0 || height <= 0 ||
+        simd_length(axis) == 0) return nil;
+    try {
+        BRepPrimAPI_MakeCone maker(gp_Ax2(toPnt(base), toDir(axis)), bottomRadius, topRadius, height);
+        return [[PCKShape alloc] initWithShape:maker.Shape()];
+    } catch (const Standard_Failure &) {
+        return nil;
+    }
+}
+
++ (nullable PCKShape *)ellipsePrismWithCenter:(simd_double3)center normal:(simd_double3)normal
+                                        xAxis:(simd_double3)xAxis radiusX:(double)radiusX
+                                      radiusY:(double)radiusY direction:(simd_double3)direction {
+    if (radiusX <= 0 || radiusY <= 0 || simd_length(direction) == 0 || simd_length(normal) == 0) return nil;
+    try {
+        // gp_Elips verlangt Hauptradius >= Nebenradius; sonst Hauptachse um 90° drehen.
+        simd_double3 major = xAxis;
+        double rMajor = radiusX, rMinor = radiusY;
+        if (radiusY > radiusX) {
+            major = simd_cross(simd_normalize(normal), xAxis);
+            std::swap(rMajor, rMinor);
+        }
+        const gp_Elips ellipse(gp_Ax2(toPnt(center), toDir(normal), toDir(major)), rMajor, rMinor);
+        BRepBuilderAPI_MakeEdge edge(ellipse);
+        if (!edge.IsDone()) return nil;
+        BRepBuilderAPI_MakeWire wire(edge.Edge());
+        if (!wire.IsDone()) return nil;
+        BRepBuilderAPI_MakeFace face(wire.Wire(), Standard_True);
+        if (!face.IsDone()) return nil;
+        BRepPrimAPI_MakePrism prism(face.Face(), gp_Vec(direction.x, direction.y, direction.z));
+        if (!prism.IsDone()) return nil;
+        return [[PCKShape alloc] initWithShape:prism.Shape()];
     } catch (const Standard_Failure &) {
         return nil;
     }
@@ -269,11 +347,23 @@ std::vector<simd_double3> circlePoints(simd_double3 base, simd_double3 axis, dou
     }
 }
 
+/// Fasst nach booleschen Operationen zerteilte Flächen und Kanten wieder zusammen.
+static TopoDS_Shape unified(const TopoDS_Shape &shape) {
+    try {
+        ShapeUpgrade_UnifySameDomain unify(shape, Standard_True, Standard_True, Standard_False);
+        unify.Build();
+        const TopoDS_Shape result = unify.Shape();
+        return result.IsNull() ? shape : result;
+    } catch (const Standard_Failure &) {
+        return shape;
+    }
+}
+
 - (nullable PCKShape *)cutting:(PCKShape *)tool {
     try {
         BRepAlgoAPI_Cut op(_shape, tool->_shape);
         if (!op.IsDone()) return nil;
-        return [[PCKShape alloc] initWithShape:op.Shape()];
+        return [[PCKShape alloc] initWithShape:unified(op.Shape())];
     } catch (const Standard_Failure &) {
         return nil;
     }
@@ -283,10 +373,87 @@ std::vector<simd_double3> circlePoints(simd_double3 base, simd_double3 axis, dou
     try {
         BRepAlgoAPI_Fuse op(_shape, other->_shape);
         if (!op.IsDone()) return nil;
+        return [[PCKShape alloc] initWithShape:unified(op.Shape())];
+    } catch (const Standard_Failure &) {
+        return nil;
+    }
+}
+
+- (nullable PCKShape *)intersecting:(PCKShape *)other {
+    try {
+        BRepAlgoAPI_Common op(_shape, other->_shape);
+        if (!op.IsDone()) return nil;
+        return [[PCKShape alloc] initWithShape:unified(op.Shape())];
+    } catch (const Standard_Failure &) {
+        return nil;
+    }
+}
+
+- (nullable PCKShape *)extrudingFace:(NSInteger)index distance:(double)distance {
+    if (distance == 0) return nil;
+    NSArray<NSNumber *> *plane = [self planeOfFace:index];
+    if (plane == nil) return nil;
+    const gp_Vec direction(plane[3].doubleValue * distance, plane[4].doubleValue * distance,
+                           plane[5].doubleValue * distance);
+    try {
+        BRepPrimAPI_MakePrism prism(_faces(int(index)), direction);
+        if (!prism.IsDone()) return nil;
+        if (distance > 0) {
+            BRepAlgoAPI_Fuse op(_shape, prism.Shape());
+            if (!op.IsDone()) return nil;
+            return [[PCKShape alloc] initWithShape:unified(op.Shape())];
+        }
+        BRepAlgoAPI_Cut op(_shape, prism.Shape());
+        if (!op.IsDone()) return nil;
+        return [[PCKShape alloc] initWithShape:unified(op.Shape())];
+    } catch (const Standard_Failure &) {
+        return nil;
+    }
+}
+
+- (nullable PCKShape *)shellingRemovingFace:(NSInteger)face thickness:(double)thickness {
+    if (face < 1 || face > _faces.Extent() || thickness <= 0) return nil;
+    try {
+        TopTools_ListOfShape removed;
+        removed.Append(_faces(int(face)));
+        BRepOffsetAPI_MakeThickSolid maker;
+        maker.MakeThickSolidByJoin(_shape, removed, -thickness, 1e-3);
+        maker.Build();
+        if (!maker.IsDone()) return nil;
+        return [[PCKShape alloc] initWithShape:maker.Shape()];
+    } catch (const Standard_Failure &) {
+        return nil;
+    }
+}
+
+- (nullable PCKShape *)transformedBy:(const gp_Trsf &)transform {
+    try {
+        BRepBuilderAPI_Transform op(_shape, transform, Standard_True);
+        if (!op.IsDone()) return nil;
         return [[PCKShape alloc] initWithShape:op.Shape()];
     } catch (const Standard_Failure &) {
         return nil;
     }
+}
+
+- (nullable PCKShape *)translatedBy:(simd_double3)offset {
+    gp_Trsf transform;
+    transform.SetTranslation(gp_Vec(offset.x, offset.y, offset.z));
+    return [self transformedBy:transform];
+}
+
+- (nullable PCKShape *)rotatedAroundOrigin:(simd_double3)origin axis:(simd_double3)axis angle:(double)radians {
+    if (simd_length(axis) == 0) return nil;
+    gp_Trsf transform;
+    transform.SetRotation(gp_Ax1(toPnt(origin), toDir(axis)), radians);
+    return [self transformedBy:transform];
+}
+
+- (nullable PCKShape *)mirroredAtPlaneOrigin:(simd_double3)origin normal:(simd_double3)normal {
+    if (simd_length(normal) == 0) return nil;
+    gp_Trsf transform;
+    transform.SetMirror(gp_Ax2(toPnt(origin), toDir(normal)));
+    return [self transformedBy:transform];
 }
 
 /// Echte Kanten einer Fläche, ohne Nahtkanten (z. B. bei Zylindern) und entartete Kanten.
@@ -329,6 +496,90 @@ static TopTools_IndexedMapOfShape realEdgesOfFace(const TopTools_IndexedMapOfSha
         chamfer.Build();
         if (!chamfer.IsDone()) return nil;
         return [[PCKShape alloc] initWithShape:chamfer.Shape()];
+    } catch (const Standard_Failure &) {
+        return nil;
+    }
+}
+
+/// Kanten aus Nummern (ab 1); ungültige Nummern werden übersprungen.
+static std::vector<TopoDS_Edge> edgesFromNumbers(const TopTools_IndexedMapOfShape &edges, NSArray<NSNumber *> *numbers) {
+    std::vector<TopoDS_Edge> result;
+    for (NSNumber *number in numbers) {
+        const NSInteger index = number.integerValue;
+        if (index < 1 || index > edges.Extent()) continue;
+        result.push_back(TopoDS::Edge(edges(int(index))));
+    }
+    return result;
+}
+
+- (nullable PCKShape *)filletingEdges:(NSArray<NSNumber *> *)numbers radius:(double)radius {
+    const std::vector<TopoDS_Edge> edges = edgesFromNumbers(_edges, numbers);
+    if (edges.empty() || radius <= 0) return nil;
+    try {
+        BRepFilletAPI_MakeFillet fillet(_shape);
+        for (const auto &edge : edges) {
+            fillet.Add(radius, edge);
+        }
+        fillet.Build();
+        if (!fillet.IsDone()) return nil;
+        return [[PCKShape alloc] initWithShape:fillet.Shape()];
+    } catch (const Standard_Failure &) {
+        return nil;
+    }
+}
+
+- (nullable PCKShape *)chamferingEdges:(NSArray<NSNumber *> *)numbers distance:(double)distance {
+    const std::vector<TopoDS_Edge> edges = edgesFromNumbers(_edges, numbers);
+    if (edges.empty() || distance <= 0) return nil;
+    try {
+        BRepFilletAPI_MakeChamfer chamfer(_shape);
+        for (const auto &edge : edges) {
+            chamfer.Add(distance, edge);
+        }
+        chamfer.Build();
+        if (!chamfer.IsDone()) return nil;
+        return [[PCKShape alloc] initWithShape:chamfer.Shape()];
+    } catch (const Standard_Failure &) {
+        return nil;
+    }
+}
+
+- (nullable NSArray<NSNumber *> *)handleOfEdge:(NSInteger)index {
+    if (index < 1 || index > _edges.Extent()) return nil;
+    try {
+        const TopoDS_Edge edge = TopoDS::Edge(_edges(int(index)));
+        if (BRep_Tool::Degenerated(edge)) return nil;
+        double first = 0, last = 0;
+        BRep_Tool::Range(edge, first, last);
+        const double mid = 0.5 * (first + last);
+        const gp_Pnt point = BRepAdaptor_Curve(edge).Value(mid);
+
+        // Summe der Flächennormalen an der Kantenmitte; die Gegenrichtung zeigt ins Material.
+        TopTools_IndexedDataMapOfShapeListOfShape edgeFaces;
+        TopExp::MapShapesAndAncestors(_shape, TopAbs_EDGE, TopAbs_FACE, edgeFaces);
+        gp_Vec sum(0, 0, 0);
+        const int key = edgeFaces.FindIndex(edge);
+        if (key > 0) {
+            TopTools_IndexedMapOfShape seen;
+            for (TopTools_ListIteratorOfListOfShape it(edgeFaces(key)); it.More(); it.Next()) {
+                const TopoDS_Face face = TopoDS::Face(it.Value());
+                if (seen.Contains(face)) continue;
+                seen.Add(face);
+                double f = 0, l = 0;
+                Handle(Geom2d_Curve) pcurve = BRep_Tool::CurveOnSurface(edge, face, f, l);
+                if (pcurve.IsNull()) continue;
+                const gp_Pnt2d uv = pcurve->Value(mid);
+                BRepGProp_Face props(face);
+                gp_Pnt onFace;
+                gp_Vec normal;
+                props.Normal(uv.X(), uv.Y(), onFace, normal);
+                if (normal.Magnitude() > 1e-12) sum += normal.Normalized();
+            }
+        }
+        gp_Vec direction = -sum;
+        if (direction.Magnitude() < 1e-9) direction = gp_Vec(0, 0, -1);
+        direction.Normalize();
+        return @[@(point.X()), @(point.Y()), @(point.Z()), @(direction.X()), @(direction.Y()), @(direction.Z())];
     } catch (const Standard_Failure &) {
         return nil;
     }
@@ -390,9 +641,11 @@ static TopTools_IndexedMapOfShape realEdgesOfFace(const TopTools_IndexedMapOfSha
         try {
             BRepAdaptor_Curve curve(edge);
             GCPnts_TangentialDeflection points(curve, 0.2, deflection);
+            const uint32_t number = uint32_t(_edges.FindIndex(edge));
             for (int k = 1; k < points.NbPoints(); ++k) {
                 const gp_Pnt a = points.Value(k), b = points.Value(k + 1);
-                buffers.addEdge(simd_make_double3(a.X(), a.Y(), a.Z()), simd_make_double3(b.X(), b.Y(), b.Z()));
+                buffers.addEdge(simd_make_double3(a.X(), a.Y(), a.Z()), simd_make_double3(b.X(), b.Y(), b.Z()),
+                                number);
             }
         } catch (const Standard_Failure &) {
             continue;
@@ -472,7 +725,70 @@ static TopTools_IndexedMapOfShape realEdgesOfFace(const TopTools_IndexedMapOfSha
     return [[PCKShape alloc] initWithFallback:fallbackPrism(points, direction, false)];
 }
 
++ (nullable PCKShape *)sphereWithCenter:(simd_double3)center radius:(double)radius {
+    return nil;
+}
+
++ (nullable PCKShape *)coneWithBase:(simd_double3)base axis:(simd_double3)axis
+                       bottomRadius:(double)bottomRadius topRadius:(double)topRadius height:(double)height {
+    return nil;
+}
+
++ (nullable PCKShape *)ellipsePrismWithCenter:(simd_double3)center normal:(simd_double3)normal
+                                        xAxis:(simd_double3)xAxis radiusX:(double)radiusX
+                                      radiusY:(double)radiusY direction:(simd_double3)direction {
+    if (radiusX <= 0 || radiusY <= 0 || simd_length(direction) == 0 || simd_length(normal) == 0) return nil;
+    const simd_double3 x = simd_normalize(xAxis);
+    const simd_double3 y = simd_cross(simd_normalize(normal), x);
+    std::vector<simd_double3> points;
+    for (int i = 0; i < 72; ++i) {
+        const double a = 2 * M_PI * i / 72;
+        points.push_back(center + radiusX * std::cos(a) * x + radiusY * std::sin(a) * y);
+    }
+    return [[PCKShape alloc] initWithFallback:fallbackPrism(points, direction, true)];
+}
+
 - (nullable PCKShape *)cutting:(PCKShape *)tool {
+    return nil;
+}
+
+- (nullable PCKShape *)intersecting:(PCKShape *)other {
+    return nil;
+}
+
+- (nullable PCKShape *)extrudingFace:(NSInteger)face distance:(double)distance {
+    return nil;
+}
+
+- (nullable PCKShape *)shellingRemovingFace:(NSInteger)face thickness:(double)thickness {
+    return nil;
+}
+
+- (nullable PCKShape *)translatedBy:(simd_double3)offset {
+    FallbackBody body = _fallback;
+    for (size_t i = 0; i + 5 < body.mesh.vertices.size(); i += 6) {
+        body.mesh.vertices[i] += float(offset.x);
+        body.mesh.vertices[i + 1] += float(offset.y);
+        body.mesh.vertices[i + 2] += float(offset.z);
+    }
+    for (size_t i = 0; i + 5 < body.mesh.edges.size(); i += 3) {
+        body.mesh.edges[i] += float(offset.x);
+        body.mesh.edges[i + 1] += float(offset.y);
+        body.mesh.edges[i + 2] += float(offset.z);
+    }
+    for (auto &plane : body.planes) {
+        plane[0] += offset.x;
+        plane[1] += offset.y;
+        plane[2] += offset.z;
+    }
+    return [[PCKShape alloc] initWithFallback:std::move(body)];
+}
+
+- (nullable PCKShape *)rotatedAroundOrigin:(simd_double3)origin axis:(simd_double3)axis angle:(double)radians {
+    return nil;
+}
+
+- (nullable PCKShape *)mirroredAtPlaneOrigin:(simd_double3)origin normal:(simd_double3)normal {
     return nil;
 }
 
@@ -485,6 +801,18 @@ static TopTools_IndexedMapOfShape realEdgesOfFace(const TopTools_IndexedMapOfSha
 }
 
 - (nullable PCKShape *)chamferingEdgesOfFace:(NSInteger)face distance:(double)distance {
+    return nil;
+}
+
+- (nullable PCKShape *)filletingEdges:(NSArray<NSNumber *> *)edges radius:(double)radius {
+    return nil;
+}
+
+- (nullable PCKShape *)chamferingEdges:(NSArray<NSNumber *> *)edges distance:(double)distance {
+    return nil;
+}
+
+- (nullable NSArray<NSNumber *> *)handleOfEdge:(NSInteger)edge {
     return nil;
 }
 

@@ -8,6 +8,8 @@ struct OrbitCamera {
     var yaw: Float = -.pi / 4
     var pitch: Float = 0.5
     let fieldOfView: Float = 45 * .pi / 180
+    /// Parallelprojektion statt Perspektive (Schalter „Projektion“).
+    var isOrthographic = false
 
     var position: SIMD3<Float> {
         let cp = cos(pitch)
@@ -19,7 +21,32 @@ struct OrbitCamera {
     }
 
     func projectionMatrix(aspect: Float) -> float4x4 {
-        .perspective(fovY: fieldOfView, aspect: aspect, near: max(distance * 0.01, 0.1), far: distance * 20)
+        if isOrthographic {
+            let halfHeight = distance * tan(fieldOfView / 2)
+            return .orthographic(halfWidth: halfHeight * aspect, halfHeight: halfHeight, near: -distance * 20,
+                                 far: distance * 20)
+        }
+        return .perspective(fovY: fieldOfView, aspect: aspect, near: max(distance * 0.01, 0.1), far: distance * 20)
+    }
+
+    /// Richtung von der Kamera zum Ziel.
+    var forward: SIMD3<Float> { simd_normalize(target - position) }
+
+    /// Weltlänge eines Bildschirmpunkts in der Tiefe von point.
+    func worldUnitsPerPoint(at point: SIMD3<Float>, viewHeight: Float) -> Float {
+        if isOrthographic { return worldUnitsPerPoint(viewHeight: viewHeight) }
+        let depth = max(simd_dot(point - position, forward), distance * 0.01)
+        return 2 * depth * tan(fieldOfView / 2) / max(viewHeight, 1)
+    }
+
+    /// Bildschirmpunkt eines Weltpunkts; nil hinter der Kamera.
+    func project(_ p: SIMD3<Float>, viewSize: CGSize) -> CGPoint? {
+        guard viewSize.width > 0, viewSize.height > 0 else { return nil }
+        let aspect = Float(viewSize.width / viewSize.height)
+        let clip = projectionMatrix(aspect: aspect) * viewMatrix * SIMD4(p.x, p.y, p.z, 1)
+        guard clip.w > 1e-6 else { return nil }
+        let x = clip.x / clip.w, y = clip.y / clip.w
+        return CGPoint(x: CGFloat((x + 1) / 2) * viewSize.width, y: CGFloat((1 - y) / 2) * viewSize.height)
     }
 
     /// Ungefähre Weltlänge eines Bildschirmpunkts in der Tiefe des Zielpunkts.
@@ -110,6 +137,17 @@ extension float4x4 {
             SIMD4(0, ys, 0, 0),
             SIMD4(0, 0, zs, -1),
             SIMD4(0, 0, zs * near, 0)
+        ))
+    }
+
+    /// Rechtshändig, Tiefenbereich 0...1 (Metal).
+    static func orthographic(halfWidth: Float, halfHeight: Float, near: Float, far: Float) -> float4x4 {
+        let zs = 1 / (near - far)
+        return float4x4(columns: (
+            SIMD4(1 / halfWidth, 0, 0, 0),
+            SIMD4(0, 1 / halfHeight, 0, 0),
+            SIMD4(0, 0, zs, 0),
+            SIMD4(0, 0, near * zs, 1)
         ))
     }
 

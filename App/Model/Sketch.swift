@@ -2,17 +2,31 @@ import Foundation
 import simd
 
 enum SketchTool: String, CaseIterable, Identifiable {
+    case polyline = "Linie"
     case rectangle = "Rechteck"
     case circle = "Kreis"
-    case polyline = "Linienzug"
+    case ellipse = "Ellipse"
+    case polygon = "Polygon"
 
     var id: Self { self }
 
     var systemImage: String {
         switch self {
+        case .polyline: "line.diagonal"
         case .rectangle: "rectangle"
-        case .circle: "circle"
-        case .polyline: "point.topleft.down.to.point.bottomright.curvepath"
+        case .circle: "circle.circle"
+        case .ellipse: "oval"
+        case .polygon: "pentagon"
+        }
+    }
+
+    /// Untertitel in der Werkzeugleiste (Variante des Werkzeugs).
+    var subtitle: String? {
+        switch self {
+        case .polyline: "Linienzug"
+        case .rectangle: "Diagonal"
+        case .polygon: nil
+        default: nil
         }
     }
 }
@@ -66,12 +80,20 @@ enum SketchProfile {
     case rectangle(corner: SIMD2<Double>, size: SIMD2<Double>)
     case polygon([SIMD2<Double>])
     case circle(center: SIMD2<Double>, radius: Double)
+    /// Achsparallele Ellipse (Halbachsen in u/v)
+    case ellipse(center: SIMD2<Double>, radii: SIMD2<Double>)
+    /// Regelmäßiges Vieleck; angle = Richtung zur ersten Ecke
+    case regularPolygon(center: SIMD2<Double>, radius: Double, sides: Int, angle: Double)
 
     /// Extrudiert zwischen den Abständen from und to entlang der Ebenennormale.
     func solid(on plane: SketchPlane, from: Double, to: Double) -> PCKShape? {
         guard from != to else { return nil }
         switch self {
-        case .rectangle, .polygon:
+        case .ellipse(let center, let radii):
+            return PCKShape.ellipsePrism(center: plane.world(center) + plane.normal * from, normal: plane.normal,
+                                         xAxis: plane.u, radiusX: radii.x, radiusY: radii.y,
+                                         direction: plane.normal * (to - from))
+        case .rectangle, .polygon, .regularPolygon:
             let base = plane.normal * from
             let xyz = outline.flatMap { p -> [NSNumber] in
                 let w = plane.world(p) + base
@@ -84,6 +106,32 @@ enum SketchProfile {
         }
     }
 
+    /// Richtung eines positiven Extrusionswerts: „Abziehen“ auf einer Fläche geht ins Material.
+    static func extrusionSign(on plane: SketchPlane, mode: ExtrudeMode) -> Double {
+        mode == .cut && plane.isOnFace ? -1 : 1
+    }
+
+    /// Körper für „Extrudieren“ (auch für die Vorschau). Beim Abziehen beginnt das Werkzeug minimal
+    /// außerhalb, damit keine hauchdünnen Restflächen bleiben.
+    func extrusion(on plane: SketchPlane, distance: Double, mode: ExtrudeMode) -> PCKShape? {
+        let sign = Self.extrusionSign(on: plane, mode: mode)
+        let start = mode == .cut ? -sign * 0.01 : 0
+        return solid(on: plane, from: start, to: sign * distance)
+    }
+
+    /// Schwerpunkt der Eckpunkte (Ansatzpunkt des Ziehpfeils).
+    var centroid: SIMD2<Double> {
+        switch self {
+        case .circle(let center, _), .ellipse(let center, _), .regularPolygon(let center, _, _, _):
+            return center
+        default:
+            break
+        }
+        let points = outline
+        guard !points.isEmpty else { return .zero }
+        return points.reduce(.zero, +) / Double(points.count)
+    }
+
     var outline: [SIMD2<Double>] {
         switch self {
         case .rectangle(let c, let s):
@@ -93,6 +141,17 @@ enum SketchProfile {
         case .circle(let center, let radius):
             return (0..<72).map { i in
                 let a = Double(i) / 72 * 2 * .pi
+                return center + radius * SIMD2(cos(a), sin(a))
+            }
+        case .ellipse(let center, let radii):
+            return (0..<72).map { i in
+                let a = Double(i) / 72 * 2 * .pi
+                return center + SIMD2(radii.x * cos(a), radii.y * sin(a))
+            }
+        case .regularPolygon(let center, let radius, let sides, let angle):
+            let n = max(sides, 3)
+            return (0..<n).map { i in
+                let a = angle + Double(i) / Double(n) * 2 * .pi
                 return center + radius * SIMD2(cos(a), sin(a))
             }
         }
@@ -124,6 +183,21 @@ final class SketchController: ObservableObject {
         didSet { reset() }
     }
     @Published var gridStep: Double = 1
+    /// Rasterfang (Magnet in der rechten Leiste)
+    @Published var snapEnabled = true
+    /// Eckenzahl für das Polygon-Werkzeug
+    @Published var polygonSides = 5 {
+        didSet {
+            if case .regularPolygon(let center, let radius, _, let angle) = profile, polygonSides >= 3 {
+                profile = .regularPolygon(center: center, radius: radius, sides: polygonSides, angle: angle)
+                updateLabel()
+                revision += 1
+            }
+        }
+    }
+    /// Extrusion des fertigen Profils; der Ziehpfeil im Viewport ändert extrudeDistance.
+    @Published var extrudeDistance: Double = 10
+    @Published var extrudeMode: ExtrudeMode = .newBody
 
     @Published private(set) var profile: SketchProfile?
     @Published private(set) var liveLabel: String?
@@ -173,6 +247,17 @@ final class SketchController: ObservableObject {
             let radius = simd_distance(start, end)
             if radius > 0 {
                 profile = .circle(center: start, radius: radius)
+            }
+        case .ellipse:
+            let radii = simd_abs(end - start)
+            if radii.x > 0, radii.y > 0 {
+                profile = .ellipse(center: start, radii: radii)
+            }
+        case .polygon:
+            let radius = simd_distance(start, end)
+            if radius > 0 {
+                profile = .regularPolygon(center: start, radius: radius, sides: polygonSides,
+                                          angle: atan2(end.y - start.y, end.x - start.x))
             }
         case .polyline:
             // Jeder Strich (oder Tipp) setzt den Endpunkt; ein Strich zurück zum Startpunkt schließt das Profil.
@@ -271,6 +356,14 @@ final class SketchController: ObservableObject {
         case .circle:
             result += closedLoop(SketchProfile.circle(center: start, radius: simd_distance(start, current)).outline)
             result += [start, current]
+        case .ellipse:
+            result += closedLoop(SketchProfile.ellipse(center: start, radii: simd_abs(current - start)).outline)
+        case .polygon:
+            let profile = SketchProfile.regularPolygon(center: start, radius: simd_distance(start, current),
+                                                       sides: polygonSides,
+                                                       angle: atan2(current.y - start.y, current.x - start.x))
+            result += closedLoop(profile.outline)
+            result += [start, current]
         case .polyline:
             result += [polyline.last ?? start, current]
         }
@@ -285,7 +378,8 @@ final class SketchController: ObservableObject {
     // MARK: Fang und Maße
 
     private func snap(_ p: SIMD2<Double>) -> SIMD2<Double> {
-        (p / gridStep).rounded(.toNearestOrAwayFromZero) * gridStep
+        guard snapEnabled else { return p }
+        return (p / gridStep).rounded(.toNearestOrAwayFromZero) * gridStep
     }
 
     private func snapToFirstPoint(_ p: SIMD2<Double>, tolerance: Double) -> SIMD2<Double> {
@@ -303,6 +397,10 @@ final class SketchController: ObservableObject {
                 liveLabel = "Linienzug, \(points.count) Punkte"
             case .circle(_, let radius):
                 liveLabel = "Ø \(format(2 * radius)) mm"
+            case .ellipse(_, let radii):
+                liveLabel = "Ellipse \(format(2 * radii.x)) × \(format(2 * radii.y)) mm"
+            case .regularPolygon(_, let radius, let sides, _):
+                liveLabel = "\(sides) Seiten · R \(format(radius)) mm"
             }
             return
         }
@@ -315,6 +413,10 @@ final class SketchController: ObservableObject {
             liveLabel = "\(format(abs(current.x - start.x))) × \(format(abs(current.y - start.y))) mm"
         case .circle:
             liveLabel = "Ø \(format(2 * simd_distance(start, current))) mm"
+        case .ellipse:
+            liveLabel = "\(format(2 * abs(current.x - start.x))) × \(format(2 * abs(current.y - start.y))) mm"
+        case .polygon:
+            liveLabel = "\(polygonSides) Seiten · R \(format(simd_distance(start, current))) mm"
         case .polyline:
             liveLabel = "\(format(simd_distance(polyline.last ?? start, current))) mm"
         }

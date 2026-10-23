@@ -4,6 +4,7 @@ using namespace metal;
 struct Vertex {
     float3 position;
     float3 normal;
+    float3 color;
 };
 
 struct Uniforms {
@@ -16,12 +17,14 @@ struct Uniforms {
 struct VertexOut {
     float4 position [[position]];
     float3 normal;
+    float3 color;
 };
 
 static VertexOut transformVertex(Vertex v, constant Uniforms &uniforms) {
     VertexOut out;
     out.position = uniforms.viewProjection * uniforms.model * float4(v.position, 1.0);
     out.normal = (uniforms.model * float4(v.normal, 0.0)).xyz;
+    out.color = v.color;
     return out;
 }
 
@@ -41,12 +44,22 @@ vertex VertexOut vertex_overlay(const device Vertex *vertices [[buffer(0)]],
     return out;
 }
 
-fragment float4 fragment_main(VertexOut in [[stage_in]],
-                              constant Uniforms &uniforms [[buffer(1)]]) {
+static float3 shade(VertexOut in, constant Uniforms &uniforms) {
     float3 n = normalize(in.normal);
     float diffuse = abs(dot(n, normalize(uniforms.lightDirection)));
-    float3 color = uniforms.baseColor * (0.3 + 0.7 * diffuse);
-    return float4(color, 1.0);
+    return in.color * (0.35 + 0.65 * diffuse);
+}
+
+/// Schattierte Körper in Vertexfarbe.
+fragment float4 fragment_main(VertexOut in [[stage_in]],
+                              constant Uniforms &uniforms [[buffer(1)]]) {
+    return float4(shade(in, uniforms), 1.0);
+}
+
+/// Röntgenansicht: halbtransparent.
+fragment float4 fragment_xray(VertexOut in [[stage_in]],
+                              constant Uniforms &uniforms [[buffer(1)]]) {
+    return float4(shade(in, uniforms), 0.28);
 }
 
 fragment float4 fragment_flat(VertexOut in [[stage_in]],
