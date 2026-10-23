@@ -641,6 +641,8 @@ final class SketchController: ObservableObject {
         // Angezeigter Kreis/Bogen des runden Strichs: wird übernommen, auch wenn die Erkennung mit dem
         // letzten (zittrigen) Punkt knapp scheitert – vorher wurde trotz Halbkreis-Vorschau eine Gerade daraus
         let previewShape = strokeShape
+        // Angezeigter tangentialer Bogen: genau dieser wird übernommen (nicht neu berechnet)
+        let shownArc = tool == .polyline && arcActive ? previewed.flatMap { tangentArc(to: $0) } : nil
         circleInference = nil
         let arcStroke = arcActive
         arcLatched = false
@@ -692,10 +694,21 @@ final class SketchController: ObservableObject {
             }
         case .polyline:
             // Finger aufgelegt: tangentialer Bogen am Ende des Linienzugs
-            if arcStroke, endTangentArc(to: end, from: start) { break }
+            if arcStroke {
+                if let arc = shownArc ?? tangentArc(to: end, from: start) {
+                    commitTangentArc(arc)
+                    break
+                }
+                notice = "Kein Bogen möglich: Das Ende liegt auf der Verlängerung der Linie – Gerade gezeichnet."
+            }
             // Rund gezogen: Kreis bzw. Bogen statt Linie
             if !endShapeStroke(samples, start: start, end: end, tolerance: tolerance, preview: previewShape) {
                 endLineStroke(start: start, end: end)
+                if !arcStroke, simd_distance(start, end) > tolerance,
+                   StrokeGesture.length(samples) > simd_distance(start, end) * 1.3 {
+                    // Rund gezogen, aber keine Bogen-Taste und keine Erkennung: sagen, warum es gerade wurde
+                    notice = "Gerade gezeichnet – für einen Bogen beim Zeichnen einen Finger auflegen."
+                }
             }
         case .arc where arcMode == .center:
             // Fusion 360: Mittelpunkt zum Start ziehen, dann das Ende (der Bogen folgt dem Stift)
@@ -1019,8 +1032,8 @@ final class SketchController: ObservableObject {
     }
 
     /// Tangentialen Bogen übernehmen; der Linienzug geht an seinem Ende weiter.
-    private func endTangentArc(to end: Point2, from origin: Point2) -> Bool {
-        guard let arc = tangentArc(to: end, from: origin) else { return false }
+    private func commitTangentArc(_ arc: (entity: SketchEntity, previous: Int)) {
+        guard case .arc(_, _, let end) = arc.entity else { return }
         // Bogen an einem anderen Ende angesetzt: dort beginnt ein neuer Linienzug
         if case .arc(let arcStart, _, _) = arc.entity, chainEnd.map({ simd_distance($0, arcStart) > 1e-6 }) ?? true {
             chainStart = arcStart
@@ -1040,7 +1053,6 @@ final class SketchController: ObservableObject {
             chainEnd = end
         }
         entitiesChanged()
-        return true
     }
 
     // MARK: Stiftgesten
