@@ -964,58 +964,6 @@ final class Workspace: ObservableObject {
         }
     }
 
-    /// Erklärung zur aktuellen Auswahl: was es ist und was man damit machen kann.
-    var selectionHelp: (title: String, lines: [String])? {
-        guard !sketch.isActive, tool == .select else { return nil }
-        if !model.selectedBodies.isEmpty {
-            let count = model.selectedBodies.count
-            var lines = [
-                "Ganze Körper sind gewählt. Antippen eines Körpers nimmt ihn hinzu oder heraus, ins Leere tippen hebt die Auswahl auf. Rechts „Körper wählen“ (Würfel) einschalten, um immer ganze Körper zu wählen.",
-                "Rahmen: mit dem Stift ins Leere ziehen (oder „Rahmenauswahl“ rechts für den Finger). Nach rechts gezogen zählen nur ganz umschlossene Körper, nach links auch angeschnittene.",
-                "Muster, Skalieren, Spiegeln, Farbe und Löschen wirken auf alle gewählten Körper; Verschieben/Rotieren auf den ersten.",
-            ]
-            if count > 1 {
-                lines.insert("„Vereinigen“ verschmilzt alle gewählten Körper zu einem (Name und Farbe vom ersten). „Abziehen“ schneidet die übrigen aus dem zuerst gewählten heraus, „Schneiden“ behält nur die Überlappung.", at: 0)
-            }
-            return (count == 1 ? "1 Körper gewählt" : "\(count) Körper gewählt", lines)
-        }
-        if !model.selectedEdges.isEmpty {
-            let count = model.selectedEdges.count
-            return (count == 1 ? "Kante gewählt" : "\(count) Kanten gewählt", [
-                "Am Pfeil ziehen rundet die Kanten ab. Unten „Fase“ wählen, um sie stattdessen schräg abzuschneiden.",
-                "Weitere Kanten desselben Körpers antippen, um sie gemeinsam zu bearbeiten; nochmal antippen nimmt sie heraus.",
-                "Radius bzw. Breite lässt sich unten auch genau eintippen. Übernehmen mit „Fertig“.",
-            ])
-        }
-        if !model.selectedRegions.isEmpty {
-            var lines = [
-                "Ein geschlossener Skizzenbereich (Profil). Am Pfeil ziehen extrudiert ihn zu einem Körper.",
-                "Unten: neuer Körper, mit vorhandenem vereinigen oder abziehen; Richtung (eine Seite, symmetrisch, zwei Seiten) und Verjüngung.",
-                "Weitere Bereiche antippen extrudiert sie gemeinsam. „Achsendrehung“ dreht den Bereich um eine Linie.",
-                "Höhe übernehmen: eine parallele Fläche eines Körpers antippen (z. B. die Oberseite eines schon extrudierten Kreises) – die Extrusion geht genau bis dorthin.",
-            ]
-            if model.selectedRegionsHaveHoles {
-                lines.insert("Der Bereich hat innere Konturen (z. B. einen Kreis). Unten wählen: „Innen aussparen“ lässt dort ein Loch, „Durchgehend“ extrudiert die ganze Außenkontur.", at: 1)
-            }
-            return (model.selectedRegions.count == 1 ? "Skizzenbereich gewählt" : "\(model.selectedRegions.count) Skizzenbereiche gewählt", lines)
-        }
-        if model.selection != nil {
-            if model.faceHandle != nil {
-                return ("Ebene Fläche gewählt", [
-                    "Am Pfeil ziehen: nach außen wird der Körper verlängert, nach innen wird Material abgetragen. Abstand unten auch eintippen – oder während des Ziehens eine andere Fläche antippen: dann geht es genau bis dorthin.",
-                    "Skizze: direkt auf dieser Fläche zeichnen.",
-                    "Achse senkrecht: erstellt sofort eine Hilfsachse durch die Flächenmitte, senkrecht zur Fläche (z. B. für Drehungen und Muster).",
-                    "Ebene Versatz: Hilfsebene parallel zur Fläche in einem Abstand. Kante versetzen: Flächenrand als Skizze nach innen oder außen versetzt.",
-                ])
-            }
-            return ("Gekrümmte Fläche gewählt", [
-                "Gekrümmte Flächen lassen sich nicht direkt extrudieren oder als Skizzenebene nutzen.",
-                "Für Rundungen und Fasen die Kanten antippen. Verschieben/Rotieren bewegt den ganzen Körper.",
-            ])
-        }
-        return nil
-    }
-
     private var sketchHint: String {
         if sketch.isChoosingPlane { return "Skizzenebene antippen – oder eine ebene Fläche eines Körpers" }
         switch sketch.tool {

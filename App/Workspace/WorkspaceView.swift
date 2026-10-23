@@ -31,7 +31,6 @@ private struct WorkspaceContent: View {
     @State private var isImporting = false
     @State private var isClearConfirmationShown = false
     /// Erklärung zur Auswahl eingeklappt (bleibt gespeichert)
-    @AppStorage("selectionHelpCollapsed") private var selectionHelpCollapsed = false
     @State private var screenshot: Screenshot?
     @State private var photoItem: PhotosPickerItem?
 
@@ -172,51 +171,9 @@ private struct WorkspaceContent: View {
                     .background(.regularMaterial, in: Capsule())
                     .transition(.opacity)
             }
-            if let help = workspace.selectionHelp {
-                selectionHelpCard(help)
-                    .transition(.opacity)
-            }
         }
         .padding(.top, 12)
         .animation(.easeOut(duration: 0.15), value: workspace.hint)
-        .animation(.easeOut(duration: 0.15), value: workspace.selectionHelp?.title)
-    }
-
-    /// Erklärung zum gewählten Objekt: was es ist und was man damit machen kann (einklappbar).
-    private func selectionHelpCard(_ help: (title: String, lines: [String])) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Button {
-                selectionHelpCollapsed.toggle()
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "info.circle.fill")
-                        .foregroundStyle(Color.accentColor)
-                    Text(help.title)
-                        .font(.footnote.weight(.semibold))
-                    Spacer(minLength: 8)
-                    Image(systemName: selectionHelpCollapsed ? "chevron.down" : "chevron.up")
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(.secondary)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            if !selectionHelpCollapsed {
-                ForEach(help.lines, id: \.self) { line in
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text("•")
-                        Text(line)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                }
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 9)
-        .frame(maxWidth: 460, alignment: .leading)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     /// Schwebende Titelleiste: Startseite, Projektname, Menü.
