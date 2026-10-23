@@ -90,6 +90,13 @@ final class ViewportView: MTKView {
 
     private func updateHeldFingers(began: Set<UITouch> = [], ended: Set<UITouch> = []) {
         guard let sketch else { return }
+        // Im Skizzenmodus nehmen Verschieben/Zoomen dem Viewport den Finger nicht weg: lag der Finger vor dem
+        // Stift auf und verrutschte leicht, begann das Verschieben, der Finger galt als abgehoben und der
+        // Bogen wurde zur Geraden (der Schlussbogen zum Linienanfang).
+        let sketching = sketch.isActive && !sketch.isChoosingPlane
+        for gesture in [orbitGesture, panGesture, pinchGesture] as [UIGestureRecognizer?] {
+            gesture?.cancelsTouchesInView = !sketching
+        }
         if sketch.isActive, !sketch.isChoosingPlane, !sketch.fingerDraws {
             heldFingers.formUnion(began.filter { $0.type == .direct })
         }
