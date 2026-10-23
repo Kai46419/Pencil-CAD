@@ -2922,6 +2922,20 @@ final class SketchController: ObservableObject {
             result = snapIndex.snap(p, tolerance: tolerance, kinds: snapKinds.subtracting([.angle]), extra: inputPoints,
                                     anchor: nil, gridStep: gridStep)
         }
+        // Bogen (Finger aufgelegt oder rund gezogen): 90° zur Linie am Bogenanfang einrasten (Halbkreis), mit
+        // gestrichelter Hilfslinie – unabhängig davon, ob die Linie selbst auf einem 15°-Schritt liegt
+        var drawsArc = arcActive
+        if case .arc? = strokeShape { drawsArc = true }
+        if tool == .polyline, drawsArc, snapKinds.contains(.angle), !Self.isPointSnap(result.kind),
+           let arcStart = arcAnchor(from: dragStart) {
+            let normal = Point2(-arcStart.direction.y, arcStart.direction.x)
+            let along = simd_dot(p - arcStart.start, normal)
+            let foot = arcStart.start + normal * along
+            if abs(along) > tolerance, simd_distance(foot, p) <= tolerance {
+                parallelLines = []
+                result = SnapResult(point: foot, kind: .angle, guides: [(arcStart.start, foot)])
+            }
+        }
         activeSnap = result.kind == nil ? nil : result
         return result.point
     }
