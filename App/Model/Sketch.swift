@@ -113,8 +113,13 @@ final class SketchController: ObservableObject {
     @Published var tool: SketchTool = .rectangle {
         didSet { reset() }
     }
-    /// Für Geräte ohne Apple Pencil (z. B. Simulator): ein Finger zeichnet statt zu drehen.
+    /// Für Geräte ohne Apple Pencil: ein Finger zeichnet statt zu drehen.
+    /// Im Simulator standardmäßig an, weil die Maus dort als Finger zählt.
+    #if targetEnvironment(simulator)
+    @Published var fingerDraws = true
+    #else
     @Published var fingerDraws = false
+    #endif
     @Published var plane: SketchPlane = .ground {
         didSet { reset() }
     }

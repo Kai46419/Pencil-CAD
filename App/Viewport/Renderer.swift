@@ -115,7 +115,9 @@ final class Renderer: NSObject, MTKViewDelegate {
 
     private func makeBuffer<T>(_ array: [T]) -> MTLBuffer? {
         guard !array.isEmpty else { return nil }
-        return device.makeBuffer(bytes: array, length: MemoryLayout<T>.stride * array.count)
+        return array.withUnsafeBytes { bytes in
+            bytes.baseAddress.flatMap { device.makeBuffer(bytes: $0, length: bytes.count) }
+        }
     }
 
     private static func makeGrid(halfSize: Float, step: Float) -> [Vertex] {

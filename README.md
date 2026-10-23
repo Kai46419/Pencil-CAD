@@ -31,8 +31,8 @@ Geometriekernel: [OpenCASCADE](https://github.com/Open-Cascade-SAS/OCCT) 7.7.2 (
 
 1. „Skizze“ einschalten, mit dem Pencil ein Rechteck ziehen.
 2. Unten Breite/Tiefe exakt eintragen, Modus „Neuer Körper“, Höhe 20, „Extrudieren“.
-3. Mit dem Finger auf die Oberseite tippen, „Draufsicht“, mit dem Pencil einen Kreis ziehen,
-   Ø 8 eintragen, Modus „Abziehen“, Tiefe 20 → Bohrung.
+3. Skizze aus, Oberseite antippen (wird orange), Skizze wieder ein: Die Fläche ist jetzt Skizzenebene.
+   Kreis ziehen, Ø 8 eintragen, Modus „Abziehen“, Tiefe 20 → Bohrung (braucht OpenCASCADE).
 4. Skizze ausschalten, Oberseite antippen, „Kanten › Kanten runden …“, 2 mm.
 5. „Datei › Als STEP exportieren …“ oder „Als STL exportieren …“.
 
@@ -43,7 +43,8 @@ Werkzeuge im Detail:
 
 „Abziehen“ arbeitet auf einer Fläche ins Material hinein, auf der Bodenebene nach oben. Negative Werte kehren die Richtung um.
 „Vereinigen“ verbindet mit dem Körper, auf dem skizziert wurde (sonst mit dem zuletzt erzeugten).
-Ohne Pencil (Simulator) „Finger zeichnet“ einschalten.
+Im Simulator ist „Finger zeichnet“ automatisch an (die Maus zählt als Finger); zum Drehen kurz ausschalten.
+Auf dem iPad zeichnet nur der Pencil, die Finger navigieren.
 
 ## Voraussetzungen
 

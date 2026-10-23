@@ -29,6 +29,13 @@ struct ContentView: View {
                 .navigationTitle("PencilCAD")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar { toolbarContent }
+                .onChange(of: sketch.isActive) { _, isActive in
+                    // Ist beim Einschalten eine ebene Fläche gewählt, wird sie zur Skizzenebene.
+                    if isActive, let face = model.selection, let plane = model.plane(of: face) {
+                        sketch.plane = plane
+                        send(.alignToSketchPlane)
+                    }
+                }
                 .alert(edgeOperation.rawValue, isPresented: $isEdgeDialogShown) {
                     TextField("mm", value: $edgeValue, format: .number)
                         .keyboardType(.decimalPad)
@@ -229,11 +236,15 @@ struct ContentView: View {
             if let message = model.message {
                 Text(message)
             } else if sketch.isActive {
-                Text("Pencil zeichnet · Finger-Tipp auf eine ebene Fläche skizziert darauf")
+                Text(sketch.fingerDraws
+                     ? "Finger/Maus zeichnet · zum Drehen „Finger zeichnet“ ausschalten"
+                     : "Pencil zeichnet · Finger-Tipp auf eine ebene Fläche skizziert darauf")
             } else if model.selection != nil {
-                Text("Fläche gewählt: Kanten runden/fasen, Körper löschen oder im Skizzenmodus darauf skizzieren")
+                Text("Fläche gewählt: Kanten runden/fasen, Körper löschen oder „Skizze“ tippen, um darauf zu zeichnen")
             }
-            Text("\(model.mesh.triangleCount) Dreiecke · Kernel: \(PCKShape.kernelAvailable ? "OpenCASCADE" : "Fallback")")
+            Text(PCKShape.kernelAvailable
+                 ? "\(model.mesh.triangleCount) Dreiecke · Kernel: OpenCASCADE"
+                 : "\(model.mesh.triangleCount) Dreiecke · Fallback ohne OpenCASCADE: nur Skizze + Neuer Körper (siehe README)")
                 .foregroundStyle(.secondary)
         }
         .font(.footnote)

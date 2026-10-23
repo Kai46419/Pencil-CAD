@@ -46,9 +46,6 @@ final class ModelStore: ObservableObject {
             bodies = [PCKShape.box(width: 60, depth: 40, height: 20)]
         }
         remesh()
-        if !PCKShape.kernelAvailable {
-            message = "Fallback-Modus: OpenCASCADE nicht eingebunden (siehe README)."
-        }
     }
 
     // MARK: Szene
