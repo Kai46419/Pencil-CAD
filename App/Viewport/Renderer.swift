@@ -267,30 +267,52 @@ final class Renderer: NSObject, MTKViewDelegate {
                         Vertex(position: p + (cos(a1) * right + sin(a1) * up) * radius, normal: normal, color: color)]
             }
         }
+        let eye = camera.position
+        let minimumDepth = camera.distance * 0.02
+        func inFront(_ p: SIMD3<Float>) -> Bool {
+            camera.isOrthographic || simd_dot(p - eye, forward) >= minimumDepth
+        }
         for line in group.polylines where line.count >= 2 {
-            var previous: SIMD2<Float>?
+            var previous: SIMD3<Float>?
             for i in 0..<(line.count - 1) {
-                let a = line[i], b = line[i + 1]
+                var a = line[i], b = line[i + 1]
+                // Am Betrachter abschneiden: Lange Linien (Achsen) würden sonst durch die Kamera laufen
+                if !camera.isOrthographic {
+                    let da = simd_dot(a - eye, forward), db = simd_dot(b - eye, forward)
+                    if da < minimumDepth, db < minimumDepth {
+                        previous = nil
+                        continue
+                    }
+                    if da < minimumDepth {
+                        a += (b - a) * ((minimumDepth - da) / (db - da))
+                    } else if db < minimumDepth {
+                        b += (a - b) * ((minimumDepth - db) / (da - db))
+                    }
+                }
                 let d = b - a
-                let screen = SIMD2<Float>(simd_dot(d, right), simd_dot(d, up))
-                let length = simd_length(screen)
+                let length = simd_length(d)
                 guard length > 1e-9 else { continue }
-                let direction = screen / length
-                let halfWidth = group.width / 2 * scale((a + b) / 2)
-                let side = (-direction.y * right + direction.x * up) * halfWidth
-                out += [Vertex(position: a - side, normal: normal, color: color),
-                        Vertex(position: b - side, normal: normal, color: color),
-                        Vertex(position: b + side, normal: normal, color: color),
-                        Vertex(position: a - side, normal: normal, color: color),
-                        Vertex(position: b + side, normal: normal, color: color),
-                        Vertex(position: a + side, normal: normal, color: color)]
+                // Quer zur Linie und zum Sehstrahl: auf dem Bildschirm genau senkrecht zur Linie.
+                // Breite je Ende nach dessen Tiefe, so bleibt die Linie auf ganzer Länge gleich breit.
+                let across = simd_cross(d, camera.isOrthographic ? forward : a - eye)
+                let acrossLength = simd_length(across)
+                guard acrossLength > 1e-12 else { continue }
+                let side = across / acrossLength
+                let halfA = group.width / 2 * scale(a), halfB = group.width / 2 * scale(b)
+                out += [Vertex(position: a - side * halfA, normal: normal, color: color),
+                        Vertex(position: b - side * halfB, normal: normal, color: color),
+                        Vertex(position: b + side * halfB, normal: normal, color: color),
+                        Vertex(position: a - side * halfA, normal: normal, color: color),
+                        Vertex(position: b + side * halfB, normal: normal, color: color),
+                        Vertex(position: a + side * halfA, normal: normal, color: color)]
                 // Rund an Enden und deutlichen Knicken, damit keine Lücken entstehen
+                let direction = d / length
                 if previous == nil || simd_dot(previous!, direction) < 0.94 {
-                    disc(a, radius: halfWidth, segments: 8)
+                    disc(a, radius: halfA, segments: 8)
                 }
                 previous = direction
             }
-            if let last = line.last {
+            if let last = line.last, inFront(last) {
                 disc(last, radius: group.width / 2 * scale(last), segments: 8)
             }
         }

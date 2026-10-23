@@ -260,7 +260,7 @@ final class ViewportView: MTKView {
         if !sketching {
             let reach = max(renderer.camera.distance * 10, planeHalfSize * 20)
             for (axis, color) in Self.axes {
-                groups.append(LineGroup(polylines: [[.zero, axis * reach]], color: color, width: 1.3, onTop: false))
+                groups.append(LineGroup(polylines: [[.zero, axis * reach]], color: color, width: 1, onTop: false))
             }
         }
         // Ebenenwahl: drei kleine graue Felder neben dem Ursprung
@@ -270,7 +270,7 @@ final class ViewportView: MTKView {
                 let corners = [square.center - square.u * h - square.v * h, square.center + square.u * h - square.v * h,
                                square.center + square.u * h + square.v * h, square.center - square.u * h + square.v * h]
                 fills.append(FillGroup(triangles: [0, 1, 2, 0, 2, 3].map { corners[$0] },
-                                       color: SIMD4(0.3, 0.3, 0.31, 0.33)))
+                                       color: SIMD4(0.28, 0.28, 0.29, 0.38)))
             }
         }
 
@@ -550,8 +550,10 @@ final class ViewportView: MTKView {
 
     /// Antippbare Felder der Standardebenen bei der Ebenenwahl, wie bei Shapr3D klein und neben dem Ursprung:
     /// XY vorn rechts, XZ rechts oben, YZ vorn oben (Mittelpunkt, Richtungen, halbe Kantenlänge).
+    /// Die Größe richtet sich nach dem Bildschirm (etwa 80 Punkte), damit die Felder bei jedem Zoom gut zu treffen sind.
     private var basePlaneSquares: [(index: Int, center: SIMD3<Float>, u: SIMD3<Float>, v: SIMD3<Float>, half: Float)] {
-        let half = planeHalfSize * 0.3
+        let perPoint = renderer?.camera.worldUnitsPerPoint(at: .zero, viewHeight: Float(max(bounds.height, 1))) ?? 0.3
+        let half = 40 * perPoint
         let offset = half * 1.8
         let sides: [SIMD2<Float>] = [[1, -1], [1, 1], [-1, 1]]
         return Self.basePlanes.indices.map { index -> (index: Int, center: SIMD3<Float>, u: SIMD3<Float>, v: SIMD3<Float>, half: Float) in
