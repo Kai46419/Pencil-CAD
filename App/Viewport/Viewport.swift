@@ -309,7 +309,7 @@ final class ViewportView: MTKView {
             guard let anchor = renderer.camera.project(anchorWorld, viewSize: bounds.size),
                   let tip = renderer.camera.project(tipWorld, viewSize: bounds.size) else { continue }
             shown.insert(dimension.kind)
-            field.isEditable = dimension.isEditable
+            field.allowsEditing = dimension.isEditable
             field.prefix = dimension.prefix
             if !field.isFirstResponder {
                 field.text = dimension.value.formatted(.number.precision(.fractionLength(0...2)).grouping(.never))
@@ -752,7 +752,7 @@ extension ViewportView: UIGestureRecognizerDelegate {
 
 extension ViewportView: UITextFieldDelegate {
     func textFieldShouldBeginEditing(_ textField: UITextField) -> Bool {
-        (textField as? DimensionField)?.isEditable ?? false
+        (textField as? DimensionField)?.allowsEditing ?? false
     }
 
     func textFieldDidBeginEditing(_ textField: UITextField) {
@@ -831,7 +831,7 @@ final class DimensionField: UITextField {
     let kind: SketchDimension.Kind
     /// false, wenn das Feld geschlossen wird, weil sein Element nicht mehr das aktuelle ist.
     var appliesOnEnd = true
-    var isEditable = false {
+    var allowsEditing = false {
         didSet { updateStyle() }
     }
     var prefix = "" {
@@ -863,8 +863,8 @@ final class DimensionField: UITextField {
     }
 
     private func updateStyle() {
-        layer.borderColor = (isEditable ? UIColor.systemBlue : UIColor.systemGray3).cgColor
-        isUserInteractionEnabled = isEditable
+        layer.borderColor = (allowsEditing ? UIColor.systemBlue : UIColor.systemGray3).cgColor
+        isUserInteractionEnabled = allowsEditing
     }
 
     override func sizeThatFits(_ size: CGSize) -> CGSize {
