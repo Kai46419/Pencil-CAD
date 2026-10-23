@@ -1035,7 +1035,18 @@ final class ViewportView: MTKView {
             field.resignFirstResponder()
         }
         sketch?.began(at: point, tolerance: snapTolerance)
+        latchArcIfFingerDown(event)
         refresh()
+    }
+
+    /// Liegt beim Stiftstrich irgendwo ein Finger auf, wird der Strich ein Bogen – auch wenn der Viewport den
+    /// Finger nicht selbst bekommen hat (z. B. von einer Geste übernommen). Handballen (große Fläche) zählen nicht.
+    private func latchArcIfFingerDown(_ event: UIEvent?) {
+        guard let sketch, !sketch.fingerDraws, sketch.tool == .polyline, !sketch.arcActive,
+              let touches = event?.allTouches,
+              touches.contains(where: { $0.type == .direct && $0.phase != .ended && $0.phase != .cancelled
+                  && $0.majorRadius < 40 }) else { return }
+        sketch.latchArc()
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -1059,6 +1070,7 @@ final class ViewportView: MTKView {
             super.touchesMoved(touches, with: event)
             return
         }
+        latchArcIfFingerDown(event)
         if let point = sketchPoint(for: touch) {
             sketch?.moved(to: point, tolerance: snapTolerance)
             refresh()

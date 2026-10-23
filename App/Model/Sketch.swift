@@ -455,11 +455,33 @@ final class SketchController: ObservableObject {
         didSet {
             // Einmal während eines Strichs aufgelegt, bleibt der Strich ein Bogen (auch wenn der Finger
             // inzwischen verrutscht oder abgehoben wurde)
-            if arcModifier, dragStart != nil { arcLatched = true }
+            if arcModifier, dragStart != nil { startArcMidStroke() }
             if arcModifier != oldValue { changed() }
         }
     }
     private var arcLatched = false
+    /// Ein Finger liegt auf (auch einer, den der Viewport nicht als Bogen-Taste gezählt hat): Strich wird Bogen
+    func latchArc() {
+        guard dragStart != nil, tool == .polyline, !arcLatched else { return }
+        startArcMidStroke()
+        changed()
+    }
+
+    /// Wie Shapr3D: Linie ziehen und mitten im Strich den Finger auflegen. Das bisher gezogene gerade Stück
+    /// wird als Linie übernommen, der Strich geht ab der Stiftspitze als tangentialer Bogen weiter.
+    /// (Vorher wurde der ganze Strich zum Bogen ab dem Strichanfang – am Ende kam Unsinn bzw. eine Gerade heraus.)
+    private func startArcMidStroke() {
+        guard !arcLatched else { return }
+        arcLatched = true
+        guard tool == .polyline, let start = dragStart, let current = dragCurrent else { return }
+        let from = chainEnd ?? start
+        guard simd_distance(from, current) > strokeTolerance else { return }
+        endLineStroke(start: start, end: current)
+        guard chainEnd != nil else { return }
+        dragStart = current
+        strokeSamples = [current]
+        strokeShape = nil
+    }
     /// Bogen-Modus für den laufenden Strich
     var arcActive: Bool { arcModifier || arcLatched }
     /// Fangradius des laufenden Strichs
@@ -1409,7 +1431,7 @@ final class SketchController: ObservableObject {
         result[drag.entity] = Self.dragged(drag.original[drag.entity], kind: drag.kind, grab: drag.grab, to: target)
         // Verbundene Elemente folgen über die Einschränkungen (gemeinsame Ecken, Mittelpunkte …)
         if !constraints.isEmpty {
-            guard let solved = ConstraintSolver.solve(result, constraints: constraints, locked: [drag.entity]) else {
+            guard let solved = solveKeepingLines(result, moving: drag.entity)?.entities else {
                 selectDrag = drag
                 notice = "Die Einschränkungen lassen diese Änderung nicht zu (z. B. „Verankern“)."
                 changed(publish: false)
@@ -2083,7 +2105,7 @@ final class SketchController: ObservableObject {
         entities[index] = updated
         // Verbundene Elemente folgen über die Einschränkungen
         if !constraints.isEmpty {
-            if let solved = ConstraintSolver.solve(entities, constraints: constraints, locked: [index]) {
+            if let solved = solveKeepingLines(entities, moving: index)?.entities {
                 entities = solved
             } else {
                 entities = before
@@ -2092,6 +2114,26 @@ final class SketchController: ObservableObject {
             }
         }
         entitiesChanged()
+    }
+
+    /// Einschränkungen lösen; gerade Elemente (Linien, Rechtecke, Polygone, Linienzüge) bleiben dabei stehen,
+    /// solange es geht – Bögen und Kreise passen sich an (Kai: einen Bogen ändern darf keine Linie verschieben).
+    /// Erst wenn das nicht lösbar ist, dürfen auch Linien mitgehen (linesMoved).
+    private func solveKeepingLines(_ trial: [SketchEntity], moving index: Int)
+        -> (entities: [SketchEntity], linesMoved: Bool)? {
+        guard !constraints.isEmpty else { return (trial, false) }
+        let straight = Set(trial.indices.filter { other in
+            guard other != index else { return false }
+            switch trial[other] {
+            case .line, .rectangle, .regularPolygon, .polyline: return true
+            default: return false
+            }
+        })
+        if !straight.isEmpty,
+           let solved = ConstraintSolver.solve(trial, constraints: constraints, locked: straight.union([index])) {
+            return (solved, false)
+        }
+        return ConstraintSolver.solve(trial, constraints: constraints, locked: [index]).map { ($0, !straight.isEmpty) }
     }
 
     /// Linienlänge bzw. Bogenradius: Mehrere Arten, das Element zu ändern (Anfang, Ende, Mitte bzw. Enden
@@ -2124,10 +2166,10 @@ final class SketchController: ObservableObject {
         for candidate in candidates {
             var trial = entities
             trial[index] = candidate
-            guard let solved = constraints.isEmpty ? trial
-                    : ConstraintSolver.solve(trial, constraints: constraints, locked: [index]) else { continue }
-            // Bewegung der übrigen Elemente
-            var cost = 0.0
+            guard let found = solveKeepingLines(trial, moving: index) else { continue }
+            let solved = found.entities
+            // Bewegung der übrigen Elemente; Linien zu verschieben kommt nur in Frage, wenn es nicht anders geht
+            var cost = found.linesMoved ? 1e12 : 0.0
             for other in solved.indices where other != index {
                 let old = before[other].parameters, new = solved[other].parameters
                 guard old.count == new.count else { continue }
@@ -2141,6 +2183,9 @@ final class SketchController: ObservableObject {
         }
         remember()
         entities = best.entities
+        if best.cost >= 1e12 {
+            notice = "Dafür mussten Linien mitgehen – Punkte verankern (Auswählen › Verankern) hält sie fest."
+        }
         // Laufender Linienzug geht am neuen Ende weiter
         if let end = chainEnd, case .line(let oldA, let oldB) = before[index], case .line(let newA, let newB) = entities[index] {
             if simd_distance(end, oldB) < 1e-6 { chainEnd = newB } else if simd_distance(end, oldA) < 1e-6 { chainEnd = newA }
