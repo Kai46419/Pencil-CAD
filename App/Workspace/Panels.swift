@@ -17,7 +17,7 @@ struct NumberField: View {
                 .foregroundStyle(.secondary)
                 .fixedSize()
             TextField(title, value: Binding(get: { value }, set: set),
-                      format: .number.precision(.fractionLength(0...2)))
+                      format: .number.precision(.fractionLength(0...3)))
                 .keyboardType(.numbersAndPunctuation)
                 .multilineTextAlignment(.trailing)
                 .monospacedDigit()

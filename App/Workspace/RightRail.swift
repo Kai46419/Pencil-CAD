@@ -113,7 +113,8 @@ struct RightRail: View {
     @Binding var panel: SidePanel?
     let screenshot: () -> Void
 
-    private static let gridSteps: [Double] = [0.1, 0.5, 1, 5, 10]
+    /// Rastermaß bis zum Tausendstel Millimeter
+    private static let gridSteps: [Double] = [0.001, 0.01, 0.1, 0.5, 1, 5, 10]
     @State private var isSnapMenuShown = false
 
     @State private var showsConstraints = true

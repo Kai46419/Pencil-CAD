@@ -311,6 +311,10 @@ final class SketchController: ObservableObject {
     /// so lassen sich Mitten von Mitten bilden. Sie gehören nicht zur gespeicherten Skizze.
     @Published private(set) var marks: [Point2] = []
     @Published private(set) var selectedMarks: [Int] = []
+    /// Per 1 s Halten gemerkte Fangpunkte (höchstens einer wartet auf den zweiten)
+    @Published private(set) var capturedPoints: [Point2] = []
+    /// Linien mit demselben Winkel wie die gerade gezeichnete (leuchten grün)
+    private(set) var parallelLines: [[Point2]] = []
     /// Geschlossene Bereiche (Außenkontur mit Löchern), größter zuerst.
     @Published private(set) var regions: [SketchRegion] = []
     @Published private(set) var offsetPreview: [SketchEntity] = []
@@ -408,6 +412,7 @@ final class SketchController: ObservableObject {
         selection = []
         marks = []
         selectedMarks = []
+        capturedPoints = []
         undoStack = []
         entitiesChanged()
     }
@@ -445,6 +450,7 @@ final class SketchController: ObservableObject {
         dragStart = nil
         dragCurrent = nil
         activeSnap = nil
+        parallelLines = []
 
         switch tool {
         case .rectangle:
@@ -526,6 +532,33 @@ final class SketchController: ObservableObject {
         dragStart = nil
         dragCurrent = nil
         activeSnap = nil
+        parallelLines = []
+        changed()
+    }
+
+    /// 1 s auf einem Punkt halten: Fangpunkt (Ende, Mitte, Zentrum, Schnittpunkt, Hilfspunkt) merken.
+    /// Zwei gemerkte Punkte ergeben ihre Mitte als neuen Hilfspunkt (Dreieck), der selbst wieder fangbar ist.
+    func capturePoint(at p: Point2, tolerance: Double) {
+        let kinds: Set<SnapKind> = [.endpoint, .midpoint, .center, .intersection, .onCurve]
+        let point = snapIndex.snap(p, tolerance: tolerance * 1.5, kinds: kinds, extra: marks, gridStep: 0).point
+        if let index = capturedPoints.firstIndex(where: { simd_distance($0, point) < 1e-6 }) {
+            capturedPoints.remove(at: index)
+            notice = nil
+            changed()
+            return
+        }
+        capturedPoints.append(point)
+        if capturedPoints.count >= 2 {
+            let a = capturedPoints[0], b = capturedPoints[1]
+            let middle = (a + b) / 2
+            if simd_distance(a, b) > 1e-6, !marks.contains(where: { simd_distance($0, middle) < 1e-6 }) {
+                marks.append(middle)
+            }
+            capturedPoints = []
+            notice = nil
+        } else {
+            notice = "Punkt 1 gemerkt – zweiten Punkt 1 Sekunde halten."
+        }
         changed()
     }
 
@@ -614,8 +647,8 @@ final class SketchController: ObservableObject {
         default: nil
         }
         hoverSnap = snapEnabled
-            ? snapIndex.snap(point, tolerance: tolerance, kinds: snapKinds, extra: inputPoints, anchor: anchor,
-                             gridStep: gridStep)
+            ? withParallel(snapIndex.snap(point, tolerance: tolerance, kinds: snapKinds, extra: inputPoints, anchor: anchor,
+                                          gridStep: gridStep), raw: point, anchor: anchor, tolerance: tolerance)
             : SnapResult(point: point, kind: nil)
         let radius = tolerance * 5
         hoverNodes = snapEnabled
@@ -626,6 +659,7 @@ final class SketchController: ObservableObject {
     func endHover() {
         hoverSnap = nil
         hoverNodes = []
+        if dragStart == nil { parallelLines = [] }
     }
 
     // MARK: Versatz
@@ -715,6 +749,8 @@ final class SketchController: ObservableObject {
         selection = []
         marks = []
         selectedMarks = []
+        capturedPoints = []
+        parallelLines = []
         undoStack = []
         notice = nil
         entitiesChanged()
@@ -1678,10 +1714,55 @@ final class SketchController: ObservableObject {
             activeSnap = nil
             return p
         }
-        let result = snapIndex.snap(p, tolerance: tolerance, kinds: snapKinds, extra: inputPoints, anchor: anchor,
-                                    gridStep: gridStep)
+        let result = withParallel(snapIndex.snap(p, tolerance: tolerance, kinds: snapKinds, extra: inputPoints,
+                                                 anchor: anchor, gridStep: gridStep),
+                                  raw: p, anchor: anchor, tolerance: tolerance)
         activeSnap = result.kind == nil ? nil : result
         return result.point
+    }
+
+    /// Gleicher Winkel wie eine vorhandene Linie: Richtung einrasten und die Linie grün hervorheben.
+    private func withParallel(_ snapped: SnapResult, raw p: Point2, anchor: Point2?, tolerance: Double) -> SnapResult {
+        parallelLines = []
+        guard let anchor, tool == .polyline || tool == .rectangle && rectangleMode == .threePoint,
+              snapKinds.contains(.angle) else { return snapped }
+        // Punktfang hat Vorrang
+        if let kind = snapped.kind, ([.endpoint, .midpoint, .center, .intersection, .onCurve] as [SnapKind]).contains(kind) {
+            return snapped
+        }
+        let lines = entities.indices.flatMap { index -> [(Point2, Point2)] in
+            (0..<entities[index].curveCount).compactMap { k -> (Point2, Point2)? in
+                guard case .line(let a, let b) = entities[index].constraintCurve(k), simd_distance(a, b) > 1e-6 else {
+                    return nil
+                }
+                return (a, b)
+            }
+        }
+        guard !lines.isEmpty, simd_distance(p, anchor) > tolerance else { return snapped }
+        var result = snapped
+        var best: (distance: Double, point: Point2)?
+        for (a, b) in lines {
+            let d = simd_normalize(b - a)
+            let along = simd_dot(p - anchor, d)
+            let projected = anchor + d * along
+            let distance = simd_distance(projected, p)
+            if distance <= tolerance, distance < (best?.distance ?? .infinity) { best = (distance, projected) }
+        }
+        guard let best else { return snapped }
+        if snapped.kind != .angle {
+            result.point = best.point
+            result.kind = .angle
+            result.guides = [(anchor, best.point)]
+        }
+        // Alle Linien mit diesem Winkel leuchten grün
+        let current = result.point - anchor
+        guard simd_length(current) > 1e-9 else { return result }
+        let direction = simd_normalize(current)
+        parallelLines = lines.filter { line in
+            let d = simd_normalize(line.1 - line.0)
+            return abs(d.x * direction.y - d.y * direction.x) < 1e-4
+        }.map { [$0.0, $0.1] }
+        return result
     }
 
     private func add(_ entity: SketchEntity, editable: Bool = false) {
@@ -1742,7 +1823,7 @@ final class SketchController: ObservableObject {
             }
         }
         if tool == .offset, offsetTarget != nil {
-            return "Versatz \(offsetDistance.formatted(.number.precision(.fractionLength(0...2)))) mm"
+            return "Versatz \(offsetDistance.formatted(.number.precision(.fractionLength(0...3)))) mm"
         } else if !splinePoints.isEmpty {
             return "Spline, \(splinePoints.count) Punkte"
         } else if !regions.isEmpty {

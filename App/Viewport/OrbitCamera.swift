@@ -26,7 +26,7 @@ struct OrbitCamera {
             return .orthographic(halfWidth: halfHeight * aspect, halfHeight: halfHeight, near: -distance * 20,
                                  far: distance * 20)
         }
-        return .perspective(fovY: fieldOfView, aspect: aspect, near: max(distance * 0.01, 0.1), far: distance * 20)
+        return .perspective(fovY: fieldOfView, aspect: aspect, near: max(distance * 0.01, 0.0005), far: distance * 20)
     }
 
     /// Richtung von der Kamera zum Ziel.
@@ -94,7 +94,7 @@ struct OrbitCamera {
     }
 
     mutating func zoom(by scale: Float) {
-        distance = min(max(distance / scale, 2), 5000)
+        distance = min(max(distance / scale, 0.05), 5000)
     }
 
     mutating func frame(min lo: SIMD3<Float>, max hi: SIMD3<Float>) {

@@ -647,7 +647,7 @@ final class Workspace: ObservableObject {
     private func measure(face: FaceRef?, edge: EdgeRef?, point: SIMD3<Float>?) {
         var lines: [String] = []
         func mm(_ value: Double, _ unit: String = "mm") -> String {
-            "\(value.formatted(.number.precision(.fractionLength(0...2)))) \(unit)"
+            "\(value.formatted(.number.precision(.fractionLength(0...3)))) \(unit)"
         }
         if let edge {
             model.resetSelection()

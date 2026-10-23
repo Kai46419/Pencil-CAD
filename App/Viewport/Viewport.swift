@@ -64,6 +64,7 @@ final class ViewportView: MTKView {
 
     private var orbitGesture: UIPanGestureRecognizer?
     private var tapGesture: UITapGestureRecognizer?
+    private var holdGesture: UILongPressGestureRecognizer?
     private var sketchTouch: UITouch?
     private var handleDrag: HandleDragState?
     private let valueLabel = PaddedLabel()
@@ -120,7 +121,13 @@ final class ViewportView: MTKView {
         // Schwebender Stift (iPad Pro mit Apple Pencil Pro / 2. Gen.)
         let hover = UIHoverGestureRecognizer(target: self, action: #selector(handleHover))
 
-        for recognizer in [orbit, pan, pinch, tap, hover] as [UIGestureRecognizer] {
+        // 1 s halten (Stift oder Finger): Fangpunkt als Markierungspunkt merken
+        let hold = UILongPressGestureRecognizer(target: self, action: #selector(handleHold))
+        hold.minimumPressDuration = 1
+        hold.allowableMovement = 10
+        hold.allowedTouchTypes = fingersAndPencil
+
+        for recognizer in [orbit, pan, pinch, tap, hover, hold] as [UIGestureRecognizer] {
             recognizer.delegate = self
             addGestureRecognizer(recognizer)
         }
@@ -131,6 +138,7 @@ final class ViewportView: MTKView {
         addInteraction(pencil)
         orbitGesture = orbit
         tapGesture = tap
+        holdGesture = hold
 
         valueLabel.font = .monospacedDigitSystemFont(ofSize: 15, weight: .semibold)
         valueLabel.textColor = .black
@@ -207,6 +215,7 @@ final class ViewportView: MTKView {
         orbitGesture?.isEnabled = !fingerSketching
         tapGesture?.isEnabled = !fingerSketching
         tapGesture?.allowedTouchTypes = sketching ? fingersOnly : fingersAndPencil
+        holdGesture?.isEnabled = sketching
 
         let plane = sketch.plane
         renderer.gridTransform = sketching
@@ -344,6 +353,19 @@ final class ViewportView: MTKView {
                 if !chosen.isEmpty {
                     groups.append(LineGroup(polylines: chosen.map { $0.map(world) }, color: Self.selectionOrange, width: 2.4))
                 }
+            }
+            // Gleicher Winkel wie eine vorhandene Linie: diese leuchtet grün
+            if !sketch.parallelLines.isEmpty {
+                groups.append(LineGroup(polylines: sketch.parallelLines.map { $0.map(world) },
+                                        color: SIMD3(0.08, 0.62, 0.2), width: 4))
+            }
+            // Gemerkte Punkte (1 s gehalten) als orange Kreuze
+            if !sketch.capturedPoints.isEmpty {
+                let s = 5 * perPoint
+                let crosses = sketch.capturedPoints.flatMap { p -> [[Point2]] in
+                    [[p - Point2(s, s), p + Point2(s, s)], [p - Point2(s, -s), p + Point2(s, -s)]]
+                }
+                groups.append(LineGroup(polylines: crosses.map { $0.map(world) }, color: Self.selectionOrange, width: 2.4))
             }
             // Schwebender Stift: Fadenkreuz am (gefangenen) Punkt, damit man sieht, wo der Strich ansetzt
             if let hover = sketch.hoverSnap?.point {
@@ -510,7 +532,7 @@ final class ViewportView: MTKView {
             field.allowsEditing = dimension.isEditable
             field.prefix = dimension.prefix
             if !field.isFirstResponder {
-                field.text = dimension.value.formatted(.number.precision(.fractionLength(0...2)).grouping(.never))
+                field.text = dimension.value.formatted(.number.precision(.fractionLength(0...3)).grouping(.never))
             }
             field.sizeToFit()
             var dx = tip.x - anchor.x, dy = tip.y - anchor.y
@@ -738,7 +760,7 @@ final class ViewportView: MTKView {
             valueLabel.isHidden = true
             return
         }
-        valueLabel.text = "\(active.value.formatted(.number.precision(.fractionLength(0...2)))) mm"
+        valueLabel.text = "\(active.value.formatted(.number.precision(.fractionLength(0...3)))) mm"
         valueLabel.sizeToFit()
         valueLabel.center = tip
         valueLabel.isHidden = false
@@ -787,7 +809,7 @@ final class ViewportView: MTKView {
     private func dragStep(at point: SIMD3<Float>) -> Double {
         guard let renderer else { return 0.5 }
         let perPoint = Double(renderer.camera.worldUnitsPerPoint(at: point, viewHeight: Float(bounds.height)))
-        return [0.1, 0.5, 1, 5, 10].first { $0 >= perPoint * 3 } ?? 10
+        return [0.001, 0.01, 0.1, 0.5, 1, 5, 10].first { $0 >= perPoint * 3 } ?? 10
     }
 
     // MARK: Skizze
@@ -1033,6 +1055,19 @@ final class ViewportView: MTKView {
     }
 
     /// Schwebender Stift: Fangpunkt und Knoten zeigen, beim Linienzug schon das nächste Stück.
+    @objc private func handleHold(_ gesture: UILongPressGestureRecognizer) {
+        guard gesture.state == .began, let sketch, sketch.isActive, !sketch.isChoosingPlane,
+              let point = sketchPoint(at: gesture.location(in: self)) else { return }
+        // Ein angefangener Strich an derselben Stelle wird verworfen
+        if sketchTouch != nil {
+            sketchTouch = nil
+            sketch.cancelStroke()
+        }
+        sketch.capturePoint(at: point, tolerance: snapTolerance)
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        refresh()
+    }
+
     @objc private func handleHover(_ gesture: UIHoverGestureRecognizer) {
         guard let sketch else { return }
         switch gesture.state {

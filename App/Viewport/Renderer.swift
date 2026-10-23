@@ -238,7 +238,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         let u = SIMD3<Float>(transform.columns.0.x, transform.columns.0.y, transform.columns.0.z)
         let v = SIMD3<Float>(transform.columns.1.x, transform.columns.1.y, transform.columns.1.z)
         let perPoint = camera.worldUnitsPerPoint(viewHeight: viewHeight)
-        let steps: [Float] = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000]
+        let steps: [Float] = [0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000]
         let step = steps.first { $0 / perPoint >= 14 } ?? 2000
         // Mitte: Ziel der Kamera, auf die Ebene projiziert
         let d = camera.target - origin
