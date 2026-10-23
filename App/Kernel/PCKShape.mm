@@ -285,7 +285,7 @@ std::vector<simd_double3> circlePoints(simd_double3 base, simd_double3 axis, dou
         BRepPrimAPI_MakeCylinder maker(gp_Ax2(gp_Pnt(base.x, base.y, base.z), gp_Dir(axis.x, axis.y, axis.z)),
                                        radius, height);
         return [[PCKShape alloc] initWithShape:maker.Shape()];
-    } catch (const Standard_Failure &) {
+    } catch (...) {
         return nil;
     }
 }
@@ -303,7 +303,7 @@ static gp_Dir toDir(simd_double3 d) {
     try {
         BRepPrimAPI_MakeSphere maker(toPnt(center), radius);
         return [[PCKShape alloc] initWithShape:maker.Shape()];
-    } catch (const Standard_Failure &) {
+    } catch (...) {
         return nil;
     }
 }
@@ -315,7 +315,7 @@ static gp_Dir toDir(simd_double3 d) {
     try {
         BRepPrimAPI_MakeCone maker(gp_Ax2(toPnt(base), toDir(axis)), bottomRadius, topRadius, height);
         return [[PCKShape alloc] initWithShape:maker.Shape()];
-    } catch (const Standard_Failure &) {
+    } catch (...) {
         return nil;
     }
 }
@@ -342,7 +342,7 @@ static gp_Dir toDir(simd_double3 d) {
         BRepPrimAPI_MakePrism prism(face.Face(), gp_Vec(direction.x, direction.y, direction.z));
         if (!prism.IsDone()) return nil;
         return [[PCKShape alloc] initWithShape:prism.Shape()];
-    } catch (const Standard_Failure &) {
+    } catch (...) {
         return nil;
     }
 }
@@ -362,7 +362,7 @@ static gp_Dir toDir(simd_double3 d) {
         BRepPrimAPI_MakePrism prism(face.Face(), gp_Vec(direction.x, direction.y, direction.z));
         if (!prism.IsDone()) return nil;
         return [[PCKShape alloc] initWithShape:prism.Shape()];
-    } catch (const Standard_Failure &) {
+    } catch (...) {
         return nil;
     }
 }
@@ -502,7 +502,7 @@ static TopoDS_Face faceFromWires(NSArray<NSArray<NSNumber *> *> *wires) {
         BRepPrimAPI_MakePrism prism(face, gp_Vec(direction.x, direction.y, direction.z));
         if (!prism.IsDone()) return nil;
         return [[PCKShape alloc] initWithShape:prism.Shape()];
-    } catch (const Standard_Failure &) {
+    } catch (...) {
         return nil;
     }
 }
@@ -535,7 +535,7 @@ static TopoDS_Face faceFromWires(NSArray<NSArray<NSNumber *> *> *wires) {
         draft.Build();
         if (!draft.IsDone()) return nil;
         return [[PCKShape alloc] initWithShape:draft.Shape()];
-    } catch (const Standard_Failure &) {
+    } catch (...) {
         return nil;
     }
 }
@@ -545,7 +545,7 @@ static TopoDS_Face faceFromWires(NSArray<NSArray<NSNumber *> *> *wires) {
         const TopoDS_Face face = faceFromWires(wires);
         if (face.IsNull()) return nil;
         return [[PCKShape alloc] initWithShape:face];
-    } catch (const Standard_Failure &) {
+    } catch (...) {
         return nil;
     }
 }
@@ -556,7 +556,7 @@ static TopoDS_Face faceFromWires(NSArray<NSArray<NSNumber *> *> *wires) {
     try {
         BRepPrimAPI_MakeTorus torus(gp_Ax2(toPnt(center), toDir(axis)), majorRadius, minorRadius);
         return [[PCKShape alloc] initWithShape:torus.Shape()];
-    } catch (const Standard_Failure &) {
+    } catch (...) {
         return nil;
     }
 }
@@ -573,7 +573,7 @@ static TopoDS_Face faceFromWires(NSArray<NSArray<NSNumber *> *> *wires) {
         BRepPrimAPI_MakeRevol revol(face, gp_Ax1(toPnt(origin), axis), angle, Standard_True);
         if (!revol.IsDone()) return nil;
         return [[PCKShape alloc] initWithShape:revol.Shape()];
-    } catch (const Standard_Failure &) {
+    } catch (...) {
         return nil;
     }
 }
@@ -587,7 +587,7 @@ static TopoDS_Face faceFromWires(NSArray<NSArray<NSNumber *> *> *wires) {
         pipe.Build();
         if (!pipe.IsDone()) return nil;
         return [[PCKShape alloc] initWithShape:pipe.Shape()];
-    } catch (const Standard_Failure &) {
+    } catch (...) {
         return nil;
     }
 }
@@ -605,7 +605,7 @@ static TopoDS_Face faceFromWires(NSArray<NSArray<NSNumber *> *> *wires) {
         loft.Build();
         if (!loft.IsDone()) return nil;
         return [[PCKShape alloc] initWithShape:loft.Shape()];
-    } catch (const Standard_Failure &) {
+    } catch (...) {
         return nil;
     }
 }
@@ -629,7 +629,7 @@ static TopoDS_Shape unified(const TopoDS_Shape &shape) {
         unify.Build();
         const TopoDS_Shape result = unify.Shape();
         return result.IsNull() ? shape : result;
-    } catch (const Standard_Failure &) {
+    } catch (...) {
         return shape;
     }
 }
@@ -639,7 +639,7 @@ static TopoDS_Shape unified(const TopoDS_Shape &shape) {
         BRepAlgoAPI_Cut op(_shape, tool->_shape);
         if (!op.IsDone()) return nil;
         return [[PCKShape alloc] initWithShape:unified(op.Shape())];
-    } catch (const Standard_Failure &) {
+    } catch (...) {
         return nil;
     }
 }
@@ -649,7 +649,7 @@ static TopoDS_Shape unified(const TopoDS_Shape &shape) {
         BRepAlgoAPI_Fuse op(_shape, other->_shape);
         if (!op.IsDone()) return nil;
         return [[PCKShape alloc] initWithShape:unified(op.Shape())];
-    } catch (const Standard_Failure &) {
+    } catch (...) {
         return nil;
     }
 }
@@ -659,7 +659,7 @@ static TopoDS_Shape unified(const TopoDS_Shape &shape) {
         BRepAlgoAPI_Common op(_shape, other->_shape);
         if (!op.IsDone()) return nil;
         return [[PCKShape alloc] initWithShape:unified(op.Shape())];
-    } catch (const Standard_Failure &) {
+    } catch (...) {
         return nil;
     }
 }
@@ -692,10 +692,10 @@ static TopoDS_Shape unified(const TopoDS_Shape &shape) {
         }
         try {
             return [[PCKShape alloc] initWithShape:unified(result)];
-        } catch (const Standard_Failure &) {
+        } catch (...) {
             return [[PCKShape alloc] initWithShape:result];
         }
-    } catch (const Standard_Failure &) {
+    } catch (...) {
         return nil;
     }
 }
@@ -710,7 +710,7 @@ static TopoDS_Shape unified(const TopoDS_Shape &shape) {
         maker.Build();
         if (!maker.IsDone()) return nil;
         return [[PCKShape alloc] initWithShape:maker.Shape()];
-    } catch (const Standard_Failure &) {
+    } catch (...) {
         return nil;
     }
 }
@@ -720,7 +720,7 @@ static TopoDS_Shape unified(const TopoDS_Shape &shape) {
         BRepBuilderAPI_Transform op(_shape, transform, Standard_True);
         if (!op.IsDone()) return nil;
         return [[PCKShape alloc] initWithShape:op.Shape()];
-    } catch (const Standard_Failure &) {
+    } catch (...) {
         return nil;
     }
 }
@@ -763,7 +763,7 @@ static TopoDS_Shape unified(const TopoDS_Shape &shape) {
         BRepBuilderAPI_GTransform op(_shape, stretch, Standard_True);
         if (!op.IsDone()) return nil;
         return [[PCKShape alloc] initWithShape:op.Shape()];
-    } catch (const Standard_Failure &) {
+    } catch (...) {
         return nil;
     }
 }
@@ -786,7 +786,7 @@ static TopoDS_Shape unified(const TopoDS_Shape &shape) {
             }
         }
         return parts.count == 2 ? parts : nil;
-    } catch (const Standard_Failure &) {
+    } catch (...) {
         return nil;
     }
 }
@@ -796,7 +796,7 @@ static TopoDS_Shape unified(const TopoDS_Shape &shape) {
         GProp_GProps props;
         BRepGProp::VolumeProperties(_shape, props);
         return std::abs(props.Mass());
-    } catch (const Standard_Failure &) {
+    } catch (...) {
         return 0;
     }
 }
@@ -807,7 +807,7 @@ static TopoDS_Shape unified(const TopoDS_Shape &shape) {
         GProp_GProps props;
         BRepGProp::LinearProperties(_edges(int(index)), props);
         return props.Mass();
-    } catch (const Standard_Failure &) {
+    } catch (...) {
         return 0;
     }
 }
@@ -818,7 +818,7 @@ static TopoDS_Shape unified(const TopoDS_Shape &shape) {
         GProp_GProps props;
         BRepGProp::SurfaceProperties(_faces(int(index)), props);
         return props.Mass();
-    } catch (const Standard_Failure &) {
+    } catch (...) {
         return 0;
     }
 }
@@ -856,7 +856,7 @@ static TopTools_IndexedMapOfShape realEdgesOfFace(const TopTools_IndexedMapOfSha
         fillet.Build();
         if (!fillet.IsDone()) return nil;
         return [[PCKShape alloc] initWithShape:fillet.Shape()];
-    } catch (const Standard_Failure &) {
+    } catch (...) {
         return nil;
     }
 }
@@ -872,7 +872,7 @@ static TopTools_IndexedMapOfShape realEdgesOfFace(const TopTools_IndexedMapOfSha
         chamfer.Build();
         if (!chamfer.IsDone()) return nil;
         return [[PCKShape alloc] initWithShape:chamfer.Shape()];
-    } catch (const Standard_Failure &) {
+    } catch (...) {
         return nil;
     }
 }
@@ -899,7 +899,7 @@ static std::vector<TopoDS_Edge> edgesFromNumbers(const TopTools_IndexedMapOfShap
         fillet.Build();
         if (!fillet.IsDone()) return nil;
         return [[PCKShape alloc] initWithShape:fillet.Shape()];
-    } catch (const Standard_Failure &) {
+    } catch (...) {
         return nil;
     }
 }
@@ -915,7 +915,7 @@ static std::vector<TopoDS_Edge> edgesFromNumbers(const TopTools_IndexedMapOfShap
         chamfer.Build();
         if (!chamfer.IsDone()) return nil;
         return [[PCKShape alloc] initWithShape:chamfer.Shape()];
-    } catch (const Standard_Failure &) {
+    } catch (...) {
         return nil;
     }
 }
@@ -956,7 +956,7 @@ static std::vector<TopoDS_Edge> edgesFromNumbers(const TopTools_IndexedMapOfShap
         if (direction.Magnitude() < 1e-9) direction = gp_Vec(0, 0, -1);
         direction.Normalize();
         return @[@(point.X()), @(point.Y()), @(point.Z()), @(direction.X()), @(direction.Y()), @(direction.Z())];
-    } catch (const Standard_Failure &) {
+    } catch (...) {
         return nil;
     }
 }
@@ -981,7 +981,7 @@ static std::vector<TopoDS_Edge> edgesFromNumbers(const TopTools_IndexedMapOfShap
         BRepClass3d_SolidClassifier atOutside(_shape, outside, 1e-6);
         BRepClass3d_SolidClassifier atInside(_shape, inside, 1e-6);
         if (atOutside.State() == TopAbs_IN && atInside.State() == TopAbs_OUT) normal.Reverse();
-    } catch (const Standard_Failure &) {
+    } catch (...) {
     }
     const gp_Pnt origin = plane.Location();
     return @[@(origin.X()), @(origin.Y()), @(origin.Z()), @(normal.X()), @(normal.Y()), @(normal.Z())];
@@ -989,9 +989,14 @@ static std::vector<TopoDS_Edge> edgesFromNumbers(const TopTools_IndexedMapOfShap
 
 - (PCKMesh *)triangulateWithDeflection:(double)deflection {
     MeshBuffers buffers;
-    BRepMesh_IncrementalMesh mesher(_shape, deflection, Standard_False, 0.35, Standard_True);
+    // Fehler im Vernetzer dürfen die App nicht beenden: dann eben ohne bzw. mit weniger Dreiecken
+    try {
+        BRepMesh_IncrementalMesh mesher(_shape, deflection, Standard_False, 0.35, Standard_True);
+    } catch (...) {
+    }
 
     for (int f = 1; f <= _faces.Extent(); ++f) {
+      try {
         const TopoDS_Face face = TopoDS::Face(_faces(f));
         TopLoc_Location location;
         Handle(Poly_Triangulation) triangulation = BRep_Tool::Triangulation(face, location);
@@ -1015,11 +1020,18 @@ static std::vector<TopoDS_Edge> edgesFromNumbers(const TopTools_IndexedMapOfShap
             if (reversed) std::swap(b, c);
             buffers.addTriangle(base + a - 1, base + b - 1, base + c - 1, uint32_t(f));
         }
+      } catch (...) {
+        continue;
+      }
     }
 
     // Kanten als Polylinien, Nahtkanten weglassen
     TopTools_IndexedDataMapOfShapeListOfShape edgeFaces;
-    TopExp::MapShapesAndAncestors(_shape, TopAbs_EDGE, TopAbs_FACE, edgeFaces);
+    try {
+        TopExp::MapShapesAndAncestors(_shape, TopAbs_EDGE, TopAbs_FACE, edgeFaces);
+    } catch (...) {
+        return [[PCKMesh alloc] initWithBuffers:buffers];
+    }
     for (int i = 1; i <= edgeFaces.Extent(); ++i) {
         const TopoDS_Edge edge = TopoDS::Edge(edgeFaces.FindKey(i));
         if (BRep_Tool::Degenerated(edge)) continue;
@@ -1037,7 +1049,7 @@ static std::vector<TopoDS_Edge> edgesFromNumbers(const TopTools_IndexedMapOfShap
                 buffers.addEdge(simd_make_double3(a.X(), a.Y(), a.Z()), simd_make_double3(b.X(), b.Y(), b.Z()),
                                 number);
             }
-        } catch (const Standard_Failure &) {
+        } catch (...) {
             continue;
         }
     }
@@ -1060,7 +1072,7 @@ static std::vector<TopoDS_Edge> edgesFromNumbers(const TopTools_IndexedMapOfShap
             [result addObject:[[PCKShape alloc] initWithShape:shape]];
         }
         return result;
-    } catch (const Standard_Failure &) {
+    } catch (...) {
         return nil;
     }
 #else
@@ -1077,7 +1089,7 @@ static std::vector<TopoDS_Edge> edgesFromNumbers(const TopTools_IndexedMapOfShap
             if (writer.Transfer(shape->_shape, STEPControl_AsIs) != IFSelect_RetDone) return NO;
         }
         return writer.Write(path.fileSystemRepresentation) == IFSelect_RetDone;
-    } catch (const Standard_Failure &) {
+    } catch (...) {
         return NO;
     }
 #else

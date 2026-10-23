@@ -563,7 +563,7 @@ final class Workspace: ObservableObject {
         case .canvas:
             break
         case .select:
-            if extrudeToTapped(point, face: face) { return }
+            if extrudeToTapped(point, face: face, region: region) { return }
             if selectsBodies || !model.selectedBodies.isEmpty, let body = face?.body ?? edge?.body {
                 // Körperauswahl (z. B. per Rahmen): Antippen nimmt Körper hinzu bzw. heraus
                 model.toggleBody(body)
@@ -688,10 +688,11 @@ final class Workspace: ObservableObject {
         }
     }
 
-    /// Wie „Bis Objekt“ in Fusion 360: Läuft eine Extrusion (Pfeil gezogen), setzt Antippen einer anderen
-    /// Fläche oder Kante die Höhe genau bis dorthin.
-    private func extrudeToTapped(_ point: SIMD3<Float>?, face: FaceRef?) -> Bool {
-        guard let point else { return false }
+    /// Wie „Bis Objekt“ in Fusion 360: Sind Skizzenbereiche gewählt, setzt Antippen einer parallelen ebenen
+    /// Fläche (z. B. der Deckfläche eines extrudierten Körpers) die Höhe genau bis dorthin – auch ohne vorher
+    /// am Pfeil zu ziehen. Läuft schon eine Extrusion, zählt jede angetippte Fläche oder Kante.
+    private func extrudeToTapped(_ point: SIMD3<Float>?, face: FaceRef?, region: RegionRef?) -> Bool {
+        guard let point, region == nil else { return false }
         let target = SIMD3<Double>(point)
         func extent(from handle: (origin: SIMD3<Double>, direction: SIMD3<Double>)) -> Double? {
             guard simd_length(handle.direction) > 1e-12 else { return nil }
@@ -702,7 +703,15 @@ final class Workspace: ObservableObject {
         func report(_ value: Double) {
             model.message = "Bis zur angetippten Stelle: \(value.formatted(.number.precision(.fractionLength(0...3)))) mm"
         }
-        if model.regionValue != 0, let handle = model.regionHandle, let value = extent(from: handle) {
+        if !model.selectedRegions.isEmpty, let handle = model.regionHandle {
+            if model.regionValue == 0 {
+                // Noch nicht gezogen: nur parallele ebene Flächen, sonst wählt Antippen wie gewohnt
+                guard let face, let plane = model.plane(of: face),
+                      abs(simd_dot(simd_normalize(plane.normal), simd_normalize(handle.direction))) > 0.999 else {
+                    return false
+                }
+            }
+            guard let value = extent(from: handle) else { return false }
             model.setRegionValue(value)
             report(value)
             return true
@@ -893,7 +902,7 @@ final class Workspace: ObservableObject {
             if model.selectedBodies.count > 1 { return "„Vereinigen“ verschmilzt die Körper · Antippen nimmt hinzu/heraus" }
             if !model.selectedBodies.isEmpty { return "Weitere Körper antippen oder Rahmen aufziehen" }
             if !model.selectedEdges.isEmpty { return "Pfeil ziehen · weitere Kanten antippen" }
-            if !model.selectedRegions.isEmpty { return "Pfeil ziehen · weitere Bereiche antippen" }
+            if !model.selectedRegions.isEmpty { return "Pfeil ziehen · weitere Bereiche antippen · Körperfläche antippen = Höhe bis dorthin" }
             if model.selection != nil {
                 return model.faceHandle != nil ? "Pfeil ziehen zum Extrudieren" : "Fläche gewählt"
             }
@@ -964,6 +973,7 @@ final class Workspace: ObservableObject {
                 "Ein geschlossener Skizzenbereich (Profil). Am Pfeil ziehen extrudiert ihn zu einem Körper.",
                 "Unten: neuer Körper, mit vorhandenem vereinigen oder abziehen; Richtung (eine Seite, symmetrisch, zwei Seiten) und Verjüngung.",
                 "Weitere Bereiche antippen extrudiert sie gemeinsam. „Achsendrehung“ dreht den Bereich um eine Linie.",
+                "Höhe übernehmen: eine parallele Fläche eines Körpers antippen (z. B. die Oberseite eines schon extrudierten Kreises) – die Extrusion geht genau bis dorthin.",
             ]
             if model.selectedRegionsHaveHoles {
                 lines.insert("Der Bereich hat innere Konturen (z. B. einen Kreis). Unten wählen: „Innen aussparen“ lässt dort ein Loch, „Durchgehend“ extrudiert die ganze Außenkontur.", at: 1)
