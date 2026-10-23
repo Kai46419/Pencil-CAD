@@ -91,7 +91,20 @@ final class ViewportView: MTKView {
         if sketch.isActive, !sketch.isChoosingPlane, !sketch.fingerDraws {
             heldFingers.formUnion(began.filter { $0.type == .direct })
         }
+        let wasHeld = !heldFingers.isEmpty
         heldFingers.subtract(ended)
+        // Finger los, während der Stift noch aufliegt: der Bogen endet sofort an der Stiftspitze
+        // (wie Shapr3D: Stift zum Endpunkt, Finger heben)
+        if wasHeld, heldFingers.isEmpty, let touch = sketchTouch, sketch.tool == .polyline, sketch.arcActive {
+            suppressFingerTap = true
+            sketchTouch = nil
+            if let point = sketchPoint(for: touch) {
+                sketch.ended(at: point, tolerance: snapTolerance)
+            } else {
+                sketch.cancelStroke()
+            }
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        }
         if heldFingers.isEmpty, suppressFingerTap, !ended.isEmpty {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.suppressFingerTap = false }
         }

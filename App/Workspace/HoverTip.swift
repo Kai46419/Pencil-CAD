@@ -156,7 +156,7 @@ enum ToolTips {
         "Auswählen": "Pfeil: zeichnet nicht. Antippen wählt, Ecken und Enden ziehen ändert die Größe, Linien ziehen verschiebt, Kreisrand ziehen ändert den Radius. Stift über einem Punkt schweben lassen und drücken (bzw. doppeltippen) merkt ihn – zwei gemerkte Punkte zeigen Mitte und Mittellinie.",
         "Aktive Ebene": "Ebene, auf der gerade gezeichnet wird.",
         "Keine aktive Ebene": "Erst eine Ebene (grau) oder eine ebene Körperfläche antippen.",
-        "Linie/Bogen": "Linie: Punkt für Punkt ziehen, zurück zum Start schließt. Rund gezogen wird automatisch ein Kreis (geschlossen) oder Bogen. Finger auflegen, während der Stift zeichnet: tangentialer Bogen am Linienende. Kritzeln über Elemente löscht sie.",
+        "Linie/Bogen": "Linie: Punkt für Punkt ziehen, zurück zum Start schließt. Rund gezogen wird automatisch ein Kreis (geschlossen) oder Bogen. Finger auflegen, während der Stift zeichnet: tangentialer Bogen am Linienende – Finger heben setzt ihn an der Stiftspitze. Kritzeln über Elemente löscht sie.",
         "Linie": "Punkt für Punkt ziehen; Länge und Winkel werden angezeigt. Rund ziehen ergibt einen Kreis bzw. Bogen, Kritzeln löscht. Zurück zum Startpunkt schließt das Profil.",
         "Bogen": "Von einem Ende zum anderen ziehen, dann die Wölbung ziehen.",
         "Spline": "Freie Kurve durch Punkte (Fit-Punkte) oder über Kontrollpunkte.",
