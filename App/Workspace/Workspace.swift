@@ -387,8 +387,6 @@ final class Workspace: ObservableObject {
             if newTool == .mirror {
                 updateMirrorPreview()
             }
-        default:
-            break
         case .shell:
             if let previousFace {
                 model.select(face: previousFace)
@@ -396,6 +394,8 @@ final class Workspace: ObservableObject {
             } else {
                 model.resetSelection()
             }
+        default:
+            break
         }
     }
 
