@@ -379,6 +379,14 @@ final class SketchController: ObservableObject {
     private var snapIndex = SnapIndex()
     private var dragStart: Point2?
     private var dragCurrent: Point2?
+    /// Ungefangene Stiftpunkte des laufenden Strichs (Gesten: Kreis/Bogen aus dem Linienwerkzeug, Kritzeln)
+    private var strokeSamples: [Point2] = []
+    /// Linienwerkzeug: erkannter Kreis bzw. Bogen des laufenden Strichs (Vorschau)
+    private(set) var strokeShape: SketchEntity?
+    /// Fangradius des laufenden Strichs
+    private var strokeTolerance = 1.0
+    /// Hilfslinien zu gemerkten Punktpaaren: Verbindung und Mittelsenkrechte („Mittellinie“), nur Anzeige
+    @Published private(set) var guideLines: [(mark: Point2, lines: [[Point2]])] = []
     private var chainStart: Point2?
     private var chainEnd: Point2?
     private var arcChord: (start: Point2, end: Point2)?
@@ -459,6 +467,7 @@ final class SketchController: ObservableObject {
         self.construction = construction
         selection = []
         marks = []
+        guideLines = []
         selectedMarks = []
         capturedPoints = []
         undoStack = []
@@ -483,6 +492,9 @@ final class SketchController: ObservableObject {
         let p = snap(point, tolerance: tolerance, anchor: anchor)
         dragStart = p
         dragCurrent = p
+        strokeSamples = [point]
+        strokeShape = nil
+        strokeTolerance = tolerance
         hoverSnap = nil
         hoverNodes = []
         changed()
@@ -495,6 +507,8 @@ final class SketchController: ObservableObject {
         }
         guard dragStart != nil else { return }
         dragCurrent = snap(point, tolerance: tolerance, anchor: strokeAnchor)
+        if strokeSamples.count < 4000 { strokeSamples.append(point) }
+        if tool == .polyline, strokeSamples.count % 4 == 0 { strokeShape = recognizedShape() }
         // Der Stift liefert bis zu 240 Punkte pro Sekunde: nicht jedes Mal die Oberfläche neu aufbauen,
         // der Viewport zeichnet selbst neu.
         changed(publish: false)
@@ -507,10 +521,20 @@ final class SketchController: ObservableObject {
         }
         guard let start = dragStart else { return }
         let end = snap(point, tolerance: tolerance, anchor: strokeAnchor)
+        let samples = strokeSamples + [point]
         dragStart = nil
         dragCurrent = nil
         activeSnap = nil
         parallelLines = []
+        strokeSamples = []
+        strokeShape = nil
+
+        // Kritzeln über Elemente löscht sie (in allen Zeichenwerkzeugen)
+        if Self.scribbleTools.contains(tool), arcChord == nil, StrokeGesture.isScribble(samples, tolerance: tolerance) {
+            eraseScribbled(samples, tolerance: tolerance)
+            changed()
+            return
+        }
 
         switch tool {
         case .rectangle:
@@ -532,7 +556,10 @@ final class SketchController: ObservableObject {
                                     angle: atan2(end.y - start.y, end.x - start.x)), editable: true)
             }
         case .polyline:
-            endLineStroke(start: start, end: end)
+            // Rund gezogen: Kreis bzw. Bogen statt Linie
+            if !endShapeStroke(samples, start: start, end: end, tolerance: tolerance) {
+                endLineStroke(start: start, end: end)
+            }
         case .arc:
             // Shapr3D: Enden aufziehen, dann die Wölbung ziehen
             if let chord = arcChord {
@@ -602,9 +629,88 @@ final class SketchController: ObservableObject {
         selectStart = nil
         dragStart = nil
         dragCurrent = nil
+        strokeSamples = []
+        strokeShape = nil
         activeSnap = nil
         parallelLines = []
         changed()
+    }
+
+    // MARK: Stiftgesten
+
+    private static let scribbleTools: Set<SketchTool> = [.polyline, .arc, .spline, .rectangle, .circle, .ellipse, .polygon]
+
+    /// Linienwerkzeug: Kreis bzw. Bogen, den der laufende Strich ergibt (nil = gerade Linie).
+    private func recognizedShape() -> SketchEntity? {
+        guard let start = dragStart, let current = dragCurrent,
+              let shape = StrokeGesture.recognize(strokeSamples, tolerance: strokeTolerance) else { return nil }
+        switch shape {
+        case .circle(let center, let radius):
+            return .circle(center: center, radius: radius)
+        case .arc(let mid):
+            let from = chainEnd ?? start
+            guard circleThrough(from, mid, current) != nil else { return nil }
+            return .arc(start: from, mid: mid, end: current)
+        }
+    }
+
+    /// Kreis oder Bogen aus einem runden Strich des Linienwerkzeugs übernehmen. false = gerade Linie.
+    private func endShapeStroke(_ samples: [Point2], start: Point2, end: Point2, tolerance: Double) -> Bool {
+        guard let shape = StrokeGesture.recognize(samples, tolerance: tolerance) else { return false }
+        switch shape {
+        case .circle(let center, let rawRadius):
+            // Mitte rastet auf vorhandene Punkte ein, der Radius aufs Raster
+            let kinds: Set<SnapKind> = [.endpoint, .center, .intersection, .midpoint]
+            let snapped = snapEnabled
+                ? snapIndex.snap(center, tolerance: tolerance, kinds: kinds, extra: inputPoints, gridStep: 0).point : center
+            var radius = rawRadius
+            if snapEnabled, gridStep > 0 { radius = max(gridStep, (rawRadius / gridStep).rounded() * gridStep) }
+            add(.circle(center: snapped, radius: radius), editable: true)
+            // Ein Kreis beendet den Linienzug
+            chainStart = nil
+            chainEnd = nil
+            notice = "Kreis erkannt – Durchmesser lässt sich eintippen, Rückgängig nimmt ihn zurück."
+        case .arc(let mid):
+            let from = chainEnd ?? start
+            // Der Bogen muss am Anfang des Strichs ansetzen
+            guard let first = samples.first, simd_distance(first, from) <= tolerance * 1.5,
+                  simd_distance(from, end) > 1e-6, circleThrough(from, mid, end) != nil else { return false }
+            if chainEnd == nil { chainStart = from }
+            add(.arc(start: from, mid: mid, end: end), editable: true)
+            if let first = chainStart, simd_distance(first, end) < 1e-6 {
+                chainStart = nil
+                chainEnd = nil
+            } else {
+                chainEnd = end
+            }
+            notice = "Bogen erkannt – der Linienzug geht am Ende weiter."
+        }
+        return true
+    }
+
+    /// Kritzeln: alle Elemente löschen, über die gekritzelt wurde.
+    private func eraseScribbled(_ samples: [Point2], tolerance: Double) {
+        let hit = StrokeGesture.scribbledEntities(samples, entities: entities, reach: tolerance * 0.5)
+        guard !hit.isEmpty else {
+            notice = "Kritzeln löscht Elemente – direkt über eine Linie oder einen Kreis kritzeln."
+            return
+        }
+        remember()
+        removeEntities(hit)
+        notice = hit.count == 1 ? "1 Element weggekritzelt (Rückgängig holt es zurück)."
+            : "\(hit.count) Elemente weggekritzelt (Rückgängig holt sie zurück)."
+        entitiesChanged()
+    }
+
+    /// Stift drücken bzw. doppeltippen beim Schweben: liegt ein Fangpunkt (Ende, Mitte, Zentrum, Schnittpunkt,
+    /// Hilfspunkt) unter dem Stift, wird er gemerkt. false = nichts in der Nähe.
+    func captureHovered(at p: Point2, tolerance: Double) -> Bool {
+        let kinds: Set<SnapKind> = [.endpoint, .midpoint, .center, .intersection]
+        guard snapIndex.snap(p, tolerance: tolerance * 1.5, kinds: kinds, extra: marks, gridStep: 0).kind != nil else {
+            return false
+        }
+        capturePoint(at: p, tolerance: tolerance)
+        return true
     }
 
     /// 1 s auf einem Punkt halten: Fangpunkt (Ende, Mitte, Zentrum, Schnittpunkt, Hilfspunkt) merken.
@@ -624,11 +730,15 @@ final class SketchController: ObservableObject {
             let middle = (a + b) / 2
             if simd_distance(a, b) > 1e-6, !marks.contains(where: { simd_distance($0, middle) < 1e-6 }) {
                 marks.append(middle)
+                // Mittellinie: Verbindung der beiden Punkte und Mittelsenkrechte
+                let half = simd_distance(a, b) * 0.6
+                let across = rightNormal(b - a)
+                guideLines.append((middle, [[a, b], [middle - across * half, middle + across * half]]))
             }
             capturedPoints = []
-            notice = nil
+            notice = "Mitte gesetzt (Dreieck, fangbar) – gestrichelt die Mittellinie."
         } else {
-            notice = "Punkt 1 gemerkt – zweiten Punkt 1 Sekunde halten."
+            notice = "Punkt 1 gemerkt – zweiten Punkt merken (Stift drücken oder 1 Sekunde halten)."
         }
         changed()
     }
@@ -1098,6 +1208,7 @@ final class SketchController: ObservableObject {
         construction = []
         selection = []
         marks = []
+        guideLines = []
         selectedMarks = []
         capturedPoints = []
         parallelLines = []
@@ -1163,8 +1274,22 @@ final class SketchController: ObservableObject {
     // MARK: Maße am Element
 
     /// Maße der laufenden Eingabe (nur Anzeige) bzw. des zuletzt gezeichneten Elements (änderbar).
+    /// Alle Maße mit eindeutiger Kennung: Maße beim Aufziehen haben sonst keine, und Breite und Höhe
+    /// eines Rechtecks teilten sich ein einziges Feld im Viewport (nur ein Maß sichtbar).
     var dimensions: [SketchDimension] {
+        rawDimensions.enumerated().map { pair -> SketchDimension in
+            guard pair.element.id.isEmpty else { return pair.element }
+            var copy = pair.element
+            copy.id = "live-\(pair.offset)"
+            return copy
+        }
+    }
+
+    private var rawDimensions: [SketchDimension] {
         if let start = dragStart, let current = dragCurrent {
+            if tool == .polyline, let shape = strokeShape {
+                return Self.dimensions(of: shape, editable: false)
+            }
             if tool == .polyline {
                 let from = chainEnd ?? start
                 // Wie in Fusion 360: beim Ziehen Länge und Winkel zur Waagrechten
@@ -1754,6 +1879,7 @@ final class SketchController: ObservableObject {
             let removed = Set(selectedMarks)
             marks = marks.indices.filter { !removed.contains($0) }.map { marks[$0] }
             selectedMarks = []
+            guideLines = guideLines.filter { guide in marks.contains { simd_distance($0, guide.mark) < 1e-9 } }
         }
         guard !selection.isEmpty else {
             notice = nil
@@ -2083,7 +2209,11 @@ final class SketchController: ObservableObject {
                 if tool == .circle || tool == .polygon { polylines.append([start, current]) }
             }
         case .polyline:
-            if let from = chainEnd ?? dragStart, let current { polylines.append([from, current]) }
+            if let shape = strokeShape, dragStart != nil {
+                polylines += shape.drawing
+            } else if let from = chainEnd ?? dragStart, let current {
+                polylines.append([from, current])
+            }
         case .arc:
             if let chord = arcChord {
                 if let current, circleThrough(chord.start, current, chord.end) != nil {

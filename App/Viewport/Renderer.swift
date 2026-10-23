@@ -212,8 +212,12 @@ final class Renderer: NSObject, MTKViewDelegate {
         selectionBuffer = nil
         selectionCount = 0
 
-        if !hasFramedOnce, let bounds = mesh.bounds {
-            camera.frame(min: bounds.min, max: bounds.max)
+        // Nur beim Öffnen des Projekts einpassen. War es leer, wurde früher beim ersten Extrudieren
+        // auf den neuen Körper gezoomt – das stört; die Ansicht bleibt jetzt, wie sie ist.
+        if !hasFramedOnce {
+            if let bounds = mesh.bounds {
+                camera.frame(min: bounds.min, max: bounds.max)
+            }
             hasFramedOnce = true
         }
     }

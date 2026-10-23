@@ -78,6 +78,8 @@ final class ViewportView: MTKView {
     private var sketchFillRevision = -1
     private var sketchFills: [[SIMD3<Float>]] = []
     private var needsSync = true
+    /// Letzte Position des schwebenden Stifts (für Drücken/Doppeltippen ohne eigene Position)
+    private var lastHoverLocation: CGPoint?
     /// Rahmenauswahl: Berührung, Startpunkt und gezeichneter Rahmen
     private var boxTouch: UITouch?
     private var boxStart: CGPoint = .zero
@@ -371,6 +373,11 @@ final class ViewportView: MTKView {
                 if !chosen.isEmpty {
                     groups.append(LineGroup(polylines: chosen.map { $0.map(world) }, color: Self.selectionOrange, width: 2.4))
                 }
+            }
+            // Mittellinien gemerkter Punktpaare (Verbindung und Mittelsenkrechte), gestrichelt
+            if !sketch.guideLines.isEmpty {
+                let guides = sketch.guideLines.flatMap { $0.lines }.flatMap { dashed($0, dash: 4 * perPoint) }
+                groups.append(LineGroup(polylines: guides.map { $0.map(world) }, color: Self.helperOrange, width: 1.3))
             }
             // Gleicher Winkel wie eine vorhandene Linie: diese leuchtet grün
             if !sketch.parallelLines.isEmpty {
@@ -1194,13 +1201,27 @@ final class ViewportView: MTKView {
         guard let sketch else { return }
         switch gesture.state {
         case .began, .changed:
+            lastHoverLocation = gesture.location(in: self)
             guard sketch.isActive, !sketch.isChoosingPlane, sketchTouch == nil,
                   let point = sketchPoint(at: gesture.location(in: self)) else { return }
             sketch.hover(at: point, tolerance: snapTolerance)
         default:
+            lastHoverLocation = nil
             sketch.endHover()
         }
         refresh()
+    }
+
+    /// Stift drücken bzw. doppeltippen: Schwebt der Stift im Skizzenmodus über einem Fangpunkt, wird er gemerkt
+    /// (zwei gemerkte Punkte ergeben Mitte und Mittellinie). Sonst öffnet sich das Werkzeugrad.
+    fileprivate func pencilAction(at location: CGPoint?) {
+        let spot = location ?? lastHoverLocation
+        if let sketch, sketch.isActive, !sketch.isChoosingPlane, let spot,
+           let point = sketchPoint(at: spot), sketch.captureHovered(at: point, tolerance: snapTolerance) {
+            refresh()
+            return
+        }
+        showQuickTools(at: location)
     }
 
     /// Werkzeugrad an der Stiftspitze (bzw. in der Mitte, wenn der Stift nicht schwebt).
@@ -1276,19 +1297,19 @@ extension ViewportView: UIPencilInteractionDelegate {
     @available(iOS 17.5, *)
     func pencilInteraction(_ interaction: UIPencilInteraction, didReceiveSqueeze squeeze: UIPencilInteraction.Squeeze) {
         guard squeeze.phase == .ended, UIPencilInteraction.preferredSqueezeAction != .ignore else { return }
-        showQuickTools(at: squeeze.hoverPose?.location)
+        pencilAction(at: squeeze.hoverPose?.location)
     }
 
     @available(iOS 17.5, *)
     func pencilInteraction(_ interaction: UIPencilInteraction, didReceiveTap tap: UIPencilInteraction.Tap) {
         guard UIPencilInteraction.preferredTapAction != .ignore else { return }
-        showQuickTools(at: tap.hoverPose?.location)
+        pencilAction(at: tap.hoverPose?.location)
     }
 
     /// Ältere Systeme: Doppeltippen auf den Apple Pencil (2. Gen.).
     func pencilInteractionDidTap(_ interaction: UIPencilInteraction) {
         guard UIPencilInteraction.preferredTapAction != .ignore else { return }
-        showQuickTools(at: nil)
+        pencilAction(at: nil)
     }
 }
 

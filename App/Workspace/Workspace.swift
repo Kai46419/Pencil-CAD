@@ -950,9 +950,11 @@ final class Workspace: ObservableObject {
             if !sketch.selection.isEmpty {
                 return "\(sketch.selection.count) gewählt · Ecke oder Kante ziehen ändert die Größe · rechts Einschränkung wählen"
             }
-            return "Element antippen zum Wählen · Ecke/Ende ziehen ändert die Größe · Linie ziehen verschiebt"
+            return "Antippen wählt · Ecke/Ende ziehen ändert die Größe · über einem Punkt Stift drücken merkt ihn (zwei → Mitte)"
         case .polyline where sketch.hasOpenChain:
-            return "Nächsten Punkt setzen · zurück zum Start schließt"
+            return "Nächsten Punkt setzen · rund ziehen ergibt einen Bogen · zurück zum Start schließt"
+        case .polyline:
+            return "Ziehen: Linie · rund ziehen: Kreis oder Bogen · Kritzeln über Elemente löscht sie"
         case .arc:
             return sketch.isWaitingForArcBulge ? "Wölbung ziehen" : "Von einem Ende zum anderen ziehen"
         case .spline where sketch.hasOpenSpline:
@@ -982,7 +984,7 @@ final class Workspace: ObservableObject {
         if !sketch.selection.isEmpty {
             return "\(sketch.selection.count) gewählt · rechts eine Einschränkung antippen"
         }
-        if sketch.hasProfile { return "„Fertig“ übernimmt die Skizze – danach Bereich antippen und extrudieren" }
+        if sketch.hasProfile { return "„Fertig“ übernimmt die Skizze · Kritzeln über Elemente löscht sie" }
         return "Zeichnen auf \(sketch.plane.isOnFace ? "der Fläche" : "der Ebene „\(sketch.plane.name)“")"
     }
 
