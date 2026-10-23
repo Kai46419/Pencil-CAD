@@ -642,7 +642,7 @@ final class SketchController: ObservableObject {
         // letzten (zittrigen) Punkt knapp scheitert – vorher wurde trotz Halbkreis-Vorschau eine Gerade daraus
         let previewShape = strokeShape
         // Angezeigter tangentialer Bogen: genau dieser wird übernommen (nicht neu berechnet)
-        let shownArc = tool == .polyline && arcActive ? previewed.flatMap { tangentArc(to: $0) } : nil
+        let shownArc = tool == .polyline && arcActive ? previewed.flatMap { arcPreview(to: $0) } : nil
         circleInference = nil
         let arcStroke = arcActive
         arcLatched = false
@@ -695,11 +695,11 @@ final class SketchController: ObservableObject {
         case .polyline:
             // Finger aufgelegt: tangentialer Bogen am Ende des Linienzugs
             if arcStroke {
-                if let arc = shownArc ?? tangentArc(to: end, from: start) {
+                if let arc = shownArc ?? arcPreview(to: end, origin: start, samples: samples) {
                     commitTangentArc(arc)
                     break
                 }
-                notice = "Kein Bogen möglich: Das Ende liegt auf der Verlängerung der Linie – Gerade gezeichnet."
+                notice = "Kein Bogen möglich: Der Strich ist gerade – Gerade gezeichnet."
             }
             // Rund gezogen: Kreis bzw. Bogen statt Linie
             if !endShapeStroke(samples, start: start, end: end, tolerance: tolerance, preview: previewShape) {
@@ -1031,8 +1031,36 @@ final class SketchController: ObservableObject {
         return (.arc(start: start, mid: mid, end: end), anchor.entity)
     }
 
+    /// Bogen des Bogen-Strichs (Finger aufgelegt): tangential, wenn möglich. Liegt das Ende auf der
+    /// Verlängerung der Tangente (dort gibt es keinen tangentialen Bogen, z. B. beim Schließen zum
+    /// Linienanfang), folgt der Bogen dem gezogenen Strich: Anfang, weitester Punkt, Ende.
+    /// So wird ein gezeichneter Halbkreis immer ein Halbkreis. previous = Element, an das er tangential ansetzt.
+    private func arcPreview(to end: Point2, origin: Point2? = nil, samples: [Point2]? = nil)
+        -> (entity: SketchEntity, previous: Int?)? {
+        if let arc = tangentArc(to: end, from: origin) { return (arc.entity, arc.previous) }
+        guard let from = origin ?? dragStart else { return nil }
+        let points = samples ?? strokeSamples
+        let chord = end - from
+        let length = simd_length(chord)
+        guard length > 1e-6 else { return nil }
+        let normal = Point2(-chord.y, chord.x) / length
+        guard let far = points.max(by: { abs(simd_dot($0 - from, normal)) < abs(simd_dot($1 - from, normal)) }),
+              abs(simd_dot(far - from, normal)) > max(length * 0.05, strokeTolerance * 0.5),
+              circleThrough(from, far, end) != nil else { return nil }
+        // Durch den weitesten Punkt, aber als Mitte des Bogens (gleich weit von beiden Enden)
+        guard let circle = circleThrough(from, far, end) else { return nil }
+        let side = simd_dot(far - from, normal) > 0 ? 1.0 : -1.0
+        let middle = (from + end) / 2
+        let toMiddle = middle - circle.center
+        var mid = circle.center + (simd_length(toMiddle) > 1e-9 ? simd_normalize(toMiddle) : normal * side) * circle.radius
+        // Die Bogenmitte muss auf der Seite des gezogenen Strichs liegen
+        if simd_dot(mid - from, normal) * side < 0 { mid = circle.center * 2 - mid }
+        guard circleThrough(from, mid, end) != nil else { return nil }
+        return (.arc(start: from, mid: mid, end: end), nil)
+    }
+
     /// Tangentialen Bogen übernehmen; der Linienzug geht an seinem Ende weiter.
-    private func commitTangentArc(_ arc: (entity: SketchEntity, previous: Int)) {
+    private func commitTangentArc(_ arc: (entity: SketchEntity, previous: Int?)) {
         guard case .arc(_, _, let end) = arc.entity else { return }
         // Bogen an einem anderen Ende angesetzt: dort beginnt ein neuer Linienzug
         if case .arc(let arcStart, _, _) = arc.entity, chainEnd.map({ simd_distance($0, arcStart) > 1e-6 }) ?? true {
@@ -1040,11 +1068,13 @@ final class SketchController: ObservableObject {
         }
         add(arc.entity, editable: true)
         let index = entities.count - 1
-        let variant = SketchConstraint.Variant.tangent(SketchCurveRef(entity: arc.previous, index: 0),
-                                                       SketchCurveRef(entity: index, index: 0), outside: true)
-        constraints.append(SketchConstraint(variant: variant))
-        if ConstraintSolver.solve(entities, constraints: constraints, locked: Set(entities.indices)) == nil {
-            constraints.removeLast()
+        if let previous = arc.previous {
+            let variant = SketchConstraint.Variant.tangent(SketchCurveRef(entity: previous, index: 0),
+                                                           SketchCurveRef(entity: index, index: 0), outside: true)
+            constraints.append(SketchConstraint(variant: variant))
+            if ConstraintSolver.solve(entities, constraints: constraints, locked: Set(entities.indices)) == nil {
+                constraints.removeLast()
+            }
         }
         if let first = chainStart, simd_distance(first, end) < 1e-6 {
             chainStart = nil
@@ -1769,7 +1799,7 @@ final class SketchController: ObservableObject {
 
     private var rawDimensions: [SketchDimension] {
         if let start = dragStart, let current = dragCurrent {
-            if tool == .polyline, arcActive, let arc = tangentArc(to: current) {
+            if tool == .polyline, arcActive, let arc = arcPreview(to: current) {
                 return Self.dimensions(of: arc.entity, editable: false)
             }
             if tool == .polyline, let shape = strokeShape {
@@ -2851,7 +2881,7 @@ final class SketchController: ObservableObject {
                 if tool == .circle || tool == .polygon { polylines.append([start, current]) }
             }
         case .polyline:
-            if arcActive, let current, let arc = tangentArc(to: current) {
+            if arcActive, let current, let arc = arcPreview(to: current) {
                 polylines += arc.entity.drawing
             } else if let shape = strokeShape, dragStart != nil {
                 polylines += shape.drawing
