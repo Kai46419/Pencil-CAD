@@ -197,6 +197,9 @@ final class Workspace: ObservableObject {
     @Published var showsOrigin = true
     /// Browser „Ebenen“ links (wie in Fusion 360)
     @Published var showsLayers = false
+    /// Rahmenauswahl: auch der Finger zieht einen Rahmen auf (Drehen mit einem Finger ist dann aus).
+    /// Mit dem Stift geht der Rahmen immer: ins Leere ziehen.
+    @Published var boxSelects = false
 
     /// Liefert ein Bild der Ansicht (vom Viewport gesetzt).
     var snapshot: ((CGSize) -> UIImage?)?
@@ -320,6 +323,7 @@ final class Workspace: ObservableObject {
             endSketch()
         }
         let previousBody = model.selectedBody
+        let previousBodies = model.selectedBodies
         let previousFace = model.selection
         let previousRegions = model.selectedRegions
         model.cancelPreview()
@@ -334,7 +338,11 @@ final class Workspace: ObservableObject {
             return
         case .pattern, .scale, .align, .split:
             model.resetSelection()
-            if let previousBody { model.toggleBody(previousBody, exclusive: true) }
+            if previousBodies.count > 1, newTool != .split {
+                model.selectBodies(previousBodies)
+            } else if let previousBody {
+                model.toggleBody(previousBody, exclusive: true)
+            }
             updatePreview()
             return
         case .revolve, .sweep, .loft, .scaleSketch:
@@ -385,7 +393,9 @@ final class Workspace: ObservableObject {
             updateInsertPreview()
         case .boolean, .move, .mirror, .color:
             model.resetSelection()
-            if let previousBody {
+            if previousBodies.count > 1, newTool != .move {
+                model.selectBodies(previousBodies)
+            } else if let previousBody {
                 model.toggleBody(previousBody, exclusive: true)
             }
             if newTool == .mirror {
@@ -551,7 +561,10 @@ final class Workspace: ObservableObject {
         case .canvas:
             break
         case .select:
-            if let edge {
+            if !model.selectedBodies.isEmpty, let body = face?.body ?? edge?.body {
+                // Körperauswahl (z. B. per Rahmen): Antippen nimmt Körper hinzu bzw. heraus
+                model.toggleBody(body)
+            } else if let edge {
                 model.toggleEdge(edge)
             } else if let region {
                 model.toggleRegion(region)
@@ -622,6 +635,69 @@ final class Workspace: ObservableObject {
         let normal = section.flipped ? -plane.normal : plane.normal
         let origin = plane.origin + plane.normal * section.offset
         return (normal, simd_dot(normal, origin))
+    }
+
+    // MARK: Rahmenauswahl und Vereinigen
+
+    /// Werkzeuge, in denen ein Rahmen Körper wählt.
+    var acceptsBoxSelection: Bool {
+        !sketch.isActive && (tool == .select || tool.collectsBodies)
+    }
+
+    /// Ergebnis eines Auswahlrahmens.
+    func boxSelected(_ bodies: [Int], crossing: Bool) {
+        guard acceptsBoxSelection else { return }
+        guard !bodies.isEmpty else {
+            model.resetSelection()
+            model.message = crossing ? "Kein Körper berührt den Rahmen."
+                : "Kein Körper ganz im Rahmen. Von rechts nach links ziehen wählt auch angeschnittene Körper."
+            return
+        }
+        model.selectBodies(bodies)
+        model.message = nil
+        updatePreview()
+        updateMirrorPreview()
+    }
+
+    /// Alle gewählten Körper zu einem verschmelzen (boolesche Vereinigung).
+    func mergeSelectedBodies() {
+        let chosen = model.selectedBodies
+        guard let target = chosen.first, chosen.count > 1 else {
+            model.message = "Mindestens zwei Körper wählen: Rahmen aufziehen oder bei gewähltem Körper weitere antippen."
+            return
+        }
+        let before = model.bodies.count
+        model.applyBoolean(.union, target: target, tools: Array(chosen.dropFirst()))
+        guard model.bodies.count < before else { return }
+        let merged = target - chosen.dropFirst().filter { $0 < target }.count
+        model.resetSelection()
+        model.selectBodies([merged])
+        model.message = "\(chosen.count) Körper zu einem vereinigt."
+    }
+
+    /// „Achse senkrecht“ aus der Kontextleiste: Achse sofort durch die Flächenmitte entlang der Normale.
+    func createNormalAxis() {
+        guard let face = model.selection, let plane = model.plane(of: face) else {
+            model.message = "Für „Achse senkrecht“ eine ebene Fläche antippen."
+            return
+        }
+        let center = model.mesh.centroid(of: face).map { SIMD3<Double>($0) } ?? plane.anchor
+        model.addConstruction(.axis, origin: center, direction: plane.normal)
+        let name = model.constructions.last?.name ?? "Achse"
+        model.message = "\(name) erstellt (senkrecht durch die Flächenmitte) – zu finden unter Ebenen › Konstruktion."
+    }
+
+    /// Achse, die „Fertig“ im Konstruieren-Werkzeug erstellen würde (Vorschau im Viewport).
+    var pendingAxis: (origin: SIMD3<Double>, direction: SIMD3<Double>)? {
+        guard tool == .construct(.axis) else { return nil }
+        if let custom = constructCustomAxis { return (custom.origin, custom.direction) }
+        return model.resolve(constructAxis)
+    }
+
+    /// Ebene, die „Fertig“ im Konstruieren-Werkzeug erstellen würde (Vorschau im Viewport).
+    var pendingPlane: (origin: SIMD3<Double>, normal: SIMD3<Double>)? {
+        guard tool == .construct(.plane), let reference = model.resolve(constructReference) else { return nil }
+        return (reference.origin + reference.normal * constructOffset, reference.normal)
     }
 
     private func setCustomAxis(normalOf face: FaceRef) {
@@ -771,11 +847,14 @@ final class Workspace: ObservableObject {
         }
         switch tool {
         case .select:
+            if model.selectedBodies.count > 1 { return "„Vereinigen“ verschmilzt die Körper · Antippen nimmt hinzu/heraus" }
+            if !model.selectedBodies.isEmpty { return "Weitere Körper antippen oder Rahmen aufziehen" }
             if !model.selectedEdges.isEmpty { return "Pfeil ziehen · weitere Kanten antippen" }
             if !model.selectedRegions.isEmpty { return "Pfeil ziehen · weitere Bereiche antippen" }
             if model.selection != nil {
                 return model.faceHandle != nil ? "Pfeil ziehen zum Extrudieren" : "Fläche gewählt"
             }
+            if boxSelects { return "Rahmen aufziehen: nach rechts ganz umschlossene, nach links auch angeschnittene Körper" }
             return nil
         case .insert: return "Maße eingeben, dann „Fertig“"
         case .boolean(let kind):
@@ -811,6 +890,57 @@ final class Workspace: ObservableObject {
         case .scaleSketch: return model.selectedRegions.isEmpty ? "Skizzenbereich antippen" : "Faktor eingeben"
         case .offsetEdges: return "Ebene Fläche antippen"
         }
+    }
+
+    /// Erklärung zur aktuellen Auswahl: was es ist und was man damit machen kann.
+    var selectionHelp: (title: String, lines: [String])? {
+        guard !sketch.isActive, tool == .select else { return nil }
+        if !model.selectedBodies.isEmpty {
+            let count = model.selectedBodies.count
+            var lines = [
+                "Ganze Körper sind gewählt (blau). Antippen eines Körpers nimmt ihn hinzu oder heraus, ins Leere tippen hebt die Auswahl auf.",
+                "Rahmen: mit dem Stift ins Leere ziehen (oder „Rahmenauswahl“ rechts für den Finger). Nach rechts gezogen zählen nur ganz umschlossene Körper, nach links auch angeschnittene.",
+                "Muster, Skalieren, Spiegeln, Farbe und Löschen wirken auf alle gewählten Körper; Verschieben/Rotieren auf den ersten.",
+            ]
+            if count > 1 {
+                lines.insert("„Vereinigen“ verschmilzt alle gewählten Körper zu einem einzigen Körper (Name und Farbe vom ersten).", at: 0)
+            }
+            return (count == 1 ? "1 Körper gewählt" : "\(count) Körper gewählt", lines)
+        }
+        if !model.selectedEdges.isEmpty {
+            let count = model.selectedEdges.count
+            return (count == 1 ? "Kante gewählt" : "\(count) Kanten gewählt", [
+                "Am Pfeil ziehen rundet die Kanten ab. Unten „Fase“ wählen, um sie stattdessen schräg abzuschneiden.",
+                "Weitere Kanten desselben Körpers antippen, um sie gemeinsam zu bearbeiten; nochmal antippen nimmt sie heraus.",
+                "Radius bzw. Breite lässt sich unten auch genau eintippen. Übernehmen mit „Fertig“.",
+            ])
+        }
+        if !model.selectedRegions.isEmpty {
+            var lines = [
+                "Ein geschlossener Skizzenbereich (Profil). Am Pfeil ziehen extrudiert ihn zu einem Körper.",
+                "Unten: neuer Körper, mit vorhandenem vereinigen oder abziehen; Richtung (eine Seite, symmetrisch, zwei Seiten) und Verjüngung.",
+                "Weitere Bereiche antippen extrudiert sie gemeinsam. „Achsendrehung“ dreht den Bereich um eine Linie.",
+            ]
+            if model.selectedRegionsHaveHoles {
+                lines.insert("Der Bereich hat innere Konturen (z. B. einen Kreis). Unten wählen: „Innen aussparen“ lässt dort ein Loch, „Durchgehend“ extrudiert die ganze Außenkontur.", at: 1)
+            }
+            return (model.selectedRegions.count == 1 ? "Skizzenbereich gewählt" : "\(model.selectedRegions.count) Skizzenbereiche gewählt", lines)
+        }
+        if model.selection != nil {
+            if model.faceHandle != nil {
+                return ("Ebene Fläche gewählt", [
+                    "Am Pfeil ziehen: nach außen wird der Körper verlängert, nach innen wird Material abgetragen. Abstand unten auch eintippen.",
+                    "Skizze: direkt auf dieser Fläche zeichnen.",
+                    "Achse senkrecht: erstellt sofort eine Hilfsachse durch die Flächenmitte, senkrecht zur Fläche (z. B. für Drehungen und Muster).",
+                    "Ebene Versatz: Hilfsebene parallel zur Fläche in einem Abstand. Kante versetzen: Flächenrand als Skizze nach innen oder außen versetzt.",
+                ])
+            }
+            return ("Gekrümmte Fläche gewählt", [
+                "Gekrümmte Flächen lassen sich nicht direkt extrudieren oder als Skizzenebene nutzen.",
+                "Für Rundungen und Fasen die Kanten antippen. Verschieben/Rotieren bewegt den ganzen Körper.",
+            ])
+        }
+        return nil
     }
 
     private var sketchHint: String {

@@ -250,7 +250,7 @@ struct ToolRail: View {
     private var contextEntries: [RailEntry] {
         let hasRegions = !model.selectedRegions.isEmpty
         let face = model.selection
-        let planarFace = face.flatMap { model.plane(of: $0) } != nil
+        let planarFace = face != nil && model.faceHandle != nil
         var entries = [
             RailEntry(id: "context.clear", title: "Alle abwählen", subtitle: "(\(selectionSummary))",
                       systemImage: "xmark.circle") {
@@ -279,6 +279,12 @@ struct ToolRail: View {
                 workspace.activate(.pattern(kind))
             }
         }
+        if model.selectedBodies.count > 1 {
+            entries.insert(RailEntry(id: "context.merge", title: "Vereinigen", subtitle: "\(model.selectedBodies.count) → 1",
+                                     systemImage: "plus.square.on.square", isActive: true) {
+                workspace.mergeSelectedBodies()
+            }, at: 1)
+        }
         if hasRegions || planarFace {
             entries.append(RailEntry(id: "context.extrude", title: "Extrudieren", subtitle: "Pfeil ziehen",
                                      systemImage: ToolGroup.extrude.systemImage, isActive: true) {
@@ -287,7 +293,7 @@ struct ToolRail: View {
         }
         if planarFace {
             entries.append(RailEntry(id: "context.axis", title: "Achse senkrecht", systemImage: "line.diagonal.arrow") {
-                workspace.activate(.construct(.axis))
+                workspace.createNormalAxis()
             })
             entries.append(RailEntry(id: "context.plane", title: "Ebene Versatz", systemImage: "square.dashed") {
                 workspace.activate(.construct(.plane))

@@ -78,6 +78,10 @@ final class ViewportView: MTKView {
     private var sketchFillRevision = -1
     private var sketchFills: [[SIMD3<Float>]] = []
     private var needsSync = true
+    /// Rahmenauswahl: Berührung, Startpunkt und gezeichneter Rahmen
+    private var boxTouch: UITouch?
+    private var boxStart: CGPoint = .zero
+    private let boxView = SelectionBoxView()
 
     private struct HandleDragState {
         let touch: UITouch
@@ -149,6 +153,8 @@ final class ViewportView: MTKView {
         valueLabel.layer.masksToBounds = true
         valueLabel.isHidden = true
         addSubview(valueLabel)
+        boxView.isHidden = true
+        addSubview(boxView)
     }
 
     // MARK: Kamera
@@ -212,7 +218,8 @@ final class ViewportView: MTKView {
         let choosing = sketch.isActive && sketch.isChoosingPlane
         let sketching = sketch.isActive && !choosing
         let fingerSketching = sketching && sketch.fingerDraws
-        orbitGesture?.isEnabled = !fingerSketching
+        // Rahmenauswahl: ein Finger zieht den Rahmen statt zu drehen
+        orbitGesture?.isEnabled = !fingerSketching && !(workspace.boxSelects && workspace.acceptsBoxSelection)
         tapGesture?.isEnabled = !fingerSketching
         tapGesture?.allowedTouchTypes = sketching ? fingersOnly : fingersAndPencil
         holdGesture?.isEnabled = sketching
@@ -430,6 +437,19 @@ final class ViewportView: MTKView {
             groups.append(LineGroup(polylines: axes, color: Self.helperOrange, width: 1.6, dots: points,
                                     dotRadius: 4.5, onTop: !sketching))
         }
+        // Vorschau im Konstruieren-Werkzeug: was „Fertig“ erstellt (blau)
+        guard let workspace, !sketching else { return }
+        if let axis = workspace.pendingAxis, simd_length(axis.direction) > 1e-9 {
+            let direction = simd_normalize(axis.direction)
+            let a = SIMD3<Float>(axis.origin - direction * reach)
+            let b = SIMD3<Float>(axis.origin + direction * reach)
+            groups.append(LineGroup(polylines: dashed([a, b], dash: Float(6 * perPoint)), color: Self.previewBlue,
+                                    width: 2.2, dots: [SIMD3<Float>(axis.origin)], dotRadius: 4.5, onTop: true))
+        }
+        if workspace.tool == .construct(.point) {
+            groups.append(LineGroup(polylines: [], color: Self.previewBlue, width: 1,
+                                    dots: [SIMD3<Float>(workspace.constructPoint)], dotRadius: 6, onTop: true))
+        }
     }
 
     /// Gestrichelter Linienzug (lokal) als einzelne Striche entlang der Länge.
@@ -637,6 +657,14 @@ final class ViewportView: MTKView {
                 labels.append((item.name, SIMD3<Float>(item.origin + (frame.u + frame.v) * Double(half) * 0.5)))
             }
         }
+        // Vorschau der Konstruktionsebene, die „Fertig“ erstellt
+        if !sketch.isActive, let pending = workspace?.pendingPlane {
+            let frame = SketchPlane(point: pending.origin, normal: pending.normal, isOnFace: false)
+            graphics.append(PlaneGraphic(center: SIMD3<Float>(pending.origin), u: SIMD3<Float>(frame.u),
+                                         v: SIMD3<Float>(frame.v), halfSize: half * 0.6,
+                                         color: SIMD3(0.2, 0.5, 0.98)))
+            labels.append(("Neue Ebene", SIMD3<Float>(pending.origin + (frame.u + frame.v) * Double(half) * 0.5)))
+        }
         // Beim Skizzieren keine Scheibe: die ganze Ebene ist Zeichenfläche
         renderer.planes = graphics
 
@@ -825,6 +853,55 @@ final class ViewportView: MTKView {
 
     // MARK: Skizze
 
+    // MARK: Rahmenauswahl
+
+    /// Ab dieser Größe (Punkte) ist ein Zug ein Rahmen, darunter ein Tippen.
+    private static let boxMinimum: CGFloat = 8
+
+    /// Stift immer, Finger nur mit eingeschalteter „Rahmenauswahl“ (Modellmodus, Auswahl bzw. Körperwerkzeuge).
+    private func acceptsForBox(_ touch: UITouch) -> Bool {
+        guard let workspace, workspace.acceptsBoxSelection else { return false }
+        return touch.type == .pencil || (workspace.boxSelects && touch.type == .direct)
+    }
+
+    private func boxRect(to point: CGPoint) -> CGRect {
+        CGRect(x: min(boxStart.x, point.x), y: min(boxStart.y, point.y),
+               width: abs(point.x - boxStart.x), height: abs(point.y - boxStart.y))
+    }
+
+    /// Körper im Rahmen wie in Fusion 360: von links nach rechts nur ganz umschlossene,
+    /// von rechts nach links (crossing) auch angeschnittene.
+    private func bodies(in rect: CGRect, crossing: Bool) -> [Int] {
+        guard let renderer, let model else { return [] }
+        let mesh = model.mesh
+        var vertexBody = [Int](repeating: -1, count: mesh.vertices.count)
+        for t in 0..<min(mesh.triangleCount, mesh.triangleFaces.count) {
+            let body = mesh.triangleFaces[t].body
+            for k in 0..<3 {
+                let index = Int(mesh.indices[t * 3 + k])
+                if index < vertexBody.count { vertexBody[index] = body }
+            }
+        }
+        var allInside: [Int: Bool] = [:]
+        var touched = Set<Int>()
+        for (index, vertex) in mesh.vertices.enumerated() {
+            let body = vertexBody[index]
+            guard body >= 0 else { continue }
+            let isInside = renderer.camera.project(vertex.position, viewSize: bounds.size).map { rect.contains($0) } ?? false
+            if isInside { touched.insert(body) }
+            allInside[body] = (allInside[body] ?? true) && isInside
+        }
+        guard crossing else {
+            return allInside.filter { $0.value }.map { $0.key }.sorted()
+        }
+        // Rahmen mitten auf einem großen Körper (keine Ecke darin): der Körper unter der Rahmenmitte zählt mit
+        if let ray = renderer.camera.ray(through: CGPoint(x: rect.midX, y: rect.midY), viewSize: bounds.size),
+           let hit = model.pick(origin: ray.origin, direction: ray.direction) {
+            touched.insert(hit.face.body)
+        }
+        return touched.sorted()
+    }
+
     private func acceptsForSketch(_ touch: UITouch) -> Bool {
         guard let sketch, sketch.isActive, !sketch.isChoosingPlane else { return false }
         return touch.type == .pencil || (sketch.fingerDraws && touch.type == .direct)
@@ -860,6 +937,11 @@ final class ViewportView: MTKView {
                                          step: dragStep(at: handle.base))
             return
         }
+        if boxTouch == nil, let touch = touches.first(where: acceptsForBox) {
+            boxTouch = touch
+            boxStart = touch.location(in: self)
+            return
+        }
         guard sketchTouch == nil, let touch = touches.first(where: acceptsForSketch),
               let point = sketchPoint(for: touch) else {
             super.touchesBegan(touches, with: event)
@@ -885,6 +967,13 @@ final class ViewportView: MTKView {
             }
             return
         }
+        if let touch = boxTouch, touches.contains(touch) {
+            let rect = boxRect(to: touch.location(in: self))
+            if max(rect.width, rect.height) >= Self.boxMinimum {
+                boxView.show(rect, crossing: touch.location(in: self).x < boxStart.x)
+            }
+            return
+        }
         guard let touch = sketchTouch, touches.contains(touch) else {
             super.touchesMoved(touches, with: event)
             return
@@ -898,6 +987,19 @@ final class ViewportView: MTKView {
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         if let drag = handleDrag, touches.contains(drag.touch) {
             handleDrag = nil
+            refresh()
+            return
+        }
+        if let touch = boxTouch, touches.contains(touch) {
+            boxTouch = nil
+            boxView.isHidden = true
+            let end = touch.location(in: self)
+            let rect = boxRect(to: end)
+            // Kurzer Zug bleibt ein Tippen (das übernimmt die Tipp-Geste)
+            if max(rect.width, rect.height) >= Self.boxMinimum {
+                let crossing = end.x < boxStart.x
+                workspace?.boxSelected(bodies(in: rect, crossing: crossing), crossing: crossing)
+            }
             refresh()
             return
         }
@@ -919,6 +1021,11 @@ final class ViewportView: MTKView {
         if let drag = handleDrag, touches.contains(drag.touch) {
             handleDrag = nil
             refresh()
+            return
+        }
+        if let touch = boxTouch, touches.contains(touch) {
+            boxTouch = nil
+            boxView.isHidden = true
             return
         }
         guard let touch = sketchTouch, touches.contains(touch) else {
@@ -1182,6 +1289,40 @@ extension ViewportView: UIPencilInteractionDelegate {
     func pencilInteractionDidTap(_ interaction: UIPencilInteraction) {
         guard UIPencilInteraction.preferredTapAction != .ignore else { return }
         showQuickTools(at: nil)
+    }
+}
+
+/// Auswahlrahmen: durchgezogen blau (nach rechts, nur ganz umschlossene Körper),
+/// gestrichelt grün (nach links, auch angeschnittene).
+final class SelectionBoxView: UIView {
+    private let outline = CAShapeLayer()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        outline.lineWidth = 1.5
+        layer.addSublayer(outline)
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        isUserInteractionEnabled = false
+        outline.lineWidth = 1.5
+        layer.addSublayer(outline)
+    }
+
+    func show(_ rect: CGRect, crossing: Bool) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        frame = rect
+        outline.frame = bounds
+        outline.path = UIBezierPath(rect: bounds).cgPath
+        let tint = crossing ? UIColor.systemGreen : UIColor.systemBlue
+        outline.strokeColor = tint.cgColor
+        outline.fillColor = tint.withAlphaComponent(0.12).cgColor
+        outline.lineDashPattern = crossing ? [6, 4] : nil
+        CATransaction.commit()
+        isHidden = false
     }
 }
 

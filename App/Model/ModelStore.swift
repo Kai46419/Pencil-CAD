@@ -253,6 +253,20 @@ final class ModelStore: ObservableObject {
             if regionValue != 0, regionDirection == .twoSides { setRegionValue(regionValue) }
         }
     }
+    /// Innere Konturen (z. B. ein Kreis im Rechteck): false = aussparen (Loch bleibt), true = durchgehend
+    /// über die ganze Außenkontur extrudieren.
+    @Published var regionThroughHoles = false {
+        didSet {
+            if regionValue != 0 { setRegionValue(regionValue) }
+        }
+    }
+    /// Ob ein gewählter Bereich innere Konturen hat (dann gibt es die Wahl „Aussparen/Durchgehend“).
+    var selectedRegionsHaveHoles: Bool {
+        selectedRegions.contains { ref in
+            sketches.indices.contains(ref.sketch) && sketches[ref.sketch].regions.indices.contains(ref.region)
+                && !sketches[ref.sketch].regions[ref.region].holes.isEmpty
+        }
+    }
     /// Verjüngungswinkel in Grad (0 = gerade Wände)
     @Published var regionTaper: Double = 0 {
         didSet {
@@ -343,6 +357,18 @@ final class ModelStore: ObservableObject {
         if let index = chosen.firstIndex(of: body) {
             chosen.remove(at: index)
         } else if bodies.indices.contains(body) {
+            chosen.append(body)
+        }
+        clearSelectionState()
+        selectedBodies = chosen
+        refreshHighlight()
+    }
+
+    /// Mehrere Körper auf einmal wählen (Rahmenauswahl).
+    func selectBodies(_ list: [Int]) {
+        commitPreview()
+        var chosen: [Int] = []
+        for body in list where bodies.indices.contains(body) && !chosen.contains(body) {
             chosen.append(body)
         }
         clearSelectionState()
@@ -471,6 +497,37 @@ final class ModelStore: ObservableObject {
 
     private static let regionPreviewName = "Extrudieren"
 
+    /// „Durchgehend“: innere Konturen ignorieren und die Außenkontur voll extrudieren. Mitgewählte Bereiche,
+    /// die in einem solchen Loch liegen, entfallen, weil sie schon enthalten sind.
+    private static func filledRegions(_ regions: [SketchRegion]) -> [SketchRegion] {
+        let filled = regions.map { region in
+            SketchRegion(outer: region.outer, holes: [], polygon: region.polygon, area: abs(signedArea(region.polygon)))
+        }
+        return filled.indices.filter { index in
+            let polygon = filled[index].polygon
+            guard !polygon.isEmpty else { return false }
+            let probe = polygon.reduce(.zero, +) / Double(polygon.count)
+            return !filled.indices.contains { other in
+                other != index && filled[other].area > filled[index].area && Self.polygon(filled[other].polygon, contains: probe)
+            }
+        }.map { filled[$0] }
+    }
+
+    /// Punkt im Polygon (Strahlverfahren).
+    private static func polygon(_ polygon: [Point2], contains point: Point2) -> Bool {
+        var inside = false
+        var j = polygon.count - 1
+        for i in polygon.indices {
+            let a = polygon[i], b = polygon[j]
+            if (a.y > point.y) != (b.y > point.y),
+               point.x < (b.x - a.x) * (point.y - a.y) / (b.y - a.y) + a.x {
+                inside.toggle()
+            }
+            j = i
+        }
+        return inside
+    }
+
     /// Gewählte Skizzenbereiche um value mm entlang der Skizzennormale extrudieren (Vorschau).
     func setRegionValue(_ value: Double) {
         regionValue = value
@@ -481,7 +538,8 @@ final class ModelStore: ObservableObject {
             return
         }
         let sketch = sketches[first.sketch]
-        let regions = selectedRegions.compactMap { sketch.regions.indices.contains($0.region) ? sketch.regions[$0.region] : nil }
+        let chosen = selectedRegions.compactMap { sketch.regions.indices.contains($0.region) ? sketch.regions[$0.region] : nil }
+        let regions = regionThroughHoles ? Self.filledRegions(chosen) : chosen
         var mode = regionMode
         var distance = value
         // Auf einer Fläche ins Material gedrückt: abziehen

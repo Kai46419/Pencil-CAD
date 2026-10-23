@@ -71,6 +71,8 @@ struct ParameterCard: View {
                     regionCard
                 } else if model.selection != nil, model.faceHandle != nil {
                     faceCard
+                } else if !model.selectedBodies.isEmpty {
+                    bodiesCard
                 }
             case .insert(let primitive):
                 insertCard(primitive)
@@ -277,6 +279,15 @@ struct ParameterCard: View {
                 .pickerStyle(.menu)
                 .fixedSize()
                 .hoverTip("Richtung", "Eine Seite, symmetrisch (gleich weit nach beiden Seiten) oder zwei Seiten mit eigenem Abstand – wie in Fusion 360.")
+                if model.selectedRegionsHaveHoles {
+                    Picker("Innen", selection: $model.regionThroughHoles) {
+                        Text("Innen aussparen").tag(false)
+                        Text("Durchgehend").tag(true)
+                    }
+                    .pickerStyle(.menu)
+                    .fixedSize()
+                    .hoverTip("Innere Konturen", "Aussparen: ein Kreis im Rechteck bleibt ein Loch, extrudiert wird nur drum herum. Durchgehend: die ganze Außenkontur wird extrudiert, als wäre innen nichts.")
+                }
                 NumberField(title: model.regionDirection == .symmetric ? "Je Seite" : "Abstand",
                             value: model.regionValue) { model.setRegionValue($0) }
                 if model.regionDirection == .twoSides {
@@ -297,6 +308,23 @@ struct ParameterCard: View {
                 Label("Extrudieren", systemImage: "square.stack.3d.up")
                     .font(.callout.weight(.semibold))
                 NumberField(title: "Abstand", value: model.faceValue) { model.setFaceValue($0) }
+            }
+        }
+    }
+
+    /// Gewählte Körper (Rahmenauswahl oder Antippen): zu einem vereinigen.
+    private var bodiesCard: some View {
+        Card {
+            HStack(spacing: 16) {
+                Label(model.selectedBodies.count == 1 ? "1 Körper" : "\(model.selectedBodies.count) Körper",
+                      systemImage: "cube")
+                    .font(.callout.weight(.semibold))
+                Button("Vereinigen", systemImage: "plus.square.on.square") {
+                    workspace.mergeSelectedBodies()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.selectedBodies.count < 2)
+                .hoverTip("Vereinigen")
             }
         }
     }
@@ -730,7 +758,7 @@ extension ParameterCard {
                 case .axis:
                     if let custom = workspace.constructCustomAxis {
                         Text("Durch \(custom.name)")
-                        Button("Weltachse", systemImage: "xmark") { workspace.constructCustomAxis = nil }
+                        Button("Andere Achse", systemImage: "xmark") { workspace.constructCustomAxis = nil }
                     } else {
                         axisPicker("Achse", selection: $workspace.constructAxis)
                         Text("oder Kante/Fläche antippen")

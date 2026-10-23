@@ -203,7 +203,19 @@ enum ToolTips {
         "Konstruktion erstellen": "Macht die Auswahl zu Konstruktionsgeometrie (gestrichelte Hilfslinien, zählen nicht als Profil). Nochmal: zurück.",
         // Extrudieren
         "Neuer Körper": "Erzeugt einen eigenen, neuen Körper.",
-        "Vereinigen": "Verbindet das Ergebnis mit dem vorhandenen Körper.",
+        "Vereinigen": "Verschmilzt zu einem Körper: beim Extrudieren mit dem vorhandenen Körper, in der Auswahl alle gewählten Körper.",
+        // Kontextleiste (Auswahl)
+        "Alle abwählen": "Hebt die ganze Auswahl auf (wie Tippen ins Leere).",
+        "Verschieben/Rotieren": "Körper bzw. Skizze an den farbigen Achsenpfeilen verschieben oder Werte eintippen.",
+        "Achse senkrecht": "Erstellt sofort eine Hilfsachse durch die Mitte der gewählten Fläche, senkrecht zu ihr. Zu finden unter Ebenen › Konstruktion.",
+        "Ebene Versatz": "Hilfsebene parallel zur gewählten Fläche im eingestellten Abstand (blaue Vorschau), übernehmen mit „Fertig“.",
+        "Muster linear": "Gewählte Körper in einer Reihe vervielfältigen: Anzahl, Abstand und Richtung.",
+        "Muster kreisförmig": "Gewählte Körper rund um eine Achse vervielfältigen: Anzahl und Winkel.",
+        "Skizze skalieren": "Ganze Skizze um einen Faktor vergrößern oder verkleinern.",
+        "Achsendrehung": "Skizzenbereich um eine Linie oder Achse drehen (Drehkörper).",
+        "Isolieren": "Nur den gewählten Körper zeigen; nochmal tippen blendet alles wieder ein.",
+        "Messen": "Kantenlänge, Fläche, Volumen oder Abstand zweier Punkte anzeigen.",
+        "Rahmenauswahl": "Finger zieht einen Rahmen statt zu drehen. Nach rechts: nur ganz umschlossene Körper, nach links: auch angeschnittene. Mit dem Stift geht der Rahmen immer – einfach ins Leere ziehen.",
         "Abziehen": "Schneidet das Ergebnis aus vorhandenen Körpern heraus.",
     ]
 }

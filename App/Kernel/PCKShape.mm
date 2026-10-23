@@ -11,6 +11,7 @@
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepAlgoAPI_Common.hxx>
+#include <BRepClass3d_SolidClassifier.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepBuilderAPI_GTransform.hxx>
@@ -667,19 +668,33 @@ static TopoDS_Shape unified(const TopoDS_Shape &shape) {
     if (distance == 0) return nil;
     NSArray<NSNumber *> *plane = [self planeOfFace:index];
     if (plane == nil) return nil;
-    const gp_Vec direction(plane[3].doubleValue * distance, plane[4].doubleValue * distance,
-                           plane[5].doubleValue * distance);
+    const gp_Vec normal(plane[3].doubleValue, plane[4].doubleValue, plane[5].doubleValue);
     try {
-        BRepPrimAPI_MakePrism prism(_faces(int(index)), direction);
+        // Das Werkzeug beginnt knapp auf der anderen Seite der Fläche: so überlappen Körper und Prisma
+        // sicher (keine deckungsgleichen Flächen, an denen Vereinigen bzw. Abziehen bei schrägen
+        // Fasenflächen scheitert).
+        const double overlap = 0.01;
+        const double start = distance > 0 ? -overlap : overlap;
+        gp_Trsf shift;
+        shift.SetTranslation(normal * start);
+        const TopoDS_Shape face = _faces(int(index)).Moved(TopLoc_Location(shift));
+        BRepPrimAPI_MakePrism prism(face, normal * (distance - start));
         if (!prism.IsDone()) return nil;
+        TopoDS_Shape result;
         if (distance > 0) {
             BRepAlgoAPI_Fuse op(_shape, prism.Shape());
             if (!op.IsDone()) return nil;
-            return [[PCKShape alloc] initWithShape:unified(op.Shape())];
+            result = op.Shape();
+        } else {
+            BRepAlgoAPI_Cut op(_shape, prism.Shape());
+            if (!op.IsDone()) return nil;
+            result = op.Shape();
         }
-        BRepAlgoAPI_Cut op(_shape, prism.Shape());
-        if (!op.IsDone()) return nil;
-        return [[PCKShape alloc] initWithShape:unified(op.Shape())];
+        try {
+            return [[PCKShape alloc] initWithShape:unified(result)];
+        } catch (const Standard_Failure &) {
+            return [[PCKShape alloc] initWithShape:result];
+        }
     } catch (const Standard_Failure &) {
         return nil;
     }
@@ -954,6 +969,20 @@ static std::vector<TopoDS_Edge> edgesFromNumbers(const TopTools_IndexedMapOfShap
     const gp_Pln plane = surface.Plane();
     gp_Dir normal = plane.Axis().Direction();
     if (face.Orientation() == TopAbs_REVERSED) normal.Reverse();
+    // Nach Fase/Abrunden kann die gespeicherte Ausrichtung der Fläche umgedreht sein: prüfen, auf welcher
+    // Seite der Körper liegt, damit die Normale sicher nach außen zeigt (Pfeil und Extrudieren nach außen).
+    try {
+        GProp_GProps props;
+        BRepGProp::SurfaceProperties(face, props);
+        const gp_Pnt center = props.CentreOfMass();
+        const double eps = 0.02;
+        const gp_Pnt outside(center.X() + normal.X() * eps, center.Y() + normal.Y() * eps, center.Z() + normal.Z() * eps);
+        const gp_Pnt inside(center.X() - normal.X() * eps, center.Y() - normal.Y() * eps, center.Z() - normal.Z() * eps);
+        BRepClass3d_SolidClassifier atOutside(_shape, outside, 1e-6);
+        BRepClass3d_SolidClassifier atInside(_shape, inside, 1e-6);
+        if (atOutside.State() == TopAbs_IN && atInside.State() == TopAbs_OUT) normal.Reverse();
+    } catch (const Standard_Failure &) {
+    }
     const gp_Pnt origin = plane.Location();
     return @[@(origin.X()), @(origin.Y()), @(origin.Z()), @(normal.X()), @(normal.Y()), @(normal.Z())];
 }
