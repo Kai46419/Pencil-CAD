@@ -26,6 +26,7 @@ private struct WorkspaceContent: View {
     @State private var newName = ""
     @State private var exportFile: ExportFile?
     @State private var exportType: UTType = .stl
+    @State private var exportName: String?
     @State private var isExporting = false
     @State private var isImporting = false
     @State private var isClearConfirmationShown = false
@@ -62,7 +63,8 @@ private struct WorkspaceContent: View {
                     VStack(alignment: .leading, spacing: 10) {
                         layersTab
                         if workspace.showsLayers {
-                            LayersPanel(workspace: workspace, model: model, projectName: projectName) {
+                            LayersPanel(workspace: workspace, model: model, projectName: projectName,
+                                        export: exportBodies) {
                                 workspace.showsLayers = false
                             }
                             .transition(.opacity.combined(with: .move(edge: .leading)))
@@ -117,7 +119,7 @@ private struct WorkspaceContent: View {
             Button("Alles löschen", role: .destructive, action: model.clear)
         }
         .fileExporter(isPresented: $isExporting, document: exportFile, contentType: exportType,
-                      defaultFilename: projectName) { _ in }
+                      defaultFilename: exportName ?? projectName) { _ in }
         .fileImporter(isPresented: $isImporting, allowedContentTypes: [.stepFile, .stpFile]) { result in
             if case .success(let url) = result {
                 model.importSTEP(from: url)
@@ -202,13 +204,16 @@ private struct WorkspaceContent: View {
                 .frame(height: 20)
             Menu {
                 Button("STEP importieren …", systemImage: "square.and.arrow.down") { isImporting = true }
-                Button("Als STEP exportieren …", systemImage: "square.and.arrow.up") {
-                    if let data = model.stepData() {
-                        export(data, as: .stepFile)
+                Menu {
+                    ForEach(ExportFormat.allCases) { format in
+                        Button {
+                            exportBodies(format, nil, projectName)
+                        } label: {
+                            Label("\(format.rawValue) – \(format.subtitle)", systemImage: format.systemImage)
+                        }
                     }
-                }
-                Button("Als STL exportieren …", systemImage: "square.and.arrow.up") {
-                    export(model.stlData(), as: .stl)
+                } label: {
+                    Label("Alle Körper exportieren", systemImage: "square.and.arrow.up")
                 }
                 Divider()
                 Button("Projekt umbenennen …", systemImage: "pencil") {
@@ -371,9 +376,16 @@ private struct WorkspaceContent: View {
         }
     }
 
-    private func export(_ data: Data, as type: UTType) {
+    private func export(_ data: Data, as type: UTType, name: String? = nil) {
         exportFile = ExportFile(data: data)
         exportType = type
+        exportName = name
         isExporting = true
+    }
+
+    /// Körper (nil = alle) als 3MF, STL, OBJ oder STEP sichern bzw. teilen.
+    private func exportBodies(_ format: ExportFormat, _ bodies: [Int]?, _ name: String) {
+        guard let data = model.exportData(format, bodies: bodies) else { return }
+        export(data, as: format.type, name: name)
     }
 }

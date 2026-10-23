@@ -898,14 +898,38 @@ final class ModelStore: ObservableObject {
         mesh.binarySTL()
     }
 
-    func stepData() -> Data? {
+    /// Körper (nil = alle) im gewählten Format; nil bei Fehler (Meldung in message).
+    func exportData(_ format: ExportFormat, bodies indices: [Int]? = nil) -> Data? {
+        let chosen = (indices ?? Array(bodies.indices)).filter { bodies.indices.contains($0) }
+        guard !chosen.isEmpty else {
+            message = "Kein Körper zum Exportieren."
+            return nil
+        }
+        if format == .step {
+            return stepData(chosen)
+        }
+        // Feinere Triangulierung als für die Anzeige, damit Rundungen im Druck glatt werden
+        let meshes = chosen.map { index in
+            ExportMesh(name: bodies[index].name, color: bodies[index].color,
+                       mesh: Mesh(bodies[index].shape.triangulate(deflection: 0.01), body: index))
+        }
+        switch format {
+        case .threeMF: return MeshExport.threeMF(meshes)
+        case .stl: return MeshExport.stl(meshes)
+        case .obj: return MeshExport.obj(meshes)
+        case .step: return nil
+        }
+    }
+
+    func stepData(_ indices: [Int]? = nil) -> Data? {
         guard PCKShape.stepAvailable else {
             message = "STEP braucht OpenCASCADE (siehe README)."
             return nil
         }
         let url = FileManager.default.temporaryDirectory.appending(path: "Export-\(UUID().uuidString).step")
         defer { try? FileManager.default.removeItem(at: url) }
-        guard PCKShape.writeSTEP(bodies.map(\.shape), path: url.path(percentEncoded: false)),
+        let shapes = (indices ?? Array(bodies.indices)).filter { bodies.indices.contains($0) }.map { bodies[$0].shape }
+        guard PCKShape.writeSTEP(shapes, path: url.path(percentEncoded: false)),
               let data = try? Data(contentsOf: url) else {
             message = "STEP-Export fehlgeschlagen."
             return nil

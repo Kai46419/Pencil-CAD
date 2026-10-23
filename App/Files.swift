@@ -7,9 +7,9 @@ extension UTType {
     static let stpFile = UTType(filenameExtension: "stp", conformingTo: .data) ?? .data
 }
 
-/// Fertige Exportdaten (STL oder STEP) für den Datei-Export.
+/// Fertige Exportdaten (STL, 3MF, OBJ oder STEP) für den Datei-Export.
 struct ExportFile: FileDocument {
-    static var readableContentTypes: [UTType] { [.stl, .stepFile] }
+    static var readableContentTypes: [UTType] { [.stl, .stepFile, .threeMF, .objFile] }
 
     let data: Data
 

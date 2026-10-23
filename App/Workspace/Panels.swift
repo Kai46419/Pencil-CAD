@@ -875,6 +875,8 @@ struct LayersPanel: View {
     @ObservedObject var workspace: Workspace
     @ObservedObject var model: ModelStore
     let projectName: String
+    /// Körper exportieren: Format, Körper (nil = alle), Dateiname
+    let export: (ExportFormat, [Int]?, String) -> Void
     let close: () -> Void
 
     private enum Renaming: Equatable {
@@ -1070,6 +1072,9 @@ struct LayersPanel: View {
                     renaming = .sketch(index)
                 }
                 Button("Skizze bearbeiten", systemImage: "pencil.and.outline") { workspace.editSketch(index) }
+                if !bodies.isEmpty {
+                    exportMenu(title: "Körper der Ebene exportieren", bodies: bodies, name: Self.layerName(item.name))
+                }
                 Button(isVisible ? "Ebene ausblenden" : "Ebene einblenden", systemImage: isVisible ? "eye.slash" : "eye") {
                     model.setLayerHidden(isVisible, sketch: index)
                 }
@@ -1085,6 +1090,21 @@ struct LayersPanel: View {
             }
         }
         .padding(.vertical, 2)
+    }
+
+    /// Lange drücken auf Körper bzw. Ebene: Export als 3MF, STL, OBJ oder STEP.
+    private func exportMenu(title: String, bodies: [Int], name: String) -> some View {
+        Menu {
+            ForEach(ExportFormat.allCases) { format in
+                Button {
+                    export(format, bodies, name)
+                } label: {
+                    Label("\(format.rawValue) – \(format.subtitle)", systemImage: format.systemImage)
+                }
+            }
+        } label: {
+            Label(title, systemImage: "square.and.arrow.up")
+        }
     }
 
     private func eye(_ visible: Bool, action: @escaping () -> Void) -> some View {
@@ -1117,6 +1137,8 @@ struct LayersPanel: View {
         .contentShape(Rectangle())
         .onTapGesture { select(index) }
         .contextMenu {
+            exportMenu(title: "Exportieren", bodies: [index], name: item.name)
+            Divider()
             Button("Umbenennen", systemImage: "pencil") {
                 newName = item.name
                 renaming = .body(index)
