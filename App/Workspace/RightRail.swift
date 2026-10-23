@@ -390,12 +390,13 @@ struct ConstraintColumn: View {
         let kinds = ConstraintKind.allCases.filter { $0 != .lock && $0 != .dimension }.map { kind in
             Row(id: kind.rawValue, systemImage: kind.systemImage, action: .constraint(kind), applicable: sketch.canApply(kind))
         }
+        // Verankern ganz oben: Kai braucht es oft (Maß ändern, ohne dass der Rest wandert)
         return [
+            [Row(id: ConstraintKind.lock.rawValue, systemImage: ConstraintKind.lock.systemImage, action: .constraint(.lock),
+                 applicable: sketch.canApply(.lock))],
             kinds,
             [Row(id: "Trennen", systemImage: "link.badge.plus", action: .detach, applicable: hasSelection)],
-            [Row(id: ConstraintKind.lock.rawValue, systemImage: ConstraintKind.lock.systemImage, action: .constraint(.lock),
-                 applicable: sketch.canApply(.lock)),
-             Row(id: "Konstruktion erstellen", systemImage: "square.dashed", action: .construction, applicable: hasSelection)],
+            [Row(id: "Konstruktion erstellen", systemImage: "square.dashed", action: .construction, applicable: hasSelection)],
         ]
     }
 

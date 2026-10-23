@@ -973,7 +973,7 @@ final class Workspace: ObservableObject {
         switch sketch.tool {
         case .select:
             if !sketch.selection.isEmpty {
-                return "\(sketch.selection.count) gewählt · Ecke oder Kante ziehen ändert die Größe · rechts Einschränkung wählen"
+                return "\(sketch.selection.count) gewählt · unten „Verankern“ hält sie fest · rechts Einschränkung wählen"
             }
             return "Antippen wählt · Ecke/Ende ziehen ändert die Größe · über einem Punkt Stift drücken merkt ihn (zwei → Mitte)"
         case .polyline where sketch.hasOpenChain:

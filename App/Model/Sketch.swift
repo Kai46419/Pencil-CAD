@@ -1341,7 +1341,7 @@ final class SketchController: ObservableObject {
         if !constraints.isEmpty {
             guard let solved = ConstraintSolver.solve(result, constraints: constraints, locked: [drag.entity]) else {
                 selectDrag = drag
-                notice = "Die Einschränkungen lassen diese Änderung nicht zu (z. B. „Sperren“)."
+                notice = "Die Einschränkungen lassen diese Änderung nicht zu (z. B. „Verankern“)."
                 changed(publish: false)
                 return
             }
@@ -2001,14 +2001,9 @@ final class SketchController: ObservableObject {
             updated = .ellipse(center: center, radii: Point2(radii.x, value / 2))
         case (.regularPolygon(let center, _, let sides, let angle), .radius):
             updated = .regularPolygon(center: center, radius: value, sides: sides, angle: angle)
-        case (.line(let a, let b), .length):
-            let direction = simd_normalize(b - a)
-            let newEnd = a + direction * value
-            updated = .line(a, newEnd)
-            // Laufender Linienzug geht am neuen Ende weiter
-            if let end = chainEnd, simd_distance(end, b) < 1e-6 { chainEnd = newEnd }
-        case (.arc(let a, let m, let b), .radius):
-            updated = Self.arc(a, m, b, radius: value).map { SketchEntity.arc(start: a, mid: $0, end: b) }
+        case (.line, .length), (.arc, .radius):
+            setStretchableDimension(of: index, to: value)
+            return
         default:
             break
         }
@@ -2025,6 +2020,60 @@ final class SketchController: ObservableObject {
                 undoStack.removeLast()
                 notice = "Maß widerspricht den Einschränkungen."
             }
+        }
+        entitiesChanged()
+    }
+
+    /// Linienlänge bzw. Bogenradius: Mehrere Arten, das Element zu ändern (Anfang, Ende, Mitte bzw. Enden
+    /// fest), und es gilt die, bei der sich der Rest der Skizze am wenigsten bewegt. Verankerte Punkte
+    /// schließen die Arten aus, die sie verschieben würden. Vorher wanderte beim Radius die ganze Kontur,
+    /// weil die Bogenenden immer stehen blieben und tangentiale Linien kippen mussten.
+    private func setStretchableDimension(of index: Int, to value: Double) {
+        var candidates: [SketchEntity] = []
+        switch entities[index] {
+        case .line(let a, let b):
+            let direction = simd_normalize(b - a)
+            let middle = (a + b) / 2
+            candidates = [.line(a, a + direction * value), .line(b - direction * value, b),
+                          .line(middle - direction * value / 2, middle + direction * value / 2)]
+        case .arc(let a, let m, let b):
+            if let mid = Self.arc(a, m, b, radius: value) { candidates.append(.arc(start: a, mid: mid, end: b)) }
+            if let circle = circleThrough(a, m, b), circle.radius > 1e-9 {
+                let k = value / circle.radius
+                // Ähnlich vergrößern: um ein Ende (dort bleibt die Tangente) bzw. um die Mitte
+                for pivot in [a, b, circle.center] {
+                    candidates.append(.arc(start: pivot + (a - pivot) * k, mid: pivot + (m - pivot) * k,
+                                           end: pivot + (b - pivot) * k))
+                }
+            }
+        default:
+            return
+        }
+        let before = entities
+        var best: (cost: Double, entities: [SketchEntity])?
+        for candidate in candidates {
+            var trial = entities
+            trial[index] = candidate
+            guard let solved = constraints.isEmpty ? trial
+                    : ConstraintSolver.solve(trial, constraints: constraints, locked: [index]) else { continue }
+            // Bewegung der übrigen Elemente
+            var cost = 0.0
+            for other in solved.indices where other != index {
+                let old = before[other].parameters, new = solved[other].parameters
+                guard old.count == new.count else { continue }
+                cost += zip(old, new).reduce(0) { $0 + ($1.0 - $1.1) * ($1.0 - $1.1) }
+            }
+            if cost < (best?.cost ?? .infinity) - 1e-12 { best = (cost, solved) }
+        }
+        guard let best else {
+            notice = "Maß widerspricht den Einschränkungen (z. B. verankerten Punkten)."
+            return
+        }
+        remember()
+        entities = best.entities
+        // Laufender Linienzug geht am neuen Ende weiter
+        if let end = chainEnd, case .line(let oldA, let oldB) = before[index], case .line(let newA, let newB) = entities[index] {
+            if simd_distance(end, oldB) < 1e-6 { chainEnd = newB } else if simd_distance(end, oldA) < 1e-6 { chainEnd = newA }
         }
         entitiesChanged()
     }
@@ -2454,6 +2503,65 @@ final class SketchController: ObservableObject {
             notice = "„\(kind.rawValue)“ widerspricht den vorhandenen Einschränkungen."
         }
         editableIndex = nil
+        entitiesChanged()
+    }
+
+    // MARK: Verankern
+
+    /// Griffpunkte der Auswahl (gewählte Punkte und alle Punkte gewählter Kurven)
+    private var selectedPointRefs: [SketchPointRef] {
+        var refs: [SketchPointRef] = []
+        for ref in selection {
+            switch ref {
+            case .point(let point):
+                refs.append(point)
+            case .curve(let curve):
+                guard entities.indices.contains(curve.entity) else { continue }
+                refs += entities[curve.entity].handlePoints.indices.map { SketchPointRef(entity: curve.entity, index: $0) }
+            }
+        }
+        return refs
+    }
+
+    private var anchoredPoints: Set<SketchPointRef> {
+        Set(constraints.compactMap { constraint -> SketchPointRef? in
+            guard case .lock(let ref, _) = constraint.variant else { return nil }
+            return ref
+        })
+    }
+
+    /// Alle gewählten Punkte sind schon verankert (dann löst der Knopf sie wieder)
+    var isSelectionAnchored: Bool {
+        let refs = selectedPointRefs
+        return !refs.isEmpty && Set(refs).isSubset(of: anchoredPoints)
+    }
+
+    /// Auswahl verankern bzw. – ist schon alles verankert – wieder lösen.
+    func toggleAnchor() {
+        let refs = selectedPointRefs
+        guard !refs.isEmpty else {
+            notice = ConstraintKind.lock.selectionHint
+            return
+        }
+        remember()
+        if isSelectionAnchored {
+            let chosen = Set(refs)
+            constraints.removeAll { constraint in
+                guard case .lock(let ref, _) = constraint.variant else { return false }
+                return chosen.contains(ref)
+            }
+            notice = refs.count == 1 ? "Punkt gelöst." : "\(refs.count) Punkte gelöst."
+        } else {
+            let anchored = anchoredPoints
+            for ref in refs where !anchored.contains(ref) {
+                guard let p = ConstraintSolver.point(ref, entities) else { continue }
+                constraints.append(SketchConstraint(variant: .lock(ref, at: p)))
+            }
+            notice = refs.count == 1 ? "Punkt verankert – er bleibt beim Ändern von Maßen stehen."
+                : "\(refs.count) Punkte verankert – sie bleiben beim Ändern von Maßen stehen."
+        }
+        selection = []
+        selectedMarks = []
         entitiesChanged()
     }
 

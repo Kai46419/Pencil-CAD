@@ -43,7 +43,8 @@ enum ConstraintKind: String, CaseIterable, Identifiable, Codable {
     case horizontalVertical = "Horizontal/Vertikal"
     case equal = "Gleich"
     case symmetric = "Symmetrien"
-    case lock = "Sperren"
+    /// Punkte bzw. Kurven an ihrer Stelle verankern (Fusion 360 „Fix“)
+    case lock = "Verankern"
     /// Bemaßung (Abstand, Winkel) als treibendes Maß; erscheint nicht in der Liste der Einschränkungen
     case dimension = "Bemaßung"
 
@@ -80,7 +81,7 @@ enum ConstraintKind: String, CaseIterable, Identifiable, Codable {
         case .horizontalVertical: "Horizontal/Vertikal: Linien oder zwei Punkte antippen."
         case .equal: "Gleich: zwei Linien oder zwei Kreise/Bögen antippen."
         case .symmetric: "Symmetrie: zwei Punkte (oder zwei Kreise/Linien) und zuletzt die Achse antippen."
-        case .lock: "Sperren: Punkte oder Kurven antippen."
+        case .lock: "Verankern: Punkte oder Kurven antippen – sie bleiben beim Ändern von Maßen stehen."
         case .dimension: "Bemaßen: ein Element, zwei Punkte, Punkt und Linie oder zwei Linien antippen."
         }
     }

@@ -204,6 +204,14 @@ struct ParameterCard: View {
         case .breakCurve:
             Text("Kurve antippen – sie wird an den nächsten Schnittpunkten geteilt")
                 .foregroundStyle(.secondary)
+        case .select:
+            if !sketch.selection.isEmpty {
+                // Auswahl verankern: bleibt beim Ändern von Maßen stehen (erneut tippen löst)
+                Button(sketch.isSelectionAnchored ? "Lösen" : "Verankern",
+                       systemImage: sketch.isSelectionAnchored ? "lock.open" : "lock", action: sketch.toggleAnchor)
+                    .buttonStyle(.bordered)
+                    .hoverTip("Verankern", "Gewählte Punkte bzw. Kurven bleiben stehen, wenn du Maße änderst. Sind sie schon verankert, löst der Knopf sie wieder.")
+            }
         case .measure:
             HStack(alignment: .top, spacing: 14) {
                 let lines = sketch.measurement.lines

@@ -219,7 +219,7 @@ enum ToolTips {
         "Gleich": "Gleiche Länge bzw. gleicher Radius. Wählen: zwei Linien oder zwei Kreise/Bögen.",
         "Symmetrien": "Zwei Punkte oder Elemente spiegelbildlich zu einer Achse. Wählen: zwei Punkte/Elemente, zuletzt die Achse (Linie).",
         "Trennen": "Löst Einschränkungen an der Auswahl, z. B. trennt zusammenhängende Ecken, damit sie einzeln verschoben werden können.",
-        "Sperren": "Fixiert Punkte oder Kurven an ihrer Stelle; sie bewegen sich beim Ändern anderer Elemente nicht mehr.",
+        "Verankern": "Fixiert Punkte oder Kurven an ihrer Stelle; sie bewegen sich beim Ändern anderer Elemente nicht mehr.",
         "Konstruktion erstellen": "Macht die Auswahl zu Konstruktionsgeometrie (gestrichelte Hilfslinien, zählen nicht als Profil). Nochmal: zurück.",
         // Extrudieren
         "Neuer Körper": "Erzeugt einen eigenen, neuen Körper.",
