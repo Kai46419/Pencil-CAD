@@ -229,6 +229,8 @@ final class Workspace: ObservableObject {
     /// Neue Skizze direkt auf einer Ebene (Konstruktionsebene, Fläche).
     func startSketch(on plane: SketchPlane) {
         tool = .select
+        // Jede Skizze beginnt mit dem Pfeil (Auswählen), nicht mit dem zuletzt benutzten Werkzeug
+        sketch.tool = .select
         editingSketchIndex = nil
         model.commitPreview()
         model.resetSelection()
@@ -254,6 +256,7 @@ final class Workspace: ObservableObject {
     /// Neue Skizze: auf der gewählten ebenen Fläche, sonst zuerst eine Standardebene antippen lassen.
     func startSketch() {
         tool = .select
+        sketch.tool = .select
         editingSketchIndex = nil
         model.commitPreview()
         if let face = model.selection, let plane = model.plane(of: face) {
@@ -311,6 +314,7 @@ final class Workspace: ObservableObject {
         model.commitPreview()
         model.resetSelection()
         let stored = model.sketches[index]
+        sketch.tool = .select
         sketch.isActive = true
         sketch.load(plane: stored.plane, entities: stored.entities, constraints: stored.constraints,
                     construction: stored.construction)

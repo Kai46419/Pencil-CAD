@@ -49,6 +49,9 @@ private struct RailEntry: Identifiable {
     /// Ausgegraut und nicht antippbar (z. B. „Keine aktive Ebene“, „Löschen“ ohne Auswahl)
     var isEnabled = true
     var flyout: [ToolItem]?
+    /// Bei Werkzeugen mit Varianten: Antippen startet das Werkzeug (zuletzt gewählte Variante),
+    /// langes Drücken öffnet die Varianten. Ohne primary öffnet Antippen das Untermenü (Gruppen wie „Mehr“).
+    var primary: (() -> Void)?
     var action: () -> Void = {}
 }
 
@@ -90,21 +93,30 @@ struct ToolRail: View {
                     .background(.regularMaterial, in: Capsule())
             }
             ForEach(entries) { entry in
-                Button {
-                    if entry.flyout != nil {
-                        openEntry = openEntry == entry.id ? nil : entry.id
-                    } else {
-                        openEntry = nil
-                        entry.action()
+                RailTile(title: entry.title, subtitle: entry.subtitle, systemImage: entry.systemImage,
+                         isActive: entry.isActive, isOpen: openEntry == entry.id, size: tile,
+                         hasVariants: entry.flyout != nil && entry.primary != nil)
+                    .onTapGesture {
+                        if let primary = entry.primary {
+                            openEntry = nil
+                            primary()
+                        } else if entry.flyout != nil {
+                            openEntry = openEntry == entry.id ? nil : entry.id
+                        } else {
+                            openEntry = nil
+                            entry.action()
+                        }
                     }
-                } label: {
-                    RailTile(title: entry.title, subtitle: entry.subtitle, systemImage: entry.systemImage,
-                             isActive: entry.isActive, isOpen: openEntry == entry.id, size: tile)
-                }
-                .buttonStyle(.plain)
-                .disabled(!entry.isEnabled)
-                .opacity(entry.isEnabled ? 1 : 0.45)
-                .hoverTip(entry.title)
+                    .onLongPressGesture(minimumDuration: 0.35) {
+                        guard entry.flyout != nil else { return }
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        openEntry = entry.id
+                    }
+                    .allowsHitTesting(entry.isEnabled)
+                    .opacity(entry.isEnabled ? 1 : 0.45)
+                    .accessibilityAddTraits(.isButton)
+                    .hoverTip(entry.title, entry.primary == nil ? nil
+                              : (ToolTips.detail(for: entry.title).map { $0 + " " } ?? "") + "Lange drücken: alle Varianten.")
             }
         }
         return HStack(alignment: .top, spacing: 12) {
@@ -208,7 +220,7 @@ struct ToolRail: View {
     }
 
     private var sketchEntries: [RailEntry] {
-        let lineTool = sketch.tool == .arc ? SketchTool.arc : .polyline
+        let lineTool = sketch.lineVariant
         let lineItems: [ToolItem] = [toolItem(.polyline, title: "Linie")] + arcItems
         let lineSubtitle = lineTool == .arc ? "Bogen \(sketch.arcMode.rawValue)" : lineTool.subtitle
         let polygonSubtitle = "\(Self.polygonName(sketch.polygonSides)) · \(sketch.polygonMode.rawValue)"
@@ -227,7 +239,7 @@ struct ToolRail: View {
                       systemImage: "square.dashed", isEnabled: false),
             RailEntry(id: "sketch.line", title: "Linie/Bogen", subtitle: lineSubtitle,
                       systemImage: lineTool.systemImage, isActive: sketch.tool == .polyline || sketch.tool == .arc,
-                      flyout: lineItems),
+                      flyout: lineItems, primary: { sketch.tool = sketch.lineVariant }),
             RailEntry(id: "sketch.spline", title: "Spline", subtitle: sketch.splineKind.rawValue,
                       systemImage: SketchTool.spline.systemImage, isActive: sketch.tool == .spline,
                       flyout: SplineKind.allCases.map { kind in
@@ -235,7 +247,7 @@ struct ToolRail: View {
                                    isActive: sketch.tool == .spline && sketch.splineKind == kind) {
                               sketch.splineKind = kind
                           }
-                      }),
+                      }, primary: { sketch.tool = .spline }),
             RailEntry(id: "sketch.rectangle", title: "Rechteck", subtitle: sketch.rectangleMode.rawValue,
                       systemImage: SketchTool.rectangle.systemImage, isActive: sketch.tool == .rectangle,
                       flyout: RectangleMode.allCases.map { mode in
@@ -245,17 +257,17 @@ struct ToolRail: View {
                               sketch.tool = .rectangle
                               sketch.rectangleMode = mode
                           }
-                      }),
+                      }, primary: { sketch.tool = .rectangle }),
             RailEntry(id: "sketch.circle", title: "Kreis", subtitle: sketch.circleMode.rawValue,
                       systemImage: SketchTool.circle.systemImage, isActive: sketch.tool == .circle,
-                      flyout: circleItems),
+                      flyout: circleItems, primary: { sketch.tool = .circle }),
             toolEntry(.ellipse),
             RailEntry(id: "sketch.polygon", title: "Polygon", subtitle: polygonSubtitle,
                       systemImage: SketchTool.polygon.systemImage, isActive: sketch.tool == .polygon,
-                      flyout: polygonItems),
+                      flyout: polygonItems, primary: { sketch.tool = .polygon }),
             RailEntry(id: "sketch.slot", title: "Langloch", subtitle: sketch.slotMode.rawValue,
                       systemImage: SketchTool.slot.systemImage, isActive: sketch.tool == .slot,
-                      flyout: slotItems),
+                      flyout: slotItems, primary: { sketch.tool = .slot }),
             toolEntry(.project),
             toolEntry(.offset),
             RailEntry(id: "sketch.modify", title: "Ändern", systemImage: "slider.horizontal.3",
@@ -604,6 +616,8 @@ struct RailTile: View {
     var isActive = false
     var isOpen = false
     var size: CGFloat = 52
+    /// Kleines Dreieck unten rechts: lange drücken zeigt weitere Varianten (wie Shapr3D/Fusion 360)
+    var hasVariants = false
 
     var body: some View {
         HStack(spacing: 8) {
@@ -613,6 +627,15 @@ struct RailTile: View {
                 .foregroundStyle(isActive ? Color.white : Color.primary)
                 .background(isActive ? Color.accentColor : Color(.systemBackground),
                             in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(alignment: .bottomTrailing) {
+                    if hasVariants {
+                        Image(systemName: "arrowtriangle.down.fill")
+                            .font(.system(size: 6, weight: .bold))
+                            .rotationEffect(.degrees(-45))
+                            .foregroundStyle(isActive ? Color.white.opacity(0.85) : Color.secondary)
+                            .padding(5)
+                    }
+                }
                 .overlay {
                     if isOpen {
                         RoundedRectangle(cornerRadius: 14, style: .continuous)

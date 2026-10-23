@@ -299,9 +299,14 @@ final class SketchController: ObservableObject {
     /// Beim Start einer Skizze ohne gewählte Fläche: Standardebene antippen.
     @Published var isChoosingPlane = false
     @Published private(set) var basePlane: BasePlane = .top
-    @Published var tool: SketchTool = .rectangle {
-        didSet { finishInput() }
+    @Published var tool: SketchTool = .select {
+        didSet {
+            if tool == .polyline || tool == .arc { lineVariant = tool }
+            finishInput()
+        }
     }
+    /// Zuletzt benutzte Variante der Kachel „Linie/Bogen“ (Antippen startet sie, langes Drücken zeigt alle)
+    @Published private(set) var lineVariant: SketchTool = .polyline
     /// Für Geräte ohne Apple Pencil: ein Finger zeichnet statt zu verschieben.
     /// Im Simulator standardmäßig an, weil die Maus dort als Finger zählt.
     #if targetEnvironment(simulator)
