@@ -402,6 +402,12 @@ final class ViewportView: MTKView {
                 groups.append(LineGroup(polylines: cross.map { $0.map(world) }, color: Self.sketchInk, width: 1.3,
                                         dots: [world(hover)], dotRadius: 1.4))
             }
+            // Vorschläge für die Mitte (Rechteck-, Kreis- und Linienmitten), dezent
+            let suggestions = sketch.suggestionNodes
+            if !suggestions.isEmpty {
+                let markers = suggestions.flatMap { snapMarker($0.kind, at: $0.point, size: 4 * perPoint) }
+                groups.append(LineGroup(polylines: markers.map { $0.map(world) }, color: Self.constructionGray, width: 1.2))
+            }
             if !sketch.hoverNodes.isEmpty {
                 groups.append(LineGroup(polylines: [], color: Self.previewBlue, width: 0,
                                         dots: sketch.hoverNodes.map(world), dotRadius: 3.5))

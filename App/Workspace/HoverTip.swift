@@ -161,7 +161,7 @@ enum ToolTips {
         "Bogen": "Von einem Ende zum anderen ziehen, dann die Wölbung ziehen.",
         "Spline": "Freie Kurve durch Punkte (Fit-Punkte) oder über Kontrollpunkte.",
         "Rechteck": "Diagonal, von der Mitte aus oder über drei Punkte (gedreht).",
-        "Kreis": "Von der Mitte nach außen ziehen. Durchmesser danach eintippen.",
+        "Kreis": "Von der Mitte nach außen ziehen. Graue Zeichen zeigen Mitten von Rechtecken, Kreisen und Linien zum Einrasten. Beim Aufziehen rastet der Radius tangential an Linien/Kreise, auf gleichen Radius oder durch Punkte ein – die Abhängigkeit wird als Einschränkung gesetzt.",
         "Ellipse": "Von der Mitte zur Ecke ziehen – Breite und Höhe ergeben sich daraus.",
         "Polygon": "Regelmäßiges Vieleck von der Mitte aus; Eckenzahl unten einstellen.",
         "Projizieren": "Körperkanten oder Flächenränder in die Skizze übernehmen.",

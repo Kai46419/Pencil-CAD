@@ -383,6 +383,8 @@ final class SketchController: ObservableObject {
     private var strokeSamples: [Point2] = []
     /// Linienwerkzeug: erkannter Kreis bzw. Bogen des laufenden Strichs (Vorschau)
     private(set) var strokeShape: SketchEntity?
+    /// Kreis aufziehen: erkannte Abhängigkeit (tangential, gleicher Radius, durch Punkt)
+    private var circleInference: CircleInference?
     /// Fangradius des laufenden Strichs
     private var strokeTolerance = 1.0
     /// Hilfslinien zu gemerkten Punktpaaren: Verbindung und Mittelsenkrechte („Mittellinie“), nur Anzeige
@@ -509,6 +511,14 @@ final class SketchController: ObservableObject {
         dragCurrent = snap(point, tolerance: tolerance, anchor: strokeAnchor)
         if strokeSamples.count < 4000 { strokeSamples.append(point) }
         if tool == .polyline, strokeSamples.count % 4 == 0 { strokeShape = recognizedShape() }
+        if tool == .circle, let center = dragStart {
+            circleInference = nil
+            if !Self.isPointSnap(activeSnap?.kind), let found = inferCircle(center: center, raw: point, tolerance: tolerance) {
+                circleInference = found
+                dragCurrent = found.point
+                activeSnap = SnapResult(point: found.point, kind: .onCurve)
+            }
+        }
         // Der Stift liefert bis zu 240 Punkte pro Sekunde: nicht jedes Mal die Oberfläche neu aufbauen,
         // der Viewport zeichnet selbst neu.
         changed(publish: false)
@@ -521,7 +531,9 @@ final class SketchController: ObservableObject {
         }
         guard let start = dragStart else { return }
         let end = snap(point, tolerance: tolerance, anchor: strokeAnchor)
+        let endKind = activeSnap?.kind
         let samples = strokeSamples + [point]
+        circleInference = nil
         dragStart = nil
         dragCurrent = nil
         activeSnap = nil
@@ -540,20 +552,25 @@ final class SketchController: ObservableObject {
         case .rectangle:
             endRectangleStroke(start: start, end: end)
         case .circle:
-            let radius = simd_distance(start, end)
+            var radius = simd_distance(start, end)
+            let inference = Self.isPointSnap(endKind) ? nil : inferCircle(center: start, raw: point, tolerance: tolerance)
+            if let inference { radius = inference.radius }
             if radius > 0 {
                 add(.circle(center: start, radius: radius), editable: true)
+                inferConstraints(forNew: entities.count - 1, center: start, inference: inference)
             }
         case .ellipse:
             let radii = simd_abs(end - start)
             if radii.x > 0, radii.y > 0 {
                 add(.ellipse(center: start, radii: radii), editable: true)
+                inferConstraints(forNew: entities.count - 1, center: start, inference: nil)
             }
         case .polygon:
             let radius = simd_distance(start, end)
             if radius > 0 {
                 add(.regularPolygon(center: start, radius: radius, sides: polygonSides,
                                     angle: atan2(end.y - start.y, end.x - start.x)), editable: true)
+                inferConstraints(forNew: entities.count - 1, center: start, inference: nil)
             }
         case .polyline:
             // Rund gezogen: Kreis bzw. Bogen statt Linie
@@ -631,9 +648,145 @@ final class SketchController: ObservableObject {
         dragCurrent = nil
         strokeSamples = []
         strokeShape = nil
+        circleInference = nil
         activeSnap = nil
         parallelLines = []
         changed()
+    }
+
+    // MARK: Abhängigkeiten erkennen (wie Fusion 360)
+
+    /// Erkannte Abhängigkeit beim Aufziehen eines Kreises: Radius rastet ein, beim Loslassen wird die
+    /// passende Einschränkung gesetzt (variant bekommt die Kurve des neuen Kreises).
+    private struct CircleInference {
+        var point: Point2
+        var radius: Double
+        var label: String
+        var variant: ((SketchCurveRef) -> SketchConstraint.Variant)?
+    }
+
+    private static func isPointSnap(_ kind: SnapKind?) -> Bool {
+        guard let kind else { return false }
+        return [.endpoint, .midpoint, .center, .intersection].contains(kind)
+    }
+
+    /// Radius, bei dem der Kreis eine Linie oder einen Kreis berührt, denselben Radius wie ein vorhandener
+    /// Kreis hat oder durch einen Fangpunkt geht – der nächste innerhalb des Fangradius.
+    private func inferCircle(center: Point2, raw: Point2, tolerance: Double) -> CircleInference? {
+        let current = simd_distance(center, raw)
+        guard snapEnabled, current > tolerance else { return nil }
+        let direction = (raw - center) / current
+        var best: (score: Double, inference: CircleInference)?
+        func consider(_ radius: Double, point: Point2?, label: String, weight: Double,
+                      variant: ((SketchCurveRef) -> SketchConstraint.Variant)?) {
+            guard radius > 1e-6 else { return }
+            let score = abs(radius - current) * weight
+            guard score <= tolerance, score < (best?.score ?? .infinity) else { return }
+            best = (score, CircleInference(point: point ?? center + direction * radius, radius: radius, label: label,
+                                           variant: variant))
+        }
+        for (index, entity) in entities.enumerated() {
+            if case .text = entity { continue }
+            for k in 0..<entity.curveCount {
+                let ref = SketchCurveRef(entity: index, index: k)
+                switch entity.constraintCurve(k) {
+                case .line(let a, let b):
+                    let d = b - a
+                    let lengthSquared = simd_length_squared(d)
+                    guard lengthSquared > 1e-12 else { continue }
+                    let t = simd_dot(center - a, d) / lengthSquared
+                    guard t >= -0.02, t <= 1.02 else { continue }
+                    let foot = a + d * t
+                    consider(simd_distance(center, foot), point: foot, label: "Tangential an Linie", weight: 1) {
+                        .tangent(ref, $0, outside: true)
+                    }
+                case .circle(let c, let r):
+                    consider(r, point: nil, label: "Gleicher Radius", weight: 0.9) { .equalRadius(ref, $0) }
+                    let distance = simd_distance(center, c)
+                    guard distance > 1e-6 else { continue }
+                    let toward = (c - center) / distance
+                    if distance > r {
+                        consider(distance - r, point: center + toward * (distance - r), label: "Tangential an Kreis",
+                                 weight: 1) { .tangent(ref, $0, outside: true) }
+                    } else {
+                        consider(r - distance, point: center - toward * (r - distance), label: "Tangential innen",
+                                 weight: 1) { .tangent(ref, $0, outside: false) }
+                    }
+                    consider(distance + r, point: center + toward * (distance + r), label: "Umschließt tangential",
+                             weight: 1) { .tangent(ref, $0, outside: false) }
+                case .other:
+                    break
+                }
+            }
+        }
+        for p in snapIndex.endpoints + snapIndex.midpoints + snapIndex.centers where simd_distance(p, center) > 1e-6 {
+            consider(simd_distance(center, p), point: p, label: "Durch Punkt", weight: 1.1, variant: nil)
+        }
+        return best?.inference
+    }
+
+    /// Nach dem Zeichnen von Kreis, Ellipse bzw. Polygon die erkannten Abhängigkeiten als Einschränkungen setzen:
+    /// Mitte einer Linie, auf einer Linie, konzentrisch, sowie tangential bzw. gleicher Radius aus dem Aufziehen.
+    /// Die Mitte eines Rechtecks ist ein Griffpunkt und wird schon beim Hinzufügen verbunden (connect).
+    private func inferConstraints(forNew index: Int, center: Point2, inference: CircleInference?) {
+        guard entities.indices.contains(index) else { return }
+        let centerRef = SketchPointRef(entity: index, index: centerIndex(of: index))
+        var added: [SketchConstraint.Variant] = []
+        var labels: [String] = []
+        for (other, entity) in entities.enumerated() where other != index {
+            if case .rectangle(let corner, let size) = entity, simd_distance(corner + size / 2, center) < 1e-6 {
+                if !labels.contains("Mitte des Rechtecks") { labels.append("Mitte des Rechtecks") }
+                continue
+            }
+            for k in 0..<entity.curveCount {
+                let ref = SketchCurveRef(entity: other, index: k)
+                switch entity.constraintCurve(k) {
+                case .line(let a, let b):
+                    if simd_distance((a + b) / 2, center) < 1e-6 {
+                        added.append(.midpoint(centerRef, ref))
+                        labels.append("Mitte der Linie")
+                    } else if simd_distance(a, center) > 1e-6, simd_distance(b, center) > 1e-6,
+                              polylineDistance(from: center, to: [a, b], closed: false).distance < 1e-6 {
+                        added.append(.pointOnCurve(centerRef, ref))
+                        labels.append("Mitte auf Linie")
+                    }
+                case .circle(let c, _):
+                    if simd_distance(c, center) < 1e-6, case .circle = entities[index], case .circle = entity {
+                        added.append(.concentric(ref, SketchCurveRef(entity: index, index: 0)))
+                        labels.append("Konzentrisch")
+                    }
+                case .other:
+                    break
+                }
+            }
+        }
+        if let variant = inference?.variant, let label = inference?.label {
+            added.append(variant(SketchCurveRef(entity: index, index: 0)))
+            labels.append(label)
+        }
+        guard !labels.isEmpty else { return }
+        let beforeEntities = entities, beforeConstraints = constraints
+        constraints += added.map { SketchConstraint(variant: $0) }
+        let fixed = Set(entities.indices).subtracting([index])
+        if added.isEmpty {
+            notice = "Abhängigkeit gesetzt: " + labels.joined(separator: ", ") + "."
+        } else if let solved = ConstraintSolver.solve(entities, constraints: constraints, locked: fixed) {
+            entities = solved
+            notice = "Abhängigkeit gesetzt: " + labels.joined(separator: ", ") + " (mit „Trennen“ rechts lösbar)."
+        } else {
+            entities = beforeEntities
+            constraints = beforeConstraints
+        }
+        entitiesChanged()
+    }
+
+    /// Vorschläge beim Zeichnen von Kreis, Ellipse, Polygon und Rechteck von der Mitte: alle Mitten von
+    /// Rechtecken, Kreisen und Linien, an denen der Stift einrastet.
+    var suggestionNodes: [(point: Point2, kind: SnapKind)] {
+        let centered = tool == .circle || tool == .ellipse || tool == .polygon
+            || (tool == .rectangle && rectangleMode == .center)
+        guard snapEnabled, centered, dragStart == nil else { return [] }
+        return snapIndex.centers.map { ($0, SnapKind.center) } + snapIndex.midpoints.map { ($0, SnapKind.midpoint) }
     }
 
     // MARK: Stiftgesten
@@ -2384,6 +2537,7 @@ final class SketchController: ObservableObject {
             case .spline:
                 return "\(splinePoints.count + 1) Punkte"
             default:
+                if let circleInference { return circleInference.label }
                 return activeSnap?.kind.map { "Fang: \($0.rawValue)" }
             }
         }
