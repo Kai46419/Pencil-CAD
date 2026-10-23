@@ -355,7 +355,7 @@ final class SketchController: ObservableObject {
     /// so lassen sich Mitten von Mitten bilden. Sie gehören nicht zur gespeicherten Skizze.
     @Published private(set) var marks: [Point2] = []
     @Published private(set) var selectedMarks: [Int] = []
-    /// Per 1 s Halten gemerkte Fangpunkte (höchstens einer wartet auf den zweiten)
+    /// Per Stiftdruck gemerkte Fangpunkte (höchstens einer wartet auf den zweiten)
     @Published private(set) var capturedPoints: [Point2] = []
     /// Linien mit demselben Winkel wie die gerade gezeichnete (leuchten grün)
     private(set) var parallelLines: [[Point2]] = []
@@ -389,9 +389,15 @@ final class SketchController: ObservableObject {
     /// zeichnet dann einen tangentialen Bogen am Ende des Linienzugs.
     var arcModifier = false {
         didSet {
+            // Einmal während eines Strichs aufgelegt, bleibt der Strich ein Bogen (auch wenn der Finger
+            // inzwischen verrutscht oder abgehoben wurde)
+            if arcModifier, dragStart != nil { arcLatched = true }
             if arcModifier != oldValue { changed() }
         }
     }
+    private var arcLatched = false
+    /// Bogen-Modus für den laufenden Strich
+    var arcActive: Bool { arcModifier || arcLatched }
     /// Fangradius des laufenden Strichs
     private var strokeTolerance = 1.0
     /// Hilfslinien zu gemerkten Punktpaaren: Verbindung und Mittelsenkrechte („Mittellinie“), nur Anzeige
@@ -504,6 +510,7 @@ final class SketchController: ObservableObject {
         strokeSamples = [point]
         strokeShape = nil
         strokeTolerance = tolerance
+        arcLatched = arcModifier
         hoverSnap = nil
         hoverNodes = []
         changed()
@@ -541,6 +548,8 @@ final class SketchController: ObservableObject {
         let endKind = activeSnap?.kind
         let samples = strokeSamples + [point]
         circleInference = nil
+        let arcStroke = arcActive
+        arcLatched = false
         dragStart = nil
         dragCurrent = nil
         activeSnap = nil
@@ -581,7 +590,7 @@ final class SketchController: ObservableObject {
             }
         case .polyline:
             // Finger aufgelegt: tangentialer Bogen am Ende des Linienzugs
-            if arcModifier, endTangentArc(to: end) { break }
+            if arcStroke, endTangentArc(to: end) { break }
             // Rund gezogen: Kreis bzw. Bogen statt Linie
             if !endShapeStroke(samples, start: start, end: end, tolerance: tolerance) {
                 endLineStroke(start: start, end: end)
@@ -658,6 +667,7 @@ final class SketchController: ObservableObject {
         strokeSamples = []
         strokeShape = nil
         circleInference = nil
+        arcLatched = false
         activeSnap = nil
         parallelLines = []
         changed()
@@ -941,7 +951,7 @@ final class SketchController: ObservableObject {
         return true
     }
 
-    /// 1 s auf einem Punkt halten: Fangpunkt (Ende, Mitte, Zentrum, Schnittpunkt, Hilfspunkt) merken.
+    /// Stift über einem Punkt drücken: Fangpunkt (Ende, Mitte, Zentrum, Schnittpunkt, Hilfspunkt) merken.
     /// Zwei gemerkte Punkte ergeben ihre Mitte als neuen Hilfspunkt (Dreieck), der selbst wieder fangbar ist.
     func capturePoint(at p: Point2, tolerance: Double) {
         let kinds: Set<SnapKind> = [.endpoint, .midpoint, .center, .intersection, .onCurve]
@@ -966,7 +976,7 @@ final class SketchController: ObservableObject {
             capturedPoints = []
             notice = "Mitte gesetzt (Dreieck, fangbar) – gestrichelt die Mittellinie."
         } else {
-            notice = "Punkt 1 gemerkt – zweiten Punkt merken (Stift drücken oder 1 Sekunde halten)."
+            notice = "Punkt 1 gemerkt – zweiten Punkt merken (Stift darüber drücken bzw. doppeltippen)."
         }
         changed()
     }
@@ -1515,7 +1525,7 @@ final class SketchController: ObservableObject {
 
     private var rawDimensions: [SketchDimension] {
         if let start = dragStart, let current = dragCurrent {
-            if tool == .polyline, arcModifier, let arc = tangentArc(to: current) {
+            if tool == .polyline, arcActive, let arc = tangentArc(to: current) {
                 return Self.dimensions(of: arc.entity, editable: false)
             }
             if tool == .polyline, let shape = strokeShape {
@@ -2440,7 +2450,7 @@ final class SketchController: ObservableObject {
                 if tool == .circle || tool == .polygon { polylines.append([start, current]) }
             }
         case .polyline:
-            if arcModifier, let current, let arc = tangentArc(to: current) {
+            if arcActive, let current, let arc = tangentArc(to: current) {
                 polylines += arc.entity.drawing
             } else if let shape = strokeShape, dragStart != nil {
                 polylines += shape.drawing

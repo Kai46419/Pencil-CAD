@@ -63,8 +63,9 @@ final class ViewportView: MTKView {
     weak var workspace: Workspace?
 
     private var orbitGesture: UIPanGestureRecognizer?
+    private var panGesture: UIPanGestureRecognizer?
+    private var pinchGesture: UIPinchGestureRecognizer?
     private var tapGesture: UITapGestureRecognizer?
-    private var holdGesture: UILongPressGestureRecognizer?
     private var sketchTouch: UITouch?
     private var handleDrag: HandleDragState?
     private let valueLabel = PaddedLabel()
@@ -147,13 +148,9 @@ final class ViewportView: MTKView {
         // Schwebender Stift (iPad Pro mit Apple Pencil Pro / 2. Gen.)
         let hover = UIHoverGestureRecognizer(target: self, action: #selector(handleHover))
 
-        // 1 s halten (Stift oder Finger): Fangpunkt als Markierungspunkt merken
-        let hold = UILongPressGestureRecognizer(target: self, action: #selector(handleHold))
-        hold.minimumPressDuration = 1
-        hold.allowableMovement = 10
-        hold.allowedTouchTypes = fingersAndPencil
-
-        for recognizer in [orbit, pan, pinch, tap, hover, hold] as [UIGestureRecognizer] {
+        // Punkte merken nur per Stift drücken bzw. doppeltippen (pencilAction): ein 1-s-Halten hat beim
+        // langsamen Zeichnen und bei aufgelegtem Finger ungewollt „Punkt 1 gemerkt“ ausgelöst.
+        for recognizer in [orbit, pan, pinch, tap, hover] as [UIGestureRecognizer] {
             recognizer.delegate = self
             addGestureRecognizer(recognizer)
         }
@@ -163,8 +160,9 @@ final class ViewportView: MTKView {
         pencil.delegate = self
         addInteraction(pencil)
         orbitGesture = orbit
+        panGesture = pan
+        pinchGesture = pinch
         tapGesture = tap
-        holdGesture = hold
 
         valueLabel.font = .monospacedDigitSystemFont(ofSize: 15, weight: .semibold)
         valueLabel.textColor = .black
@@ -240,11 +238,11 @@ final class ViewportView: MTKView {
         let choosing = sketch.isActive && sketch.isChoosingPlane
         let sketching = sketch.isActive && !choosing
         let fingerSketching = sketching && sketch.fingerDraws
-        // Rahmenauswahl: ein Finger zieht den Rahmen statt zu drehen
-        orbitGesture?.isEnabled = !fingerSketching && !(workspace.boxSelects && workspace.acceptsBoxSelection)
+        // Rahmenauswahl: ein Finger zieht den Rahmen statt zu drehen. Beim Skizzieren mit dem Stift verschiebt
+        // ein Finger nicht: er ist die Bogen-Taste (verschieben und zoomen mit zwei Fingern).
+        orbitGesture?.isEnabled = !sketching && !(workspace.boxSelects && workspace.acceptsBoxSelection)
         tapGesture?.isEnabled = !fingerSketching
         tapGesture?.allowedTouchTypes = sketching ? fingersOnly : fingersAndPencil
-        holdGesture?.isEnabled = sketching
 
         let plane = sketch.plane
         renderer.gridTransform = sketching && !sketch.showsGrid ? nil : sketching
@@ -404,7 +402,7 @@ final class ViewportView: MTKView {
                 groups.append(LineGroup(polylines: sketch.parallelLines.map { $0.map(world) },
                                         color: SIMD3(0.08, 0.62, 0.2), width: 4))
             }
-            // Gemerkte Punkte (1 s gehalten) als orange Kreuze
+            // Gemerkte Punkte (Stift gedrückt) als orange Kreuze
             if !sketch.capturedPoints.isEmpty {
                 let s = 5 * perPoint
                 let crosses = sketch.capturedPoints.flatMap { p -> [[Point2]] in
@@ -982,6 +980,13 @@ final class ViewportView: MTKView {
             return
         }
         sketchTouch = touch
+        // Ein schon laufendes Verschieben/Zoomen durch den aufgelegten Finger abbrechen: der Finger ist
+        // jetzt nur die Bogen-Taste
+        for gesture in [orbitGesture, panGesture, pinchGesture] as [UIGestureRecognizer?] {
+            guard let gesture, gesture.state == .began || gesture.state == .changed else { continue }
+            gesture.isEnabled = false
+            gesture.isEnabled = true
+        }
         // Ein offenes Maßfeld gehört zum vorigen Element: verwerfen statt auf das neue anwenden
         for field in dimensionFields.values where field.isFirstResponder {
             field.appliesOnEnd = false
@@ -1043,7 +1048,7 @@ final class ViewportView: MTKView {
             return
         }
         sketchTouch = nil
-        if sketch?.arcModifier == true { suppressFingerTap = true }
+        if sketch?.arcActive == true || !heldFingers.isEmpty { suppressFingerTap = true }
         if let point = sketchPoint(for: touch) {
             sketch?.ended(at: point, tolerance: snapTolerance)
             if sketch?.tool == .project { project(at: touch.location(in: self)) }
@@ -1206,28 +1211,6 @@ final class ViewportView: MTKView {
         return found
     }
 
-    /// Während ein Ziehpfeil gezogen wird, drehen und wählen die Finger nicht.
-    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        if handleDrag != nil, gestureRecognizer === orbitGesture || gestureRecognizer === tapGesture {
-            return false
-        }
-        return super.gestureRecognizerShouldBegin(gestureRecognizer)
-    }
-
-    /// Schwebender Stift: Fangpunkt und Knoten zeigen, beim Linienzug schon das nächste Stück.
-    @objc private func handleHold(_ gesture: UILongPressGestureRecognizer) {
-        guard gesture.state == .began, let sketch, sketch.isActive, !sketch.isChoosingPlane,
-              let point = sketchPoint(at: gesture.location(in: self)) else { return }
-        // Ein angefangener Strich an derselben Stelle wird verworfen
-        if sketchTouch != nil {
-            sketchTouch = nil
-            sketch.cancelStroke()
-        }
-        sketch.capturePoint(at: point, tolerance: snapTolerance)
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-        refresh()
-    }
-
     @objc private func handleHover(_ gesture: UIHoverGestureRecognizer) {
         guard let sketch else { return }
         switch gesture.state {
@@ -1253,6 +1236,21 @@ final class ViewportView: MTKView {
             return
         }
         showQuickTools(at: location)
+    }
+
+    /// Während ein Ziehpfeil gezogen wird, drehen und wählen die Finger nicht. Während der Stift zeichnet,
+    /// verschiebt, dreht, zoomt und tippt kein Finger: ein aufgelegter Finger ist dann nur die Bogen-Taste
+    /// (mit einem Finger begann sonst bei kleinster Bewegung das Verschieben).
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        if handleDrag != nil, gestureRecognizer === orbitGesture || gestureRecognizer === tapGesture {
+            return false
+        }
+        if sketchTouch != nil,
+           gestureRecognizer === orbitGesture || gestureRecognizer === panGesture
+            || gestureRecognizer === pinchGesture || gestureRecognizer === tapGesture {
+            return false
+        }
+        return super.gestureRecognizerShouldBegin(gestureRecognizer)
     }
 
     /// Werkzeugrad an der Stiftspitze (bzw. in der Mitte, wenn der Stift nicht schwebt).
