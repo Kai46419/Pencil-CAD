@@ -319,12 +319,15 @@ struct ParameterCard: View {
                 Label(model.selectedBodies.count == 1 ? "1 Körper" : "\(model.selectedBodies.count) Körper",
                       systemImage: "cube")
                     .font(.callout.weight(.semibold))
-                Button("Vereinigen", systemImage: "plus.square.on.square") {
-                    workspace.mergeSelectedBodies()
+                ForEach(BooleanKind.allCases) { kind in
+                    Button(kind.rawValue, systemImage: kind.systemImage) {
+                        workspace.combineSelectedBodies(kind)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(kind == .union ? .accentColor : .secondary)
+                    .disabled(model.selectedBodies.count < 2)
+                    .hoverTip(kind.rawValue)
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(model.selectedBodies.count < 2)
-                .hoverTip("Vereinigen")
             }
         }
     }
@@ -1284,7 +1287,8 @@ struct LayersPanel: View {
             model.toggleBody(index, exclusive: true)
             workspace.updatePreview()
         default:
-            model.toggleBody(index, exclusive: true)
+            // Wie im Fusion-Browser: weitere Körper antippen nimmt sie zur Auswahl hinzu
+            model.toggleBody(index, exclusive: model.selectedBodies.isEmpty && !workspace.selectsBodies)
         }
     }
 }

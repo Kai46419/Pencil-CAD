@@ -358,6 +358,10 @@ struct RightRail: View {
             RailButton(systemImage: "square.3.layers.3d", label: "Ebenen", isActive: workspace.showsLayers) {
                 workspace.showsLayers.toggle()
             }
+            RailButton(systemImage: "cube", label: "Körper wählen", isActive: workspace.selectsBodies) {
+                workspace.selectsBodies.toggle()
+                if workspace.selectsBodies, workspace.tool != .select { workspace.activate(.select) }
+            }
             RailButton(systemImage: "rectangle.dashed", label: "Rahmenauswahl", isActive: workspace.boxSelects) {
                 workspace.boxSelects.toggle()
                 if workspace.boxSelects, !workspace.acceptsBoxSelection { workspace.activate(.select) }

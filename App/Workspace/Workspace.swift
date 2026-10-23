@@ -200,6 +200,8 @@ final class Workspace: ObservableObject {
     /// Rahmenauswahl: auch der Finger zieht einen Rahmen auf (Drehen mit einem Finger ist dann aus).
     /// Mit dem Stift geht der Rahmen immer: ins Leere ziehen.
     @Published var boxSelects = false
+    /// Körper wählen: Antippen wählt ganze Körper (mehrere) statt Flächen und Kanten.
+    @Published var selectsBodies = false
 
     /// Liefert ein Bild der Ansicht (vom Viewport gesetzt).
     var snapshot: ((CGSize) -> UIImage?)?
@@ -561,7 +563,8 @@ final class Workspace: ObservableObject {
         case .canvas:
             break
         case .select:
-            if !model.selectedBodies.isEmpty, let body = face?.body ?? edge?.body {
+            if extrudeToTapped(point, face: face) { return }
+            if selectsBodies || !model.selectedBodies.isEmpty, let body = face?.body ?? edge?.body {
                 // Körperauswahl (z. B. per Rahmen): Antippen nimmt Körper hinzu bzw. heraus
                 model.toggleBody(body)
             } else if let edge {
@@ -661,18 +664,55 @@ final class Workspace: ObservableObject {
 
     /// Alle gewählten Körper zu einem verschmelzen (boolesche Vereinigung).
     func mergeSelectedBodies() {
+        combineSelectedBodies(.union)
+    }
+
+    /// Boolesche Verknüpfung der gewählten Körper: der zuerst gewählte ist das Ziel, die übrigen die Werkzeuge
+    /// (Vereinigen verschmilzt alle, Abziehen schneidet die übrigen heraus, Schneiden behält die Überlappung).
+    func combineSelectedBodies(_ kind: BooleanKind) {
         let chosen = model.selectedBodies
         guard let target = chosen.first, chosen.count > 1 else {
-            model.message = "Mindestens zwei Körper wählen: Rahmen aufziehen oder bei gewähltem Körper weitere antippen."
+            model.message = "Mindestens zwei Körper wählen: Rahmen aufziehen, „Körper wählen“ einschalten oder im Ebenen-Browser antippen."
             return
         }
         let before = model.bodies.count
-        model.applyBoolean(.union, target: target, tools: Array(chosen.dropFirst()))
+        model.applyBoolean(kind, target: target, tools: Array(chosen.dropFirst()))
         guard model.bodies.count < before else { return }
-        let merged = target - chosen.dropFirst().filter { $0 < target }.count
+        let result = target - chosen.dropFirst().filter { $0 < target }.count
         model.resetSelection()
-        model.selectBodies([merged])
-        model.message = "\(chosen.count) Körper zu einem vereinigt."
+        model.selectBodies([result])
+        switch kind {
+        case .union: model.message = "\(chosen.count) Körper zu einem vereinigt."
+        case .subtract: model.message = "\(chosen.count - 1) Körper vom ersten abgezogen."
+        case .intersect: model.message = "Nur die Überlappung der \(chosen.count) Körper bleibt."
+        }
+    }
+
+    /// Wie „Bis Objekt“ in Fusion 360: Läuft eine Extrusion (Pfeil gezogen), setzt Antippen einer anderen
+    /// Fläche oder Kante die Höhe genau bis dorthin.
+    private func extrudeToTapped(_ point: SIMD3<Float>?, face: FaceRef?) -> Bool {
+        guard let point else { return false }
+        let target = SIMD3<Double>(point)
+        func extent(from handle: (origin: SIMD3<Double>, direction: SIMD3<Double>)) -> Double? {
+            guard simd_length(handle.direction) > 1e-12 else { return nil }
+            let raw = simd_dot(target - handle.origin, simd_normalize(handle.direction))
+            let rounded = (raw * 10_000).rounded() / 10_000
+            return abs(rounded) > 1e-4 ? rounded : nil
+        }
+        func report(_ value: Double) {
+            model.message = "Bis zur angetippten Stelle: \(value.formatted(.number.precision(.fractionLength(0...3)))) mm"
+        }
+        if model.regionValue != 0, let handle = model.regionHandle, let value = extent(from: handle) {
+            model.setRegionValue(value)
+            report(value)
+            return true
+        }
+        if model.faceValue != 0, let handle = model.faceHandle, face != model.selection, let value = extent(from: handle) {
+            model.setFaceValue(value)
+            report(value)
+            return true
+        }
+        return false
     }
 
     /// „Achse senkrecht“ aus der Kontextleiste: Achse sofort durch die Flächenmitte entlang der Normale.
@@ -847,6 +887,9 @@ final class Workspace: ObservableObject {
         }
         switch tool {
         case .select:
+            if model.regionValue != 0 || model.faceValue != 0 {
+                return "Pfeil ziehen · andere Fläche antippen extrudiert bis dorthin"
+            }
             if model.selectedBodies.count > 1 { return "„Vereinigen“ verschmilzt die Körper · Antippen nimmt hinzu/heraus" }
             if !model.selectedBodies.isEmpty { return "Weitere Körper antippen oder Rahmen aufziehen" }
             if !model.selectedEdges.isEmpty { return "Pfeil ziehen · weitere Kanten antippen" }
@@ -855,6 +898,7 @@ final class Workspace: ObservableObject {
                 return model.faceHandle != nil ? "Pfeil ziehen zum Extrudieren" : "Fläche gewählt"
             }
             if boxSelects { return "Rahmen aufziehen: nach rechts ganz umschlossene, nach links auch angeschnittene Körper" }
+            if selectsBodies { return "Körper antippen – mehrere möglich, dann Vereinigen, Abziehen oder Schneiden" }
             return nil
         case .insert: return "Maße eingeben, dann „Fertig“"
         case .boolean(let kind):
@@ -898,12 +942,12 @@ final class Workspace: ObservableObject {
         if !model.selectedBodies.isEmpty {
             let count = model.selectedBodies.count
             var lines = [
-                "Ganze Körper sind gewählt (blau). Antippen eines Körpers nimmt ihn hinzu oder heraus, ins Leere tippen hebt die Auswahl auf.",
+                "Ganze Körper sind gewählt. Antippen eines Körpers nimmt ihn hinzu oder heraus, ins Leere tippen hebt die Auswahl auf. Rechts „Körper wählen“ (Würfel) einschalten, um immer ganze Körper zu wählen.",
                 "Rahmen: mit dem Stift ins Leere ziehen (oder „Rahmenauswahl“ rechts für den Finger). Nach rechts gezogen zählen nur ganz umschlossene Körper, nach links auch angeschnittene.",
                 "Muster, Skalieren, Spiegeln, Farbe und Löschen wirken auf alle gewählten Körper; Verschieben/Rotieren auf den ersten.",
             ]
             if count > 1 {
-                lines.insert("„Vereinigen“ verschmilzt alle gewählten Körper zu einem einzigen Körper (Name und Farbe vom ersten).", at: 0)
+                lines.insert("„Vereinigen“ verschmilzt alle gewählten Körper zu einem (Name und Farbe vom ersten). „Abziehen“ schneidet die übrigen aus dem zuerst gewählten heraus, „Schneiden“ behält nur die Überlappung.", at: 0)
             }
             return (count == 1 ? "1 Körper gewählt" : "\(count) Körper gewählt", lines)
         }
@@ -929,7 +973,7 @@ final class Workspace: ObservableObject {
         if model.selection != nil {
             if model.faceHandle != nil {
                 return ("Ebene Fläche gewählt", [
-                    "Am Pfeil ziehen: nach außen wird der Körper verlängert, nach innen wird Material abgetragen. Abstand unten auch eintippen.",
+                    "Am Pfeil ziehen: nach außen wird der Körper verlängert, nach innen wird Material abgetragen. Abstand unten auch eintippen – oder während des Ziehens eine andere Fläche antippen: dann geht es genau bis dorthin.",
                     "Skizze: direkt auf dieser Fläche zeichnen.",
                     "Achse senkrecht: erstellt sofort eine Hilfsachse durch die Flächenmitte, senkrecht zur Fläche (z. B. für Drehungen und Muster).",
                     "Ebene Versatz: Hilfsebene parallel zur Fläche in einem Abstand. Kante versetzen: Flächenrand als Skizze nach innen oder außen versetzt.",

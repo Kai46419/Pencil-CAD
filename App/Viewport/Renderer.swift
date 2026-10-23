@@ -10,6 +10,8 @@ private struct Uniforms {
     var baseColor: SIMD3<Float>
     /// Schnittansicht: xyz = Normale, w = Abstand; Normale 0 = aus
     var clipPlane: SIMD4<Float> = .zero
+    /// xyz = Kameraposition, w = Anteil, um den Überlagerungen (Kanten, Skizzen) zur Kamera rücken
+    var eye: SIMD4<Float> = .zero
 }
 
 enum DisplayMode: String, CaseIterable, Identifiable {
@@ -464,7 +466,8 @@ final class Renderer: NSObject, MTKViewDelegate {
             model: matrix_identity_float4x4,
             lightDirection: simd_normalize(toEye + SIMD3(0.3, 0.2, 0.6)),
             baseColor: SIMD3(0.55, 0.62, 0.72),
-            clipPlane: clipPlane
+            clipPlane: clipPlane,
+            eye: SIMD4<Float>(camera.position, 0.0015)
         )
 
         func setUniforms(_ u: inout Uniforms) {

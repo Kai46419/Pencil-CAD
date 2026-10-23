@@ -14,6 +14,8 @@ struct Uniforms {
     float3 baseColor;
     /// Schnittansicht: xyz = Normale, w = Abstand; Normale 0 = aus
     float4 clipPlane;
+    /// xyz = Kameraposition, w = Anteil, um den Überlagerungen zur Kamera gezogen werden
+    float4 eye;
 };
 
 struct VertexOut {
@@ -50,8 +52,17 @@ vertex VertexOut vertex_main(const device Vertex *vertices [[buffer(0)]],
 vertex VertexOut vertex_overlay(const device Vertex *vertices [[buffer(0)]],
                                 constant Uniforms &uniforms [[buffer(1)]],
                                 uint vid [[vertex_id]]) {
-    VertexOut out = transformVertex(vertices[vid], uniforms);
-    out.position.z -= 0.0004 * out.position.w;
+    // Um einen festen Anteil der Entfernung zur Kamera hin verschieben. Ein fester Versatz in der
+    // Tiefe wirkte bei größerem Abstand wie mehrere Millimeter: Skizzen und Kanten am Boden
+    // schienen dann durch flache Körper hindurch.
+    Vertex v = vertices[vid];
+    float4 world = uniforms.model * float4(v.position, 1.0);
+    world.xyz += (uniforms.eye.xyz - world.xyz) * uniforms.eye.w;
+    VertexOut out;
+    out.position = uniforms.viewProjection * world;
+    out.normal = (uniforms.model * float4(v.normal, 0.0)).xyz;
+    out.color = v.color;
+    out.world = world.xyz;
     return out;
 }
 

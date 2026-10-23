@@ -215,7 +215,9 @@ enum ToolTips {
         "Achsendrehung": "Skizzenbereich um eine Linie oder Achse drehen (Drehkörper).",
         "Isolieren": "Nur den gewählten Körper zeigen; nochmal tippen blendet alles wieder ein.",
         "Messen": "Kantenlänge, Fläche, Volumen oder Abstand zweier Punkte anzeigen.",
+        "Körper wählen": "Antippen wählt ganze Körper statt Flächen – mehrere nacheinander antippen, dann Vereinigen, Abziehen oder Schneiden.",
+        "Schneiden": "Behält nur den Bereich, in dem sich die gewählten Körper überlappen.",
         "Rahmenauswahl": "Finger zieht einen Rahmen statt zu drehen. Nach rechts: nur ganz umschlossene Körper, nach links: auch angeschnittene. Mit dem Stift geht der Rahmen immer – einfach ins Leere ziehen.",
-        "Abziehen": "Schneidet das Ergebnis aus vorhandenen Körpern heraus.",
+        "Abziehen": "Schneidet heraus: beim Extrudieren aus vorhandenen Körpern, in der Auswahl die übrigen Körper aus dem zuerst gewählten.",
     ]
 }

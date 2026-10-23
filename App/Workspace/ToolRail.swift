@@ -280,10 +280,14 @@ struct ToolRail: View {
             }
         }
         if model.selectedBodies.count > 1 {
-            entries.insert(RailEntry(id: "context.merge", title: "Vereinigen", subtitle: "\(model.selectedBodies.count) → 1",
-                                     systemImage: "plus.square.on.square", isActive: true) {
-                workspace.mergeSelectedBodies()
-            }, at: 1)
+            let combine = BooleanKind.allCases.map { kind in
+                RailEntry(id: "context.\(kind.rawValue)", title: kind.rawValue,
+                          subtitle: kind == .union ? "\(model.selectedBodies.count) → 1" : nil,
+                          systemImage: kind.systemImage, isActive: kind == .union) {
+                    workspace.combineSelectedBodies(kind)
+                }
+            }
+            entries.insert(contentsOf: combine, at: 1)
         }
         if hasRegions || planarFace {
             entries.append(RailEntry(id: "context.extrude", title: "Extrudieren", subtitle: "Pfeil ziehen",
