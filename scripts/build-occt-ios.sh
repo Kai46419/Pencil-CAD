@@ -57,7 +57,7 @@ build_platform() {
   # Alle Teilbibliotheken zu einer libOCCT.a zusammenfassen
   local libs
   libs=$(find "$install_dir" -name "libTK*.a")
-  libtool -static -o "$install_dir/libOCCT.a" $libs
+  libtool -static -no_warning_for_no_symbols -o "$install_dir/libOCCT.a" $libs
 }
 
 build_platform iphoneos device
