@@ -217,6 +217,9 @@ final class SketchController: ObservableObject {
 
     var hasOpenPolyline: Bool { !polyline.isEmpty }
 
+    /// true, solange noch nichts gezeichnet ist; dann darf ein neuer Strich die Skizzenebene wählen.
+    var isEmpty: Bool { profile == nil && polyline.isEmpty && dragStart == nil }
+
     // MARK: Exakte Maße nach dem Zeichnen
 
     /// Breite/Tiefe des Rechtecks (Betrag). Die Startecke bleibt fest.

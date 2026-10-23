@@ -269,8 +269,8 @@ struct ContentView: View {
                 Text(message)
             } else if sketch.isActive {
                 Text(sketch.fingerDraws
-                     ? "Finger/Maus zeichnet · zum Drehen „Finger zeichnet“ ausschalten"
-                     : "Pencil zeichnet · Finger-Tipp auf eine ebene Fläche skizziert darauf")
+                     ? "Finger/Maus zeichnet · auf einer Fläche beginnen = auf ihr zeichnen · zum Drehen „Finger zeichnet“ aus"
+                     : "Pencil zeichnet · auf einer Fläche beginnen = auf ihr zeichnen, im Leeren = Boden")
             } else if model.selection != nil {
                 Text("Fläche gewählt: Kanten runden/fasen, Körper löschen oder „Skizze“ tippen, um darauf zu zeichnen")
             } else {

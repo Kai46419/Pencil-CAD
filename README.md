@@ -25,14 +25,15 @@ Geometriekernel: [OpenCASCADE](https://github.com/Open-Cascade-SAS/OCCT) 7.7.2 (
 | Pinch | Zoomen |
 | Tippen | Fläche auswählen (orange) |
 | Pencil im Skizzenmodus | Zeichnen auf der Skizzenebene |
-| Finger-Tipp im Skizzenmodus | Ebene Fläche wird zur Skizzenebene, Tipp ins Leere = Bodenebene |
+| Erster Strich im Skizzenmodus | Beginnt er auf einer ebenen Fläche, wird darauf skizziert; im Leeren auf der Bodenebene |
+| Finger-Tipp im Skizzenmodus (mit Pencil) | Ebene Fläche wird zur Skizzenebene, Tipp ins Leere = Bodenebene |
 
 **Typischer Ablauf:**
 
 1. „Skizze“ einschalten, mit dem Pencil ein Rechteck ziehen.
 2. Unten Breite/Tiefe exakt eintragen, Modus „Neuer Körper“, Höhe 20, „Extrudieren“.
-3. Skizze aus, Oberseite antippen (wird orange), Skizze wieder ein: Die Fläche ist jetzt Skizzenebene.
-   Kreis ziehen, Ø 8 eintragen, Modus „Abziehen“, Tiefe 20 → Bohrung (braucht OpenCASCADE).
+3. Werkzeug „Kreis“, den Strich auf der Oberseite beginnen: Die Fläche wird automatisch Skizzenebene.
+   Ø 8 eintragen, Modus „Abziehen“, 20 → Bohrung (braucht OpenCASCADE).
 4. Skizze ausschalten, Oberseite antippen, „Kanten › Kanten runden …“, 2 mm.
 5. „Datei › Als STEP exportieren …“ oder „Als STL exportieren …“.
 

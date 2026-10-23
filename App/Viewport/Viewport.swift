@@ -165,8 +165,35 @@ final class ViewportView: MTKView, UIGestureRecognizerDelegate {
         Double((renderer?.camera.worldUnitsPerPoint(viewHeight: Float(bounds.height)) ?? 0.1) * 20)
     }
 
+    /// Wie bei Shapr3D: Der erste Strich legt die Skizzenebene fest. Beginnt er auf einer ebenen Fläche,
+    /// wird auf dieser Fläche gezeichnet, beginnt er im Leeren, auf der Bodenebene.
+    /// Gibt false zurück, wenn der Strich auf einer gekrümmten Fläche beginnt.
+    private func choosePlane(for touch: UITouch) -> Bool {
+        guard let renderer, let model, let sketch, sketch.isEmpty,
+              let ray = renderer.camera.ray(through: touch.location(in: self), viewSize: bounds.size) else { return true }
+        guard let hit = model.pick(origin: ray.origin, direction: ray.direction) else {
+            if sketch.plane.isOnFace {
+                sketch.plane = .ground
+            }
+            return true
+        }
+        guard let plane = model.plane(of: hit.face) else {
+            model.message = "Auf gekrümmten Flächen kann nicht skizziert werden. Auf einer ebenen Fläche oder im Leeren beginnen."
+            return false
+        }
+        model.message = nil
+        let samePlane = sketch.plane.isOnFace
+            && simd_distance(sketch.plane.normal, plane.normal) < 1e-6
+            && simd_distance(sketch.plane.origin, plane.origin) < 1e-6
+        if !samePlane {
+            sketch.plane = plane
+        }
+        return true
+    }
+
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard sketchTouch == nil, let touch = touches.first(where: acceptsForSketch),
+              choosePlane(for: touch),
               let point = sketchPoint(for: touch) else {
             super.touchesBegan(touches, with: event)
             return
