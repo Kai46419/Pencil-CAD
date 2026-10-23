@@ -416,6 +416,17 @@ final class ViewportView: MTKView {
                 let guides = sketch.guideLines.flatMap { $0.lines }.flatMap { dashed($0, dash: 4 * perPoint) }
                 groups.append(LineGroup(polylines: guides.map { $0.map(world) }, color: Self.helperOrange, width: 1.3))
             }
+            // Messen: gemessene Elemente orange, kürzeste Verbindung gestrichelt mit Endpunkten
+            if sketch.tool == .measure, !sketch.measureRefs.isEmpty {
+                let measured = sketch.measuredPolylines
+                if !measured.isEmpty {
+                    groups.append(LineGroup(polylines: measured.map { $0.map(world) }, color: Self.selectionOrange, width: 3.2))
+                }
+                let span = sketch.measurement.span
+                let spanLines = span.count == 2 ? dashed(span, dash: 4 * perPoint) : []
+                groups.append(LineGroup(polylines: spanLines.map { $0.map(world) }, color: Self.snapOrange, width: 1.5,
+                                        dots: (sketch.measuredPoints + span).map(world), dotRadius: 3))
+            }
             // Gleicher Winkel wie eine vorhandene Linie: diese leuchtet grün
             if !sketch.parallelLines.isEmpty {
                 groups.append(LineGroup(polylines: sketch.parallelLines.map { $0.map(world) },
@@ -1143,6 +1154,10 @@ final class ViewportView: MTKView {
                 return
             case .breakCurve:
                 if let point = sketchPoint(at: location) { sketch.breakCurve(at: point, tolerance: snapTolerance) }
+                refresh()
+                return
+            case .measure:
+                if let point = sketchPoint(at: location) { sketch.measure(at: point, tolerance: snapTolerance) }
                 refresh()
                 return
             default:

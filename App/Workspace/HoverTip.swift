@@ -234,7 +234,7 @@ enum ToolTips {
         "Skizze skalieren": "Ganze Skizze um einen Faktor vergrößern oder verkleinern.",
         "Achsendrehung": "Skizzenbereich um eine Linie oder Achse drehen (Drehkörper).",
         "Isolieren": "Nur den gewählten Körper zeigen; nochmal tippen blendet alles wieder ein.",
-        "Messen": "Kantenlänge, Fläche, Volumen oder Abstand zweier Punkte anzeigen.",
+        "Messen": "Kantenlänge, Fläche, Volumen oder Abstand zweier Punkte anzeigen. In der Skizze: Länge, Radius, Abstand und Winkel – zeigt auch, ob zwei Linien wirklich parallel sind.",
         "Körper wählen": "Antippen wählt ganze Körper statt Flächen – mehrere nacheinander antippen, dann Vereinigen, Abziehen oder Schneiden.",
         "Schneiden": "Behält nur den Bereich, in dem sich die gewählten Körper überlappen.",
         "Rahmenauswahl": "Finger zieht einen Rahmen statt zu drehen. Nach rechts: nur ganz umschlossene Körper, nach links: auch angeschnittene. Mit dem Stift geht der Rahmen immer – einfach ins Leere ziehen.",

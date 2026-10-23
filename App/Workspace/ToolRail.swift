@@ -279,6 +279,7 @@ struct ToolRail: View {
                       flyout: [toolItem(.mirror), toolItem(.rectPattern), toolItem(.circPattern),
                                toolItem(.point), toolItem(.text)]),
             toolEntry(.trim),
+            toolEntry(.measure),
             RailEntry(id: "sketch.delete", title: "Löschen", subtitle: sketch.selection.isEmpty ? nil : "Auswahl",
                       systemImage: "trash", isEnabled: !sketch.selection.isEmpty) {
                 sketch.deleteSelection()

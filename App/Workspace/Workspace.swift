@@ -1003,6 +1003,9 @@ final class Workspace: ObservableObject {
             return "Linie nahe dem Ende antippen – sie wächst bis zur nächsten Kurve"
         case .breakCurve:
             return "Kurve antippen – sie wird an den nächsten Schnittpunkten geteilt"
+        case .measure:
+            return sketch.measureRefs.isEmpty ? "Element oder Punkt antippen"
+                : "Zweites Element antippen für Abstand und Winkel · erneut antippen nimmt es heraus"
         case .mirror, .rectPattern, .circPattern:
             return sketch.transformStatus
         case .spline where sketch.hasOpenSpline:

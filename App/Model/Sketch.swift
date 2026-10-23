@@ -33,6 +33,8 @@ enum SketchTool: String, CaseIterable, Identifiable {
     case rectPattern = "Rechteckmuster"
     /// Gewählte Elemente um einen Punkt vervielfältigen (Fusion 360 „Circular Pattern“)
     case circPattern = "Kreismuster"
+    /// Länge, Radius, Abstand und Winkel antippen (Fusion 360 „Messen“): zeigt z. B., ob zwei Linien parallel sind
+    case measure = "Messen"
 
     var id: Self { self }
 
@@ -60,6 +62,7 @@ enum SketchTool: String, CaseIterable, Identifiable {
         case .mirror: "arrow.left.and.right.righttriangle.left.righttriangle.right"
         case .rectPattern: "square.grid.3x3"
         case .circPattern: "circle.grid.cross"
+        case .measure: "ruler"
         }
     }
 
@@ -80,6 +83,7 @@ enum SketchTool: String, CaseIterable, Identifiable {
         case .breakCurve: "An Schnittpunkten teilen"
         case .mirror: "Auswahl, zuletzt Achse"
         case .rectPattern, .circPattern: "Auswahl vervielfältigen"
+        case .measure: "Länge, Abstand, Winkel"
         default: nil
         }
     }
@@ -623,8 +627,16 @@ final class SketchController: ObservableObject {
             return
         }
         guard let start = dragStart else { return }
-        let end = snap(point, tolerance: tolerance, anchor: strokeAnchor)
-        let endKind = activeSnap?.kind
+        let previewed = dragCurrent, previewedKind = activeSnap?.kind
+        var end = snap(point, tolerance: tolerance, anchor: strokeAnchor)
+        var endKind = activeSnap?.kind
+        // Beim Abheben zittert der Stift: es gilt der zuletzt angezeigte (eingerastete) Punkt, sonst springt
+        // eine gerade noch parallele Linie im letzten Moment aus dem Fang
+        if let previewed, strokeSamples.count > 1, let last = strokeSamples.last,
+           simd_distance(last, point) <= tolerance * 0.5 {
+            end = previewed
+            endKind = previewedKind
+        }
         let samples = strokeSamples + [point]
         circleInference = nil
         let arcStroke = arcActive
@@ -637,7 +649,8 @@ final class SketchController: ObservableObject {
         strokeShape = nil
 
         // Kritzeln über Elemente löscht sie (in allen Zeichenwerkzeugen)
-        if Self.scribbleTools.contains(tool), arcChord == nil, stepBase == nil, StrokeGesture.isScribble(samples, tolerance: tolerance) {
+        if Self.scribbleTools.contains(tool), !arcStroke, arcChord == nil, stepBase == nil,
+           StrokeGesture.isScribble(samples, tolerance: tolerance) {
             eraseScribbled(samples, tolerance: tolerance)
             changed()
             return
@@ -730,6 +743,8 @@ final class SketchController: ObservableObject {
         case .mirror, .rectPattern, .circPattern:
             // Antippen wählt Elemente (bzw. beim Spiegeln zuletzt die Achse), angewendet wird über die Karte
             select(at: point, tolerance: tolerance)
+        case .measure:
+            measure(at: point, tolerance: tolerance)
         case .project, .scale, .select:
             // Projizieren übernimmt der Viewport (braucht die Körperkanten), Skalieren die Parameterkarte
             break
@@ -1415,7 +1430,8 @@ final class SketchController: ObservableObject {
     /// Bezugspunkt für Winkelschritte während eines Strichs.
     private var strokeAnchor: Point2? {
         switch tool {
-        case .polyline: chainEnd ?? dragStart
+        // Bogen (Finger aufgelegt): keine Winkel- und Parallelstrahlen, die zögen das Ende auf die Tangente
+        case .polyline: arcActive ? nil : chainEnd ?? dragStart
         case .arc: arcChord == nil && stepBase == nil ? dragStart : nil
         case .slot: stepBase == nil ? dragStart : nil
         case .rectangle: rectangleMode == .threePoint && rectangleBase == nil ? dragStart : nil
@@ -1494,7 +1510,7 @@ final class SketchController: ObservableObject {
     func hover(at point: Point2, tolerance: Double) {
         guard dragStart == nil else { return }
         let anchor: Point2? = switch tool {
-        case .polyline: chainEnd
+        case .polyline: arcActive ? nil : chainEnd
         case .spline: splinePoints.last
         default: nil
         }
@@ -1626,6 +1642,7 @@ final class SketchController: ObservableObject {
         pendingTextAnchor = nil
         editableIndex = nil
         rectangleBase = nil
+        measureRefs = []
         changed()
     }
 
@@ -2731,7 +2748,7 @@ final class SketchController: ObservableObject {
                 polylines += preview.drawing
                 if splineKind == .control { polylines.append(points) }
             }
-        case .point, .text, .offset, .project, .trim, .scale, .select, .fillet, .chamfer, .extend, .breakCurve:
+        case .point, .text, .offset, .project, .trim, .scale, .select, .fillet, .chamfer, .extend, .breakCurve, .measure:
             break
         }
         return polylines
@@ -2813,7 +2830,8 @@ final class SketchController: ObservableObject {
             if distance <= tolerance, distance < (best?.distance ?? .infinity) { best = (distance, projected) }
         }
         guard let best else { return snapped.kind == .angle ? alignedOnRay(snapped, anchor: anchor, tolerance: tolerance) : snapped }
-        if snapped.kind != .angle {
+        // Parallel zu einer vorhandenen Linie schlägt den 15°-Schritt, wenn es näher am Stift liegt
+        if snapped.kind != .angle || best.distance < simd_distance(snapped.point, p) - 1e-9 {
             result.point = best.point
             result.kind = .angle
             result.guides = [(anchor, best.point)]
@@ -2828,6 +2846,70 @@ final class SketchController: ObservableObject {
             return abs(d.x * direction.y - d.y * direction.x) < 1e-4
         }.map { [$0.0, $0.1] }
         return result
+    }
+
+    // MARK: Messen
+
+    /// Angetippt (höchstens zwei; ein drittes Antippen beginnt neu, erneutes Antippen nimmt es heraus)
+    @Published private(set) var measureRefs: [SketchRef] = []
+
+    func measure(at p: Point2, tolerance: Double) {
+        guard let ref = pick(at: p, tolerance: tolerance) else {
+            measureRefs = []
+            changed()
+            return
+        }
+        if let index = measureRefs.firstIndex(of: ref) {
+            measureRefs.remove(at: index)
+        } else {
+            if measureRefs.count >= 2 { measureRefs = [] }
+            measureRefs.append(ref)
+        }
+        changed()
+    }
+
+    func clearMeasure() {
+        measureRefs = []
+        changed()
+    }
+
+    var measurement: SketchMeasurement {
+        SketchMeasurement(measureRefs.compactMap(measureItem))
+    }
+
+    /// Gemessene Kurven zum Hervorheben (lokal)
+    var measuredPolylines: [[Point2]] {
+        measureRefs.compactMap { ref -> [Point2]? in
+            guard case .curve(let curve) = ref else { return nil }
+            return curvePolyline(curve)
+        }
+    }
+
+    /// Gemessene Punkte zum Hervorheben (lokal)
+    var measuredPoints: [Point2] {
+        measureRefs.compactMap { ref -> Point2? in
+            guard case .point(let point) = ref else { return nil }
+            return ConstraintSolver.point(point, entities)
+        }
+    }
+
+    private func measureItem(_ ref: SketchRef) -> SketchMeasurement.Item? {
+        switch ref {
+        case .point(let point):
+            return ConstraintSolver.point(point, entities).map { SketchMeasurement.Item.point($0) }
+        case .curve(let curve):
+            guard entities.indices.contains(curve.entity), let polyline = curvePolyline(curve) else { return nil }
+            switch entities[curve.entity].constraintCurve(curve.index) {
+            case .line(let a, let b):
+                return .line(a, b)
+            case .circle(let center, let radius):
+                var isArc = false
+                if case .arc = entities[curve.entity] { isArc = true }
+                return .circle(center: center, radius: radius, polyline: polyline, isArc: isArc)
+            case .other:
+                return .curve(polyline)
+            }
+        }
     }
 
     /// Fluchtlinie auf dem eingerasteten Strahl: Die Länge rastet dort ein, wo ein vorhandener Punkt
@@ -2888,6 +2970,7 @@ final class SketchController: ObservableObject {
         regions = found.regions
         loops = found.loops
         snapIndex = SnapIndex(entities: entities)
+        measureRefs = measureRefs.filter { entities.indices.contains($0.entity) }
         geometryRevision += 1
         changed()
     }

@@ -204,6 +204,23 @@ struct ParameterCard: View {
         case .breakCurve:
             Text("Kurve antippen – sie wird an den nächsten Schnittpunkten geteilt")
                 .foregroundStyle(.secondary)
+        case .measure:
+            HStack(alignment: .top, spacing: 14) {
+                let lines = sketch.measurement.lines
+                VStack(alignment: .leading, spacing: 3) {
+                    if lines.isEmpty {
+                        Text("Linie, Kreis oder Punkt antippen – ein zweites misst Abstand und Winkel")
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(lines, id: \.self) { line in
+                        Text(line)
+                            .monospacedDigit()
+                    }
+                }
+                if !sketch.measureRefs.isEmpty {
+                    Button("Neu", systemImage: "arrow.counterclockwise", action: sketch.clearMeasure)
+                }
+            }
         case .mirror:
             HStack(spacing: 14) {
                 Text(sketch.transformStatus)
