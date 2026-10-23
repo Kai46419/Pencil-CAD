@@ -26,6 +26,9 @@ build_platform() {
   local build_dir="$WORK/build-$name"
   local install_dir="$WORK/install-$name"
 
+  # Abgebrochene Konfiguration verwerfen, sonst bleiben alte Cache-Werte hängen
+  [ -f "$build_dir/CMakeCache.txt" ] && [ ! -f "$build_dir/Makefile" ] && rm -rf "$build_dir"
+
   cmake -S "$SRC" -B "$build_dir" \
     -DCMAKE_SYSTEM_NAME=iOS \
     -DCMAKE_OSX_SYSROOT="$sdk" \
@@ -33,6 +36,7 @@ build_platform() {
     -DCMAKE_OSX_DEPLOYMENT_TARGET="$DEPLOYMENT_TARGET" \
     -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
     -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     -DBUILD_LIBRARY_TYPE=Static \
     -DINSTALL_DIR="$install_dir" \
     -DBUILD_MODULE_FoundationClasses=ON \
