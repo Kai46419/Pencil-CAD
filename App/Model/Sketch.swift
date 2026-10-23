@@ -17,25 +17,77 @@ enum SketchTool: String, CaseIterable, Identifiable {
     }
 }
 
+/// Ebene im Raum mit lokalem 2D-Koordinatensystem (u, v) für die Skizze.
+struct SketchPlane {
+    var origin: SIMD3<Double>
+    var u: SIMD3<Double>
+    var v: SIMD3<Double>
+    var normal: SIMD3<Double>
+    /// true, wenn die Ebene auf einer Körperfläche liegt (Normale zeigt aus dem Material).
+    var isOnFace: Bool
+    /// Körper, auf dessen Fläche skizziert wird (Ziel für „Vereinigen“).
+    var sourceBody: Int?
+
+    static let ground = SketchPlane(origin: .zero, u: [1, 0, 0], v: [0, 1, 0], normal: [0, 0, 1], isOnFace: false)
+
+    /// Ebene durch point mit Normale normal. Der Ursprung liegt dem Weltursprung am nächsten,
+    /// damit das Raster bei achsparallelen Flächen auf ganzen Millimetern bleibt.
+    init(point: SIMD3<Double>, normal n: SIMD3<Double>, isOnFace: Bool, sourceBody: Int? = nil) {
+        let normal = simd_normalize(n)
+        let u: SIMD3<Double> = abs(normal.z) > 0.99
+            ? [1, 0, 0]
+            : simd_normalize(simd_cross(SIMD3<Double>(0, 0, 1), normal))
+        self.init(origin: normal * simd_dot(point, normal), u: u, v: simd_cross(normal, u),
+                  normal: normal, isOnFace: isOnFace)
+        self.sourceBody = sourceBody
+    }
+
+    init(origin: SIMD3<Double>, u: SIMD3<Double>, v: SIMD3<Double>, normal: SIMD3<Double>, isOnFace: Bool) {
+        self.origin = origin
+        self.u = u
+        self.v = v
+        self.normal = normal
+        self.isOnFace = isOnFace
+    }
+
+    func world(_ p: SIMD2<Double>) -> SIMD3<Double> {
+        origin + p.x * u + p.y * v
+    }
+
+    func local(_ p: SIMD3<Double>) -> SIMD2<Double> {
+        let d = p - origin
+        return SIMD2(simd_dot(d, u), simd_dot(d, v))
+    }
+}
+
 /// Geschlossenes Profil in der Skizzenebene, bereit zum Extrudieren.
 enum SketchProfile {
+    /// corner = Startecke, size = vorzeichenbehaftete Ausdehnung in u/v
+    case rectangle(corner: SIMD2<Double>, size: SIMD2<Double>)
     case polygon([SIMD2<Double>])
     case circle(center: SIMD2<Double>, radius: Double)
 
-    func solid(z: Double, height: Double) -> PCKShape? {
+    /// Extrudiert zwischen den Abständen from und to entlang der Ebenennormale.
+    func solid(on plane: SketchPlane, from: Double, to: Double) -> PCKShape? {
+        guard from != to else { return nil }
         switch self {
-        case .polygon(let points):
-            let xy = points.flatMap { [NSNumber(value: $0.x), NSNumber(value: $0.y)] }
-            return PCKShape.prism(polygonXY: xy, z: z, height: height)
+        case .rectangle, .polygon:
+            let base = plane.normal * from
+            let xyz = outline.flatMap { p -> [NSNumber] in
+                let w = plane.world(p) + base
+                return [NSNumber(value: w.x), NSNumber(value: w.y), NSNumber(value: w.z)]
+            }
+            return PCKShape.prism(pointsXYZ: xyz, direction: plane.normal * (to - from))
         case .circle(let center, let radius):
-            guard radius > 0, height != 0 else { return nil }
-            return PCKShape.cylinder(x: center.x, y: center.y, z: height < 0 ? z + height : z,
-                                     radius: radius, height: abs(height))
+            return PCKShape.cylinder(base: plane.world(center) + plane.normal * min(from, to), axis: plane.normal,
+                                     radius: radius, height: abs(to - from))
         }
     }
 
     var outline: [SIMD2<Double>] {
         switch self {
+        case .rectangle(let c, let s):
+            return [c, c + SIMD2(s.x, 0), c + s, c + SIMD2(0, s.y)]
         case .polygon(let points):
             return points
         case .circle(let center, let radius):
@@ -47,19 +99,24 @@ enum SketchProfile {
     }
 }
 
-/// Zustand der aktuellen Skizze. Bekommt Weltpunkte in der Skizzenebene vom Viewport.
+/// Zustand der aktuellen Skizze. Bekommt Punkte im lokalen System der Skizzenebene vom Viewport.
 @MainActor
 final class SketchController: ObservableObject {
     @Published var isActive = false {
-        didSet { if !isActive { reset() } }
+        didSet {
+            if !isActive {
+                reset()
+                plane = .ground
+            }
+        }
     }
     @Published var tool: SketchTool = .rectangle {
         didSet { reset() }
     }
     /// Für Geräte ohne Apple Pencil (z. B. Simulator): ein Finger zeichnet statt zu drehen.
     @Published var fingerDraws = false
-    @Published var planeZ: Double = 0 {
-        didSet { revision += 1 }
+    @Published var plane: SketchPlane = .ground {
+        didSet { reset() }
     }
     @Published var gridStep: Double = 1
 
@@ -70,6 +127,12 @@ final class SketchController: ObservableObject {
     private var dragStart: SIMD2<Double>?
     private var dragCurrent: SIMD2<Double>?
     private var polyline: [SIMD2<Double>] = []
+
+    /// Höhe der Bodenebene; nur wenn nicht auf einer Fläche skizziert wird.
+    var groundHeight: Double {
+        get { plane.isOnFace ? 0 : plane.origin.z }
+        set { plane = SketchPlane(origin: [0, 0, newValue], u: [1, 0, 0], v: [0, 1, 0], normal: [0, 0, 1], isOnFace: false) }
+    }
 
     // MARK: Eingabe
 
@@ -97,9 +160,9 @@ final class SketchController: ObservableObject {
 
         switch tool {
         case .rectangle:
-            let lo = simd_min(start, end), hi = simd_max(start, end)
-            if hi.x - lo.x > 0, hi.y - lo.y > 0 {
-                profile = .polygon([lo, SIMD2(hi.x, lo.y), hi, SIMD2(lo.x, hi.y)])
+            let size = end - start
+            if size.x != 0, size.y != 0 {
+                profile = .rectangle(corner: start, size: size)
             }
         case .circle:
             let radius = simd_distance(start, end)
@@ -149,9 +212,40 @@ final class SketchController: ObservableObject {
 
     var hasOpenPolyline: Bool { !polyline.isEmpty }
 
+    // MARK: Exakte Maße nach dem Zeichnen
+
+    /// Breite/Tiefe des Rechtecks (Betrag). Die Startecke bleibt fest.
+    var rectangleSize: SIMD2<Double>? {
+        get {
+            guard case .rectangle(_, let size) = profile else { return nil }
+            return simd_abs(size)
+        }
+        set {
+            guard let newValue, newValue.x > 0, newValue.y > 0,
+                  case .rectangle(let corner, let size) = profile else { return }
+            let sign = SIMD2(size.x < 0 ? -1.0 : 1.0, size.y < 0 ? -1.0 : 1.0)
+            profile = .rectangle(corner: corner, size: newValue * sign)
+            updateLabel()
+            revision += 1
+        }
+    }
+
+    var circleDiameter: Double? {
+        get {
+            guard case .circle(_, let radius) = profile else { return nil }
+            return 2 * radius
+        }
+        set {
+            guard let newValue, newValue > 0, case .circle(let center, _) = profile else { return }
+            profile = .circle(center: center, radius: newValue / 2)
+            updateLabel()
+            revision += 1
+        }
+    }
+
     // MARK: Darstellung
 
-    /// Liniensegmente (Paare von Punkten) für den Renderer.
+    /// Liniensegmente (Punktpaare, lokal) für den Renderer.
     var segments: [SIMD2<Double>] {
         if let profile {
             return closedLoop(profile.outline)
@@ -165,7 +259,7 @@ final class SketchController: ObservableObject {
         guard let start = dragStart, let current = dragCurrent else { return result }
         switch tool {
         case .rectangle:
-            result += closedLoop([start, SIMD2(current.x, start.y), current, SIMD2(start.x, current.y)])
+            result += closedLoop(SketchProfile.rectangle(corner: start, size: current - start).outline)
         case .circle:
             result += closedLoop(SketchProfile.circle(center: start, radius: simd_distance(start, current)).outline)
             result += [start, current]
@@ -195,8 +289,8 @@ final class SketchController: ObservableObject {
     private func updateLabel() {
         if let profile {
             switch profile {
-            case .polygon(let points) where tool == .rectangle:
-                liveLabel = "\(format(points[2].x - points[0].x)) × \(format(points[2].y - points[0].y)) mm"
+            case .rectangle(_, let size):
+                liveLabel = "\(format(abs(size.x))) × \(format(abs(size.y))) mm"
             case .polygon(let points):
                 liveLabel = "Linienzug, \(points.count) Punkte"
             case .circle(_, let radius):

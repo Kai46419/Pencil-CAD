@@ -3,11 +3,12 @@
 # und packt sie nach Vendor/OCCT.xcframework.
 #
 # Voraussetzungen: Xcode, cmake (brew install cmake), git.
-# Gebaut werden nur die Module FoundationClasses, ModelingData und ModelingAlgorithms.
-# DataExchange (STEP) folgt in Phase 3, Visualization brauchen wir nicht (eigener Metal-Renderer).
+# Gebaut werden die Module FoundationClasses, ModelingData und ModelingAlgorithms plus TKSTEP für
+# STEP-Import/-Export. Visualization brauchen wir nicht (eigener Metal-Renderer).
+# Version 7.7.2, weil TKSTEP dort noch ohne XCAF/Visualization auskommt.
 set -euo pipefail
 
-OCCT_TAG="${OCCT_TAG:-V7_8_1}"
+OCCT_TAG="${OCCT_TAG:-V7_7_2}"
 DEPLOYMENT_TARGET="${DEPLOYMENT_TARGET:-17.0}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="$ROOT/build/occt"
@@ -41,6 +42,7 @@ build_platform() {
     -DBUILD_MODULE_ApplicationFramework=OFF \
     -DBUILD_MODULE_DataExchange=OFF \
     -DBUILD_MODULE_Draw=OFF \
+    -DBUILD_ADDITIONAL_TOOLKITS="TKSTEP" \
     -DBUILD_DOC_Overview=OFF \
     -DUSE_FREETYPE=OFF \
     -DUSE_TK=OFF

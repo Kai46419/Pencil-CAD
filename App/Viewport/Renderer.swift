@@ -11,22 +11,28 @@ private struct Uniforms {
 
 final class Renderer: NSObject, MTKViewDelegate {
     var camera = OrbitCamera()
+    /// Lage des Rasters (Skizzenebene); nil blendet es aus.
+    var gridTransform: float4x4? = matrix_identity_float4x4
 
     private let device: MTLDevice
     private let queue: MTLCommandQueue
-    private let pipeline: MTLRenderPipelineState
+    private let solidPipeline: MTLRenderPipelineState
+    private let overlayPipeline: MTLRenderPipelineState
     private let linePipeline: MTLRenderPipelineState
     private let depthState: MTLDepthStencilState
-    private let overlayDepthState: MTLDepthStencilState
-    private let gridBuffer: MTLBuffer?
-    private let gridVertexCount: Int
-    private var sketchBuffer: MTLBuffer?
-    private var sketchVertexCount = 0
-    /// Höhe des Rasters (= Skizzenebene); nil blendet es aus.
-    var gridZ: Float? = 0
+    private let alwaysDepthState: MTLDepthStencilState
+
     private var vertexBuffer: MTLBuffer?
     private var indexBuffer: MTLBuffer?
     private var indexCount = 0
+    private var selectionBuffer: MTLBuffer?
+    private var selectionCount = 0
+    private var edgeBuffer: MTLBuffer?
+    private var edgeCount = 0
+    private let gridBuffer: MTLBuffer?
+    private let gridCount: Int
+    private var sketchBuffer: MTLBuffer?
+    private var sketchCount = 0
     private var hasFramedOnce = false
 
     init?(view: MTKView) {
@@ -40,51 +46,54 @@ final class Renderer: NSObject, MTKViewDelegate {
         view.sampleCount = 4
         view.clearColor = MTLClearColor(red: 0.93, green: 0.94, blue: 0.96, alpha: 1)
 
-        let descriptor = MTLRenderPipelineDescriptor()
-        descriptor.vertexFunction = library.makeFunction(name: "vertex_main")
-        descriptor.fragmentFunction = library.makeFunction(name: "fragment_main")
-        descriptor.colorAttachments[0].pixelFormat = view.colorPixelFormat
-        descriptor.depthAttachmentPixelFormat = view.depthStencilPixelFormat
-        descriptor.rasterSampleCount = view.sampleCount
-
-        let lineDescriptor = descriptor.copy() as! MTLRenderPipelineDescriptor
-        lineDescriptor.fragmentFunction = library.makeFunction(name: "fragment_line")
+        func pipeline(vertex: String, fragment: String) -> MTLRenderPipelineState? {
+            let descriptor = MTLRenderPipelineDescriptor()
+            descriptor.vertexFunction = library.makeFunction(name: vertex)
+            descriptor.fragmentFunction = library.makeFunction(name: fragment)
+            descriptor.colorAttachments[0].pixelFormat = view.colorPixelFormat
+            descriptor.depthAttachmentPixelFormat = view.depthStencilPixelFormat
+            descriptor.rasterSampleCount = view.sampleCount
+            return try? device.makeRenderPipelineState(descriptor: descriptor)
+        }
 
         let depthDescriptor = MTLDepthStencilDescriptor()
-        depthDescriptor.depthCompareFunction = .less
+        depthDescriptor.depthCompareFunction = .lessEqual
         depthDescriptor.isDepthWriteEnabled = true
 
-        let overlayDescriptor = MTLDepthStencilDescriptor()
-        overlayDescriptor.depthCompareFunction = .always
-        overlayDescriptor.isDepthWriteEnabled = false
+        let alwaysDescriptor = MTLDepthStencilDescriptor()
+        alwaysDescriptor.depthCompareFunction = .always
+        alwaysDescriptor.isDepthWriteEnabled = false
 
-        guard let pipeline = try? device.makeRenderPipelineState(descriptor: descriptor),
-              let linePipeline = try? device.makeRenderPipelineState(descriptor: lineDescriptor),
+        guard let solidPipeline = pipeline(vertex: "vertex_main", fragment: "fragment_main"),
+              let overlayPipeline = pipeline(vertex: "vertex_overlay", fragment: "fragment_flat"),
+              let linePipeline = pipeline(vertex: "vertex_main", fragment: "fragment_flat"),
               let depthState = device.makeDepthStencilState(descriptor: depthDescriptor),
-              let overlayDepthState = device.makeDepthStencilState(descriptor: overlayDescriptor) else { return nil }
+              let alwaysDepthState = device.makeDepthStencilState(descriptor: alwaysDescriptor) else { return nil }
 
         let grid = Renderer.makeGrid(halfSize: 200, step: 10)
         self.device = device
         self.queue = queue
-        self.pipeline = pipeline
+        self.solidPipeline = solidPipeline
+        self.overlayPipeline = overlayPipeline
         self.linePipeline = linePipeline
         self.depthState = depthState
-        self.overlayDepthState = overlayDepthState
+        self.alwaysDepthState = alwaysDepthState
         self.gridBuffer = device.makeBuffer(bytes: grid, length: MemoryLayout<Vertex>.stride * grid.count)
-        self.gridVertexCount = grid.count
+        self.gridCount = grid.count
         super.init()
     }
 
+    // MARK: Daten
+
     func update(mesh: Mesh) {
-        guard !mesh.indices.isEmpty else {
-            vertexBuffer = nil
-            indexBuffer = nil
-            indexCount = 0
-            return
-        }
-        vertexBuffer = device.makeBuffer(bytes: mesh.vertices, length: MemoryLayout<Vertex>.stride * mesh.vertices.count)
-        indexBuffer = device.makeBuffer(bytes: mesh.indices, length: MemoryLayout<UInt32>.stride * mesh.indices.count)
+        vertexBuffer = makeBuffer(mesh.vertices)
+        indexBuffer = makeBuffer(mesh.indices)
         indexCount = mesh.indices.count
+        let edges = mesh.edges.map { Vertex(position: $0, normal: SIMD3(0, 0, 1)) }
+        edgeBuffer = makeBuffer(edges)
+        edgeCount = edges.count
+        selectionBuffer = nil
+        selectionCount = 0
 
         if !hasFramedOnce, let bounds = mesh.bounds {
             camera.frame(min: bounds.min, max: bounds.max)
@@ -92,15 +101,21 @@ final class Renderer: NSObject, MTKViewDelegate {
         }
     }
 
-    /// Skizzenlinien als Punktpaare in der Ebene Z = z.
-    func updateSketch(segments: [SIMD2<Double>], z: Double) {
-        let vertices = segments.map {
-            Vertex(position: SIMD3(Float($0.x), Float($0.y), Float(z)), normal: SIMD3(0, 0, 1))
-        }
-        sketchVertexCount = vertices.count
-        sketchBuffer = vertices.isEmpty
-            ? nil
-            : device.makeBuffer(bytes: vertices, length: MemoryLayout<Vertex>.stride * vertices.count)
+    func updateSelection(indices: [UInt32]) {
+        selectionBuffer = makeBuffer(indices)
+        selectionCount = indices.count
+    }
+
+    /// Skizzenlinien als Punktpaare in Weltkoordinaten.
+    func updateSketch(points: [SIMD3<Float>]) {
+        let vertices = points.map { Vertex(position: $0, normal: SIMD3(0, 0, 1)) }
+        sketchBuffer = makeBuffer(vertices)
+        sketchCount = vertices.count
+    }
+
+    private func makeBuffer<T>(_ array: [T]) -> MTLBuffer? {
+        guard !array.isEmpty else { return nil }
+        return device.makeBuffer(bytes: array, length: MemoryLayout<T>.stride * array.count)
     }
 
     private static func makeGrid(halfSize: Float, step: Float) -> [Vertex] {
@@ -115,6 +130,8 @@ final class Renderer: NSObject, MTKViewDelegate {
         return vertices
     }
 
+    // MARK: Zeichnen
+
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
         view.setNeedsDisplay()
     }
@@ -125,13 +142,12 @@ final class Renderer: NSObject, MTKViewDelegate {
               let commandBuffer = queue.makeCommandBuffer(),
               let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else { return }
 
-        encoder.setRenderPipelineState(pipeline)
         encoder.setDepthStencilState(depthState)
         encoder.setCullMode(.none)
 
         let size = view.drawableSize
         let aspect = Float(size.width / max(size.height, 1))
-        // Licht kommt leicht versetzt aus Blickrichtung, damit Kanten Kontrast haben.
+        // Licht kommt leicht versetzt aus Blickrichtung, damit Flächen Kontrast haben.
         let toEye = simd_normalize(camera.position - camera.target)
         var uniforms = Uniforms(
             viewProjection: camera.projectionMatrix(aspect: aspect) * camera.viewMatrix,
@@ -140,33 +156,60 @@ final class Renderer: NSObject, MTKViewDelegate {
             baseColor: SIMD3(0.55, 0.62, 0.72)
         )
 
+        func setUniforms(_ u: inout Uniforms) {
+            encoder.setVertexBytes(&u, length: MemoryLayout<Uniforms>.stride, index: 1)
+            encoder.setFragmentBytes(&u, length: MemoryLayout<Uniforms>.stride, index: 1)
+        }
+        func setColor(_ r: Float, _ g: Float, _ b: Float, _ a: Float = 1) {
+            var color = SIMD4<Float>(r, g, b, a)
+            encoder.setFragmentBytes(&color, length: MemoryLayout<SIMD4<Float>>.stride, index: 2)
+        }
+
+        // Körper
         if let vertexBuffer, let indexBuffer, indexCount > 0 {
+            encoder.setRenderPipelineState(solidPipeline)
             encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
-            encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
-            encoder.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
+            setUniforms(&uniforms)
             encoder.drawIndexedPrimitives(type: .triangle, indexCount: indexCount, indexType: .uint32,
                                           indexBuffer: indexBuffer, indexBufferOffset: 0)
+
+            // Ausgewählte Fläche
+            if let selectionBuffer, selectionCount > 0 {
+                encoder.setRenderPipelineState(overlayPipeline)
+                setColor(0.98, 0.62, 0.18)
+                encoder.drawIndexedPrimitives(type: .triangle, indexCount: selectionCount, indexType: .uint32,
+                                              indexBuffer: selectionBuffer, indexBufferOffset: 0)
+            }
         }
 
-        encoder.setRenderPipelineState(linePipeline)
+        // Kanten
+        if let edgeBuffer, edgeCount > 0 {
+            encoder.setRenderPipelineState(overlayPipeline)
+            encoder.setVertexBuffer(edgeBuffer, offset: 0, index: 0)
+            setUniforms(&uniforms)
+            setColor(0.12, 0.14, 0.18)
+            encoder.drawPrimitives(type: .line, vertexStart: 0, vertexCount: edgeCount)
+        }
 
-        if let gridBuffer, let gridZ {
+        // Raster auf der Skizzenebene
+        if let gridBuffer, let gridTransform {
             var gridUniforms = uniforms
-            gridUniforms.model = float4x4(translation: SIMD3(0, 0, gridZ))
-            var color = SIMD4<Float>(0.6, 0.63, 0.68, 1)
+            gridUniforms.model = gridTransform
+            encoder.setRenderPipelineState(linePipeline)
             encoder.setVertexBuffer(gridBuffer, offset: 0, index: 0)
-            encoder.setVertexBytes(&gridUniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
-            encoder.setFragmentBytes(&color, length: MemoryLayout<SIMD4<Float>>.stride, index: 2)
-            encoder.drawPrimitives(type: .line, vertexStart: 0, vertexCount: gridVertexCount)
+            setUniforms(&gridUniforms)
+            setColor(0.62, 0.65, 0.7)
+            encoder.drawPrimitives(type: .line, vertexStart: 0, vertexCount: gridCount)
         }
 
-        if let sketchBuffer, sketchVertexCount > 0 {
-            var color = SIMD4<Float>(0.05, 0.4, 0.95, 1)
-            encoder.setDepthStencilState(overlayDepthState)
+        // Skizze immer obenauf
+        if let sketchBuffer, sketchCount > 0 {
+            encoder.setRenderPipelineState(linePipeline)
+            encoder.setDepthStencilState(alwaysDepthState)
             encoder.setVertexBuffer(sketchBuffer, offset: 0, index: 0)
-            encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
-            encoder.setFragmentBytes(&color, length: MemoryLayout<SIMD4<Float>>.stride, index: 2)
-            encoder.drawPrimitives(type: .line, vertexStart: 0, vertexCount: sketchVertexCount)
+            setUniforms(&uniforms)
+            setColor(0.05, 0.4, 0.95)
+            encoder.drawPrimitives(type: .line, vertexStart: 0, vertexCount: sketchCount)
         }
 
         encoder.endEncoding()

@@ -18,19 +18,27 @@ struct VertexOut {
     float3 normal;
 };
 
-vertex VertexOut vertex_main(const device Vertex *vertices [[buffer(0)]],
-                             constant Uniforms &uniforms [[buffer(1)]],
-                             uint vid [[vertex_id]]) {
-    Vertex v = vertices[vid];
+static VertexOut transformVertex(Vertex v, constant Uniforms &uniforms) {
     VertexOut out;
     out.position = uniforms.viewProjection * uniforms.model * float4(v.position, 1.0);
     out.normal = (uniforms.model * float4(v.normal, 0.0)).xyz;
     return out;
 }
 
-fragment float4 fragment_line(VertexOut in [[stage_in]],
-                              constant float4 &color [[buffer(2)]]) {
-    return color;
+vertex VertexOut vertex_main(const device Vertex *vertices [[buffer(0)]],
+                             constant Uniforms &uniforms [[buffer(1)]],
+                             uint vid [[vertex_id]]) {
+    return transformVertex(vertices[vid], uniforms);
+}
+
+/// Wie vertex_main, aber minimal zur Kamera verschoben, damit Kanten und Auswahl
+/// nicht mit den Flächen darunter flimmern.
+vertex VertexOut vertex_overlay(const device Vertex *vertices [[buffer(0)]],
+                                constant Uniforms &uniforms [[buffer(1)]],
+                                uint vid [[vertex_id]]) {
+    VertexOut out = transformVertex(vertices[vid], uniforms);
+    out.position.z -= 0.0004 * out.position.w;
+    return out;
 }
 
 fragment float4 fragment_main(VertexOut in [[stage_in]],
@@ -39,4 +47,9 @@ fragment float4 fragment_main(VertexOut in [[stage_in]],
     float diffuse = abs(dot(n, normalize(uniforms.lightDirection)));
     float3 color = uniforms.baseColor * (0.3 + 0.7 * diffuse);
     return float4(color, 1.0);
+}
+
+fragment float4 fragment_flat(VertexOut in [[stage_in]],
+                              constant float4 &color [[buffer(2)]]) {
+    return color;
 }

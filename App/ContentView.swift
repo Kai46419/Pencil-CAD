@@ -4,67 +4,148 @@ import UniformTypeIdentifiers
 struct ContentView: View {
     @StateObject private var model = ModelStore()
     @StateObject private var sketch = SketchController()
-    @State private var exportDocument: STLDocument?
-    @State private var isExporting = false
-    @State private var extrudeHeight: Double = 10
+    @State private var viewCommand = ViewCommand()
+
+    @State private var extrudeDistance: Double = 10
     @State private var extrudeMode: ExtrudeMode = .newBody
+
+    @State private var edgeOperation: EdgeOperation = .fillet
+    @State private var edgeValue: Double = 1
+    @State private var isEdgeDialogShown = false
+
+    @State private var exportFile: ExportFile?
+    @State private var exportType: UTType = .stl
+    @State private var isExporting = false
+    @State private var isImporting = false
+    @State private var isClearConfirmationShown = false
 
     var body: some View {
         NavigationStack {
-            Viewport(mesh: model.mesh, revision: model.revision, sketch: sketch)
+            Viewport(model: model, sketch: sketch, command: viewCommand)
                 .ignoresSafeArea(edges: .bottom)
                 .overlay(alignment: .bottomLeading) { statusBar }
                 .overlay(alignment: .top) { if sketch.isActive { sketchBar } }
                 .overlay(alignment: .bottom) { if sketch.profile != nil { extrudePanel } }
                 .navigationTitle("PencilCAD")
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItemGroup(placement: .topBarLeading) {
-                        Toggle(isOn: $sketch.isActive) {
-                            Label("Skizze", systemImage: "pencil.and.outline")
-                        }
-                        .toggleStyle(.button)
-                        Button("Neuer Quader", systemImage: "cube", action: model.newBlock)
-                        Button("Bohrung", systemImage: "circle.circle", action: model.drillHole)
-                        Button("Kanten runden", systemImage: "square.on.square.squareshape.controlhandles",
-                               action: model.roundEdges)
-                    }
-                    ToolbarItemGroup(placement: .topBarTrailing) {
-                        Button("Rückgängig", systemImage: "arrow.uturn.backward", action: model.undo)
-                            .disabled(!model.canUndo)
-                        Button("STL exportieren", systemImage: "square.and.arrow.up") {
-                            exportDocument = STLDocument(data: model.stlData())
-                            isExporting = true
-                        }
+                .toolbar { toolbarContent }
+                .alert(edgeOperation.rawValue, isPresented: $isEdgeDialogShown) {
+                    TextField("mm", value: $edgeValue, format: .number)
+                        .keyboardType(.decimalPad)
+                    Button("Abbrechen", role: .cancel) {}
+                    Button("Anwenden") { model.applyEdgeOperation(edgeOperation, value: edgeValue) }
+                } message: {
+                    Text(edgeOperation == .fillet
+                         ? "Radius in mm für alle Kanten der gewählten Fläche"
+                         : "Fasenbreite in mm für alle Kanten der gewählten Fläche")
+                }
+                .confirmationDialog("Alle Körper löschen?", isPresented: $isClearConfirmationShown,
+                                    titleVisibility: .visible) {
+                    Button("Alles löschen", role: .destructive, action: model.clear)
+                }
+                .fileExporter(isPresented: $isExporting, document: exportFile,
+                              contentType: exportType, defaultFilename: "Teil") { _ in }
+                .fileImporter(isPresented: $isImporting, allowedContentTypes: [.stepFile, .stpFile]) { result in
+                    if case .success(let url) = result {
+                        model.importSTEP(from: url)
+                        send(.fitAll)
                     }
                 }
-                .fileExporter(isPresented: $isExporting, document: exportDocument,
-                              contentType: .stl, defaultFilename: "Teil") { _ in }
         }
     }
 
+    // MARK: Toolbar
+
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItemGroup(placement: .topBarLeading) {
+            Toggle(isOn: $sketch.isActive) {
+                Label("Skizze", systemImage: "pencil.and.outline")
+            }
+            .toggleStyle(.button)
+
+            Button("Quader", systemImage: "cube", action: model.newBlock)
+
+            Menu {
+                Button("Kanten runden …", systemImage: "app") {
+                    edgeOperation = .fillet
+                    edgeValue = 1
+                    isEdgeDialogShown = true
+                }
+                Button("Kanten fasen …", systemImage: "octagon") {
+                    edgeOperation = .chamfer
+                    edgeValue = 1
+                    isEdgeDialogShown = true
+                }
+            } label: {
+                Label("Kanten", systemImage: "square.on.square.squareshape.controlhandles")
+            }
+            .disabled(model.selection == nil)
+
+            Button("Körper löschen", systemImage: "trash", action: model.deleteSelectedBody)
+                .disabled(model.selection == nil)
+        }
+
+        ToolbarItemGroup(placement: .topBarTrailing) {
+            Button("Rückgängig", systemImage: "arrow.uturn.backward", action: model.undo)
+                .disabled(!model.canUndo)
+            Button("Wiederholen", systemImage: "arrow.uturn.forward", action: model.redo)
+                .disabled(!model.canRedo)
+            Button("Einpassen", systemImage: "arrow.up.left.and.arrow.down.right") { send(.fitAll) }
+
+            Menu {
+                Button("STEP öffnen …", systemImage: "folder") { isImporting = true }
+                Button("Als STEP exportieren …", systemImage: "square.and.arrow.up") {
+                    if let data = model.stepData() {
+                        export(data, as: .stepFile)
+                    }
+                }
+                Button("Als STL exportieren …", systemImage: "square.and.arrow.up") {
+                    export(model.stlData(), as: .stl)
+                }
+                Divider()
+                Button(role: .destructive) {
+                    isClearConfirmationShown = true
+                } label: {
+                    Label("Alles löschen …", systemImage: "trash")
+                }
+            } label: {
+                Label("Datei", systemImage: "doc")
+            }
+        }
+    }
+
+    // MARK: Skizzenleiste
+
     private var sketchBar: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: 14) {
             Picker("Werkzeug", selection: $sketch.tool) {
                 ForEach(SketchTool.allCases) { tool in
                     Label(tool.rawValue, systemImage: tool.systemImage).tag(tool)
                 }
             }
             .pickerStyle(.segmented)
-            .frame(maxWidth: 360)
+            .frame(maxWidth: 330)
 
             if sketch.tool == .polyline, sketch.hasOpenPolyline {
                 Button("Punkt zurück", systemImage: "delete.backward", action: sketch.undoPoint)
             }
 
-            HStack(spacing: 4) {
-                Text("Ebene Z")
-                TextField("Z", value: $sketch.planeZ, format: .number)
-                    .keyboardType(.numbersAndPunctuation)
-                    .frame(width: 60)
-                    .textFieldStyle(.roundedBorder)
-                Text("mm")
+            if sketch.plane.isOnFace {
+                Text("Ebene: Fläche")
+                Button("Boden") { sketch.plane = .ground }
+            } else {
+                HStack(spacing: 4) {
+                    Text("Boden Z")
+                    TextField("Z", value: $sketch.groundHeight, format: .number)
+                        .keyboardType(.numbersAndPunctuation)
+                        .frame(width: 56)
+                        .textFieldStyle(.roundedBorder)
+                    Text("mm")
+                }
             }
+
+            Button("Draufsicht", systemImage: "scope") { send(.alignToSketchPlane) }
 
             Toggle("Finger zeichnet", isOn: $sketch.fingerDraws)
                 .fixedSize()
@@ -81,42 +162,76 @@ struct ContentView: View {
         .padding(.top, 8)
     }
 
+    // MARK: Extrudieren
+
     private var extrudePanel: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: 14) {
+            if sketch.rectangleSize != nil {
+                numberField("B", value: rectangleBinding(\.x))
+                numberField("T", value: rectangleBinding(\.y))
+            } else if sketch.circleDiameter != nil {
+                numberField("Ø", value: Binding(
+                    get: { sketch.circleDiameter ?? 0 },
+                    set: { sketch.circleDiameter = $0 }
+                ))
+            }
+
             Picker("Modus", selection: $extrudeMode) {
                 ForEach(ExtrudeMode.allCases) { Text($0.rawValue).tag($0) }
             }
             .pickerStyle(.segmented)
-            .frame(maxWidth: 360)
+            .frame(maxWidth: 330)
 
-            HStack(spacing: 4) {
-                Text("Höhe")
-                TextField("Höhe", value: $extrudeHeight, format: .number)
-                    .keyboardType(.numbersAndPunctuation)
-                    .frame(width: 70)
-                    .textFieldStyle(.roundedBorder)
-                Text("mm")
-            }
+            numberField(extrudeMode == .cut ? "Tiefe" : "Höhe", value: $extrudeDistance)
 
             Button("Verwerfen", role: .destructive, action: sketch.reset)
             Button("Extrudieren") {
                 if let profile = sketch.profile {
-                    model.extrude(profile, planeZ: sketch.planeZ, height: extrudeHeight, mode: extrudeMode)
+                    model.extrude(profile, on: sketch.plane, distance: extrudeDistance, mode: extrudeMode)
                     sketch.reset()
                 }
             }
             .buttonStyle(.borderedProminent)
-            .disabled(extrudeHeight == 0)
+            .disabled(extrudeDistance == 0)
         }
+        .font(.callout)
         .padding(12)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
         .padding(.bottom, 24)
     }
 
+    private func numberField(_ title: String, value: Binding<Double>) -> some View {
+        HStack(spacing: 4) {
+            Text(title)
+            TextField(title, value: value, format: .number)
+                .keyboardType(.numbersAndPunctuation)
+                .frame(width: 64)
+                .textFieldStyle(.roundedBorder)
+            Text("mm")
+        }
+    }
+
+    private func rectangleBinding(_ component: WritableKeyPath<SIMD2<Double>, Double>) -> Binding<Double> {
+        Binding(
+            get: { sketch.rectangleSize?[keyPath: component] ?? 0 },
+            set: { newValue in
+                guard var size = sketch.rectangleSize else { return }
+                size[keyPath: component] = newValue
+                sketch.rectangleSize = size
+            }
+        )
+    }
+
+    // MARK: Status
+
     private var statusBar: some View {
         VStack(alignment: .leading, spacing: 4) {
             if let message = model.message {
                 Text(message)
+            } else if sketch.isActive {
+                Text("Pencil zeichnet · Finger-Tipp auf eine ebene Fläche skizziert darauf")
+            } else if model.selection != nil {
+                Text("Fläche gewählt: Kanten runden/fasen, Körper löschen oder im Skizzenmodus darauf skizzieren")
             }
             Text("\(model.mesh.triangleCount) Dreiecke · Kernel: \(PCKShape.kernelAvailable ? "OpenCASCADE" : "Fallback")")
                 .foregroundStyle(.secondary)
@@ -126,14 +241,29 @@ struct ContentView: View {
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
         .padding()
     }
+
+    // MARK: Hilfen
+
+    private func send(_ kind: ViewCommand.Kind) {
+        viewCommand = ViewCommand(id: viewCommand.id + 1, kind: kind)
+    }
+
+    private func export(_ data: Data, as type: UTType) {
+        exportFile = ExportFile(data: data)
+        exportType = type
+        isExporting = true
+    }
 }
 
 extension UTType {
     static let stl = UTType(filenameExtension: "stl", conformingTo: .data) ?? .data
+    static let stepFile = UTType(filenameExtension: "step", conformingTo: .data) ?? .data
+    static let stpFile = UTType(filenameExtension: "stp", conformingTo: .data) ?? .data
 }
 
-struct STLDocument: FileDocument {
-    static var readableContentTypes: [UTType] { [.stl] }
+/// Fertige Exportdaten (STL oder STEP) für den Datei-Export.
+struct ExportFile: FileDocument {
+    static var readableContentTypes: [UTType] { [.stl, .stepFile] }
 
     let data: Data
 

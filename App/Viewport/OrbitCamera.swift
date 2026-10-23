@@ -27,8 +27,8 @@ struct OrbitCamera {
         2 * distance * tan(fieldOfView / 2) / max(viewHeight, 1)
     }
 
-    /// Schnittpunkt des Sehstrahls durch einen Bildschirmpunkt mit der Ebene Z = planeZ.
-    func intersect(screenPoint p: CGPoint, viewSize: CGSize, planeZ: Float) -> SIMD3<Float>? {
+    /// Sehstrahl durch einen Bildschirmpunkt (Ursprung auf der nahen Ebene, normierte Richtung).
+    func ray(through p: CGPoint, viewSize: CGSize) -> (origin: SIMD3<Float>, direction: SIMD3<Float>)? {
         guard viewSize.width > 0, viewSize.height > 0 else { return nil }
         let aspect = Float(viewSize.width / viewSize.height)
         let inverse = (projectionMatrix(aspect: aspect) * viewMatrix).inverse
@@ -38,11 +38,18 @@ struct OrbitCamera {
             return SIMD3(v.x, v.y, v.z) / v.w
         }
         let near = unproject(0), far = unproject(1)
-        let direction = far - near
-        guard abs(direction.z) > 1e-6 else { return nil }
-        let t = (planeZ - near.z) / direction.z
+        return (near, simd_normalize(far - near))
+    }
+
+    /// Schnittpunkt des Sehstrahls mit einer Ebene.
+    func intersect(screenPoint p: CGPoint, viewSize: CGSize,
+                   planeOrigin: SIMD3<Float>, planeNormal: SIMD3<Float>) -> SIMD3<Float>? {
+        guard let ray = ray(through: p, viewSize: viewSize) else { return nil }
+        let denom = simd_dot(ray.direction, planeNormal)
+        guard abs(denom) > 1e-6 else { return nil }
+        let t = simd_dot(planeOrigin - ray.origin, planeNormal) / denom
         guard t >= 0 else { return nil }
-        return near + t * direction
+        return ray.origin + t * ray.direction
     }
 
     mutating func orbit(dx: Float, dy: Float) {
@@ -67,6 +74,16 @@ struct OrbitCamera {
         target = (lo + hi) / 2
         let radius = simd_length(hi - lo) / 2
         distance = max(radius / sin(fieldOfView / 2) * 1.2, 5)
+    }
+
+    /// Blickt senkrecht auf eine Ebene (Kamera auf der Seite der Normale).
+    mutating func look(along normal: SIMD3<Float>, at point: SIMD3<Float>) {
+        let n = simd_normalize(normal)
+        target = point
+        pitch = min(max(asin(n.z), -1.55), 1.55)
+        if abs(n.z) < 0.999 {
+            yaw = atan2(n.y, n.x)
+        }
     }
 }
 
@@ -95,11 +112,14 @@ extension float4x4 {
             SIMD4(0, 0, zs * near, 0)
         ))
     }
-}
 
-extension float4x4 {
     init(translation t: SIMD3<Float>) {
         self = matrix_identity_float4x4
         columns.3 = SIMD4(t.x, t.y, t.z, 1)
+    }
+
+    /// Basiswechsel: lokale x/y/z-Achsen auf u/v/n, Ursprung auf origin.
+    init(origin: SIMD3<Float>, u: SIMD3<Float>, v: SIMD3<Float>, n: SIMD3<Float>) {
+        self.init(columns: (SIMD4(u, 0), SIMD4(v, 0), SIMD4(n, 0), SIMD4(origin, 1)))
     }
 }
