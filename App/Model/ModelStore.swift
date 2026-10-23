@@ -474,10 +474,11 @@ final class ModelStore: ObservableObject {
 
     // MARK: Skizze extrudieren
 
-    func extrude(_ profile: SketchProfile, on plane: SketchPlane, distance: Double, mode: ExtrudeMode) {
+    /// Fertigen Skizzenkörper (siehe SketchController.extrusion) übernehmen.
+    func extrude(_ solid: PCKShape?, on plane: SketchPlane, mode: ExtrudeMode) {
         commitPreview()
         guard mode == .newBody || requireKernel() else { return }
-        guard let solid = profile.extrusion(on: plane, distance: distance, mode: mode) else {
+        guard let solid else {
             message = "Profil lässt sich nicht extrudieren."
             return
         }

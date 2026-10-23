@@ -11,7 +11,11 @@ Oberfläche nach dem Aufbau von Shapr3D (eigene Symbole, kein Shapr3D-Material):
 - **Arbeitsbereich:** schwebende Titelleiste (Startseite, Projektname, Menü), linke Werkzeugleiste mit Gruppen und
   Untermenüs, rechte Leiste (Fang, Rastergröße, ViewCube, Einpassen, Anzeigemodi, Screenshot, Verlauf, Elemente),
   „Abbrechen/Fertig“ unten, Rückgängig/Wiederholen unten links, Maß-Etikett am Ziehpfeil
-- **Skizze** (Pencil): Linie, Rechteck, Kreis, Ellipse, Polygon, auf der Bodenebene oder auf jeder ebenen Fläche
+- **Skizze** (Pencil): Linie, Rechteck, Kreis, Ellipse, Polygon, Bogen, Spline (Fit- oder Kontrollpunkte), Punkt,
+  Text (Schrift als Profil), Versatz (Schleife oder einzeln, mit Ziehpfeil); Fang an Endpunkten, Ecken und Mittelpunkten.
+  Mehrere Kurven je Skizze, geschlossene Bereiche (auch mit Löchern) werden automatisch erkannt und exakt extrudiert.
+- **Skizzenebene:** beim Start antippbare Ebenenscheiben (Oben, Unten, Vorne, Hinten, Rechts, Links) oder eine ebene
+  Fläche; die Ansicht dreht sich senkrecht auf die Ebene, die aktive Ebene bleibt als Scheibe sichtbar
 - **Extrudieren** mit Ziehpfeil: Skizzenprofil (Neuer Körper, Vereinigen, Abziehen) oder ebene Fläche eines Körpers
 - **Abrunden und Fase** mit Ziehpfeil: einzelne Kanten antippen, mehrere gleichzeitig
 - **Einfügen:** Quader, Zylinder, Kugel, Kegel, STEP-Datei
@@ -24,7 +28,7 @@ Oberfläche nach dem Aufbau von Shapr3D (eigene Symbole, kein Shapr3D-Material):
 - Automatisches Speichern je Projekt (`Projects/<id>/` in der Dateien-App unter „Auf meinem iPad › PencilCAD“)
 - Fallback-Modus ohne OpenCASCADE: Viewer, Skizze und „Neuer Körper“ laufen, alles andere meldet „braucht OpenCASCADE“
 
-Grau dargestellt und noch nicht umgesetzt: Bogen, Spline, Punkt, Text, Versetzen, Ebenen/Achsen, Muster, Skalieren,
+Grau dargestellt und noch nicht umgesetzt: Projizieren, Trimmen, Ebenen/Achsen, Muster, Skalieren,
 Rotieren/Sweep/Loft, Kante versetzen, Beschneiden, Teilen, Schnittansicht, Messen, Einschränkungen.
 
 ## Bedienung
@@ -43,7 +47,8 @@ Rotieren/Sweep/Loft, Kante versetzen, Beschneiden, Teilen, Schnittansicht, Messe
 **Typischer Ablauf:**
 
 1. Startseite › „Neues Projekt“.
-2. Links „Skizze › Rechteck“, mit dem Pencil ein Rechteck ziehen, unten Breite/Tiefe eintragen.
+2. Links „Skizze › Rechteck“, Ebene „Oben“ antippen (Draufsicht), mit dem Pencil ein Rechteck ziehen,
+   unten Breite/Länge eintragen.
 3. Am blauen Pfeil auf 20 mm ziehen, „Fertig“.
 4. „Skizze › Kreis“, den Strich auf der Oberseite beginnen, Modus „Abziehen“, Pfeil ziehen → Bohrung.
 5. „Fertig“ (Skizze beenden), zwei Kanten oben antippen, am Pfeil ziehen → Rundung, „Fertig“.
@@ -54,6 +59,11 @@ Werkzeuge im Detail:
 - *Kreis, Polygon:* vom Mittelpunkt nach außen ziehen (Polygon: Seitenzahl unten einstellbar)
 - *Ellipse:* vom Mittelpunkt zur Ecke des umschließenden Rechtecks ziehen
 - *Linie:* Startpunkt tippen, dann jeden weiteren Punkt antippen oder hinziehen; zurück zum Startpunkt schließt das Profil
+- *Bogen:* von einem Ende zum anderen ziehen, dann mit einem zweiten Strich die Wölbung ziehen
+- *Spline:* Punkte nacheinander setzen; Ende auf dem ersten Punkt schließt, den letzten Punkt erneut antippen beendet
+- *Punkt:* antippen; Punkte dienen als Fangpunkte
+- *Text:* Position antippen, Inhalt, Schrift, Höhe (Großbuchstaben) und Ausrichtung eingeben
+- *Versatz:* Kontur (Schleife) oder einzelne Kurve antippen, am Pfeil ziehen oder Abstand eingeben, „Fertig“
 - *Boolesch:* erst den Zielkörper antippen, dann die Werkzeugkörper, „Fertig“
 - *Schale:* die Fläche antippen, die offen sein soll, Wandstärke eingeben
 

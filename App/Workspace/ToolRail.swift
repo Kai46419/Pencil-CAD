@@ -100,14 +100,14 @@ struct ToolRail: View {
         case .visualize:
             return workspace.tool == .color
         case .extrude:
-            return (sketch.isActive && sketch.profile != nil) || (workspace.tool == .select && model.faceHandle != nil)
+            return (sketch.isActive && sketch.hasProfile) || (workspace.tool == .select && model.faceHandle != nil)
         }
     }
 
     /// Wie bei Shapr3D: Profil oder ebene Fläche wählen, dann am Pfeil ziehen.
     private func startExtrude() {
         if sketch.isActive {
-            if sketch.profile == nil {
+            if !sketch.hasProfile {
                 model.message = "Erst ein geschlossenes Profil zeichnen, dann am Pfeil ziehen."
             }
             return
@@ -134,13 +134,7 @@ struct ToolRail: View {
                     }
                 }
             }
-            items += [
-                soon("Bogen", "point.topleft.down.curvedto.point.bottomright.up"),
-                soon("Spline", "scribble.variable"),
-                soon("Punkt", "smallcircle.filled.circle"),
-                soon("Text", "textformat"),
-                soon("Versetzen", "square.dashed.inset.filled"),
-            ]
+            items += [soon("Projizieren", "square.and.arrow.down.on.square"), soon("Trimmen", "scissors")]
             if sketch.isActive {
                 items.append(ToolItem(id: "sketch.end", title: "Skizze beenden", systemImage: "xmark.circle") {
                     workspace.endSketch()

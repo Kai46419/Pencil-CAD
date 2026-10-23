@@ -56,6 +56,23 @@ NS_ASSUME_NONNULL_BEGIN
 + (nullable PCKShape *)prismWithPointsXYZ:(NSArray<NSNumber *> *)xyz direction:(simd_double3)direction
     NS_SWIFT_NAME(prism(pointsXYZ:direction:));
 
+/// Prisma aus einem Skizzenprofil mit exakten Kurven, verschoben um direction.
+/// wires[0] ist die Außenkontur, weitere Einträge sind Löcher. Jede Kontur ist eine Folge von Segmenten,
+/// jeweils Typnummer und Werte in Weltkoordinaten:
+///   0 Linie: p1, p2
+///   1 Bogen durch drei Punkte: Start, Punkt auf dem Bogen, Ende
+///   2 Kette kubischer Bézierkurven: n, dann n = 3k + 1 Pole (Fit-Spline)
+///   3 Vollkreis: Mitte, Normale, Radius
+///   4 Vollellipse: Mitte, Normale, X-Achse, Radius X, Radius Y
+///   5 B-Spline durch Kontrollpunkte, Enden fest: n, dann n Pole
+///   6 geschlossener (periodischer) kubischer B-Spline: n, dann n Pole
+/// nil bei ungültigem Profil oder ohne Kernel.
++ (nullable PCKShape *)prismWithProfileWires:(NSArray<NSArray<NSNumber *> *> *)wires direction:(simd_double3)direction
+    NS_SWIFT_NAME(prism(profileWires:direction:));
+
+/// Fasst mehrere Körper zu einem Verbund zusammen (ohne Kernel: nur der erste).
++ (nullable PCKShape *)compoundOfShapes:(NSArray<PCKShape *> *)shapes NS_SWIFT_NAME(compound(_:));
+
 /// Boolesche Operationen. nil, wenn die Operation fehlschlägt oder kein Kernel vorhanden ist.
 - (nullable PCKShape *)cutting:(PCKShape *)tool NS_SWIFT_NAME(cutting(_:));
 - (nullable PCKShape *)fusing:(PCKShape *)other NS_SWIFT_NAME(fusing(_:));

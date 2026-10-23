@@ -92,6 +92,10 @@ private struct WorkspaceContent: View {
             }
         }
         .sheet(item: $screenshot) { ScreenshotSheet(screenshot: $0) }
+        .sheet(isPresented: Binding(get: { sketch.pendingTextAnchor != nil },
+                                    set: { if !$0 { sketch.pendingTextAnchor = nil } })) {
+            TextEntrySheet(sketch: sketch)
+        }
     }
 
     // MARK: Oben
@@ -235,8 +239,8 @@ private struct WorkspaceContent: View {
     private var undoRedo: some View {
         HStack(spacing: 10) {
             RailButton(systemImage: "arrow.uturn.backward", label: "Rückgängig", action: undo)
-                .disabled(!model.canUndo && !sketch.hasOpenPolyline)
-                .opacity(model.canUndo || sketch.hasOpenPolyline ? 1 : 0.4)
+                .disabled(!canUndo)
+                .opacity(canUndo ? 1 : 0.4)
             RailButton(systemImage: "arrow.uturn.forward", label: "Wiederholen", action: model.redo)
                 .disabled(!model.canRedo)
                 .opacity(model.canRedo ? 1 : 0.4)
@@ -247,10 +251,14 @@ private struct WorkspaceContent: View {
 
     // MARK: Aktionen
 
-    /// Im Linienzug nimmt Rückgängig zuerst den letzten Punkt zurück.
+    /// In der Skizze nimmt Rückgängig zuerst Skizzenschritte zurück.
+    private var canUndo: Bool {
+        (sketch.isActive && sketch.canUndo) || model.canUndo
+    }
+
     private func undo() {
-        if sketch.isActive, sketch.tool == .polyline, sketch.hasOpenPolyline {
-            sketch.undoPoint()
+        if sketch.isActive, sketch.canUndo {
+            sketch.undo()
         } else {
             model.undo()
         }

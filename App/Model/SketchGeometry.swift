@@ -1,0 +1,708 @@
+import CoreGraphics
+import CoreText
+import Foundation
+import simd
+
+// Geometrie der Skizze im lokalen 2D-System der Skizzenebene (mm).
+
+typealias Point2 = SIMD2<Double>
+
+private func samePoint(_ a: Point2, _ b: Point2) -> Bool {
+    simd_distance(a, b) < 1e-6
+}
+
+/// Rechte Normale einer Richtung.
+func rightNormal(_ t: Point2) -> Point2 {
+    let n = Point2(t.y, -t.x)
+    let length = simd_length(n)
+    return length > 0 ? n / length : .zero
+}
+
+/// Kreis durch drei Punkte; nil, wenn sie auf einer Geraden liegen.
+func circleThrough(_ a: Point2, _ b: Point2, _ c: Point2) -> (center: Point2, radius: Double)? {
+    let d = 2 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y))
+    guard abs(d) > 1e-9 else { return nil }
+    let a2 = simd_length_squared(a), b2 = simd_length_squared(b), c2 = simd_length_squared(c)
+    let center = Point2((a2 * (b.y - c.y) + b2 * (c.y - a.y) + c2 * (a.y - b.y)) / d,
+                        (a2 * (c.x - b.x) + b2 * (a.x - c.x) + c2 * (b.x - a.x)) / d)
+    return (center, simd_distance(center, a))
+}
+
+/// Pole einer Kette kubischer Bézierkurven durch die Punkte (Catmull-Rom, wie ein Fit-Spline).
+func fitBezierPoles(_ points: [Point2], closed: Bool) -> [Point2] {
+    let n = points.count
+    guard n >= 2 else { return points }
+    let count = closed ? n + 1 : n
+    let p = closed ? points + [points[0]] : points
+    func tangent(_ i: Int) -> Point2 {
+        if closed {
+            let prev = points[(i - 1 + n) % n], next = points[(i + 1) % n]
+            return (next - prev) / 2
+        }
+        if i == 0 { return p[1] - p[0] }
+        if i == count - 1 { return p[count - 1] - p[count - 2] }
+        return (p[i + 1] - p[i - 1]) / 2
+    }
+    var poles = [p[0]]
+    for i in 0..<(count - 1) {
+        let t0 = tangent(i % n), t1 = tangent((i + 1) % (closed ? n : count))
+        poles += [p[i] + t0 / 3, p[i + 1] - t1 / 3, p[i + 1]]
+    }
+    return poles
+}
+
+/// Punkt auf einer kubischen Bézierkurve.
+private func bezierPoint(_ p0: Point2, _ p1: Point2, _ p2: Point2, _ p3: Point2, _ t: Double) -> Point2 {
+    let u = 1 - t
+    let b0 = u * u * u, b1 = 3 * u * u * t, b2 = 3 * u * t * t, b3 = t * t * t
+    return b0 * p0 + b1 * p1 + b2 * p2 + b3 * p3
+}
+
+/// Geklemmter B-Spline (Grad min(3, n−1), gleichmäßige innere Knoten), wie im Kernel.
+private func clampedBSplineSamples(_ poles: [Point2], perSpan: Int) -> [Point2] {
+    let n = poles.count
+    guard n >= 2 else { return poles }
+    let degree = min(3, n - 1)
+    let spans = n - degree
+    var knots: [Double] = Array(repeating: 0, count: degree + 1)
+    if spans > 1 { knots += (1..<spans).map(Double.init) }
+    knots += Array(repeating: Double(spans), count: degree + 1)
+    func evaluate(_ t: Double) -> Point2 {
+        var k = degree
+        while k < n - 1, t >= knots[k + 1] { k += 1 }
+        var d = (0...degree).map { poles[$0 + k - degree] }
+        if degree > 0 {
+            for r in 1...degree {
+                for j in stride(from: degree, through: r, by: -1) {
+                    let i = j + k - degree
+                    let denominator = knots[i + 1 + degree - r] - knots[i]
+                    let alpha = denominator == 0 ? 0 : (t - knots[i]) / denominator
+                    d[j] = (1 - alpha) * d[j - 1] + alpha * d[j]
+                }
+            }
+        }
+        return d[degree]
+    }
+    let steps = spans * perSpan
+    return (0...steps).map { evaluate(Double(spans) * Double($0) / Double(steps)) }
+}
+
+/// Geschlossener gleichmäßiger B-Spline (Grad min(3, n−1)), wie der periodische Kernel-Spline.
+private func periodicBSplineSamples(_ poles: [Point2], perSpan: Int) -> [Point2] {
+    let n = poles.count
+    guard n >= 3 else { return poles }
+    let degree = min(3, n - 1)
+    var result: [Point2] = []
+    for j in 0..<n {
+        let p = (0...degree).map { poles[(j + $0) % n] }
+        for s in 0..<perSpan {
+            let t = Double(s) / Double(perSpan)
+            let u = 1 - t
+            let t2 = t * t, t3 = t2 * t
+            if degree == 3 {
+                let b0 = u * u * u / 6
+                let b1 = (3 * t3 - 6 * t2 + 4) / 6
+                let b2 = (-3 * t3 + 3 * t2 + 3 * t + 1) / 6
+                let b3 = t3 / 6
+                result.append(b0 * p[0] + b1 * p[1] + b2 * p[2] + b3 * p[3])
+            } else {
+                let b0 = u * u / 2
+                let b1 = (-2 * t2 + 2 * t + 1) / 2
+                let b2 = t2 / 2
+                result.append(b0 * p[0] + b1 * p[1] + b2 * p[2])
+            }
+        }
+    }
+    return result
+}
+
+// MARK: Segmente und Konturen
+
+/// Gerichtetes Kurvenstück einer Kontur.
+enum SketchSegment {
+    case line(Point2, Point2)
+    /// Start, Punkt auf dem Bogen, Ende
+    case arc(Point2, Point2, Point2)
+    /// Kette kubischer Bézierkurven, 3k + 1 Pole
+    case bezier([Point2])
+    /// Offener B-Spline durch Kontrollpunkte (Enden auf dem ersten und letzten Pol)
+    case bspline([Point2])
+
+    var start: Point2 {
+        switch self {
+        case .line(let a, _), .arc(let a, _, _): a
+        case .bezier(let poles), .bspline(let poles): poles.first ?? .zero
+        }
+    }
+
+    var end: Point2 {
+        switch self {
+        case .line(_, let b), .arc(_, _, let b): b
+        case .bezier(let poles), .bspline(let poles): poles.last ?? .zero
+        }
+    }
+
+    var reversed: SketchSegment {
+        switch self {
+        case .line(let a, let b): .line(b, a)
+        case .arc(let a, let m, let b): .arc(b, m, a)
+        case .bezier(let poles): .bezier(poles.reversed())
+        case .bspline(let poles): .bspline(poles.reversed())
+        }
+    }
+
+    /// Punkte entlang der Kurve, inklusive Start und Ende.
+    var samples: [Point2] {
+        switch self {
+        case .line(let a, let b):
+            return [a, b]
+        case .arc(let a, let m, let b):
+            guard let circle = circleThrough(a, m, b) else { return [a, b] }
+            let c = circle.center
+            let a0 = atan2(a.y - c.y, a.x - c.x)
+            var am = atan2(m.y - c.y, m.x - c.x) - a0
+            var ab = atan2(b.y - c.y, b.x - c.x) - a0
+            am = am.truncatingRemainder(dividingBy: 2 * .pi)
+            ab = ab.truncatingRemainder(dividingBy: 2 * .pi)
+            if am < 0 { am += 2 * .pi }
+            if ab < 0 { ab += 2 * .pi }
+            // Läuft der Bogen gegen den Uhrzeigersinn, liegt m zwischen a und b
+            let sweep = am <= ab ? ab : ab - 2 * .pi
+            let steps = max(8, Int(abs(sweep) / (2 * .pi) * 72))
+            return (0...steps).map { i in
+                let angle = a0 + sweep * Double(i) / Double(steps)
+                return c + circle.radius * Point2(cos(angle), sin(angle))
+            }
+        case .bezier(let poles):
+            guard poles.count >= 4 else { return poles }
+            var result = [poles[0]]
+            for k in stride(from: 0, to: poles.count - 3, by: 3) {
+                for s in 1...16 {
+                    result.append(bezierPoint(poles[k], poles[k + 1], poles[k + 2], poles[k + 3], Double(s) / 16))
+                }
+            }
+            return result
+        case .bspline(let poles):
+            return clampedBSplineSamples(poles, perSpan: 16)
+        }
+    }
+
+    /// Kodierung für PCKShape.prism(profileWires:), base wird zu jedem Punkt addiert.
+    func code(_ world: (Point2) -> [NSNumber]) -> [NSNumber] {
+        switch self {
+        case .line(let a, let b):
+            return [NSNumber(value: 0)] + world(a) + world(b)
+        case .arc(let a, let m, let b):
+            if circleThrough(a, m, b) == nil { return [NSNumber(value: 0)] + world(a) + world(b) }
+            return [NSNumber(value: 1)] + world(a) + world(m) + world(b)
+        case .bezier(let poles):
+            return [NSNumber(value: 2), NSNumber(value: poles.count)] + poles.flatMap(world)
+        case .bspline(let poles):
+            return [NSNumber(value: 5), NSNumber(value: poles.count)] + poles.flatMap(world)
+        }
+    }
+}
+
+/// Geschlossene Kontur.
+enum SketchLoop {
+    case chain([SketchSegment])
+    case circle(center: Point2, radius: Double)
+    case ellipse(center: Point2, radii: Point2)
+    /// Geschlossener Kontrollpunkt-Spline
+    case periodic([Point2])
+
+    /// Umriss als Polygon (ohne doppelten Endpunkt).
+    var polygon: [Point2] {
+        switch self {
+        case .chain(let segments):
+            var points: [Point2] = []
+            for segment in segments {
+                points += segment.samples.dropLast()
+            }
+            return points
+        case .circle(let center, let radius):
+            return (0..<72).map { i -> Point2 in
+                let a = Double(i) / 72 * 2 * .pi
+                return center + radius * Point2(cos(a), sin(a))
+            }
+        case .ellipse(let center, let radii):
+            return (0..<72).map {
+                let a = Double($0) / 72 * 2 * .pi
+                return center + Point2(radii.x * cos(a), radii.y * sin(a))
+            }
+        case .periodic(let poles):
+            return periodicBSplineSamples(poles, perSpan: 12)
+        }
+    }
+
+    func code(normal: SIMD3<Double>, xAxis: SIMD3<Double>, world: (Point2) -> [NSNumber]) -> [NSNumber] {
+        let vector = { (v: SIMD3<Double>) -> [NSNumber] in [NSNumber(value: v.x), NSNumber(value: v.y), NSNumber(value: v.z)] }
+        switch self {
+        case .chain(let segments):
+            return segments.flatMap { $0.code(world) }
+        case .circle(let center, let radius):
+            return [NSNumber(value: 3)] + world(center) + vector(normal) + [NSNumber(value: radius)]
+        case .ellipse(let center, let radii):
+            return [NSNumber(value: 4)] + world(center) + vector(normal) + vector(xAxis) + [NSNumber(value: radii.x), NSNumber(value: radii.y)]
+        case .periodic(let poles):
+            return [NSNumber(value: 6), NSNumber(value: poles.count)] + poles.flatMap(world)
+        }
+    }
+}
+
+/// Polygonfläche mit Vorzeichen (positiv = gegen den Uhrzeigersinn).
+func signedArea(_ polygon: [Point2]) -> Double {
+    guard polygon.count >= 3 else { return 0 }
+    var sum = 0.0
+    for i in polygon.indices {
+        let a = polygon[i], b = polygon[(i + 1) % polygon.count]
+        sum += a.x * b.y - b.x * a.y
+    }
+    return sum / 2
+}
+
+func polygonContains(_ polygon: [Point2], _ p: Point2) -> Bool {
+    var inside = false
+    var j = polygon.count - 1
+    for i in polygon.indices {
+        let a = polygon[i], b = polygon[j]
+        if (a.y > p.y) != (b.y > p.y), p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x {
+            inside.toggle()
+        }
+        j = i
+    }
+    return inside
+}
+
+/// Abstand eines Punkts zu einem Linienzug.
+func polylineDistance(from p: Point2, to points: [Point2], closed: Bool) -> (distance: Double, point: Point2, tangent: Point2) {
+    var best = (distance: Double.infinity, point: p, tangent: Point2(1, 0))
+    let count = closed ? points.count : points.count - 1
+    guard count > 0 else {
+        if let first = points.first { return (simd_distance(p, first), first, Point2(1, 0)) }
+        return best
+    }
+    for i in 0..<count {
+        let a = points[i], b = points[(i + 1) % points.count]
+        let ab = b - a
+        let lengthSquared = simd_length_squared(ab)
+        let t = lengthSquared > 0 ? min(max(simd_dot(p - a, ab) / lengthSquared, 0), 1) : 0
+        let q = a + t * ab
+        let d = simd_distance(p, q)
+        if d < best.distance, lengthSquared > 0 {
+            best = (d, q, simd_normalize(ab))
+        }
+    }
+    return best
+}
+
+/// Bereich zum Extrudieren: Außenkontur mit Löchern.
+struct SketchRegion {
+    var outer: SketchLoop
+    var holes: [SketchLoop]
+    var polygon: [Point2]
+    var area: Double
+}
+
+// MARK: Elemente
+
+enum SplineKind: String, CaseIterable, Identifiable {
+    case fit = "Fit-Punkte"
+    case control = "Kontrollpunkte"
+
+    var id: Self { self }
+}
+
+enum OffsetKind: String, CaseIterable, Identifiable {
+    case loop = "Schleife"
+    case single = "Einzeln"
+
+    var id: Self { self }
+}
+
+enum TextAlignmentOption: String, CaseIterable, Identifiable {
+    case left = "Links"
+    case center = "Mitte"
+    case right = "Rechts"
+
+    var id: Self { self }
+}
+
+/// Text als Skizzenprofil: Umrisse der Buchstaben aus der Schrift.
+struct SketchText {
+    var string: String
+    var anchor: Point2
+    var height: Double
+    var fontName: String
+    var alignment: TextAlignmentOption
+    var loops: [SketchLoop]
+
+    struct Font: Identifiable {
+        let name: String
+        let title: String
+        var id: String { name }
+    }
+
+    static let fonts: [Font] = [
+        Font(name: "Helvetica-Bold", title: "Helvetica Fett"), Font(name: "Helvetica", title: "Helvetica"),
+        Font(name: "AvenirNext-Bold", title: "Avenir Next Fett"), Font(name: "AvenirNext-Regular", title: "Avenir Next"),
+        Font(name: "Futura-Bold", title: "Futura Fett"), Font(name: "Georgia-Bold", title: "Georgia Fett"),
+        Font(name: "Courier-Bold", title: "Courier Fett"), Font(name: "Menlo-Bold", title: "Menlo Fett"),
+    ]
+
+    init(string: String, anchor: Point2, height: Double, fontName: String, alignment: TextAlignmentOption) {
+        self.string = string
+        self.anchor = anchor
+        self.height = height
+        self.fontName = fontName
+        self.alignment = alignment
+        loops = Self.outlines(string: string, anchor: anchor, height: height, fontName: fontName, alignment: alignment)
+    }
+
+    /// Buchstabenumrisse als geschlossene Ketten aus Linien und Bézierkurven.
+    /// height = Höhe der Großbuchstaben; anchor liegt auf der Grundlinie.
+    private static func outlines(string: String, anchor: Point2, height: Double, fontName: String,
+                                 alignment: TextAlignmentOption) -> [SketchLoop] {
+        let text = string.replacingOccurrences(of: "\n", with: " ")
+        guard !text.isEmpty, height > 0 else { return [] }
+        let font = CTFontCreateWithName(fontName as CFString, 100, nil)
+        let capHeight = max(Double(CTFontGetCapHeight(font)), 1)
+        let scale = height / capHeight
+        let attributed = NSAttributedString(string: text,
+                                            attributes: [NSAttributedString.Key(kCTFontAttributeName as String): font])
+        let line = CTLineCreateWithAttributedString(attributed)
+        let width = Double(CTLineGetTypographicBounds(line, nil, nil, nil))
+        let shift: Double = switch alignment {
+        case .left: 0
+        case .center: -width / 2
+        case .right: -width
+        }
+
+        var loops: [SketchLoop] = []
+        let runs = (CTLineGetGlyphRuns(line) as? [CTRun]) ?? []
+        for run in runs {
+            let count = CTRunGetGlyphCount(run)
+            guard count > 0 else { continue }
+            var glyphs = [CGGlyph](repeating: 0, count: count)
+            var positions = [CGPoint](repeating: .zero, count: count)
+            CTRunGetGlyphs(run, CFRange(location: 0, length: count), &glyphs)
+            CTRunGetPositions(run, CFRange(location: 0, length: count), &positions)
+            let attributes = CTRunGetAttributes(run) as NSDictionary
+            let runFont = attributes[kCTFontAttributeName as String].map { $0 as! CTFont } ?? font
+            for index in 0..<count {
+                guard let path = CTFontCreatePathForGlyph(runFont, glyphs[index], nil) else { continue }
+                let origin = positions[index]
+                let map = { (p: CGPoint) -> Point2 in
+                    anchor + scale * Point2(Double(p.x + origin.x) + shift, Double(p.y + origin.y))
+                }
+                loops += Self.loops(of: path, map: map)
+            }
+        }
+        return loops
+    }
+
+    private static func loops(of path: CGPath, map: @escaping (CGPoint) -> Point2) -> [SketchLoop] {
+        var loops: [SketchLoop] = []
+        var segments: [SketchSegment] = []
+        var start = Point2.zero
+        var current = Point2.zero
+        func close() {
+            if !samePoint(current, start) {
+                segments.append(.line(current, start))
+            }
+            if segments.count >= 2 {
+                loops.append(.chain(segments))
+            }
+            segments = []
+            current = start
+        }
+        path.applyWithBlock { pointer in
+            let element = pointer.pointee
+            let points = element.points
+            switch element.type {
+            case .moveToPoint:
+                if !segments.isEmpty { close() }
+                start = map(points[0])
+                current = start
+            case .addLineToPoint:
+                let p = map(points[0])
+                if !samePoint(p, current) { segments.append(.line(current, p)) }
+                current = p
+            case .addQuadCurveToPoint:
+                let q = map(points[0]), p = map(points[1])
+                segments.append(.bezier([current, current + 2 / 3 * (q - current), p + 2 / 3 * (q - p), p]))
+                current = p
+            case .addCurveToPoint:
+                let c1 = map(points[0]), c2 = map(points[1]), p = map(points[2])
+                segments.append(.bezier([current, c1, c2, p]))
+                current = p
+            case .closeSubpath:
+                close()
+            @unknown default:
+                break
+            }
+        }
+        if !segments.isEmpty { close() }
+        return loops
+    }
+}
+
+/// Ein Element der Skizze.
+enum SketchEntity {
+    case line(Point2, Point2)
+    case rectangle(corner: Point2, size: Point2)
+    case circle(center: Point2, radius: Double)
+    case ellipse(center: Point2, radii: Point2)
+    case regularPolygon(center: Point2, radius: Double, sides: Int, angle: Double)
+    case arc(start: Point2, mid: Point2, end: Point2)
+    case spline(points: [Point2], kind: SplineKind, closed: Bool)
+    case polyline([Point2], closed: Bool)
+    case point(Point2)
+    case text(SketchText)
+
+    static func polygonCorners(center: Point2, radius: Double, sides: Int, angle: Double) -> [Point2] {
+        let n = max(sides, 3)
+        return (0..<n).map { i in
+            let a = angle + Double(i) / Double(n) * 2 * .pi
+            return center + radius * Point2(cos(a), sin(a))
+        }
+    }
+
+    private static func lines(_ points: [Point2], closed: Bool) -> [SketchSegment] {
+        guard points.count >= 2 else { return [] }
+        var result = zip(points, points.dropFirst()).map { SketchSegment.line($0, $1) }
+        if closed, let first = points.first, let last = points.last, !samePoint(first, last) {
+            result.append(.line(last, first))
+        }
+        return result
+    }
+
+    /// Geschlossene Konturen, die das Element allein bildet.
+    var loops: [SketchLoop] {
+        switch self {
+        case .rectangle(let c, let s):
+            return [.chain(Self.lines([c, c + Point2(s.x, 0), c + s, c + Point2(0, s.y)], closed: true))]
+        case .circle(let center, let radius):
+            return [.circle(center: center, radius: radius)]
+        case .ellipse(let center, let radii):
+            return [.ellipse(center: center, radii: radii)]
+        case .regularPolygon(let center, let radius, let sides, let angle):
+            return [.chain(Self.lines(Self.polygonCorners(center: center, radius: radius, sides: sides, angle: angle),
+                                      closed: true))]
+        case .spline(let points, let kind, true):
+            switch kind {
+            case .fit: return [.chain([.bezier(fitBezierPoles(points, closed: true))])]
+            case .control: return [.periodic(points)]
+            }
+        case .polyline(let points, true):
+            return [.chain(Self.lines(points, closed: true))]
+        case .text(let text):
+            return text.loops
+        default:
+            return []
+        }
+    }
+
+    /// Offene Kurvenstücke, die mit anderen zu Konturen verkettet werden können.
+    var openSegments: [SketchSegment] {
+        switch self {
+        case .line(let a, let b):
+            return samePoint(a, b) ? [] : [.line(a, b)]
+        case .arc(let a, let m, let b):
+            return [.arc(a, m, b)]
+        case .spline(let points, let kind, false):
+            guard points.count >= 2 else { return [] }
+            return [kind == .fit ? .bezier(fitBezierPoles(points, closed: false)) : .bspline(points)]
+        case .polyline(let points, false):
+            return Self.lines(points, closed: false)
+        default:
+            return []
+        }
+    }
+
+    /// Fangpunkte: Enden, Ecken, Mittelpunkte, Punkte.
+    var snapPoints: [Point2] {
+        switch self {
+        case .line(let a, let b): return [a, b]
+        case .rectangle(let c, let s): return [c, c + Point2(s.x, 0), c + s, c + Point2(0, s.y), c + s / 2]
+        case .circle(let center, _), .ellipse(let center, _): return [center]
+        case .regularPolygon(let center, let radius, let sides, let angle):
+            return [center] + Self.polygonCorners(center: center, radius: radius, sides: sides, angle: angle)
+        case .arc(let a, _, let b): return [a, b]
+        case .spline(let points, _, _), .polyline(let points, _): return points
+        case .point(let p): return [p]
+        case .text: return []
+        }
+    }
+
+    /// Linienzüge für die Darstellung.
+    var drawing: [[Point2]] {
+        if case .point(let p) = self {
+            let s = 0.6
+            return [[p - Point2(s, s), p + Point2(s, s)], [p - Point2(s, -s), p + Point2(s, -s)]]
+        }
+        return loops.map { $0.polygon + [$0.polygon.first ?? .zero] } + openSegments.map(\.samples)
+    }
+}
+
+// MARK: Bereiche finden
+
+/// Verkettet offene Segmente zu geschlossenen Konturen und ordnet Löcher ihren Außenkonturen zu.
+func findRegions(in entities: [SketchEntity]) -> (regions: [SketchRegion], loops: [SketchLoop]) {
+    var loops = entities.flatMap(\.loops)
+    var unused = entities.flatMap(\.openSegments)
+    while let first = unused.popLast() {
+        var chain = [first]
+        while !samePoint(chain[chain.count - 1].end, chain[0].start) {
+            let end = chain[chain.count - 1].end
+            if let i = unused.firstIndex(where: { samePoint($0.start, end) }) {
+                chain.append(unused.remove(at: i))
+            } else if let i = unused.firstIndex(where: { samePoint($0.end, end) }) {
+                chain.append(unused.remove(at: i).reversed)
+            } else {
+                break
+            }
+        }
+        // Eine einzelne Linie kann keine Kontur bilden, ein geschlossener Spline schon
+        var startsWithLine = false
+        if case .line = chain[0] { startsWithLine = true }
+        if samePoint(chain[chain.count - 1].end, chain[0].start), chain.count >= 2 || !startsWithLine {
+            loops.append(.chain(chain))
+        }
+    }
+
+    let polygons = loops.map(\.polygon)
+    let areas = polygons.map { abs(signedArea($0)) }
+    // Elternkontur = kleinste Kontur, die einen Punkt der Kontur enthält
+    let parents: [Int?] = loops.indices.map { i in
+        guard let probe = polygons[i].first else { return nil }
+        return loops.indices
+            .filter { $0 != i && areas[$0] > areas[i] && polygonContains(polygons[$0], probe) }
+            .min { areas[$0] < areas[$1] }
+    }
+    func depth(_ i: Int) -> Int {
+        var d = 0
+        var current = parents[i]
+        while let parent = current, d < loops.count {
+            d += 1
+            current = parents[parent]
+        }
+        return d
+    }
+    var regions: [SketchRegion] = []
+    for i in loops.indices where depth(i) % 2 == 0 && areas[i] > 1e-6 {
+        let holes = loops.indices.filter { parents[$0] == i }.map { loops[$0] }
+        regions.append(SketchRegion(outer: loops[i], holes: holes, polygon: polygons[i], area: areas[i]))
+    }
+    return (regions.sorted { $0.area > $1.area }, loops)
+}
+
+// MARK: Versatz
+
+/// Versetzt Konturen und Kurvenstücke in der Skizzenebene.
+enum SketchOffset {
+    /// Ein Kurvenstück um distance zur Seite sign·rechts versetzen.
+    static func segment(_ segment: SketchSegment, distance d: Double, sign: Double) -> SketchSegment? {
+        switch segment {
+        case .line(let a, let b):
+            let n = rightNormal(b - a) * sign
+            return .line(a + n * d, b + n * d)
+        case .arc(let a, let m, let b):
+            guard let circle = circleThrough(a, m, b) else { return self.segment(.line(a, b), distance: d, sign: sign) }
+            let samples = segment.samples
+            let n = rightNormal(samples[1] - samples[0]) * sign
+            let outward = simd_dot(simd_normalize(a - circle.center), n) > 0 ? 1.0 : -1.0
+            let radius = circle.radius + outward * d
+            guard radius > 1e-6 else { return nil }
+            let move = { (p: Point2) in circle.center + simd_normalize(p - circle.center) * radius }
+            return .arc(move(a), move(m), move(b))
+        case .bezier, .bspline:
+            let points = offsetPolyline(segment.samples, distance: d, sign: sign, closed: false)
+            let step = max(1, points.count / 12)
+            var fit = stride(from: 0, to: points.count, by: step).map { points[$0] }
+            if let last = points.last, !samePoint(fit[fit.count - 1], last) { fit.append(last) }
+            return .bezier(fitBezierPoles(fit, closed: false))
+        }
+    }
+
+    /// Kontur nach außen (distance > 0) bzw. innen versetzen. Liefert neue Skizzenelemente.
+    static func loop(_ loop: SketchLoop, distance d: Double) -> [SketchEntity] {
+        let polygon = loop.polygon
+        let ccw = signedArea(polygon) > 0
+        // rechts der Laufrichtung liegt bei Umlauf gegen den Uhrzeigersinn außen
+        let sign: Double = ccw ? 1 : -1
+        switch loop {
+        case .circle(let center, let radius):
+            return radius + d > 1e-6 ? [.circle(center: center, radius: radius + d)] : []
+        case .ellipse, .periodic:
+            let points = offsetPolyline(polygon, distance: d, sign: sign, closed: true)
+            let step = max(1, points.count / 36)
+            return [.spline(points: stride(from: 0, to: points.count, by: step).map { points[$0] }, kind: .fit, closed: true)]
+        case .chain(let segments):
+            if segments.allSatisfy({ if case .line = $0 { return true } else { return false } }) {
+                let corners = segments.map(\.start)
+                return [.polyline(offsetPolyline(corners, distance: d, sign: sign, closed: true), closed: true)]
+            }
+            var pieces = segments.compactMap { Self.segment($0, distance: d, sign: sign) }
+            guard pieces.count == segments.count else { return [] }
+            var result: [SketchEntity] = []
+            for i in pieces.indices {
+                let next = pieces[(i + 1) % pieces.count]
+                if case .line(let a, let b) = pieces[i], case .line(let c, let e) = next,
+                   let x = intersect(a, b, c, e) {
+                    pieces[i] = .line(a, x)
+                    pieces[(i + 1) % pieces.count] = .line(x, e)
+                }
+            }
+            for i in pieces.indices {
+                result.append(entity(pieces[i]))
+                let next = pieces[(i + 1) % pieces.count]
+                if !samePoint(pieces[i].end, next.start) {
+                    result.append(.line(pieces[i].end, next.start))
+                }
+            }
+            return result
+        }
+    }
+
+    static func entity(_ segment: SketchSegment) -> SketchEntity {
+        switch segment {
+        case .line(let a, let b): .line(a, b)
+        case .arc(let a, let m, let b): .arc(start: a, mid: m, end: b)
+        case .bezier(let poles):
+            // Bézierkette als Fit-Spline durch ihre Knotenpunkte
+            .spline(points: stride(from: 0, to: poles.count, by: 3).map { poles[$0] }, kind: .fit, closed: false)
+        case .bspline(let poles): .spline(points: poles, kind: .control, closed: false)
+        }
+    }
+
+    /// Schnittpunkt der Geraden a–b und c–e.
+    private static func intersect(_ a: Point2, _ b: Point2, _ c: Point2, _ e: Point2) -> Point2? {
+        let r = b - a, s = e - c
+        let denominator = r.x * s.y - r.y * s.x
+        guard abs(denominator) > 1e-9 else { return nil }
+        let t = ((c.x - a.x) * s.y - (c.y - a.y) * s.x) / denominator
+        return a + t * r
+    }
+
+    /// Linienzug mit Gehrung versetzen.
+    static func offsetPolyline(_ points: [Point2], distance d: Double, sign: Double, closed: Bool) -> [Point2] {
+        let n = points.count
+        guard n >= 2 else { return points }
+        return points.indices.map { i in
+            let prev = closed ? points[(i - 1 + n) % n] : points[max(i - 1, 0)]
+            let next = closed ? points[(i + 1) % n] : points[min(i + 1, n - 1)]
+            let p = points[i]
+            let n1 = rightNormal(p - prev) * sign
+            let n2 = rightNormal(next - p) * sign
+            if i == 0, !closed { return p + n2 * d }
+            if i == n - 1, !closed { return p + n1 * d }
+            let bisector = n1 + n2
+            let length = simd_length(bisector)
+            guard length > 1e-9 else { return p + n1 * d }
+            let miter = bisector / length
+            let scale = 1 / max(simd_dot(miter, n1), 0.2)
+            return p + miter * d * scale
+        }
+    }
+}

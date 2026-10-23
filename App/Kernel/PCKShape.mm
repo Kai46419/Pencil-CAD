@@ -1,5 +1,6 @@
 #import "PCKShape.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <utility>
@@ -30,6 +31,13 @@
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
+#include <GC_MakeArcOfCircle.hxx>
+#include <Geom_BSplineCurve.hxx>
+#include <Geom_TrimmedCurve.hxx>
+#include <ShapeFix_Face.hxx>
+#include <TColStd_Array1OfInteger.hxx>
+#include <TColStd_Array1OfReal.hxx>
+#include <TColgp_Array1OfPnt.hxx>
 #include <GCPnts_TangentialDeflection.hxx>
 #include <Geom2d_Curve.hxx>
 #include <Poly_Triangulation.hxx>
@@ -45,6 +53,7 @@
 #include <TopoDS_Compound.hxx>
 #include <TopoDS_Shape.hxx>
 #include <gp_Ax1.hxx>
+#include <gp_Circ.hxx>
 #include <gp_Ax2.hxx>
 #include <gp_Elips.hxx>
 #include <gp_Trsf.hxx>
@@ -345,6 +354,150 @@ static gp_Dir toDir(simd_double3 d) {
     } catch (const Standard_Failure &) {
         return nil;
     }
+}
+
+/// B-Spline aus Polen. clamped: Enden liegen auf dem ersten und letzten Pol (gleichmäßige innere Knoten),
+/// sonst periodisch und kubisch. bezierChain: Pole bilden eine Kette kubischer Bézierkurven (3k + 1 Pole).
+static Handle(Geom_BSplineCurve) makeBSpline(const std::vector<gp_Pnt> &poles, bool periodic, bool bezierChain) {
+    const int n = int(poles.size());
+    TColgp_Array1OfPnt array(1, n);
+    for (int i = 0; i < n; ++i) array.SetValue(i + 1, poles[size_t(i)]);
+    if (bezierChain) {
+        const int segments = (n - 1) / 3;
+        if (segments < 1 || segments * 3 + 1 != n) return nullptr;
+        TColStd_Array1OfReal knots(1, segments + 1);
+        TColStd_Array1OfInteger mults(1, segments + 1);
+        for (int i = 0; i <= segments; ++i) {
+            knots.SetValue(i + 1, double(i));
+            mults.SetValue(i + 1, (i == 0 || i == segments) ? 4 : 3);
+        }
+        return new Geom_BSplineCurve(array, knots, mults, 3);
+    }
+    if (periodic) {
+        if (n < 3) return nullptr;
+        TColStd_Array1OfReal knots(1, n + 1);
+        TColStd_Array1OfInteger mults(1, n + 1);
+        for (int i = 0; i <= n; ++i) {
+            knots.SetValue(i + 1, double(i));
+            mults.SetValue(i + 1, 1);
+        }
+        return new Geom_BSplineCurve(array, knots, mults, std::min(3, n - 1), Standard_True);
+    }
+    if (n < 2) return nullptr;
+    const int degree = std::min(3, n - 1);
+    const int count = n - degree + 1;
+    TColStd_Array1OfReal knots(1, count);
+    TColStd_Array1OfInteger mults(1, count);
+    for (int i = 0; i < count; ++i) {
+        knots.SetValue(i + 1, double(i));
+        mults.SetValue(i + 1, (i == 0 || i == count - 1) ? degree + 1 : 1);
+    }
+    return new Geom_BSplineCurve(array, knots, mults, degree);
+}
+
+/// Baut eine Kontur aus der Segment-Kodierung (siehe PCKShape.h). Liefert einen leeren Draht bei Fehlern.
+static TopoDS_Wire wireFromCode(const std::vector<double> &code) {
+    BRepBuilderAPI_MakeWire wire;
+    size_t i = 0;
+    auto point = [&]() {
+        const gp_Pnt p(code[i], code[i + 1], code[i + 2]);
+        i += 3;
+        return p;
+    };
+    auto has = [&](size_t count) { return i + count <= code.size(); };
+    while (i < code.size()) {
+        const int type = int(code[i++]);
+        TopoDS_Edge edge;
+        switch (type) {
+        case 0: {
+            if (!has(6)) return TopoDS_Wire();
+            const gp_Pnt a = point(), b = point();
+            if (a.Distance(b) < 1e-7) continue;
+            edge = BRepBuilderAPI_MakeEdge(a, b).Edge();
+            break;
+        }
+        case 1: {
+            if (!has(9)) return TopoDS_Wire();
+            const gp_Pnt a = point(), m = point(), b = point();
+            GC_MakeArcOfCircle arc(a, m, b);
+            if (!arc.IsDone()) return TopoDS_Wire();
+            edge = BRepBuilderAPI_MakeEdge(arc.Value()).Edge();
+            break;
+        }
+        case 2:
+        case 5:
+        case 6: {
+            if (!has(1)) return TopoDS_Wire();
+            const size_t n = size_t(code[i++]);
+            if (!has(3 * n)) return TopoDS_Wire();
+            std::vector<gp_Pnt> poles;
+            for (size_t k = 0; k < n; ++k) poles.push_back(point());
+            const Handle(Geom_BSplineCurve) curve = makeBSpline(poles, type == 6, type == 2);
+            if (curve.IsNull()) return TopoDS_Wire();
+            edge = BRepBuilderAPI_MakeEdge(curve).Edge();
+            break;
+        }
+        case 3: {
+            if (!has(7)) return TopoDS_Wire();
+            const gp_Pnt c = point(), n = point();
+            const double r = code[i++];
+            edge = BRepBuilderAPI_MakeEdge(gp_Circ(gp_Ax2(c, gp_Dir(n.X(), n.Y(), n.Z())), r)).Edge();
+            break;
+        }
+        case 4: {
+            if (!has(11)) return TopoDS_Wire();
+            const gp_Pnt c = point(), n = point(), x = point();
+            double rx = code[i++], ry = code[i++];
+            gp_Dir normal(n.X(), n.Y(), n.Z());
+            gp_Dir major(x.X(), x.Y(), x.Z());
+            if (ry > rx) {
+                major = normal.Crossed(major);
+                std::swap(rx, ry);
+            }
+            edge = BRepBuilderAPI_MakeEdge(gp_Elips(gp_Ax2(c, normal, major), rx, ry)).Edge();
+            break;
+        }
+        default:
+            return TopoDS_Wire();
+        }
+        wire.Add(edge);
+        if (!wire.IsDone()) return TopoDS_Wire();
+    }
+    return wire.IsDone() ? wire.Wire() : TopoDS_Wire();
+}
+
++ (nullable PCKShape *)prismWithProfileWires:(NSArray<NSArray<NSNumber *> *> *)wires direction:(simd_double3)direction {
+    if (wires.count == 0 || simd_length(direction) == 0) return nil;
+    try {
+        const TopoDS_Wire outer = wireFromCode(toVector(wires[0]));
+        if (outer.IsNull()) return nil;
+        BRepBuilderAPI_MakeFace face(outer, Standard_True);
+        if (!face.IsDone()) return nil;
+        for (NSUInteger k = 1; k < wires.count; ++k) {
+            const TopoDS_Wire hole = wireFromCode(toVector(wires[k]));
+            if (!hole.IsNull()) face.Add(hole);
+        }
+        // Umlaufrichtung der Löcher passend zur Außenkontur
+        ShapeFix_Face fix(face.Face());
+        fix.Perform();
+        BRepPrimAPI_MakePrism prism(fix.Face(), gp_Vec(direction.x, direction.y, direction.z));
+        if (!prism.IsDone()) return nil;
+        return [[PCKShape alloc] initWithShape:prism.Shape()];
+    } catch (const Standard_Failure &) {
+        return nil;
+    }
+}
+
++ (nullable PCKShape *)compoundOfShapes:(NSArray<PCKShape *> *)shapes {
+    if (shapes.count == 0) return nil;
+    if (shapes.count == 1) return shapes[0];
+    BRep_Builder builder;
+    TopoDS_Compound compound;
+    builder.MakeCompound(compound);
+    for (PCKShape *shape in shapes) {
+        builder.Add(compound, shape->_shape);
+    }
+    return [[PCKShape alloc] initWithShape:compound];
 }
 
 /// Fasst nach booleschen Operationen zerteilte Flächen und Kanten wieder zusammen.
@@ -727,6 +880,14 @@ static std::vector<TopoDS_Edge> edgesFromNumbers(const TopTools_IndexedMapOfShap
 
 + (nullable PCKShape *)sphereWithCenter:(simd_double3)center radius:(double)radius {
     return nil;
+}
+
++ (nullable PCKShape *)prismWithProfileWires:(NSArray<NSArray<NSNumber *> *> *)wires direction:(simd_double3)direction {
+    return nil;
+}
+
++ (nullable PCKShape *)compoundOfShapes:(NSArray<PCKShape *> *)shapes {
+    return shapes.firstObject;
 }
 
 + (nullable PCKShape *)coneWithBase:(simd_double3)base axis:(simd_double3)axis

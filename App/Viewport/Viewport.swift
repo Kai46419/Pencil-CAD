@@ -65,6 +65,7 @@ final class ViewportView: MTKView {
     private var handleDrag: HandleDragState?
     private var previewKey = ""
     private let valueLabel = PaddedLabel()
+    private var planeLabels: [PaddedLabel] = []
 
     private struct HandleDragState {
         let touch: UITouch
@@ -165,19 +166,21 @@ final class ViewportView: MTKView {
     /// Gleicht Renderer, Gesten, Ziehpfeile und Vorschau mit dem Zustand ab.
     func refresh() {
         guard let renderer, let sketch, let workspace else { return }
-        let fingerSketching = sketch.isActive && sketch.fingerDraws
+        let choosing = sketch.isActive && sketch.isChoosingPlane
+        let fingerSketching = sketch.isActive && sketch.fingerDraws && !choosing
         orbitGesture?.isEnabled = !fingerSketching
         tapGesture?.isEnabled = !fingerSketching
-        tapGesture?.allowedTouchTypes = sketch.isActive ? fingersOnly : fingersAndPencil
+        tapGesture?.allowedTouchTypes = sketch.isActive && !choosing ? fingersOnly : fingersAndPencil
 
         let plane = sketch.plane
-        renderer.gridTransform = sketch.isActive
+        renderer.gridTransform = sketch.isActive && !choosing
             ? float4x4(origin: SIMD3<Float>(plane.origin), u: SIMD3<Float>(plane.u),
                        v: SIMD3<Float>(plane.v), n: SIMD3<Float>(plane.normal))
             : matrix_identity_float4x4
-        let points = sketch.isActive ? sketch.segments.map { SIMD3<Float>(plane.world($0)) } : []
+        let points = sketch.isActive && !choosing ? sketch.segments.map { SIMD3<Float>(plane.world($0)) } : []
         renderer.updateSketch(points: points)
         refreshExtrusionPreview()
+        refreshPlanes()
 
         let handles = workspace.handles
         renderer.handles = handles.map { HandleGraphic(base: $0.base, direction: $0.pointing, color: $0.color) }
@@ -187,19 +190,109 @@ final class ViewportView: MTKView {
 
     private func refreshExtrusionPreview() {
         guard let renderer, let sketch else { return }
-        guard sketch.isActive, let profile = sketch.profile, sketch.extrudeDistance != 0 else {
+        guard sketch.isActive, sketch.hasProfile, sketch.extrudeDistance != 0 else {
             if !previewKey.isEmpty {
                 previewKey = ""
                 renderer.updatePreview(nil, filled: false)
             }
             return
         }
-        let key = "\(sketch.revision)|\(sketch.extrudeDistance)|\(sketch.extrudeMode.rawValue)"
+        let key = "\(sketch.geometryRevision)|\(sketch.extrudeDistance)|\(sketch.extrudeMode.rawValue)"
         guard key != previewKey else { return }
         previewKey = key
-        let mesh = profile.extrusion(on: sketch.plane, distance: sketch.extrudeDistance, mode: sketch.extrudeMode)
+        let mesh = sketch.extrusion(distance: sketch.extrudeDistance, mode: sketch.extrudeMode)
             .map { Mesh($0.triangulate(deflection: 0.05), body: -1) }
         renderer.updatePreview(mesh, filled: sketch.extrudeMode != .cut)
+    }
+
+    // MARK: Ebenenscheiben
+
+    /// Die drei Standardebenen durch den Ursprung (Normale, u, v).
+    private static let basePlanes: [(normal: SIMD3<Float>, u: SIMD3<Float>, v: SIMD3<Float>)] = [
+        ([0, 0, 1], [1, 0, 0], [0, 1, 0]),
+        ([0, 1, 0], [1, 0, 0], [0, 0, 1]),
+        ([1, 0, 0], [0, 1, 0], [0, 0, 1]),
+    ]
+
+    /// Halbe Kantenlänge der Scheiben, passend zur Modellgröße.
+    private var planeHalfSize: Float {
+        guard let bounds = model?.mesh.bounds else { return 30 }
+        let extent = max(simd_reduce_max(simd_abs(bounds.min)), simd_reduce_max(simd_abs(bounds.max)))
+        return max(30, extent * 1.1)
+    }
+
+    /// Welche Seite der Standardebene index die Kamera sieht.
+    private func facingSide(ofBasePlane index: Int) -> BasePlane {
+        let eye = renderer?.camera.position ?? SIMD3<Float>(1, -1, 1)
+        switch index {
+        case 0: return eye.z >= 0 ? .top : .bottom
+        case 1: return eye.y <= 0 ? .front : .back
+        default: return eye.x >= 0 ? .right : .left
+        }
+    }
+
+    /// Ebenenwahl: drei antippbare Scheiben. Beim Skizzieren: Scheibe der aktiven Ebene.
+    private func refreshPlanes() {
+        guard let renderer, let sketch else { return }
+        let half = planeHalfSize
+        var graphics: [PlaneGraphic] = []
+        var labels: [(text: String, position: SIMD3<Float>)] = []
+        if sketch.isActive, sketch.isChoosingPlane {
+            for (index, plane) in Self.basePlanes.enumerated() {
+                graphics.append(PlaneGraphic(center: .zero, u: plane.u, v: plane.v, halfSize: half,
+                                             color: SIMD3(0.35, 0.55, 0.95)))
+                labels.append((facingSide(ofBasePlane: index).rawValue, (plane.u + plane.v) * half * 0.8))
+            }
+        } else if sketch.isActive {
+            let plane = sketch.plane
+            let center = SIMD3<Float>(plane.origin + plane.u * simd_dot(plane.anchor - plane.origin, plane.u)
+                                      + plane.v * simd_dot(plane.anchor - plane.origin, plane.v))
+            let size = plane.isOnFace ? max(15, half * 0.5) : half
+            graphics.append(PlaneGraphic(center: center, u: SIMD3<Float>(plane.u), v: SIMD3<Float>(plane.v),
+                                         halfSize: size, color: SIMD3(0.25, 0.5, 0.95)))
+            labels.append((plane.name,
+                           center + (SIMD3<Float>(plane.u) * -0.85 + SIMD3<Float>(plane.v) * 0.85) * size))
+        }
+        renderer.planes = graphics
+
+        while planeLabels.count < labels.count {
+            let label = PaddedLabel()
+            label.font = .systemFont(ofSize: 13, weight: .semibold)
+            label.textColor = .white
+            label.backgroundColor = UIColor.systemBlue.withAlphaComponent(0.85)
+            label.layer.cornerRadius = 8
+            label.layer.masksToBounds = true
+            label.isUserInteractionEnabled = false
+            addSubview(label)
+            planeLabels.append(label)
+        }
+        for (index, label) in planeLabels.enumerated() {
+            guard index < labels.count,
+                  let point = renderer.camera.project(labels[index].position, viewSize: bounds.size) else {
+                label.isHidden = true
+                continue
+            }
+            label.text = labels[index].text
+            label.sizeToFit()
+            label.center = point
+            label.isHidden = false
+        }
+    }
+
+    /// Getroffene Standardebene (vorderste Scheibe unter dem Finger) und Abstand entlang des Sehstrahls.
+    private func basePlaneHit(ray: (origin: SIMD3<Float>, direction: SIMD3<Float>)) -> (side: BasePlane, t: Float)? {
+        let half = planeHalfSize
+        var best: (side: BasePlane, t: Float)?
+        for (index, plane) in Self.basePlanes.enumerated() {
+            let denominator = simd_dot(ray.direction, plane.normal)
+            guard abs(denominator) > 1e-6 else { continue }
+            let t = -simd_dot(ray.origin, plane.normal) / denominator
+            guard t > 0, t < (best?.t ?? .infinity) else { continue }
+            let p = ray.origin + t * ray.direction
+            guard abs(simd_dot(p, plane.u)) <= half, abs(simd_dot(p, plane.v)) <= half else { continue }
+            best = (facingSide(ofBasePlane: index), t)
+        }
+        return best
     }
 
     /// Maß-Etikett an der Pfeilspitze des ersten Ziehpfeils.
@@ -265,7 +358,7 @@ final class ViewportView: MTKView {
     // MARK: Skizze
 
     private func acceptsForSketch(_ touch: UITouch) -> Bool {
-        guard let sketch, sketch.isActive else { return false }
+        guard let sketch, sketch.isActive, !sketch.isChoosingPlane else { return false }
         return touch.type == .pencil || (sketch.fingerDraws && touch.type == .direct)
     }
 
@@ -291,7 +384,7 @@ final class ViewportView: MTKView {
               let ray = renderer.camera.ray(through: touch.location(in: self), viewSize: bounds.size) else { return true }
         guard let hit = model.pick(origin: ray.origin, direction: ray.direction) else {
             if sketch.plane.isOnFace {
-                sketch.plane = .ground
+                sketch.useBasePlane()
             }
             return true
         }
@@ -397,13 +490,19 @@ final class ViewportView: MTKView {
         let hit = model.pick(origin: ray.origin, direction: ray.direction)
 
         if sketch.isActive {
+            if sketch.isChoosingPlane {
+                chooseSketchPlane(ray: ray, faceHit: hit)
+                return
+            }
+            // Ebene nur wechseln, solange noch nichts gezeichnet ist (der Wechsel leert die Skizze)
+            guard sketch.isEmpty else { return }
             guard let hit else {
-                sketch.plane = .ground
+                if sketch.plane.isOnFace { sketch.useBasePlane() }
                 refresh()
                 return
             }
             if let plane = model.plane(of: hit.face) {
-                sketch.plane = plane
+                workspace.chooseSketchPlane(plane)
                 model.message = nil
             } else {
                 model.message = "Auf gekrümmten Flächen kann nicht skizziert werden."
@@ -413,6 +512,28 @@ final class ViewportView: MTKView {
         }
         let edge = pickEdge(at: location, ray: ray, faceHit: hit)
         workspace.tapped(face: hit?.face, edge: edge)
+    }
+
+    /// Ebenenwahl: vorderste Standardebene oder ebene Körperfläche unter dem Finger.
+    private func chooseSketchPlane(ray: (origin: SIMD3<Float>, direction: SIMD3<Float>),
+                                   faceHit: (face: FaceRef, point: SIMD3<Float>)?) {
+        guard let model, let workspace else { return }
+        let planeHit = basePlaneHit(ray: ray)
+        if let faceHit {
+            let faceT = simd_dot(faceHit.point - ray.origin, ray.direction)
+            if planeHit == nil || faceT < planeHit!.t {
+                if let plane = model.plane(of: faceHit.face) {
+                    model.message = nil
+                    workspace.chooseSketchPlane(plane)
+                } else {
+                    model.message = "Auf gekrümmten Flächen kann nicht skizziert werden."
+                }
+                return
+            }
+        }
+        if let planeHit {
+            workspace.chooseSketchPlane(planeHit.side)
+        }
     }
 
     /// Kante in Fingernähe, die nicht von einer Fläche verdeckt ist.

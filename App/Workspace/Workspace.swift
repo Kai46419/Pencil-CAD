@@ -31,6 +31,7 @@ enum HandleKind: Equatable {
     case face
     case edge
     case move(axis: Int)
+    case offset
 }
 
 /// Ziehpfeil: Achse (Ursprung + Richtung), aktueller Wert in mm entlang der Achse.
@@ -111,6 +112,7 @@ final class Workspace: ObservableObject {
 
     // MARK: Skizze
 
+    /// Neue Skizze: auf der gewählten ebenen Fläche, sonst zuerst eine Standardebene antippen lassen.
     func startSketch() {
         tool = .select
         model.commitPreview()
@@ -120,9 +122,25 @@ final class Workspace: ObservableObject {
             send(.alignToSketchPlane)
         } else {
             sketch.isActive = true
+            sketch.isChoosingPlane = true
+            // Schräge Ansicht, damit alle drei Ebenen antippbar sind
+            send(.look(SIMD3<Float>(1, -1, 0.85)))
         }
         model.resetSelection()
         sketchNumber += 1
+    }
+
+    /// Standardebene wählen; die Ansicht dreht sich senkrecht darauf (Oben = Draufsicht).
+    func chooseSketchPlane(_ side: BasePlane) {
+        sketch.choose(side)
+        send(.alignToSketchPlane)
+    }
+
+    /// Ebene Fläche eines Körpers als Skizzenebene.
+    func chooseSketchPlane(_ plane: SketchPlane) {
+        sketch.isChoosingPlane = false
+        sketch.plane = plane
+        send(.alignToSketchPlane)
     }
 
     func endSketch() {
@@ -130,8 +148,9 @@ final class Workspace: ObservableObject {
     }
 
     func extrudeSketch() {
-        guard let profile = sketch.profile, sketch.extrudeDistance != 0 else { return }
-        model.extrude(profile, on: sketch.plane, distance: sketch.extrudeDistance, mode: sketch.extrudeMode)
+        guard sketch.hasProfile, sketch.extrudeDistance != 0 else { return }
+        model.extrude(sketch.extrusion(distance: sketch.extrudeDistance, mode: sketch.extrudeMode),
+                      on: sketch.plane, mode: sketch.extrudeMode)
         sketch.reset()
     }
 
@@ -199,7 +218,11 @@ final class Workspace: ObservableObject {
     /// „Fertig“: aktuelles Werkzeug bzw. Vorschau übernehmen.
     func done() {
         if sketch.isActive {
-            if sketch.profile != nil {
+            if sketch.isChoosingPlane {
+                chooseSketchPlane(.top)
+            } else if sketch.hasOffsetTarget {
+                sketch.applyOffset()
+            } else if sketch.hasProfile {
                 extrudeSketch()
             } else {
                 endSketch()
@@ -222,7 +245,9 @@ final class Workspace: ObservableObject {
     /// „Abbrechen“: Vorschau verwerfen, zurück zur Auswahl.
     func cancel() {
         if sketch.isActive {
-            if sketch.profile != nil || sketch.hasOpenPolyline {
+            if sketch.hasOffsetTarget {
+                sketch.cancelOffset()
+            } else if !sketch.isEmpty {
                 sketch.reset()
             } else {
                 endSketch()
@@ -241,7 +266,10 @@ final class Workspace: ObservableObject {
     }
 
     var canFinish: Bool {
-        if sketch.isActive { return sketch.profile == nil || sketch.extrudeDistance != 0 }
+        if sketch.isActive {
+            if sketch.isChoosingPlane || sketch.hasOffsetTarget || !sketch.hasProfile { return true }
+            return sketch.extrudeDistance != 0
+        }
         switch tool {
         case .boolean: return model.selectedBodies.count > 1
         case .color: return true
@@ -282,10 +310,15 @@ final class Workspace: ObservableObject {
     var handles: [DragHandle] {
         let blue = SIMD3<Float>(0.1, 0.42, 0.98)
         if sketch.isActive {
-            guard let profile = sketch.profile else { return [] }
             let plane = sketch.plane
-            let sign = SketchProfile.extrusionSign(on: plane, mode: sketch.extrudeMode)
-            return [DragHandle(kind: .extrude, axisOrigin: SIMD3<Float>(plane.world(profile.centroid)),
+            if sketch.tool == .offset, let handle = sketch.offsetHandle {
+                return [DragHandle(kind: .offset, axisOrigin: SIMD3<Float>(plane.world(handle.anchor)),
+                                   direction: SIMD3<Float>(simd_normalize(plane.world(direction: handle.direction))),
+                                   value: sketch.offsetDistance, color: blue)]
+            }
+            guard !sketch.isChoosingPlane, let centroid = sketch.profileCentroid else { return [] }
+            let sign = plane.extrusionSign(mode: sketch.extrudeMode)
+            return [DragHandle(kind: .extrude, axisOrigin: SIMD3<Float>(plane.world(centroid)),
                                direction: SIMD3<Float>(plane.normal * sign), value: sketch.extrudeDistance,
                                color: blue)]
         }
@@ -323,6 +356,8 @@ final class Workspace: ObservableObject {
         switch kind {
         case .extrude:
             if value != sketch.extrudeDistance { sketch.extrudeDistance = value }
+        case .offset:
+            if value != sketch.offsetDistance { sketch.offsetDistance = value }
         case .face:
             if value != model.faceValue { model.setFaceValue(value) }
         case .edge:
@@ -340,8 +375,7 @@ final class Workspace: ObservableObject {
 
     var hint: String? {
         if sketch.isActive {
-            if sketch.profile != nil { return "Pfeil ziehen oder Höhe eingeben, dann „Fertig“" }
-            return sketch.plane.isOnFace ? "Auf der Fläche zeichnen" : "Auf einer Fläche oder im Raster zeichnen"
+            return sketchHint
         }
         switch tool {
         case .select:
@@ -362,6 +396,30 @@ final class Workspace: ObservableObject {
         case .shell: return model.selection == nil ? "Fläche antippen, die offen sein soll" : "Wandstärke eingeben"
         case .color: return model.selectedBodies.isEmpty ? "Körper antippen" : "Farbe wählen"
         }
+    }
+
+    private var sketchHint: String {
+        if sketch.isChoosingPlane { return "Skizzenebene antippen – oder eine ebene Fläche eines Körpers" }
+        switch sketch.tool {
+        case .polyline where sketch.hasOpenChain:
+            return "Nächsten Punkt setzen · zurück zum Start schließt"
+        case .arc:
+            return sketch.isWaitingForArcBulge ? "Wölbung ziehen" : "Von einem Ende zum anderen ziehen"
+        case .spline where sketch.hasOpenSpline:
+            return "Punkte setzen · auf dem Start schließen · letzten Punkt erneut antippen beendet"
+        case .spline:
+            return "Ersten Punkt setzen"
+        case .point:
+            return "Punkt antippen"
+        case .text:
+            return "Position des Textes antippen"
+        case .offset:
+            return sketch.hasOffsetTarget ? "Pfeil ziehen, dann „Fertig“" : "Kontur oder Kurve antippen"
+        default:
+            break
+        }
+        if sketch.hasProfile { return "Pfeil ziehen oder Höhe eingeben, dann „Fertig“" }
+        return "Zeichnen auf \(sketch.plane.isOnFace ? "der Fläche" : "der Ebene „\(sketch.plane.name)“")"
     }
 
     // MARK: Speichern

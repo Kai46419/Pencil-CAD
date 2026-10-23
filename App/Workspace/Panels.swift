@@ -88,52 +88,149 @@ struct ParameterCard: View {
 
     // MARK: Skizze
 
+    @ViewBuilder
     private var sketchCard: some View {
-        Card {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 14) {
-                    Label(sketch.tool.rawValue, systemImage: sketch.tool.systemImage)
-                        .font(.callout.weight(.semibold))
-                    if sketch.tool == .polygon {
-                        Stepper("\(sketch.polygonSides) Seiten", value: $sketch.polygonSides, in: 3...24)
-                            .fixedSize()
-                    }
-                    if sketch.tool == .polyline, sketch.hasOpenPolyline {
-                        Button("Punkt zurück", systemImage: "delete.backward", action: sketch.undoPoint)
-                    }
-                    if sketch.plane.isOnFace {
-                        Label("Auf Fläche", systemImage: "square.dashed")
-                            .foregroundStyle(.secondary)
-                        Button("Boden") { sketch.plane = .ground }
-                    } else if sketch.profile == nil {
-                        NumberField(title: "Boden Z", value: sketch.groundHeight, width: 60) {
-                            sketch.groundHeight = $0
+        if sketch.isChoosingPlane {
+            planeChoiceCard
+        } else {
+            Card {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 14) {
+                        Label(sketch.tool.rawValue, systemImage: sketch.tool.systemImage)
+                            .font(.callout.weight(.semibold))
+                        planeMenu
+                        if !sketch.plane.isOnFace, sketch.isEmpty {
+                            NumberField(title: "Abstand", value: sketch.planeOffset, width: 60) { sketch.planeOffset = $0 }
+                        }
+                        if let label = sketch.liveLabel {
+                            Text(label)
+                                .monospacedDigit()
+                                .foregroundStyle(Color.accentColor)
                         }
                     }
-                    if let label = sketch.liveLabel {
-                        Text(label)
-                            .monospacedDigit()
-                            .foregroundStyle(Color.accentColor)
-                    }
-                }
-                if sketch.profile != nil {
-                    HStack(spacing: 16) {
-                        if let size = sketch.rectangleSize {
-                            NumberField(title: "Breite", value: size.x) { sketch.rectangleSize = SIMD2($0, size.y) }
-                            NumberField(title: "Tiefe", value: size.y) { sketch.rectangleSize = SIMD2(size.x, $0) }
-                        } else if let diameter = sketch.circleDiameter {
-                            NumberField(title: "Ø", value: diameter) { sketch.circleDiameter = $0 }
+                    toolOptions
+                    if sketch.hasProfile, !sketch.hasOffsetTarget {
+                        HStack(spacing: 16) {
+                            if let size = sketch.rectangleSize {
+                                NumberField(title: "Breite", value: size.x) { sketch.rectangleSize = SIMD2($0, size.y) }
+                                NumberField(title: "Länge", value: size.y) { sketch.rectangleSize = SIMD2(size.x, $0) }
+                            } else if let diameter = sketch.circleDiameter {
+                                NumberField(title: "Ø", value: diameter) { sketch.circleDiameter = $0 }
+                            }
+                            NumberField(title: sketch.extrudeMode == .cut ? "Tiefe" : "Höhe",
+                                        value: sketch.extrudeDistance) { sketch.extrudeDistance = $0 }
                         }
-                        NumberField(title: sketch.extrudeMode == .cut ? "Tiefe" : "Höhe",
-                                    value: sketch.extrudeDistance) { sketch.extrudeDistance = $0 }
+                        Picker("Modus", selection: $sketch.extrudeMode) {
+                            ForEach(ExtrudeMode.allCases) { Text($0.rawValue).tag($0) }
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(maxWidth: 380)
                     }
-                    Picker("Modus", selection: $sketch.extrudeMode) {
-                        ForEach(ExtrudeMode.allCases) { Text($0.rawValue).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(maxWidth: 380)
                 }
             }
+        }
+    }
+
+    /// Ebenenwahl beim Start einer Skizze.
+    private var planeChoiceCard: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Skizzenebene wählen")
+                    .font(.callout.weight(.semibold))
+                Text("Eine Ebene im Modell oder eine ebene Fläche antippen – oder hier wählen:")
+                    .foregroundStyle(.secondary)
+                    .font(.footnote)
+                Grid(horizontalSpacing: 8, verticalSpacing: 8) {
+                    GridRow {
+                        planeButton(.top)
+                        planeButton(.front)
+                        planeButton(.right)
+                    }
+                    GridRow {
+                        planeButton(.bottom)
+                        planeButton(.back)
+                        planeButton(.left)
+                    }
+                }
+            }
+        }
+    }
+
+    private func planeButton(_ side: BasePlane) -> some View {
+        Button {
+            workspace.chooseSketchPlane(side)
+        } label: {
+            Text(side.rawValue)
+                .font(.callout.weight(.medium))
+                .frame(width: 92, height: 38)
+        }
+        .buttonStyle(.bordered)
+    }
+
+    /// Aktuelle Ebene; Wechsel auf eine Standardebene leert die Skizze.
+    private var planeMenu: some View {
+        Menu {
+            ForEach(BasePlane.allCases) { side in
+                Button(side.rawValue) { workspace.chooseSketchPlane(side) }
+            }
+        } label: {
+            Label("Ebene: \(sketch.plane.name)", systemImage: "square.dashed")
+        }
+        .fixedSize()
+    }
+
+    /// Einstellungen des aktiven Skizzenwerkzeugs.
+    @ViewBuilder
+    private var toolOptions: some View {
+        switch sketch.tool {
+        case .polygon:
+            Stepper("\(sketch.polygonSides) Seiten", value: $sketch.polygonSides, in: 3...24)
+                .fixedSize()
+        case .polyline:
+            if sketch.hasOpenChain {
+                Button("Linie absetzen", systemImage: "scissors", action: sketch.endChain)
+            }
+        case .spline:
+            HStack(spacing: 14) {
+                Picker("Art", selection: $sketch.splineKind) {
+                    ForEach(SplineKind.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
+                if sketch.hasOpenSpline {
+                    Button("Spline beenden", systemImage: "checkmark", action: sketch.finishSpline)
+                }
+            }
+        case .text:
+            HStack(spacing: 14) {
+                Picker("Schrift", selection: $sketch.textFont) {
+                    ForEach(SketchText.fonts) { Text($0.title).tag($0.name) }
+                }
+                .fixedSize()
+                NumberField(title: "Höhe", value: sketch.textHeight, width: 56) { value in
+                    if value > 0 { sketch.textHeight = value }
+                }
+                Picker("Ausrichtung", selection: $sketch.textAlignment) {
+                    ForEach(TextAlignmentOption.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
+            }
+        case .offset:
+            HStack(spacing: 14) {
+                Picker("Art", selection: $sketch.offsetKind) {
+                    ForEach(OffsetKind.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
+                NumberField(title: "Abstand", value: sketch.offsetDistance, width: 60) { sketch.offsetDistance = $0 }
+                if sketch.hasOffsetTarget {
+                    Button("Übernehmen", systemImage: "checkmark", action: sketch.applyOffset)
+                        .buttonStyle(.borderedProminent)
+                }
+            }
+        default:
+            EmptyView()
         }
     }
 
@@ -490,6 +587,51 @@ struct SidePanelFrame<Content: View>: View {
         .frame(width: 280)
         .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .shadow(color: .black.opacity(0.15), radius: 10, y: 3)
+    }
+}
+
+// MARK: Text
+
+/// Eingabe des Textinhalts nach dem Antippen der Position (wie Shapr3D: Inhalt, Schrift, Höhe, Ausrichtung).
+struct TextEntrySheet: View {
+    @ObservedObject var sketch: SketchController
+    @State private var content = ""
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                TextField("Inhalt", text: $content)
+                    .focused($isFocused)
+                Picker("Schrift", selection: $sketch.textFont) {
+                    ForEach(SketchText.fonts) { Text($0.title).tag($0.name) }
+                }
+                HStack {
+                    Text("Höhe")
+                    Spacer()
+                    NumberField(title: "", value: sketch.textHeight, width: 70) { value in
+                        if value > 0 { sketch.textHeight = value }
+                    }
+                }
+                Picker("Ausrichtung", selection: $sketch.textAlignment) {
+                    ForEach(TextAlignmentOption.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+            }
+            .navigationTitle("Text")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Abbrechen") { sketch.pendingTextAnchor = nil }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Hinzufügen") { sketch.addText(content) }
+                        .disabled(content.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+            .onAppear { isFocused = true }
+        }
+        .presentationDetents([.medium])
     }
 }
 

@@ -35,6 +35,15 @@ struct HandleGraphic {
     var color: SIMD3<Float>
 }
 
+/// Halbtransparente quadratische Ebenenscheibe (Skizzenebene bzw. Ebenenwahl).
+struct PlaneGraphic {
+    var center: SIMD3<Float>
+    var u: SIMD3<Float>
+    var v: SIMD3<Float>
+    var halfSize: Float
+    var color: SIMD3<Float>
+}
+
 final class Renderer: NSObject, MTKViewDelegate {
     /// Länge eines Ziehpfeils in Bildschirmpunkten.
     static let handleLength: Float = 64
@@ -44,6 +53,7 @@ final class Renderer: NSObject, MTKViewDelegate {
     var gridTransform: float4x4? = matrix_identity_float4x4
     var displayMode: DisplayMode = .shaded
     var handles: [HandleGraphic] = []
+    var planes: [PlaneGraphic] = []
 
     private let device: MTLDevice
     private let queue: MTLCommandQueue
@@ -391,6 +401,38 @@ final class Renderer: NSObject, MTKViewDelegate {
                 setColor(0.98, 0.62, 0.18, 1)
                 encoder.drawIndexedPrimitives(type: .triangle, indexCount: selectionCount, indexType: .uint32,
                                               indexBuffer: selectionBuffer, indexBufferOffset: 0)
+            }
+        }
+
+        // Ebenenscheiben: halbtransparent, hinter Körpern verdeckt
+        if !planes.isEmpty {
+            var fill: [Vertex] = []
+            for plane in planes {
+                let n = simd_normalize(simd_cross(plane.u, plane.v))
+                let h = plane.halfSize
+                let corners = [plane.center - plane.u * h - plane.v * h, plane.center + plane.u * h - plane.v * h,
+                               plane.center + plane.u * h + plane.v * h, plane.center - plane.u * h + plane.v * h]
+                fill += [0, 1, 2, 0, 2, 3].map { Vertex(position: corners[$0], normal: n, color: plane.color) }
+            }
+            if let buffer = makeBuffer(fill) {
+                encoder.setRenderPipelineState(xrayPipeline)
+                encoder.setDepthStencilState(readOnlyDepthState)
+                encoder.setVertexBuffer(buffer, offset: 0, index: 0)
+                setUniforms(&uniforms)
+                encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: fill.count)
+            }
+            for plane in planes {
+                let h = plane.halfSize
+                let corners = [plane.center - plane.u * h - plane.v * h, plane.center + plane.u * h - plane.v * h,
+                               plane.center + plane.u * h + plane.v * h, plane.center - plane.u * h + plane.v * h]
+                let outline = [0, 1, 1, 2, 2, 3, 3, 0].map { Vertex(position: corners[$0], normal: SIMD3(0, 0, 1)) }
+                guard let buffer = makeBuffer(outline) else { continue }
+                encoder.setRenderPipelineState(linePipeline)
+                encoder.setDepthStencilState(readOnlyDepthState)
+                encoder.setVertexBuffer(buffer, offset: 0, index: 0)
+                setUniforms(&uniforms)
+                setColor(plane.color.x * 0.8, plane.color.y * 0.8, plane.color.z * 0.8)
+                encoder.drawPrimitives(type: .line, vertexStart: 0, vertexCount: outline.count)
             }
         }
 
