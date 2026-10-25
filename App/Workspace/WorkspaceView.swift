@@ -8,7 +8,8 @@ struct WorkspaceView: View {
     let close: () -> Void
 
     var body: some View {
-        WorkspaceContent(workspace: workspace, model: workspace.model, sketch: workspace.sketch, close: close)
+        WorkspaceContent(workspace: workspace, model: workspace.model, sketch: workspace.sketch,
+                         assistant: workspace.assistant, close: close)
     }
 }
 
@@ -18,6 +19,7 @@ private struct WorkspaceContent: View {
     @ObservedObject var workspace: Workspace
     @ObservedObject var model: ModelStore
     @ObservedObject var sketch: SketchController
+    @ObservedObject var assistant: AIAssistant
     let close: () -> Void
 
     @State private var openGroup: ToolGroup?
@@ -163,6 +165,10 @@ private struct WorkspaceContent: View {
     private var topArea: some View {
         VStack(spacing: 10) {
             titleBar
+            if assistant.isOpen {
+                AIPanel(assistant: assistant)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
             if let hint = workspace.hint {
                 Text(hint)
                     .font(.footnote.weight(.medium))
@@ -174,6 +180,7 @@ private struct WorkspaceContent: View {
         }
         .padding(.top, 12)
         .animation(.easeOut(duration: 0.15), value: workspace.hint)
+        .animation(.easeOut(duration: 0.15), value: assistant.isOpen)
     }
 
     /// Schwebende Titelleiste: Startseite, Projektname, Menü.
@@ -201,6 +208,17 @@ private struct WorkspaceContent: View {
                 .padding(.horizontal, 10)
                 .frame(height: 36)
             }
+            Divider()
+                .frame(height: 20)
+            Button {
+                assistant.isOpen.toggle()
+            } label: {
+                Image(systemName: "sparkles")
+                    .foregroundStyle(assistant.isOpen ? Color.accentColor : Color.primary)
+                    .frame(width: 40, height: 36)
+            }
+            .accessibilityLabel("KI-Assistent")
+            .hoverTip("KI-Assistent: in Worten modellieren")
             Divider()
                 .frame(height: 20)
             Menu {

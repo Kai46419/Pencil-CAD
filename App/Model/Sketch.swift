@@ -241,6 +241,12 @@ struct SketchDimension: Identifiable {
     /// Eindeutig je Maß (ein Eingabefeld im Viewport)
     var id = ""
     var target: Target = .display
+    /// Winkel beim Zeichnen: Richtung des Bezugsschenkels (normiert) und überstrichener Winkel im Bogenmaß
+    /// (Vorzeichen = Drehsinn) – für Winkelbogen bzw. Quadrat bei 90°
+    var reference = Point2(1, 0)
+    var sweep: Double = 0
+    /// Treibendes Maß: true = fest (grünes Schloss), false = gelöst (rot, frei verschiebbar), nil = kein Schloss
+    var lockState: Bool?
 
     var prefix: String {
         switch kind {
@@ -883,8 +889,12 @@ final class SketchController: ObservableObject {
 
     /// Radius, bei dem der Kreis eine Linie oder einen Kreis berührt, denselben Radius wie ein vorhandener
     /// Kreis hat oder durch einen Fangpunkt geht – der nächste innerhalb des Fangradius.
-    private func inferCircle(center: Point2, raw: Point2, tolerance: Double) -> CircleInference? {
+    /// Kai: „er snappt überall ein, er soll nur da einsnappen, wo auch der Stift ist“. Daher zählt ein Berühr-
+    /// bzw. Durchgangspunkt nur, wenn er nah an der Stiftspitze liegt (nicht irgendwo sonst auf dem Kreis), und
+    /// „Gleicher Radius“ (ohne festen Punkt) nur sehr knapp.
+    private func inferCircle(center: Point2, raw: Point2, tolerance rawTolerance: Double) -> CircleInference? {
         let current = simd_distance(center, raw)
+        let tolerance = rawTolerance * Self.snapSensitivity
         guard snapEnabled, current > tolerance else { return nil }
         let direction = (raw - center) / current
         var best: (score: Double, inference: CircleInference)?
@@ -892,6 +902,12 @@ final class SketchController: ObservableObject {
                       variant: ((SketchCurveRef) -> SketchConstraint.Variant)?) {
             guard radius > 1e-6 else { return }
             let score = abs(radius - current) * weight
+            // Mit festem Punkt: der Punkt muss unter dem Stift liegen; ohne: nur ein Drittel des Fangradius
+            if let point {
+                guard simd_distance(point, raw) <= tolerance else { return }
+            } else {
+                guard score <= tolerance * 0.35 else { return }
+            }
             guard score <= tolerance, score < (best?.score ?? .infinity) else { return }
             best = (score, CircleInference(point: point ?? center + direction * radius, radius: radius, label: label,
                                            variant: variant))
@@ -1987,8 +2003,9 @@ final class SketchController: ObservableObject {
             }
             if tool == .polyline {
                 let from = chainEnd ?? start
-                // Wie in Fusion 360: beim Ziehen Länge und Winkel zur Waagrechten
-                return Self.lineDimensions(from, current, editable: false) + Self.lineAngle(from, current)
+                // Wie in Fusion 360: beim Ziehen Länge und Winkel – zur vorigen Linie des Zugs, sonst zur Waagrechten
+                return Self.lineDimensions(from, current, editable: false)
+                    + Self.lineAngle(from, current, reference: previousSegmentDirection(at: from))
             }
             if let base = stepBase, let shapes = stepPreview(base: base, current: current) {
                 if tool == .slot, let first = shapes.first, case .line(let a, let b) = first {
@@ -2026,11 +2043,15 @@ final class SketchController: ObservableObject {
             return []
         }
         if tool == .polyline, let from = chainEnd, let hover = hoverSnap?.point, simd_distance(from, hover) > 1e-6 {
-            return Self.lineDimensions(from, hover, editable: false) + Self.lineAngle(from, hover)
+            return Self.lineDimensions(from, hover, editable: false)
+                + Self.lineAngle(from, hover, reference: previousSegmentDirection(at: from))
         }
         var result: [SketchDimension] = []
         if let index = editableIndex, entities.indices.contains(index), !isInProgress || chainEnd != nil {
+            // Schon festgelegte Maße zeigt drivingDimensions (mit Schloss), nicht doppelt
+            let fixed = fixedKinds(of: index)
             result = Self.dimensions(of: entities[index], editable: true)
+                .filter { !fixed.contains($0.kind) }
                 .map { $0.tagged("e\(index)-\($0.kind)", .entity(index)) }
         } else if !isInProgress {
             result = selectionDimensions
@@ -2074,7 +2095,9 @@ final class SketchController: ObservableObject {
                 return distance(SketchPointRef(entity: ref.entity, index: ends.0),
                                 SketchPointRef(entity: ref.entity, index: ends.1))
             }
+            let fixed = fixedKinds(of: ref.entity)
             return Self.dimensions(of: entities[ref.entity], editable: true)
+                .filter { !fixed.contains($0.kind) }
                 .map { $0.tagged("s\(ref.entity)-\($0.kind)", .entity(ref.entity)) }
         case (2, 0):
             guard points[0] != points[1] else { return [] }
@@ -2132,18 +2155,31 @@ final class SketchController: ObservableObject {
     private var drivingDimensions: [SketchDimension] {
         constraints.enumerated().flatMap { entry -> [SketchDimension] in
             let index = entry.offset
-            switch entry.element.variant {
-            case .distance(let a, let b, let value):
+            let constraint = entry.element
+            // Fest: eingegebener Wert, grünes Schloss; gelöst: gemessener Wert, rotes Schloss
+            func finish(_ dimension: SketchDimension, measured: Double) -> SketchDimension {
+                var copy = dimension
+                copy.value = constraint.isSuspended ? measured : constraint.dimensionValue ?? measured
+                copy.lockState = !constraint.isSuspended
+                return copy.tagged("c\(index)", .constraint(index))
+            }
+            // Maß am Element (Länge, Breite, Höhe, Durchmesser, Radius): Lage wie das Elementmaß, außen
+            if let owner = fixedEntityKind(of: constraint), entities.indices.contains(owner.entity),
+               let dimension = Self.dimensions(of: entities[owner.entity], editable: true)
+                .first(where: { $0.kind == owner.kind }) {
+                return [finish(dimension, measured: dimension.value)]
+            }
+            switch constraint.variant {
+            case .distance(let a, let b, _):
                 guard let p = ConstraintSolver.point(a, entities), let q = ConstraintSolver.point(b, entities) else {
                     return []
                 }
                 return Self.lineDimensions(p, q, editable: true).map { dimension -> SketchDimension in
                     var copy = dimension
                     copy.kind = .distance
-                    copy.value = value
-                    return copy.tagged("c\(index)", .constraint(index))
+                    return finish(copy, measured: dimension.value)
                 }
-            case .pointLineDistance(let a, let c, let value):
+            case .pointLineDistance(let a, let c, _):
                 guard let p = ConstraintSolver.point(a, entities) else { return [] }
                 var foot = p
                 switch ConstraintSolver.curve(c, entities) {
@@ -2158,20 +2194,74 @@ final class SketchController: ObservableObject {
                 return Self.lineDimensions(foot, p, editable: true).map { dimension -> SketchDimension in
                     var copy = dimension
                     copy.kind = .distance
-                    copy.value = value
-                    return copy.tagged("c\(index)", .constraint(index))
+                    return finish(copy, measured: dimension.value)
                 }
-            case .angle(let a, let b, let degrees):
+            case .angle(let a, let b, _):
                 guard case .line(let p1, let p2) = ConstraintSolver.curve(a, entities),
                       case .line(let q1, let q2) = ConstraintSolver.curve(b, entities) else { return [] }
+                let d1 = simd_normalize(p2 - p1), d2 = simd_normalize(q2 - q1)
+                let measured = atan2(abs(d1.x * d2.y - d1.y * d2.x), simd_dot(d1, d2)) * 180 / .pi
                 let label = ((p1 + p2) / 2 + (q1 + q2) / 2) / 2
-                return [SketchDimension(kind: .angle, value: degrees, position: label, direction: Point2(0, 1),
-                                        isEditable: true)
-                    .tagged("c\(index)", .constraint(index))]
+                return [finish(SketchDimension(kind: .angle, value: measured, position: label, direction: Point2(0, 1),
+                                               isEditable: true), measured: measured)]
             default:
                 return []
             }
         }
+    }
+
+    /// Ein treibendes Maß, das ein Maß am Element darstellt (Linienlänge, Rechteckbreite/-höhe, Durchmesser,
+    /// Radius) – so entstehen sie, wenn ein Wert am Element eingegeben wird.
+    private func fixedEntityKind(of constraint: SketchConstraint) -> (entity: Int, kind: SketchDimension.Kind)? {
+        switch constraint.variant {
+        case .distance(let a, let b, _) where a.entity == b.entity && entities.indices.contains(a.entity):
+            let pair = Set([a.index, b.index])
+            switch entities[a.entity] {
+            case .line: return pair == [0, 1] ? (a.entity, .length) : nil
+            case .rectangle: return pair == [0, 1] ? (a.entity, .width) : pair == [1, 2] ? (a.entity, .height) : nil
+            default: return nil
+            }
+        case .radius(let c, _, let diameter):
+            return (c.entity, diameter ? .diameter : .radius)
+        default:
+            return nil
+        }
+    }
+
+    /// Maßarten des Elements, die schon als festes (treibendes) Maß vorliegen.
+    private func fixedKinds(of index: Int) -> Set<SketchDimension.Kind> {
+        Set(constraints.compactMap { fixedEntityKind(of: $0) }.filter { $0.entity == index }.map(\.kind))
+    }
+
+    /// Treibendes Maß für ein am Element eingegebenes Maß; nil, wo es keins gibt (Ellipse, Polygon).
+    private func fixedVariant(_ kind: SketchDimension.Kind, of index: Int, value: Double) -> SketchConstraint.Variant? {
+        guard entities.indices.contains(index) else { return nil }
+        func point(_ k: Int) -> SketchPointRef { SketchPointRef(entity: index, index: k) }
+        let curve = SketchCurveRef(entity: index, index: 0)
+        switch (entities[index], kind) {
+        case (.line, .length): return .distance(point(0), point(1), value: value)
+        case (.rectangle, .width): return .distance(point(0), point(1), value: value)
+        case (.rectangle, .height): return .distance(point(1), point(2), value: value)
+        case (.circle, .diameter): return .radius(curve, value: value, diameter: true)
+        case (.arc, .radius): return .radius(curve, value: value, diameter: false)
+        default: return nil
+        }
+    }
+
+    /// Schloss am Maß antippen (Kai): grün = fest, rot = gelöst und frei verschiebbar; wieder antippen hält den
+    /// aktuellen Wert fest.
+    func toggleDimensionLock(id: String) {
+        guard let dimension = dimensions.first(where: { $0.id == id }),
+              case .constraint(let index) = dimension.target, constraints.indices.contains(index) else { return }
+        remember()
+        if constraints[index].isSuspended {
+            constraints[index] = constraints[index].withDimensionValue(dimension.value)
+            notice = "Maß festgelegt: \(dimension.value.formatted(.number.precision(.fractionLength(0...2))))"
+        } else {
+            constraints[index].isSuspended = true
+            notice = "Maß gelöst – das Element lässt sich frei verschieben. Schloss antippen legt es wieder fest."
+        }
+        entitiesChanged()
     }
 
     /// Wert eines Maßfelds übernehmen: Element ändern, treibendes Maß ändern oder neu anlegen.
@@ -2215,8 +2305,44 @@ final class SketchController: ObservableObject {
         entitiesChanged()
     }
 
-    /// Maß eines Elements setzen. Startecke, Mitte bzw. Startpunkt bleiben fest.
+    /// Maß eines Elements setzen. Startecke, Mitte bzw. Startpunkt bleiben fest. Kai: Ein eingegebenes Maß ist
+    /// danach fest (treibend, grünes Schloss) – Verschieben anderer Elemente, etwa eines Bogens zwischen zwei
+    /// Geraden, ändert es nicht mehr.
     private func setEntityDimension(_ kind: SketchDimension.Kind, of index: Int, to value: Double) {
+        guard entities.indices.contains(index) else { return }
+        guard let variant = fixedVariant(kind, of: index, value: value) else {
+            changeEntityDimension(kind, of: index, to: value)
+            return
+        }
+        let beforeConstraints = constraints
+        let undoDepth = undoStack.count
+        let existing = constraints.firstIndex { constraint in
+            fixedEntityKind(of: constraint).map { $0.entity == index && $0.kind == kind } ?? false
+        }
+        // Das Maß gilt schon beim Ändern (sonst hielte ein altes festes Maß das Element zurück)
+        if let existing {
+            constraints[existing] = SketchConstraint(variant: variant)
+        } else {
+            constraints.append(SketchConstraint(variant: variant))
+        }
+        changeEntityDimension(kind, of: index, to: value)
+        let fixed = constraints.firstIndex { constraint in
+            fixedEntityKind(of: constraint).map { $0.entity == index && $0.kind == kind } ?? false
+        }
+        let reached = fixed.map { ConstraintSolver.residual(constraints[$0], entities).allSatisfy { abs($0) < 1e-6 } } ?? false
+        if !reached {
+            // Nicht erreichbar: Maß nicht festlegen, Zustand wie vorher
+            constraints = beforeConstraints
+            while undoStack.count > undoDepth { undoStack.removeLast() }
+        } else if undoStack.count > undoDepth {
+            // Rückgängig stellt auch die Maße von vorher wieder her
+            undoStack[undoDepth].constraints = beforeConstraints
+        }
+        entitiesChanged()
+    }
+
+    /// Geometrie für ein Maß am Element ändern (ohne es festzulegen).
+    private func changeEntityDimension(_ kind: SketchDimension.Kind, of index: Int, to value: Double) {
         guard entities.indices.contains(index) else { return }
         let entity = entities[index]
         var updated: SketchEntity?
@@ -2333,18 +2459,39 @@ final class SketchController: ObservableObject {
         entitiesChanged()
     }
 
-    /// Winkel der Linie a→b zur Waagrechten (0…360°), nur Anzeige, auf halbem Winkel neben dem Startpunkt.
-    private static func lineAngle(_ a: Point2, _ b: Point2) -> [SketchDimension] {
+    /// Richtung von p zurück entlang der letzten Linie des laufenden Zugs (endet in p), sonst nil.
+    private func previousSegmentDirection(at p: Point2) -> Point2? {
+        for entity in entities.reversed() {
+            guard case .line(let a, let b) = entity else { continue }
+            if simd_distance(b, p) < 1e-6, simd_distance(a, b) > 1e-9 { return simd_normalize(a - b) }
+            if simd_distance(a, p) < 1e-6, simd_distance(a, b) > 1e-9 { return simd_normalize(b - a) }
+        }
+        return nil
+    }
+
+    /// Winkel der Linie a→b, nur Anzeige: mit Bezug (vorige Linie) der Winkel zwischen beiden Linien (0…180°),
+    /// sonst zur Waagrechten (0…360°). Etikett auf der Winkelhalbierenden neben dem Scheitel; der Viewport
+    /// zeichnet den Winkelbogen bzw. bei genau 90° das Quadrat (Kai).
+    private static func lineAngle(_ a: Point2, _ b: Point2, reference: Point2? = nil) -> [SketchDimension] {
         let length = simd_distance(a, b)
         guard length > 1e-6 else { return [] }
-        var radians = atan2(b.y - a.y, b.x - a.x)
-        if radians < 0 { radians += 2 * .pi }
-        let half = radians / 2
-        let label = a + Point2(cos(half), sin(half)) * length * 0.45
+        let start = reference ?? Point2(1, 0)
+        let startAngle = atan2(start.y, start.x)
+        var sweep = atan2(b.y - a.y, b.x - a.x) - startAngle
+        if reference != nil {
+            sweep = remainder(sweep, 2 * .pi)
+        } else {
+            sweep = sweep.truncatingRemainder(dividingBy: 2 * .pi)
+            if sweep < 0 { sweep += 2 * .pi }
+        }
+        let half = startAngle + sweep / 2
+        let bisector = Point2(cos(half), sin(half))
         // span: Linienanfang (Scheitel) und -ende, damit das Etikett Abstand zur Linie halten kann
-        return [SketchDimension(kind: .angle, value: radians * 180 / .pi, position: label,
-                                direction: Point2(cos(half), sin(half)), isEditable: false, span: [a, b])
-                    .tagged("live-angle", .display)]
+        var dimension = SketchDimension(kind: .angle, value: abs(sweep) * 180 / .pi, position: a + bisector * length * 0.45,
+                                        direction: bisector, isEditable: false, span: [a, b])
+        dimension.reference = start
+        dimension.sweep = sweep
+        return [dimension.tagged("live-angle", .display)]
     }
 
     private static func lineDimensions(_ a: Point2, _ b: Point2, editable: Bool) -> [SketchDimension] {
@@ -3042,7 +3189,7 @@ final class SketchController: ObservableObject {
         case .coincident(let p, _), .pointOnCurve(let p, _), .midpoint(let p, _), .horizontalPoints(let p, _),
              .verticalPoints(let p, _), .symmetric(let p, _, _), .lock(let p, _):
             return ConstraintSolver.point(p, entities)
-        case .distance, .pointLineDistance, .angle:
+        case .distance, .pointLineDistance, .angle, .radius:
             // Maße zeigt das Maßfeld
             return nil
         }

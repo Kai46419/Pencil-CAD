@@ -37,6 +37,8 @@ struct HandleGraphic {
     var base: SIMD3<Float>
     var direction: SIMD3<Float>
     var color: SIMD3<Float>
+    /// Größe relativ zu handleLength
+    var scale: Float = 1
 }
 
 /// Halbtransparente quadratische Ebenenscheibe (Skizzenebene bzw. Ebenenwahl).
@@ -341,47 +343,40 @@ final class Renderer: NSObject, MTKViewDelegate {
         return out
     }
 
-    /// Pfeil aus Schaft und Spitze, length in Weltmaß.
+    /// Pfeil wie in Fusion 360: schlanker Schaft, kräftige Kegelspitze (etwas dunkler), length in Weltmaß.
     static func arrowVertices(_ handle: HandleGraphic, length: Float) -> [Vertex] {
         let d = simd_normalize(handle.direction)
         let reference: SIMD3<Float> = abs(d.z) < 0.9 ? SIMD3(0, 0, 1) : SIMD3(1, 0, 0)
         let u = simd_normalize(simd_cross(reference, d)), v = simd_cross(d, u)
-        let shaftRadius = length * 0.05, headRadius = length * 0.14, headLength = length * 0.34
+        let shaftRadius = length * 0.035, headRadius = length * 0.13, headLength = length * 0.32
         let base = handle.base
         let shaftEnd = base + d * (length - headLength), tip = base + d * length
         let color = handle.color
-        let segments = 18
+        let headColor = handle.color * 0.82
+        let segments = 20
         var out: [Vertex] = []
         for i in 0..<segments {
             let a0 = Float(i) / Float(segments) * 2 * .pi
             let a1 = Float(i + 1) / Float(segments) * 2 * .pi
             let r0 = cos(a0) * u + sin(a0) * v, r1 = cos(a1) * u + sin(a1) * v
-            // Schaft
+            // Schaft mit Boden
             let p0 = base + r0 * shaftRadius, p1 = base + r1 * shaftRadius
             let q0 = shaftEnd + r0 * shaftRadius, q1 = shaftEnd + r1 * shaftRadius
             out += [Vertex(position: p0, normal: r0, color: color), Vertex(position: p1, normal: r1, color: color),
                     Vertex(position: q1, normal: r1, color: color), Vertex(position: p0, normal: r0, color: color),
                     Vertex(position: q1, normal: r1, color: color), Vertex(position: q0, normal: r0, color: color)]
+            out += [Vertex(position: base, normal: -d, color: color), Vertex(position: p1, normal: -d, color: color),
+                    Vertex(position: p0, normal: -d, color: color)]
             // Boden der Spitze
-            out += [Vertex(position: shaftEnd, normal: -d, color: color),
-                    Vertex(position: shaftEnd + r1 * headRadius, normal: -d, color: color),
-                    Vertex(position: shaftEnd + r0 * headRadius, normal: -d, color: color)]
+            out += [Vertex(position: shaftEnd, normal: -d, color: headColor),
+                    Vertex(position: shaftEnd + r1 * headRadius, normal: -d, color: headColor),
+                    Vertex(position: shaftEnd + r0 * headRadius, normal: -d, color: headColor)]
             // Mantel der Spitze
             let n0 = simd_normalize(r0 * headLength + d * headRadius)
             let n1 = simd_normalize(r1 * headLength + d * headRadius)
-            out += [Vertex(position: shaftEnd + r0 * headRadius, normal: n0, color: color),
-                    Vertex(position: shaftEnd + r1 * headRadius, normal: n1, color: color),
-                    Vertex(position: tip, normal: simd_normalize(n0 + n1), color: color)]
-        }
-        // Griffkugel am Fuß (Oktaeder)
-        let k = shaftRadius * 2.2
-        let axes = [u, -u, v, -v, d, -d]
-        let faces: [(Int, Int, Int)] = [(0, 2, 4), (2, 1, 4), (1, 3, 4), (3, 0, 4), (2, 0, 5), (1, 2, 5), (3, 1, 5), (0, 3, 5)]
-        for (a, b, c) in faces {
-            let n = simd_normalize(axes[a] + axes[b] + axes[c])
-            out += [Vertex(position: base + axes[a] * k, normal: n, color: color),
-                    Vertex(position: base + axes[b] * k, normal: n, color: color),
-                    Vertex(position: base + axes[c] * k, normal: n, color: color)]
+            out += [Vertex(position: shaftEnd + r0 * headRadius, normal: n0, color: headColor),
+                    Vertex(position: shaftEnd + r1 * headRadius, normal: n1, color: headColor),
+                    Vertex(position: tip, normal: simd_normalize(n0 + n1), color: headColor)]
         }
         return out
     }
@@ -639,7 +634,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         // Ziehpfeile obenauf, Größe bleibt auf dem Bildschirm gleich
         var arrows: [Vertex] = []
         for handle in handles {
-            let length = Renderer.handleLength * camera.worldUnitsPerPoint(at: handle.base, viewHeight: viewHeight)
+            let length = Renderer.handleLength * handle.scale * camera.worldUnitsPerPoint(at: handle.base, viewHeight: viewHeight)
             arrows += Renderer.arrowVertices(handle, length: length)
         }
         if let arrowBuffer = makeBuffer(arrows) {

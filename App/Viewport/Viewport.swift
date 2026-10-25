@@ -68,6 +68,9 @@ final class ViewportView: MTKView {
     private var tapGesture: UITapGestureRecognizer?
     private var sketchTouch: UITouch?
     private var handleDrag: HandleDragState?
+    /// Drehscheibe im Verschieben-Werkzeug
+    private var ringDrag: RingDragState?
+    private let ringLabel = PaddedLabel()
     private let valueLabel = PaddedLabel()
     private var planeLabels: [PaddedLabel] = []
     private var dimensionFields: [String: DimensionField] = [:]
@@ -147,6 +150,18 @@ final class ViewportView: MTKView {
         let step: Double
     }
 
+    /// Drehen am Ring: Ring wie beim Ansetzen (dreht nicht mit), Winkel des Ansatzpunkts, aufsummierter
+    /// Drehwinkel (Bogenmaß) und der gezeigte, gerastete Wert in ganzen Grad.
+    private struct RingDragState {
+        let touch: UITouch
+        let center: SIMD3<Double>
+        let radius: Double
+        let startAngle: Double
+        var lastAngle: Double
+        var sweep: Double = 0
+        var degrees: Double = 0
+    }
+
     private let fingersOnly = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
     private let fingersAndPencil = [NSNumber(value: UITouch.TouchType.direct.rawValue),
                                     NSNumber(value: UITouch.TouchType.pencil.rawValue)]
@@ -209,11 +224,18 @@ final class ViewportView: MTKView {
         valueLabel.textColor = .black
         valueLabel.backgroundColor = .white
         valueLabel.layer.cornerRadius = 9
-        valueLabel.layer.borderWidth = 2
-        valueLabel.layer.borderColor = UIColor.systemBlue.cgColor
+        valueLabel.layer.borderWidth = 1.5
+        valueLabel.layer.borderColor = UIColor(red: 0.2, green: 0.55, blue: 0.95, alpha: 1).cgColor
         valueLabel.layer.masksToBounds = true
         valueLabel.isHidden = true
         addSubview(valueLabel)
+        ringLabel.font = .monospacedDigitSystemFont(ofSize: 15, weight: .semibold)
+        ringLabel.textColor = .white
+        ringLabel.backgroundColor = UIColor(red: 0.1, green: 0.36, blue: 0.88, alpha: 1)
+        ringLabel.layer.cornerRadius = 9
+        ringLabel.layer.masksToBounds = true
+        ringLabel.isHidden = true
+        addSubview(ringLabel)
         boxView.isHidden = true
         addSubview(boxView)
     }
@@ -301,7 +323,7 @@ final class ViewportView: MTKView {
         let handles = workspace.handles
         // Ein Pfeil, der knapp über dem Objekt schwebt; Ziehen in Gegenrichtung ergibt negative Werte
         renderer.handles = handles.map { handle in
-            HandleGraphic(base: arrowBase(handle), direction: handle.pointing, color: handle.color)
+            HandleGraphic(base: arrowBase(handle), direction: handle.pointing, color: handle.color, scale: handle.scale)
         }
         updateValueLabel(handles)
         updateDimensionFields()
@@ -349,7 +371,7 @@ final class ViewportView: MTKView {
             }
         }
 
-        for (index, stored) in model.sketches.enumerated() where !stored.isHidden {
+        for (index, stored) in model.sketches.enumerated() where !stored.isHidden && stored.id != model.previewHiddenSketch {
             if sketch.isActive, index == workspace.editingSketchIndex { continue }
             // Skizze, die gerade verschoben wird, an der neuen Stelle zeigen
             let shift = !sketch.isActive && workspace.tool == .move && model.movingSketch == index
@@ -371,6 +393,7 @@ final class ViewportView: MTKView {
         }
 
         addConstructionItems(to: &groups, perPoint: perPoint, sketching: sketching)
+        if !sketching { addRotationRing(to: &groups) }
         if !sketch.isActive, workspace.tool == .measure, !workspace.measurePoints.isEmpty {
             let points = workspace.measurePoints.map { SIMD3<Float>($0) }
             groups.append(LineGroup(polylines: points.count == 2 ? [points] : [], color: Self.previewBlue, width: 2,
@@ -496,6 +519,89 @@ final class ViewportView: MTKView {
         }
         renderer.lineGroups = groups
         renderer.fills = fills
+    }
+
+    // MARK: Drehscheibe
+
+    /// Ring des Verschieben-Werkzeugs: beim Drehen der beim Ansetzen gemerkte, sonst der aktuelle.
+    private var currentRing: (center: SIMD3<Double>, radius: Double)? {
+        if let ringDrag { return (ringDrag.center, ringDrag.radius) }
+        return workspace?.rotationRing
+    }
+
+    private static let ringBlue = SIMD3<Float>(0.1, 0.36, 0.88)
+
+    /// Punkt auf dem Ring zum Winkel (Bogenmaß, 0 = +X).
+    private static func ringPoint(_ ring: (center: SIMD3<Double>, radius: Double), angle: Double,
+                                  scale: Double = 1) -> SIMD3<Float> {
+        SIMD3<Float>(ring.center + SIMD3<Double>(cos(angle), sin(angle), 0) * ring.radius * scale)
+    }
+
+    /// Drehscheibe wie in Bambu Studio / PrusaSlicer: blauer Ring am Boden der Auswahl, Striche alle 15°,
+    /// Griffpunkt; beim Drehen der überstrichene Bogen orange.
+    private func addRotationRing(to groups: inout [LineGroup]) {
+        guard let ring = currentRing else { return }
+        let segments = 120
+        let circle = (0...segments).map { Self.ringPoint(ring, angle: Double($0) / Double(segments) * 2 * .pi) }
+        let ticks = (0..<24).map { k -> [SIMD3<Float>] in
+            let angle = Double(k) * .pi / 12
+            let inner = k % 6 == 0 ? 0.86 : 0.93
+            return [Self.ringPoint(ring, angle: angle, scale: inner), Self.ringPoint(ring, angle: angle)]
+        }
+        let start = ringDrag?.startAngle ?? -.pi / 2
+        let turned = (ringDrag?.degrees ?? 0) * .pi / 180
+        let knob = Self.ringPoint(ring, angle: start + turned)
+        groups.append(LineGroup(polylines: [circle], color: Self.ringBlue, width: 3.2))
+        groups.append(LineGroup(polylines: ticks, color: Self.ringBlue, width: 1.4, dots: [knob], dotRadius: 8))
+        if abs(turned) > 1e-9 {
+            let steps = max(2, Int(abs(turned) / (.pi / 90)))
+            let arc = (0...steps).map { Self.ringPoint(ring, angle: start + turned * Double($0) / Double(steps)) }
+            groups.append(LineGroup(polylines: [arc], color: Self.snapOrange, width: 4.5,
+                                    dots: [Self.ringPoint(ring, angle: start)], dotRadius: 3.5))
+        }
+    }
+
+    /// Winkel (Bogenmaß) des Bildschirmpunkts in der Ringebene um die Ringmitte.
+    private func ringAngle(at location: CGPoint, ring: (center: SIMD3<Double>, radius: Double)) -> Double? {
+        guard let renderer,
+              let hit = renderer.camera.intersect(screenPoint: location, viewSize: bounds.size,
+                                                  planeOrigin: SIMD3<Float>(ring.center), planeNormal: [0, 0, 1]) else {
+            return nil
+        }
+        let d = SIMD3<Double>(hit) - ring.center
+        guard simd_length(SIMD2(d.x, d.y)) > 1e-9 else { return nil }
+        return atan2(d.y, d.x)
+    }
+
+    /// Berührung nah am gezeichneten Ring (höchstens 24 pt)?
+    private func ringHit(at location: CGPoint) -> Bool {
+        guard let renderer, let ring = currentRing else { return false }
+        let points = (0...72).compactMap {
+            renderer.camera.project(Self.ringPoint(ring, angle: Double($0) / 72 * 2 * .pi), viewSize: bounds.size)
+        }
+        guard points.count > 1 else { return false }
+        return (1..<points.count).contains { location.distance(toSegment: points[$0 - 1], points[$0]) <= 24 }
+    }
+
+    /// Ganze Grad, nahe einem Vielfachen von 15° rastet es dort ein.
+    private static func ringDegrees(_ sweep: Double) -> Double {
+        let degrees = sweep * 180 / .pi
+        let detent = (degrees / 15).rounded() * 15
+        return abs(degrees - detent) < 3 ? detent : degrees.rounded()
+    }
+
+    private func updateRingLabel() {
+        guard let ringDrag, let renderer, let ring = currentRing,
+              let point = renderer.camera.project(Self.ringPoint(ring, angle: ringDrag.startAngle
+                                                                   + ringDrag.degrees * .pi / 180, scale: 1.18),
+                                                  viewSize: bounds.size) else {
+            ringLabel.isHidden = true
+            return
+        }
+        ringLabel.text = "\(Int(ringDrag.degrees))°"
+        ringLabel.sizeToFit()
+        ringLabel.center = CGPoint(x: point.x, y: point.y - 22)
+        ringLabel.isHidden = false
     }
 
     /// Konstruktionsachsen (gestrichelt) und -punkte; Ebenen zeichnet refreshPlanes.
@@ -630,7 +736,26 @@ final class ViewportView: MTKView {
             let bisector = dimension.position - a
             guard simd_length(bisector) > 1e-9 else { return ([], dimension.position, true) }
             let radius = max(simd_length(bisector), 70 * perPoint)
-            return ([], a + simd_normalize(bisector) * radius, true)
+            var lines: [[Point2]] = []
+            if abs(dimension.sweep) > 1e-6 {
+                let start = atan2(dimension.reference.y, dimension.reference.x)
+                let u = Point2(cos(start), sin(start))
+                let v = Point2(cos(start + dimension.sweep), sin(start + dimension.sweep))
+                if abs(abs(dimension.sweep) - .pi / 2) < 0.05 * .pi / 180 {
+                    // Rechter Winkel: kleines Quadrat im Scheitel (Kai)
+                    let size = 12 * perPoint
+                    lines.append([a + u * size, a + (u + v) * size, a + v * size])
+                } else {
+                    // Winkelbogen zwischen den Schenkeln
+                    let arcRadius = 30 * perPoint
+                    let steps = max(6, Int(abs(dimension.sweep) / (.pi / 36)))
+                    lines.append((0...steps).map { k in
+                        let angle = start + dimension.sweep * Double(k) / Double(steps)
+                        return a + Point2(cos(angle), sin(angle)) * arcRadius
+                    })
+                }
+            }
+            return (lines, a + simd_normalize(bisector) * radius, true)
         }
     }
 
@@ -655,7 +780,19 @@ final class ViewportView: MTKView {
             field.isFine = dimension.id.hasPrefix("mark-")
             field.prefix = dimension.prefix
             if !field.isFirstResponder {
-                field.text = dimension.value.formatted(.number.precision(.fractionLength(0...3)).grouping(.never))
+                if dimension.kind == .angle {
+                    // Winkel nur in ganzen Grad (Kai)
+                    let degrees = Int(dimension.value.rounded())
+                    field.text = dimension.isEditable ? "\(degrees)" : "\(degrees)°"
+                } else {
+                    field.text = dimension.value.formatted(.number.precision(.fractionLength(0...3)).grouping(.never))
+                }
+            }
+            field.lockState = dimension.lockState
+            let id = dimension.id
+            field.onLockTap = { [weak self] in
+                self?.sketch?.toggleDimensionLock(id: id)
+                self?.refresh()
             }
             field.sizeToFit()
             var dx = tip.x - anchor.x, dy = tip.y - anchor.y
@@ -936,14 +1073,25 @@ final class ViewportView: MTKView {
         let shown = handleDrag?.handle.kind ?? handle.kind
         let active = handles.first { $0.kind == shown } ?? handle
         let base = arrowBase(active)
-        let length = Renderer.handleLength * renderer.camera.worldUnitsPerPoint(at: base, viewHeight: Float(bounds.height))
-        guard let tip = renderer.camera.project(base + active.pointing * length * 1.25, viewSize: bounds.size) else {
+        let length = Renderer.handleLength * active.scale * renderer.camera.worldUnitsPerPoint(at: base, viewHeight: Float(bounds.height))
+        guard let foot = renderer.camera.project(base, viewSize: bounds.size),
+              let tip = renderer.camera.project(base + active.pointing * length, viewSize: bounds.size) else {
             valueLabel.isHidden = true
             return
         }
         valueLabel.text = "\(active.value.formatted(.number.precision(.fractionLength(0...3)))) mm"
         valueLabel.sizeToFit()
-        valueLabel.center = tip
+        // Wie in Fusion 360: Wertfeld neben dem Pfeil (seitlich auf Höhe der Spitze), nicht auf der Spitze
+        var dx = tip.x - foot.x, dy = tip.y - foot.y
+        let screenLength = max((dx * dx + dy * dy).squareRoot(), 1e-6)
+        dx /= screenLength
+        dy /= screenLength
+        // Seite rechts vom Pfeil auf dem Bildschirm (nach oben zeigend: rechts daneben)
+        let side = CGPoint(x: -dy, y: dx)
+        let sideways = abs(side.x) * valueLabel.bounds.width / 2 + abs(side.y) * valueLabel.bounds.height / 2 + 14
+        let along = CGPoint(x: foot.x + (tip.x - foot.x) * 0.75, y: foot.y + (tip.y - foot.y) * 0.75)
+        valueLabel.center = CGPoint(x: along.x + (side.x >= 0 ? side.x : -side.x) * sideways,
+                                    y: along.y + (side.x >= 0 ? side.y : -side.y) * sideways)
         valueLabel.isHidden = false
     }
 
@@ -954,7 +1102,7 @@ final class ViewportView: MTKView {
         var best: (distance: CGFloat, handle: DragHandle)?
         for handle in workspace.handles {
             let base = arrowBase(handle)
-            let length = Renderer.handleLength * renderer.camera.worldUnitsPerPoint(at: base, viewHeight: Float(bounds.height))
+            let length = Renderer.handleLength * handle.scale * renderer.camera.worldUnitsPerPoint(at: base, viewHeight: Float(bounds.height))
             guard let a = renderer.camera.project(base, viewSize: bounds.size),
                   let b = renderer.camera.project(base + handle.pointing * length, viewSize: bounds.size) else {
                 continue
@@ -967,10 +1115,11 @@ final class ViewportView: MTKView {
         return best?.handle
     }
 
-    /// Fuß des gezeichneten Pfeils: wie bei Shapr3D etwas über dem Objekt schwebend (Verschiebe-Pfeile am Mittelpunkt).
+    /// Fuß des gezeichneten Pfeils: wie in Fusion 360 direkt auf dem Profil bzw. der Fläche (Mitte); der
+    /// Kantenpfeil setzt knapp neben der Kante an, Verschiebe-Pfeile am Mittelpunkt.
     private func arrowBase(_ handle: DragHandle) -> SIMD3<Float> {
-        guard !handle.isMove, let renderer else { return handle.base }
-        let gap = 22 * renderer.camera.worldUnitsPerPoint(at: handle.base, viewHeight: Float(bounds.height))
+        guard handle.kind == .edge || handle.kind == .offset, let renderer else { return handle.base }
+        let gap = 6 * renderer.camera.worldUnitsPerPoint(at: handle.base, viewHeight: Float(bounds.height))
         return handle.base + handle.pointing * gap
     }
 
@@ -1082,6 +1231,17 @@ final class ViewportView: MTKView {
                                          step: dragStep(at: handle.base))
             return
         }
+        if ringDrag == nil, handleDrag == nil, alone,
+           let touch = touches.first(where: { $0.type == .pencil || $0.type == .direct }),
+           ringHit(at: touch.location(in: self)), let ring = currentRing,
+           let angle = ringAngle(at: touch.location(in: self), ring: ring) {
+            workspace?.beginRingRotation()
+            ringDrag = RingDragState(touch: touch, center: ring.center, radius: ring.radius, startAngle: angle,
+                                     lastAngle: angle)
+            updateRingLabel()
+            refresh()
+            return
+        }
         if boxTouch == nil, alone, let touch = touches.first(where: acceptsForBox) {
             boxTouch = touch
             boxStart = touch.location(in: self)
@@ -1121,6 +1281,24 @@ final class ViewportView: MTKView {
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if var drag = ringDrag, touches.contains(drag.touch) {
+            if let angle = ringAngle(at: drag.touch.location(in: self), ring: (drag.center, drag.radius)) {
+                drag.sweep += remainder(angle - drag.lastAngle, 2 * .pi)
+                drag.lastAngle = angle
+                let degrees = Self.ringDegrees(drag.sweep)
+                if degrees != drag.degrees {
+                    if Int(degrees) % 15 == 0 { UISelectionFeedbackGenerator().selectionChanged() }
+                    drag.degrees = degrees
+                    ringDrag = drag
+                    workspace?.ringRotation(degrees: degrees, center: drag.center)
+                } else {
+                    ringDrag = drag
+                }
+                updateRingLabel()
+                refresh()
+            }
+            return
+        }
         if let drag = handleDrag, touches.contains(drag.touch) {
             if let parameter = axisParameter(at: drag.touch.location(in: self), handle: drag.handle) {
                 let raw = drag.handle.value + Double(parameter - drag.startParameter)
@@ -1154,6 +1332,10 @@ final class ViewportView: MTKView {
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         updateHeldFingers(ended: touches)
+        if let drag = ringDrag, touches.contains(drag.touch) {
+            finishRingDrag()
+            return
+        }
         if let drag = handleDrag, touches.contains(drag.touch) {
             handleDrag = nil
             if drag.handle.kind == .offset { sketch?.endOffsetSnap() }
@@ -1191,6 +1373,10 @@ final class ViewportView: MTKView {
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
         updateHeldFingers(ended: touches)
+        if let drag = ringDrag, touches.contains(drag.touch) {
+            finishRingDrag()
+            return
+        }
         if let drag = handleDrag, touches.contains(drag.touch) {
             handleDrag = nil
             if drag.handle.kind == .offset { sketch?.endOffsetSnap() }
@@ -1209,6 +1395,15 @@ final class ViewportView: MTKView {
         sketchTouch = nil
         strokeEndedAt = CACurrentMediaTime()
         sketch?.cancelStroke()
+        refresh()
+    }
+
+    /// Ring losgelassen: gedrehte Lage übernehmen (0° = nichts geändert).
+    private func finishRingDrag() {
+        guard let drag = ringDrag else { return }
+        ringDrag = nil
+        ringLabel.isHidden = true
+        if drag.degrees != 0 { workspace?.endRingRotation() }
         refresh()
     }
 
@@ -1435,7 +1630,7 @@ final class ViewportView: MTKView {
     /// verschiebt, dreht, zoomt und tippt kein Finger: ein aufgelegter Finger ist dann nur die Bogen-Taste
     /// (mit einem Finger begann sonst bei kleinster Bewegung das Verschieben).
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        if handleDrag != nil, gestureRecognizer === orbitGesture || gestureRecognizer === tapGesture {
+        if handleDrag != nil || ringDrag != nil, gestureRecognizer === orbitGesture || gestureRecognizer === tapGesture {
             return false
         }
         if sketchTouch != nil,
@@ -1634,6 +1829,20 @@ final class DimensionField: UITextField {
         }
     }
     private let prefixLabel = UILabel()
+    /// Schloss am treibenden Maß: true = fest (grün), false = gelöst (rot), nil = keins
+    var lockState: Bool? {
+        didSet {
+            guard lockState != oldValue else { return }
+            updateLock()
+        }
+    }
+    var onLockTap: (() -> Void)?
+    private lazy var lockButton: UIButton = {
+        let button = UIButton(type: .system)
+        button.frame = CGRect(x: 0, y: 0, width: 26, height: 30)
+        button.addAction(UIAction { [weak self] _ in self?.onLockTap?() }, for: .touchUpInside)
+        return button
+    }()
 
     init(dimensionID: String) {
         self.dimensionID = dimensionID
@@ -1662,18 +1871,37 @@ final class DimensionField: UITextField {
         fatalError("init(coder:) wird nicht verwendet")
     }
 
+    /// Grünes geschlossenes bzw. rotes offenes Schloss rechts im Feld; antippen schaltet um.
+    private func updateLock() {
+        guard let lockState else {
+            rightView = nil
+            rightViewMode = .never
+            return
+        }
+        let configuration = UIImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
+        lockButton.setImage(UIImage(systemName: lockState ? "lock.fill" : "lock.open.fill", withConfiguration: configuration),
+                            for: .normal)
+        lockButton.tintColor = lockState ? .systemGreen : .systemRed
+        lockButton.accessibilityLabel = lockState ? "Maß fest – antippen löst es" : "Maß gelöst – antippen macht es fest"
+        rightView = lockButton
+        rightViewMode = .always
+        updateStyle()
+    }
+
     private func updateStyle() {
         layer.borderWidth = isFine ? 0.75 : 1.5
         backgroundColor = isFine ? UIColor.white.withAlphaComponent(0.85) : .white
-        layer.borderColor = (allowsEditing ? UIColor.systemBlue : UIColor.systemGray3).cgColor
-        isUserInteractionEnabled = allowsEditing
+        layer.borderColor = (lockState == false ? UIColor.systemRed
+            : allowsEditing ? UIColor.systemBlue : UIColor.systemGray3).cgColor
+        isUserInteractionEnabled = allowsEditing || lockState != nil
     }
 
     override func sizeThatFits(_ size: CGSize) -> CGSize {
         let text = (self.text ?? "") as NSString
         let width = text.size(withAttributes: [.font: font ?? UIFont.systemFont(ofSize: 15)]).width
         let prefixWidth = prefix.isEmpty ? 0 : prefixLabel.intrinsicContentSize.width + 2
-        return CGSize(width: max(width + prefixWidth + 22, 46), height: 30)
+        let lockWidth: CGFloat = lockState == nil ? 0 : 24
+        return CGSize(width: max(width + prefixWidth + lockWidth + 22, 46), height: 30)
     }
 
     override func sizeToFit() {

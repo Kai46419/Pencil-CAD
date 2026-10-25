@@ -79,7 +79,10 @@
 #include <gp_Ax2.hxx>
 #include <gp_Elips.hxx>
 #include <gp_Trsf.hxx>
+#include <gp_Cylinder.hxx>
+#include <gp_Lin.hxx>
 #include <gp_Pln.hxx>
+#include <gp_Torus.hxx>
 #include <gp_Pnt2d.hxx>
 #else
 #define PCK_HAS_OCCT 0
@@ -1068,6 +1071,76 @@ static std::vector<TopoDS_Edge> edgesFromNumbers(const TopTools_IndexedMapOfShap
     }
 }
 
+- (nullable NSArray<NSNumber *> *)blendOfFace:(NSInteger)index {
+    if (index < 1 || index > _faces.Extent()) return nil;
+    try {
+        const TopoDS_Face face = TopoDS::Face(_faces(int(index)));
+        BRepAdaptor_Surface surface(face);
+        switch (surface.GetType()) {
+        case GeomAbs_Cylinder:
+            return @[@1, @(surface.Cylinder().Radius())];
+        case GeomAbs_Torus:
+            return @[@1, @(surface.Torus().MinorRadius())];
+        case GeomAbs_Plane:
+            break;
+        default:
+            return nil;
+        }
+        // Fase: schmaler ebener Streifen zwischen zwei langen parallelen Geraden, an denen ebene Nachbarflächen
+        // schräg (weder fluchtend noch senkrecht) anschließen
+        const gp_Dir normal = surface.Plane().Axis().Direction();
+        std::vector<std::pair<double, TopoDS_Edge>> lines;
+        for (TopExp_Explorer it(face, TopAbs_EDGE); it.More(); it.Next()) {
+            const TopoDS_Edge edge = TopoDS::Edge(it.Current());
+            if (BRepAdaptor_Curve(edge).GetType() != GeomAbs_Line) continue;
+            GProp_GProps props;
+            BRepGProp::LinearProperties(edge, props);
+            lines.push_back(std::make_pair(props.Mass(), edge));
+        }
+        if (lines.size() < 2) return nil;
+        std::sort(lines.begin(), lines.end(),
+                  [](const std::pair<double, TopoDS_Edge> &a, const std::pair<double, TopoDS_Edge> &b) {
+                      return a.first > b.first;
+                  });
+        const TopoDS_Edge longEdges[2] = {lines[0].second, lines[1].second};
+        const gp_Lin first = BRepAdaptor_Curve(longEdges[0]).Line();
+        const gp_Lin second = BRepAdaptor_Curve(longEdges[1]).Line();
+        if (std::abs(first.Direction().Dot(second.Direction())) < 0.999) return nil;
+        const double width = first.Distance(second.Location());
+        if (width < 1e-6 || width >= lines[1].first) return nil;
+
+        TopTools_IndexedDataMapOfShapeListOfShape edgeFaces;
+        TopExp::MapShapesAndAncestors(_shape, TopAbs_EDGE, TopAbs_FACE, edgeFaces);
+        double tilt[2] = {0, 0};
+        for (int k = 0; k < 2; ++k) {
+            const int key = edgeFaces.FindIndex(longEdges[k]);
+            if (key < 1) return nil;
+            bool found = false;
+            for (TopTools_ListIteratorOfListOfShape it(edgeFaces(key)); it.More(); it.Next()) {
+                const TopoDS_Face other = TopoDS::Face(it.Value());
+                if (other.IsSame(face)) continue;
+                BRepAdaptor_Surface neighbour(other);
+                if (neighbour.GetType() != GeomAbs_Plane) return nil;
+                const double cosine = std::min(1.0, std::abs(neighbour.Plane().Axis().Direction().Dot(normal)));
+                tilt[k] = std::acos(cosine);
+                found = true;
+                break;
+            }
+            if (!found) return nil;
+        }
+        const double minimum = 5.0 * M_PI / 180, maximum = 85.0 * M_PI / 180;
+        for (double angle : tilt) {
+            if (angle < minimum || angle > maximum) return nil;
+        }
+        // Gleichschenklige Fase: Winkel der Nachbarflächen α = π − (Neigung 1 + Neigung 2), Breite = 2 d sin(α/2)
+        const double alpha = M_PI - (tilt[0] + tilt[1]);
+        if (alpha < 1e-3) return nil;
+        return @[@2, @(width / (2 * std::sin(alpha / 2)))];
+    } catch (...) {
+        return nil;
+    }
+}
+
 - (nullable NSArray<NSNumber *> *)planeOfFace:(NSInteger)index {
     if (index < 1 || index > _faces.Extent()) return nil;
     const TopoDS_Face face = TopoDS::Face(_faces(int(index)));
@@ -1394,6 +1467,10 @@ static std::vector<TopoDS_Edge> edgesFromNumbers(const TopTools_IndexedMapOfShap
 }
 
 - (nullable NSArray<NSNumber *> *)handleOfEdge:(NSInteger)edge {
+    return nil;
+}
+
+- (nullable NSArray<NSNumber *> *)blendOfFace:(NSInteger)face {
     return nil;
 }
 

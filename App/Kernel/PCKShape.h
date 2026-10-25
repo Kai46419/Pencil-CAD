@@ -156,6 +156,11 @@ NS_ASSUME_NONNULL_BEGIN
 /// (Winkelhalbierende der beiden Flächen). nil ohne Kernel oder bei ungültiger Kante.
 - (nullable NSArray<NSNumber *> *)handleOfEdge:(NSInteger)edge NS_SWIFT_NAME(handle(ofEdge:));
 
+/// Vorhandene Rundung bzw. Fase einer Fläche als [Art, Wert]: Art 1 = Rundung (Radius der Zylinder- bzw.
+/// Torusfläche), Art 2 = Fase (Schenkellänge einer schmalen, schräg anschließenden ebenen Fläche).
+/// nil bei anderen Flächen oder ohne Kernel.
+- (nullable NSArray<NSNumber *> *)blendOfFace:(NSInteger)face NS_SWIFT_NAME(blend(ofFace:));
+
 /// Ebene einer planaren Fläche als [ox, oy, oz, nx, ny, nz], Normale zeigt aus dem Körper heraus.
 /// nil bei gekrümmten Flächen.
 - (nullable NSArray<NSNumber *> *)planeOfFace:(NSInteger)face NS_SWIFT_NAME(plane(ofFace:));

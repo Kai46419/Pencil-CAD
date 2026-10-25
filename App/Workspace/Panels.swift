@@ -686,15 +686,32 @@ extension ParameterCard {
             HStack(spacing: 14) {
                 Label(kind.rawValue, systemImage: kind.systemImage)
                     .font(.callout.weight(.semibold))
-                Stepper("Anzahl \(workspace.patternCount)", value: preview(\.patternCount), in: 2...100)
-                    .fixedSize()
                 if kind == .linear {
-                    NumberField(title: "Abstand", value: workspace.patternSpacing, width: 60) { value in
-                        workspace.patternSpacing = value
-                        workspace.updatePreview()
+                    // Zwei Richtungen (Kai: X und Y); Anzahl 1 in Richtung 2 = einfache Reihe
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 12) {
+                            axisPicker("Richtung 1", selection: preview(\.patternAxis))
+                            Stepper("Anzahl \(workspace.patternCount)", value: preview(\.patternCount), in: 1...100)
+                                .fixedSize()
+                            NumberField(title: "Abstand", value: workspace.patternSpacing, width: 60) { value in
+                                workspace.patternSpacing = value
+                                workspace.updatePreview()
+                            }
+                        }
+                        HStack(spacing: 12) {
+                            axisPicker("Richtung 2", selection: preview(\.patternAxis2))
+                            Stepper("Anzahl \(workspace.patternCount2)", value: preview(\.patternCount2), in: 1...100)
+                                .fixedSize()
+                            NumberField(title: "Abstand", value: workspace.patternSpacing2, width: 60) { value in
+                                workspace.patternSpacing2 = value
+                                workspace.updatePreview()
+                            }
+                            .opacity(workspace.patternCount2 > 1 ? 1 : 0.4)
+                        }
                     }
-                    axisPicker("Richtung", selection: preview(\.patternAxis))
                 } else {
+                    Stepper("Anzahl \(workspace.patternCount)", value: preview(\.patternCount), in: 2...100)
+                        .fixedSize()
                     NumberField(title: "Winkel", value: workspace.patternAngle, unit: "°", width: 56) { value in
                         workspace.patternAngle = max(-360, min(360, value))
                         workspace.updatePreview()
@@ -1293,6 +1310,24 @@ struct LayersPanel: View {
                 .lineLimit(1)
                 .foregroundStyle(item.isHidden ? Color.secondary : Color.primary)
             Spacer(minLength: 0)
+            // Stift neben dem Körper (Kai): Export als 3MF oder STL mit einem Tippen
+            Menu {
+                ForEach([ExportFormat.threeMF, .stl]) { format in
+                    Button {
+                        export(format, [index], item.name)
+                    } label: {
+                        Label("Als \(format.rawValue) exportieren – \(format.subtitle)", systemImage: format.systemImage)
+                    }
+                }
+            } label: {
+                Image(systemName: "pencil.circle")
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 30, height: 30)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .hoverTip("Als 3MF oder STL exportieren")
         }
         .padding(.horizontal, 4)
         .background(isSelected ? Color.accentColor.opacity(0.15) : Color.clear,

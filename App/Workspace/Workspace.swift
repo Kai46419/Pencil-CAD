@@ -112,6 +112,8 @@ struct DragHandle {
     var direction: SIMD3<Float>
     var value: Double
     var color: SIMD3<Float>
+    /// Größe relativ zum normalen Pfeil (Kantenpfeil kleiner, wie in Fusion 360)
+    var scale: Float = 1
 
     /// Fuß des Pfeils: wandert mit dem Wert entlang der Achse.
     var base: SIMD3<Float> { axisOrigin + direction * Float(value) }
@@ -145,6 +147,8 @@ final class Workspace: ObservableObject {
     let project: Project
     let model: ModelStore
     let sketch = SketchController()
+    /// KI-Anbindung: Befehl in Worten → Plan → Vorschau
+    let assistant: AIAssistant
     /// Kamerawinkel für den ViewCube (eigenes Objekt, damit Drehen nicht die ganze Oberfläche neu aufbaut).
     let camera = CameraState()
 
@@ -167,6 +171,10 @@ final class Workspace: ObservableObject {
     @Published var patternSpacing: Double = 20
     @Published var patternAngle: Double = 360
     @Published var patternAxis: ReferenceAxis = .world(0)
+    /// Muster linear, zweite Richtung (Kai: X und Y zugleich); Anzahl 1 = aus
+    @Published var patternCount2 = 1
+    @Published var patternSpacing2: Double = 20
+    @Published var patternAxis2: ReferenceAxis = .world(1)
     @Published var scaleFactors: SIMD3<Double> = [1.5, 1.5, 1.5]
     @Published var scaleUniform = true
     @Published var alignModes: [AlignMode] = [.center, .center, .none]
@@ -209,6 +217,8 @@ final class Workspace: ObservableObject {
     init(project: Project) {
         self.project = project
         model = ModelStore(folder: project.folder)
+        assistant = AIAssistant(model: model)
+        assistant.onPreview = { [weak self] in self?.send(.fitAll) }
     }
 
     // MARK: Kamera
@@ -567,6 +577,8 @@ final class Workspace: ObservableObject {
         case .canvas:
             break
         case .select:
+            // Vorhandene Rundung bzw. Fase antippen übernimmt ihren Wert für die gewählten Kanten
+            if edge == nil, let face, model.adoptBlend(from: face) { return }
             if extrudeToTapped(point, face: face, region: region) { return }
             if selectsBodies || !model.selectedBodies.isEmpty, let body = face?.body ?? edge?.body {
                 // Körperauswahl (z. B. per Rahmen): Antippen nimmt Körper hinzu bzw. heraus
@@ -601,7 +613,10 @@ final class Workspace: ObservableObject {
         switch tool {
         case .pattern(.linear):
             guard let axis = model.resolve(patternAxis) else { return }
-            model.previewLinearPattern(count: patternCount, spacing: patternSpacing, direction: axis.direction)
+            let second = patternCount2 > 1 ? model.resolve(patternAxis2) : nil
+            model.previewLinearPattern(count: patternCount, spacing: patternSpacing, direction: axis.direction,
+                                       count2: second == nil ? 1 : patternCount2, spacing2: patternSpacing2,
+                                       direction2: second?.direction ?? [0, 1, 0])
         case .pattern(.circular):
             guard let axis = model.resolve(patternAxis) else { return }
             model.previewCircularPattern(count: patternCount, angle: patternAngle, axisOrigin: axis.origin,
@@ -844,8 +859,8 @@ final class Workspace: ObservableObject {
     // MARK: Ziehpfeile
 
     var handles: [DragHandle] {
-        // Wie bei Shapr3D: ein schlichter grauer Zugpfeil
-        let blue = SIMD3<Float>(0.3, 0.32, 0.36)
+        // Wie in Fusion 360: blauer Pfeil aus Schaft und Kegelspitze
+        let blue = Self.handleBlue
         if sketch.isActive {
             let plane = sketch.plane
             if sketch.tool == .offset, let handle = sketch.offsetHandle {
@@ -863,9 +878,11 @@ final class Workspace: ObservableObject {
                                    value: model.regionValue, color: blue)]
             }
             if let handle = model.edgeHandle {
+                // Wie in Fusion 360: kleiner Pfeil an der Kantenmitte, quer zur Kante nach außen (aus dem Material
+                // heraus, sonst steckte er im Körper); Ziehen nach außen vergrößert Radius bzw. Fase
                 return [DragHandle(kind: .edge, axisOrigin: SIMD3<Float>(handle.origin),
-                                   direction: simd_normalize(SIMD3<Float>(handle.direction)),
-                                   value: model.edgeValue, color: blue)]
+                                   direction: -simd_normalize(SIMD3<Float>(handle.direction)),
+                                   value: model.edgeValue, color: blue, scale: 0.7)]
             }
             if let handle = model.faceHandle {
                 return [DragHandle(kind: .face, axisOrigin: SIMD3<Float>(handle.origin),
@@ -911,6 +928,48 @@ final class Workspace: ObservableObject {
         }
     }
 
+    /// Blau der Ziehpfeile (linear, ergibt etwa sRGB 51/140/242 wie in Fusion 360)
+    static let handleBlue = SIMD3<Float>(0.03, 0.27, 0.88)
+
+    // MARK: Drehscheibe
+
+    /// Ring unter den gewählten Körpern im Verschieben-Werkzeug (wie Bambu Studio / PrusaSlicer):
+    /// Mitte am Boden der Auswahl, Radius etwas größer als die Auswahl.
+    var rotationRing: (center: SIMD3<Double>, radius: Double)? {
+        guard !sketch.isActive, tool == .move, model.movingSketch == nil, !model.selectedBodies.isEmpty else { return nil }
+        var low = SIMD3<Float>(repeating: .infinity), high = SIMD3<Float>(repeating: -.infinity)
+        for body in model.selectedBodies {
+            guard let box = model.mesh.bounds(ofBody: body) else { continue }
+            low = simd_min(low, box.min)
+            high = simd_max(high, box.max)
+        }
+        guard low.x <= high.x else { return nil }
+        let center = SIMD3<Double>(Double(low.x + high.x) / 2, Double(low.y + high.y) / 2, Double(low.z))
+        let halfDiagonal = Double(simd_length(SIMD2<Float>(high.x - low.x, high.y - low.y))) / 2
+        return (center, max(halfDiagonal * 1.2, 8))
+    }
+
+    /// Drehen am Ring beginnt: eine offene Verschiebung wird vorher übernommen.
+    func beginRingRotation() {
+        let chosen = model.selectedBodies
+        if model.hasPreview {
+            model.commitPreview()
+            model.selectBodies(chosen)
+        }
+    }
+
+    /// Drehwinkel am Ring (Vorschau).
+    func ringRotation(degrees: Double, center: SIMD3<Double>) {
+        model.previewRotation(degrees: degrees, center: center)
+    }
+
+    /// Ring losgelassen: Drehung übernehmen, Auswahl bleibt für weiteres Drehen oder Verschieben.
+    func endRingRotation() {
+        let chosen = model.selectedBodies
+        model.commitPreview()
+        model.selectBodies(chosen)
+    }
+
     // MARK: Hinweise
 
     var hint: String? {
@@ -941,7 +1000,7 @@ final class Workspace: ObservableObject {
             }
         case .move:
             if model.movingSketch != nil { return "Skizze: Achsenpfeil ziehen oder Werte eingeben, dann „Fertig“" }
-            return model.selectedBodies.isEmpty ? "Körper antippen" : "Achsenpfeil ziehen oder Werte eingeben"
+            return model.selectedBodies.isEmpty ? "Körper antippen" : "Achsenpfeil ziehen · am Ring drehen (rastet alle 15°)"
         case .mirror: return model.selectedBodies.isEmpty ? "Körper antippen" : "Ebene wählen, dann „Fertig“"
         case .shell: return model.selection == nil ? "Fläche antippen, die offen sein soll" : "Wandstärke eingeben"
         case .color: return model.selectedBodies.isEmpty ? "Körper antippen" : "Farbe wählen"

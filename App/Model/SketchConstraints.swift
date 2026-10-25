@@ -127,9 +127,13 @@ struct SketchConstraint: Codable, Hashable {
         case distance(SketchPointRef, SketchPointRef, value: Double)
         case pointLineDistance(SketchPointRef, SketchCurveRef, value: Double)
         case angle(SketchCurveRef, SketchCurveRef, degrees: Double)
+        /// Radius eines Bogens bzw. Durchmesser eines Kreises (diameter), eingegebenes Maß am Element
+        case radius(SketchCurveRef, value: Double, diameter: Bool)
     }
 
     var variant: Variant
+    /// Treibendes Maß gelöst (rotes Schloss): bleibt sichtbar, wird aber nicht eingehalten
+    var isSuspended = false
 
     var kind: ConstraintKind {
         switch variant {
@@ -143,7 +147,7 @@ struct SketchConstraint: Codable, Hashable {
         case .equalLength, .equalRadius: .equal
         case .symmetric: .symmetric
         case .lock: .lock
-        case .distance, .pointLineDistance, .angle: .dimension
+        case .distance, .pointLineDistance, .angle, .radius: .dimension
         }
     }
 
@@ -152,6 +156,7 @@ struct SketchConstraint: Codable, Hashable {
         switch variant {
         case .distance(_, _, let value), .pointLineDistance(_, _, let value): value
         case .angle(_, _, let degrees): degrees
+        case .radius(_, let value, _): value
         default: nil
         }
     }
@@ -162,6 +167,7 @@ struct SketchConstraint: Codable, Hashable {
         case .distance(let a, let b, _): SketchConstraint(variant: .distance(a, b, value: newValue))
         case .pointLineDistance(let p, let c, _): SketchConstraint(variant: .pointLineDistance(p, c, value: newValue))
         case .angle(let a, let b, _): SketchConstraint(variant: .angle(a, b, degrees: newValue))
+        case .radius(let c, _, let diameter): SketchConstraint(variant: .radius(c, value: newValue, diameter: diameter))
         default: self
         }
     }
@@ -187,6 +193,8 @@ struct SketchConstraint: Codable, Hashable {
             [p.entity, c.entity]
         case .angle(let a, let b, _):
             [a.entity, b.entity]
+        case .radius(let c, _, _):
+            [c.entity]
         }
     }
 
@@ -216,8 +224,14 @@ struct SketchConstraint: Codable, Hashable {
         case .pointLineDistance(let a, let b, let value):
             v = p(a).flatMap { a in c(b).map { .pointLineDistance(a, $0, value: value) } }
         case .angle(let a, let b, let degrees): v = c(a).flatMap { a in c(b).map { .angle(a, $0, degrees: degrees) } }
+        case .radius(let a, let value, let diameter): v = c(a).map { .radius($0, value: value, diameter: diameter) }
         }
-        return v.map { SketchConstraint(variant: $0) }
+        let suspended = isSuspended
+        return v.map { variant -> SketchConstraint in
+            var constraint = SketchConstraint(variant: variant)
+            constraint.isSuspended = suspended
+            return constraint
+        }
     }
 }
 
@@ -226,6 +240,25 @@ enum ConstraintCurve {
     case line(Point2, Point2)
     case circle(center: Point2, radius: Double)
     case other
+}
+
+extension SketchConstraint {
+    private enum CodingKeys: String, CodingKey {
+        case variant, isSuspended
+    }
+
+    /// Ältere Skizzen kennen isSuspended noch nicht
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(variant: try container.decode(Variant.self, forKey: .variant))
+        isSuspended = try container.decodeIfPresent(Bool.self, forKey: .isSuspended) ?? false
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(variant, forKey: .variant)
+        if isSuspended { try container.encode(isSuspended, forKey: .isSuspended) }
+    }
 }
 
 // MARK: Parameter der Elemente
@@ -372,7 +405,9 @@ extension SketchEntity {
 enum ConstraintSolver {
     /// Passt die Elemente so an, dass alle Einschränkungen gelten. locked: Elemente, die sich nicht bewegen.
     /// Liefert nil, wenn sich die Einschränkungen nicht erfüllen lassen.
-    static func solve(_ entities: [SketchEntity], constraints: [SketchConstraint], locked: Set<Int> = []) -> [SketchEntity]? {
+    static func solve(_ entities: [SketchEntity], constraints all: [SketchConstraint], locked: Set<Int> = []) -> [SketchEntity]? {
+        // Gelöste Maße (rotes Schloss) gelten nicht
+        let constraints = all.filter { !$0.isSuspended }
         guard !constraints.isEmpty else { return entities }
         // Nur Elemente, die in Einschränkungen vorkommen, sind Unbekannte
         let involved = Set(constraints.flatMap(\.entities)).filter { entities.indices.contains($0) }.sorted()
@@ -581,6 +616,9 @@ enum ConstraintSolver {
             let d1 = direction(p1, p2), d2 = direction(q1, q2)
             let angle = atan2(abs(cross(d1, d2)), simd_dot(d1, d2))
             return [angle - degrees * .pi / 180]
+        case .radius(let c, let value, let diameter):
+            guard case .circle(_, let r) = curve(c, e) else { return [] }
+            return [(diameter ? 2 * r : r) - value]
         }
     }
 }

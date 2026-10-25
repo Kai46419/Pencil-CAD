@@ -299,6 +299,9 @@ final class ModelStore: ObservableObject {
 
     // Vorschau und Verlauf
     @Published private(set) var previewName: String?
+    /// Skizze des Körpers, der gerade abgerundet bzw. gefast wird: ihre (eckige) Kontur passt nicht mehr zum
+    /// Körper und wird während der Vorschau ausgeblendet, beim Übernehmen dauerhaft (Kai: „die Außenlinie muss weg“).
+    @Published private(set) var previewHiddenSketch: UUID?
     @Published private(set) var history: [HistoryEntry] = []
     @Published private(set) var future: [HistoryEntry] = []
     private var previewBodies: [SceneBody]?
@@ -519,7 +522,27 @@ final class ModelStore: ObservableObject {
             ? "\(operation.rawValue): größter möglicher Wert hier \(amount.formatted()) mm." : nil
         var preview = bodies
         preview[body] = preview[body].with(result)
+        previewHiddenSketch = bodies[body].sketchID
         showPreview(preview, name: operation.rawValue)
+    }
+
+    /// Wie in Fusion 360: Während Kanten zum Abrunden bzw. Fasen gewählt sind, übernimmt das Antippen einer
+    /// vorhandenen Rundungs- bzw. Fasenfläche deren Radius bzw. Breite (samt Art). false = keine solche Fläche.
+    func adoptBlend(from face: FaceRef) -> Bool {
+        guard !selectedEdges.isEmpty else { return false }
+        // Während der Vorschau zeigt das Netz die Vorschaukörper: deren Flächennummern gelten
+        let shown = previewBodies ?? bodies
+        guard shown.indices.contains(face.body),
+              let values = shown[face.body].shape.blend(ofFace: face.face)?.map(\.doubleValue),
+              values.count == 2, values[1] > 1e-6 else { return false }
+        let operation: EdgeOperation = values[0] == 1 ? .fillet : .chamfer
+        let value = (values[1] * 100).rounded() / 100
+        if edgeOperation != operation { edgeOperation = operation }
+        setEdgeValue(value)
+        if message == nil {
+            message = "\(operation == .fillet ? "Radius" : "Fase") übernommen: \(value.formatted()) mm"
+        }
+        return true
     }
 
     /// Größter möglicher Radius bzw. Fasenbreite für die aktuelle Kantenauswahl (Halbierungssuche, gemerkt)
@@ -779,8 +802,17 @@ final class ModelStore: ObservableObject {
         previewBodies = nil
         previewName = nil
         // Die Skizze bleibt sichtbar, damit weitere Bereiche (z. B. bei sich überschneidenden Kreisen)
-        // extrudiert werden können; ausblenden über „Sichtbarkeit“ bzw. „Elemente“.
-        commit(preview, name: name)
+        // extrudiert werden können; ausblenden über „Sichtbarkeit“ bzw. „Elemente“. Nur nach Abrunden/Fase
+        // verschwindet sie, weil ihre eckige Kontur sonst neben der Rundung stehen bleibt (rückgängig machbar).
+        var newSketches: [StoredSketch]?
+        if let id = previewHiddenSketch, let index = sketches.firstIndex(where: { $0.id == id }),
+           !sketches[index].isHidden {
+            var list = sketches
+            list[index].isHidden = true
+            newSketches = list
+        }
+        previewHiddenSketch = nil
+        commit(preview, sketches: newSketches, name: name)
     }
 
     func cancelPreview() {
@@ -1132,6 +1164,7 @@ final class ModelStore: ObservableObject {
         guard previewBodies != nil else { return }
         previewBodies = nil
         previewName = nil
+        previewHiddenSketch = nil
         remesh()
         refreshHighlight()
     }
@@ -1164,6 +1197,7 @@ final class ModelStore: ObservableObject {
         message = nil
         previewBodies = nil
         previewName = nil
+        previewHiddenSketch = nil
         remesh()
         clearSelectionState()
         refreshHighlight()
@@ -1594,26 +1628,64 @@ extension ModelStore {
 
     // MARK: Muster, Skalieren, Ausrichten
 
-    func previewLinearPattern(count: Int, spacing: Double, direction: SIMD3<Double>) {
-        guard requireKernel(), !selectedBodies.isEmpty, count >= 2 else {
+    /// Rechteckmuster der gewählten Körper: Richtung 1 (z. B. X) und Richtung 2 (z. B. Y) mit eigener Anzahl
+    /// und eigenem Abstand; Anzahl 1 in Richtung 2 ergibt eine einfache Reihe.
+    func previewLinearPattern(count: Int, spacing: Double, direction: SIMD3<Double>,
+                              count2: Int = 1, spacing2: Double = 0, direction2: SIMD3<Double> = [0, 1, 0]) {
+        let rows = max(1, count2)
+        guard requireKernel(), !selectedBodies.isEmpty, count >= 1, count * rows >= 2,
+              simd_length(direction) > 1e-12, rows == 1 || simd_length(direction2) > 1e-12 else {
             dropPreview()
             return
         }
         var preview = bodies
         let d = simd_normalize(direction)
+        let d2 = rows > 1 ? simd_normalize(direction2) : SIMD3<Double>(0, 0, 0)
         for index in selectedBodies where bodies.indices.contains(index) {
-            for k in 1..<count {
-                guard let copy = bodies[index].shape.translated(by: d * spacing * Double(k)) else {
-                    message = "Muster nicht möglich."
-                    return
+            var number = 1
+            for row in 0..<rows {
+                for k in 0..<max(1, count) where row > 0 || k > 0 {
+                    let offset = d * spacing * Double(k) + d2 * spacing2 * Double(row)
+                    guard let copy = bodies[index].shape.translated(by: offset) else {
+                        message = "Muster nicht möglich."
+                        return
+                    }
+                    number += 1
+                    var body = bodies[index].with(copy)
+                    body.name += " (\(number))"
+                    preview.append(body)
                 }
-                var body = bodies[index].with(copy)
-                body.name += " (\(k + 1))"
-                preview.append(body)
             }
         }
         message = nil
         showPreview(preview, name: "Muster linear")
+    }
+
+    /// Drehscheibe im Verschieben-Werkzeug: gewählte Körper um eine Achse durch center drehen (Vorschau,
+    /// Übernahme mit commitPreview).
+    func previewRotation(degrees: Double, center: SIMD3<Double>, axis: SIMD3<Double> = [0, 0, 1]) {
+        guard requireKernel(), !selectedBodies.isEmpty else { return }
+        guard abs(degrees) > 1e-9 else {
+            dropPreview()
+            return
+        }
+        var preview = bodies
+        for index in selectedBodies where bodies.indices.contains(index) {
+            guard let rotated = bodies[index].shape.rotated(origin: center, axis: axis, angle: degrees * .pi / 180) else {
+                message = "Drehen nicht möglich."
+                return
+            }
+            preview[index] = preview[index].with(rotated)
+        }
+        message = nil
+        showPreview(preview, name: "Drehen")
+    }
+
+    /// Ergebnis der KI-Anbindung als Vorschau zeigen (Übernehmen mit commitPreview, Verwerfen mit cancelPreview).
+    func showPlanPreview(_ result: [SceneBody], name: String) {
+        dropPreview()
+        clearSelectionState()
+        showPreview(result, name: name)
     }
 
     func previewCircularPattern(count: Int, angle degrees: Double, axisOrigin: SIMD3<Double>, axis: SIMD3<Double>) {
