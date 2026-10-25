@@ -147,6 +147,11 @@ NS_ASSUME_NONNULL_BEGIN
 - (nullable PCKShape *)chamferingEdges:(NSArray<NSNumber *> *)edges distance:(double)distance
     NS_SWIFT_NAME(chamfering(edges:distance:));
 
+/// Größter Radius bzw. größte Fasenbreite bis limit, die für diese Kanten noch geht (Halbierungssuche,
+/// auf 1 % genau). 0, wenn gar nichts geht.
+- (double)maximumBlendForEdges:(NSArray<NSNumber *> *)edges upTo:(double)limit chamfer:(BOOL)chamfer
+    NS_SWIFT_NAME(maximumBlend(edges:upTo:chamfer:));
+
 /// Ziehpfeil für eine Kante als [px, py, pz, dx, dy, dz]: Kantenmitte und Richtung ins Material
 /// (Winkelhalbierende der beiden Flächen). nil ohne Kernel oder bei ungültiger Kante.
 - (nullable NSArray<NSNumber *> *)handleOfEdge:(NSInteger)edge NS_SWIFT_NAME(handle(ofEdge:));

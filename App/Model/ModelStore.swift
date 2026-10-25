@@ -485,19 +485,50 @@ final class ModelStore: ObservableObject {
         }
         guard requireKernel() else { return }
         let numbers = selectedEdges.map { NSNumber(value: $0.edge) }
-        let result = switch edgeOperation {
-        case .fillet: bodies[body].shape.filleting(edges: numbers, radius: value)
-        case .chamfer: bodies[body].shape.chamfering(edges: numbers, distance: value)
+        let shape = bodies[body].shape
+        let operation = edgeOperation
+        func blend(_ amount: Double) -> PCKShape? {
+            switch operation {
+            case .fillet: shape.filleting(edges: numbers, radius: amount)
+            case .chamfer: shape.chamfering(edges: numbers, distance: amount)
+            }
+        }
+        // Zu groß: nicht einfach nichts zeigen, sondern den größten möglichen Wert (einmal je Auswahl gesucht)
+        let key = EdgeLimitKey(edges: selectedEdges, operation: operation, shape: ObjectIdentifier(shape))
+        var amount = value
+        var result: PCKShape?
+        if let limit = edgeLimit, limit.key == key, value > limit.value {
+            amount = limit.value
+        } else {
+            result = blend(value)
+        }
+        if result == nil {
+            if edgeLimit?.key != key || value <= (edgeLimit?.value ?? 0) {
+                let found = shape.maximumBlend(edges: numbers, upTo: value, chamfer: operation == .chamfer)
+                edgeLimit = (key, (found * 100).rounded(.down) / 100)
+            }
+            amount = edgeLimit?.value ?? 0
+            result = amount > 0 ? blend(amount) : nil
         }
         guard let result else {
-            message = "\(edgeOperation.rawValue) mit \(value.formatted()) mm nicht möglich (zu groß?)."
+            message = "\(operation.rawValue) an dieser Kante nicht möglich."
+            dropPreview()
             return
         }
-        message = nil
+        message = amount < value - 1e-9
+            ? "\(operation.rawValue): größter möglicher Wert hier \(amount.formatted()) mm." : nil
         var preview = bodies
         preview[body] = preview[body].with(result)
-        showPreview(preview, name: edgeOperation.rawValue)
+        showPreview(preview, name: operation.rawValue)
     }
+
+    /// Größter möglicher Radius bzw. Fasenbreite für die aktuelle Kantenauswahl (Halbierungssuche, gemerkt)
+    private struct EdgeLimitKey: Equatable {
+        var edges: [EdgeRef]
+        var operation: EdgeOperation
+        var shape: ObjectIdentifier
+    }
+    private var edgeLimit: (key: EdgeLimitKey, value: Double)?
 
     /// Gewählte ebene Fläche um value mm herausziehen (> 0) oder hineindrücken (< 0).
     func setFaceValue(_ value: Double) {

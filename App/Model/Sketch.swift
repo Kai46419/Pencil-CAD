@@ -2534,7 +2534,7 @@ final class SketchController: ObservableObject {
             if case .text = entity { continue }
             for (k, q) in entity.handlePoints.enumerated() {
                 let d = simd_distance(p, q)
-                if d <= tolerance * 0.6, d < (bestPoint?.distance ?? .infinity) {
+                if d <= tolerance * 0.8, d < (bestPoint?.distance ?? .infinity) {
                     bestPoint = (d, SketchPointRef(entity: index, index: k))
                 }
             }
@@ -2546,7 +2546,8 @@ final class SketchController: ObservableObject {
                 let ref = SketchCurveRef(entity: index, index: k)
                 guard let line = curvePolyline(ref) else { continue }
                 let d = polylineDistance(from: p, to: line, closed: false).distance
-                if d <= tolerance, d < (bestCurve?.distance ?? .infinity) { bestCurve = (d, ref) }
+                // Linien großzügig treffen (Kai: „Linie zu erwischen ist nicht leicht“)
+                if d <= tolerance * 1.6, d < (bestCurve?.distance ?? .infinity) { bestCurve = (d, ref) }
             }
         }
         return bestCurve.map { .curve($0.ref) }
@@ -2975,7 +2976,20 @@ final class SketchController: ObservableObject {
 
     /// Maße laut Skizzenpalette; beim Zeichnen bleiben Länge und Winkel immer sichtbar.
     var visibleDimensions: [SketchDimension] {
-        showsDimensions || isInProgress ? dimensions : []
+        (showsDimensions || isInProgress ? dimensions : []) + markDimensions
+    }
+
+    /// Abstand zweier gemerkter Punkte (Stift schweben bzw. Finger doppeltippen) als Maß, immer sichtbar,
+    /// in feiner Schrift (nur Anzeige)
+    private var markDimensions: [SketchDimension] {
+        guideLines.enumerated().compactMap { index, guide -> SketchDimension? in
+            guard let pair = guide.lines.first, pair.count == 2, simd_distance(pair[0], pair[1]) > 1e-6 else { return nil }
+            var normal = rightNormal(pair[1] - pair[0])
+            if normal.y < 0 || (normal.y == 0 && normal.x < 0) { normal = -normal }
+            return SketchDimension(kind: .distance, value: simd_distance(pair[0], pair[1]), position: guide.mark,
+                                   direction: normal, isEditable: false, span: pair)
+                .tagged("mark-\(index)", .display)
+        }
     }
 
     var entityPolylines: [[Point2]] {

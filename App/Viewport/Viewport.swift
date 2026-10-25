@@ -89,7 +89,7 @@ final class ViewportView: MTKView {
     private var needsSync = true
     /// Letzte Position des schwebenden Stifts (für Drücken/Doppeltippen ohne eigene Position)
     private var lastHoverLocation: CGPoint?
-    /// Punkt merken durch ruhiges Schweben (2 s)
+    /// Punkt merken durch ruhiges Schweben (1 s)
     private var hoverDwell: DispatchWorkItem?
     private var hoverDwellOrigin: CGPoint?
     /// Aufgelegte Finger beim Skizzieren mit dem Stift (Finger auflegen = tangentialer Bogen)
@@ -185,7 +185,7 @@ final class ViewportView: MTKView {
         // Schwebender Stift (iPad Pro mit Apple Pencil Pro / 2. Gen.)
         let hover = UIHoverGestureRecognizer(target: self, action: #selector(handleHover))
 
-        // Punkt merken: Finger doppeltippen (Stift: 2 s schweben). Ein 1-s-Halten mit aufgesetztem Stift hatte
+        // Punkt merken: Finger doppeltippen (Stift: 1 s schweben). Ein 1-s-Halten mit aufgesetztem Stift hatte
         // beim langsamen Zeichnen ungewollt Punkte gemerkt – darum nur schwebend.
         let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap))
         doubleTap.numberOfTapsRequired = 2
@@ -652,6 +652,7 @@ final class ViewportView: MTKView {
                   let tip = renderer.camera.project(tipWorld, viewSize: bounds.size) else { continue }
             shown.insert(dimension.id)
             field.allowsEditing = dimension.isEditable
+            field.isFine = dimension.id.hasPrefix("mark-")
             field.prefix = dimension.prefix
             if !field.isFirstResponder {
                 field.text = dimension.value.formatted(.number.precision(.fractionLength(0...3)).grouping(.never))
@@ -1348,7 +1349,9 @@ final class ViewportView: MTKView {
         guard let renderer, let model else { return nil }
         let size = bounds.size
         let camera = renderer.camera
-        guard let found = model.mesh.nearestEdge(to: location, tolerance: 16,
+        // 28 pt: mit 16 pt traf der Finger oft die Fläche statt der Kante (Kai: Abrunden zeigte den
+        // Extrudieren-Pfeil der Fläche, Ziehen rundete nichts)
+        guard let found = model.mesh.nearestEdge(to: location, tolerance: 28,
                                                  project: { camera.project($0, viewSize: size) }) else { return nil }
         if let faceHit {
             let edgeDepth = simd_dot(found.point - ray.origin, ray.direction)
@@ -1381,7 +1384,7 @@ final class ViewportView: MTKView {
     }
 
     /// Stift drücken bzw. doppeltippen öffnet das Werkzeugrad – in der Skizze mit „Bogen“ (tangential ohne
-    /// Finger). Punkte merken: Stift 2 s über dem Punkt schweben lassen oder mit dem Finger doppeltippen.
+    /// Finger). Punkte merken: Stift 1 s über dem Punkt schweben lassen oder mit dem Finger doppeltippen.
     /// Während und kurz nach einem Strich wird nichts ausgelöst (fester Griff beim Zeichnen zählt als Drücken).
     fileprivate func pencilAction(at location: CGPoint?) {
         if let sketch, sketch.isActive {
@@ -1390,7 +1393,7 @@ final class ViewportView: MTKView {
         showQuickTools(at: location ?? lastHoverLocation)
     }
 
-    /// Stift schwebt 2 s ruhig (innerhalb weniger Punkte) über einem Fangpunkt: Punkt merken.
+    /// Stift schwebt 1 s ruhig (innerhalb weniger Punkte) über einem Fangpunkt: Punkt merken.
     private func updateHoverDwell(at location: CGPoint?) {
         guard let location else {
             hoverDwell?.cancel()
@@ -1415,10 +1418,10 @@ final class ViewportView: MTKView {
             }
         }
         hoverDwell = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: work)
     }
 
-    /// Doppeltippen mit dem Finger auf einen Fangpunkt: Punkt merken (wie 2 s Schweben mit dem Stift).
+    /// Doppeltippen mit dem Finger auf einen Fangpunkt: Punkt merken (wie 1 s Schweben mit dem Stift).
     @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
         guard let sketch, sketch.isActive, !sketch.isChoosingPlane,
               let point = sketchPoint(at: gesture.location(in: self)) else { return }
@@ -1622,6 +1625,14 @@ final class DimensionField: UITextField {
     var prefix = "" {
         didSet { prefixLabel.text = prefix.isEmpty ? nil : prefix }
     }
+    /// Feine, dünne Schrift (Maß zwischen gemerkten Punkten)
+    var isFine = false {
+        didSet {
+            guard isFine != oldValue else { return }
+            font = .monospacedDigitSystemFont(ofSize: isFine ? 13 : 15, weight: isFine ? .light : .semibold)
+            updateStyle()
+        }
+    }
     private let prefixLabel = UILabel()
 
     init(dimensionID: String) {
@@ -1652,6 +1663,8 @@ final class DimensionField: UITextField {
     }
 
     private func updateStyle() {
+        layer.borderWidth = isFine ? 0.75 : 1.5
+        backgroundColor = isFine ? UIColor.white.withAlphaComponent(0.85) : .white
         layer.borderColor = (allowsEditing ? UIColor.systemBlue : UIColor.systemGray3).cgColor
         isUserInteractionEnabled = allowsEditing
     }

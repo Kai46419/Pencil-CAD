@@ -1006,6 +1006,27 @@ static std::vector<TopoDS_Edge> edgesFromNumbers(const TopTools_IndexedMapOfShap
     return result.IsNull() ? nil : [[PCKShape alloc] initWithShape:result];
 }
 
+- (double)maximumBlendForEdges:(NSArray<NSNumber *> *)numbers upTo:(double)limit chamfer:(BOOL)chamfer {
+    const std::vector<TopoDS_Edge> edges = edgesFromNumbers(_edges, numbers);
+    if (edges.empty() || limit <= 0) return 0;
+    try {
+        // Zusammengefasste Form (wie im Rückfall von blendEdges): zerteilte Seiten begrenzen sonst den Radius
+        const TopoDS_Shape merged = unified(_shape);
+        const std::vector<TopoDS_Edge> mergedEdges = matchEdges(edges, merged);
+        const bool useMerged = !mergedEdges.empty();
+        double lo = 0, hi = limit;
+        for (int i = 0; i < 9 && hi - lo > limit * 0.01; ++i) {
+            const double mid = 0.5 * (lo + hi);
+            const bool ok = !blendOnce(_shape, edges, mid, chamfer).IsNull()
+                || (useMerged && !blendOnce(merged, mergedEdges, mid, chamfer).IsNull());
+            if (ok) lo = mid; else hi = mid;
+        }
+        return lo;
+    } catch (...) {
+        return 0;
+    }
+}
+
 - (nullable NSArray<NSNumber *> *)handleOfEdge:(NSInteger)index {
     if (index < 1 || index > _edges.Extent()) return nil;
     try {
@@ -1366,6 +1387,10 @@ static std::vector<TopoDS_Edge> edgesFromNumbers(const TopTools_IndexedMapOfShap
 
 - (nullable PCKShape *)chamferingEdges:(NSArray<NSNumber *> *)edges distance:(double)distance {
     return nil;
+}
+
+- (double)maximumBlendForEdges:(NSArray<NSNumber *> *)edges upTo:(double)limit chamfer:(BOOL)chamfer {
+    return 0;
 }
 
 - (nullable NSArray<NSNumber *> *)handleOfEdge:(NSInteger)edge {
