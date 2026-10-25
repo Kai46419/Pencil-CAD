@@ -729,7 +729,9 @@ final class SketchController: ObservableObject {
         case .polyline:
             // Finger aufgelegt: tangentialer Bogen am Ende des Linienzugs
             if arcStroke {
-                if let arc = shownArc ?? arcPreview(to: end, origin: start, samples: samples) {
+                // Zuletzt mit dem ungefangenen Stiftpunkt: ein Fang darf den Bogen nie zur Geraden machen
+                if let arc = shownArc ?? arcPreview(to: end, origin: start, samples: samples)
+                    ?? arcPreview(to: point, origin: start, samples: samples) {
                     commitTangentArc(arc)
                     break
                 }
@@ -3137,10 +3139,16 @@ final class SketchController: ObservableObject {
                                   raw: p, anchor: anchor, tolerance: tolerance)
         // Bogen (Finger aufgelegt): Winkelschritte wie 90° zum Linienende bleiben samt Hilfslinie, nur ein Strahl
         // genau entlang der Tangente fällt weg – auf ihm gäbe es keinen Bogen, nur eine gerade Linie
-        if tool == .polyline, arcActive, result.kind == .angle, tangentArc(to: result.point) == nil {
+        // Gilt auch für den Fang auf Kurven (seit Build 57 vor Ausrichtung/Winkel): lag das Bogenende dadurch
+        // auf der Linie bzw. ihrer Verlängerung, entstand „Kein Bogen möglich“
+        if tool == .polyline, arcActive, result.kind != nil, !Self.isPointSnap(result.kind),
+           tangentArc(to: result.point) == nil {
             parallelLines = []
-            result = snapIndex.snap(p, tolerance: tolerance, kinds: snapKinds.subtracting([.angle]), extra: inputPoints,
-                                    anchor: nil, gridStep: gridStep)
+            result = snapIndex.snap(p, tolerance: tolerance, kinds: snapKinds.subtracting([.angle, .onCurve]),
+                                    extra: inputPoints, anchor: nil, gridStep: gridStep)
+            if !Self.isPointSnap(result.kind), tangentArc(to: result.point) == nil {
+                result = SnapResult(point: p, kind: nil)
+            }
         }
         // Bogen (Finger aufgelegt oder rund gezogen): 90° zur Linie am Bogenanfang einrasten (Halbkreis), mit
         // gestrichelter Hilfslinie – unabhängig davon, ob die Linie selbst auf einem 15°-Schritt liegt
