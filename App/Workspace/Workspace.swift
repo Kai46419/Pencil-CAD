@@ -982,7 +982,7 @@ final class Workspace: ObservableObject {
             if sketch.arcActive { return "Bogen-Taste erkannt: Stift zum Endpunkt, dann Finger heben (oder Stift heben)" }
             return "Nächsten Punkt setzen · Finger auflegen: tangentialer Bogen · zurück zum Start schließt"
         case .polyline:
-            return "Ziehen: Linie · rund ziehen: Kreis oder Bogen · Kritzeln über Elemente löscht sie"
+            return "Ziehen: Linie · rund ziehen: Kreis oder Bogen"
         case .arc where sketch.arcMode == .center:
             return sketch.isWaitingForSecondStep ? "Zum Ende ziehen – der Bogen folgt dem Stift (auch über 180°)"
                 : "Vom Mittelpunkt zum Startpunkt ziehen"
@@ -1037,7 +1037,7 @@ final class Workspace: ObservableObject {
         if !sketch.selection.isEmpty {
             return "\(sketch.selection.count) gewählt · rechts eine Einschränkung antippen"
         }
-        if sketch.hasProfile { return "„Fertig“ übernimmt die Skizze · Kritzeln über Elemente löscht sie" }
+        if sketch.hasProfile { return "Grüner Haken beendet die Skizze · Schere entfernt Kurvenstücke" }
         return "Zeichnen auf \(sketch.plane.isOnFace ? "der Fläche" : "der Ebene „\(sketch.plane.name)“")"
     }
 

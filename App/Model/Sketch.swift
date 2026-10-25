@@ -1181,7 +1181,11 @@ final class SketchController: ObservableObject {
 
     // MARK: Stiftgesten
 
-    private static let scribbleTools: Set<SketchTool> = [.polyline, .arc, .spline, .rectangle, .circle, .ellipse, .polygon]
+    /// Kritzeln zum Löschen ist aus (Kai: „dafür reicht die Schere“ – Beschneiden bzw. Auswahl + Löschen)
+    private static let scribbleTools: Set<SketchTool> = []
+    /// Fang feinfühliger als der Trefferradius fürs Antippen: Der Punkt springt erst, wenn der Stift wirklich
+    /// nah ist (Kai: „nicht so krasse Sprünge beim Einsnappen“)
+    private static let snapSensitivity = 0.6
 
     /// Linienwerkzeug: Kreis bzw. Bogen, den der laufende Strich ergibt (nil = gerade Linie).
     private func recognizedShape() -> SketchEntity? {
@@ -1480,7 +1484,8 @@ final class SketchController: ObservableObject {
         let raw = drag.grab + (p - drag.start)
         var target = raw
         if snapEnabled {
-            let result = drag.snapIndex.snap(raw, tolerance: tolerance, kinds: snapKinds, extra: marks, gridStep: gridStep)
+            let result = drag.snapIndex.snap(raw, tolerance: tolerance * Self.snapSensitivity, kinds: snapKinds,
+                                             extra: marks, gridStep: gridStep)
             activeSnap = result.kind == nil ? nil : result
             target = result.point
         }
@@ -3170,7 +3175,8 @@ final class SketchController: ObservableObject {
         return points
     }
 
-    private func snap(_ p: Point2, tolerance: Double, anchor: Point2?) -> Point2 {
+    private func snap(_ p: Point2, tolerance pickTolerance: Double, anchor: Point2?) -> Point2 {
+        let tolerance = pickTolerance * Self.snapSensitivity
         guard snapEnabled else {
             activeSnap = nil
             return p
