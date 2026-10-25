@@ -121,27 +121,35 @@ struct ParameterCard: View {
     // MARK: Skizze
 
     /// Vor der Ebenenwahl keine Karte (wie bei Shapr3D): Die Felder der Standardebenen liegen im Viewport.
+    /// Ohne Infozeile (Werkzeug, Ebene, geschlossene Bereiche – Kai braucht sie nicht): nur Ebene/Abstand bei
+    /// leerer Skizze und die Einstellungen des Werkzeugs; ohne beides keine Karte.
     @ViewBuilder
     private var sketchCard: some View {
-        if !sketch.isChoosingPlane {
+        let planeOptions = !sketch.plane.isOnFace && sketch.isEmpty
+        if !sketch.isChoosingPlane, planeOptions || hasToolOptions {
             Card {
                 VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 14) {
-                        Label(sketch.tool.rawValue, systemImage: sketch.tool.systemImage)
-                            .font(.callout.weight(.semibold))
-                        planeMenu
-                        if !sketch.plane.isOnFace, sketch.isEmpty {
+                    if planeOptions {
+                        HStack(spacing: 14) {
+                            planeMenu
                             NumberField(title: "Abstand", value: sketch.planeOffset, width: 60) { sketch.planeOffset = $0 }
                         }
-                        if let label = sketch.liveLabel {
-                            Text(label)
-                                .monospacedDigit()
-                                .foregroundStyle(Color.accentColor)
-                        }
                     }
-                    toolOptions
+                    if hasToolOptions {
+                        toolOptions
+                    }
                 }
             }
+        }
+    }
+
+    /// Ob das aktive Skizzenwerkzeug Einstellungen zeigt.
+    private var hasToolOptions: Bool {
+        switch sketch.tool {
+        case .select: !sketch.selection.isEmpty
+        case .polyline: sketch.hasOpenChain
+        case .ellipse, .point: false
+        default: true
         }
     }
 

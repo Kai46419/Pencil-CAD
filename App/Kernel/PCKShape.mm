@@ -30,6 +30,10 @@
 #include <GProp_GProps.hxx>
 #include <gp_GTrsf.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
+#include <BRepBuilderAPI_MakeVertex.hxx>
+#include <BRepBndLib.hxx>
+#include <BRepExtrema_DistShapeShape.hxx>
+#include <Bnd_Box.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
@@ -852,6 +856,97 @@ static TopoDS_Shape unified(const TopoDS_Shape &shape) {
     }
 }
 
+/// Punkt bei Anteil t (0…1) des Parameterbereichs einer Kante.
+static gp_Pnt edgePoint(const TopoDS_Edge &edge, double t) {
+    BRepAdaptor_Curve curve(edge);
+    return curve.Value(curve.FirstParameter() + t * (curve.LastParameter() - curve.FirstParameter()));
+}
+
+/// Liegt p (bis auf tolerance) auf der Kante? Erst grob über den Hüllquader, dann genau.
+static bool pointOnEdge(const gp_Pnt &p, const TopoDS_Edge &edge, double tolerance) {
+    Bnd_Box box;
+    BRepBndLib::Add(edge, box);
+    box.Enlarge(tolerance);
+    if (box.IsOut(p)) return false;
+    BRepExtrema_DistShapeShape distance(BRepBuilderAPI_MakeVertex(p).Vertex(), edge);
+    return distance.IsDone() && distance.Value() < tolerance;
+}
+
+/// Die Kanten von shape, die aus den gegebenen (alten) Kanten hervorgegangen sind: zusammengefasst
+/// (alte Mitte liegt auf der neuen Kante), gekürzt oder geteilt (neue Kante liegt ganz auf der alten).
+static std::vector<TopoDS_Edge> matchEdges(const std::vector<TopoDS_Edge> &old, const TopoDS_Shape &shape) {
+    const double tolerance = 1e-4;
+    TopTools_IndexedMapOfShape edges;
+    TopExp::MapShapes(shape, TopAbs_EDGE, edges);
+    std::vector<gp_Pnt> oldMids;
+    for (const auto &edge : old) oldMids.push_back(edgePoint(edge, 0.5));
+    std::vector<TopoDS_Edge> result;
+    for (int i = 1; i <= edges.Extent(); ++i) {
+        const TopoDS_Edge edge = TopoDS::Edge(edges(i));
+        if (BRep_Tool::Degenerated(edge)) continue;
+        const gp_Pnt mid = edgePoint(edge, 0.5), quarter = edgePoint(edge, 0.25), last = edgePoint(edge, 0.75);
+        for (size_t k = 0; k < old.size(); ++k) {
+            const bool merged = pointOnEdge(oldMids[k], edge, tolerance);
+            const bool piece = !merged && pointOnEdge(mid, old[k], tolerance) && pointOnEdge(quarter, old[k], tolerance)
+                && pointOnEdge(last, old[k], tolerance);
+            if (merged || piece) {
+                result.push_back(edge);
+                break;
+            }
+        }
+    }
+    return result;
+}
+
+/// Ein Durchgang Abrunden bzw. Fasen; leere Form bei Fehler.
+static TopoDS_Shape blendOnce(const TopoDS_Shape &shape, const std::vector<TopoDS_Edge> &edges, double value,
+                              bool chamfer) {
+    try {
+        if (chamfer) {
+            BRepFilletAPI_MakeChamfer maker(shape);
+            for (const auto &edge : edges) maker.Add(value, edge);
+            maker.Build();
+            if (maker.IsDone()) return maker.Shape();
+        } else {
+            BRepFilletAPI_MakeFillet maker(shape);
+            for (const auto &edge : edges) maker.Add(value, edge);
+            maker.Build();
+            if (maker.IsDone()) return maker.Shape();
+        }
+    } catch (...) {
+    }
+    return TopoDS_Shape();
+}
+
+/// Abrunden/Fasen, das nicht an zerteilten Flächen hängen bleibt. Nach Skizzen mit Schnittpunkten oder
+/// booleschen Operationen besteht eine Seite oft aus mehreren gleichen Flächen bzw. kurzen Kantenstücken –
+/// dann ging nur ein winziger Radius. Darum: 1. direkt, 2. nach Zusammenfassen gleicher Flächen und Kanten,
+/// 3. Kante für Kante nacheinander (benachbarte Rundungen blockieren sich nicht mehr gegenseitig).
+static TopoDS_Shape blendEdges(const TopoDS_Shape &shape, const std::vector<TopoDS_Edge> &edges, double value,
+                               bool chamfer) {
+    if (edges.empty() || value <= 0) return TopoDS_Shape();
+    TopoDS_Shape result = blendOnce(shape, edges, value, chamfer);
+    if (!result.IsNull()) return result;
+    try {
+        const TopoDS_Shape merged = unified(shape);
+        const std::vector<TopoDS_Edge> mergedEdges = matchEdges(edges, merged);
+        if (mergedEdges.empty()) return TopoDS_Shape();
+        result = blendOnce(merged, mergedEdges, value, chamfer);
+        if (!result.IsNull() || edges.size() < 2) return result;
+        TopoDS_Shape current = merged;
+        for (const auto &edge : edges) {
+            const std::vector<TopoDS_Edge> step = matchEdges({edge}, current);
+            // Leer: schon von einer vorigen Rundung erfasst (tangentiale Kette)
+            if (step.empty()) continue;
+            current = blendOnce(current, step, value, chamfer);
+            if (current.IsNull()) return TopoDS_Shape();
+        }
+        return current;
+    } catch (...) {
+        return TopoDS_Shape();
+    }
+}
+
 /// Echte Kanten einer Fläche, ohne Nahtkanten (z. B. bei Zylindern) und entartete Kanten.
 static TopTools_IndexedMapOfShape realEdgesOfFace(const TopTools_IndexedMapOfShape &faces, NSInteger index) {
     TopTools_IndexedMapOfShape result;
@@ -874,36 +969,20 @@ static TopTools_IndexedMapOfShape realEdgesOfFace(const TopTools_IndexedMapOfSha
     return numbers;
 }
 
+static std::vector<TopoDS_Edge> edgeVector(const TopTools_IndexedMapOfShape &map) {
+    std::vector<TopoDS_Edge> result;
+    for (int i = 1; i <= map.Extent(); ++i) result.push_back(TopoDS::Edge(map(i)));
+    return result;
+}
+
 - (nullable PCKShape *)filletingEdgesOfFace:(NSInteger)face radius:(double)radius {
-    const TopTools_IndexedMapOfShape edges = realEdgesOfFace(_faces, face);
-    if (edges.IsEmpty() || radius <= 0) return nil;
-    try {
-        BRepFilletAPI_MakeFillet fillet(_shape);
-        for (int i = 1; i <= edges.Extent(); ++i) {
-            fillet.Add(radius, TopoDS::Edge(edges(i)));
-        }
-        fillet.Build();
-        if (!fillet.IsDone()) return nil;
-        return [[PCKShape alloc] initWithShape:fillet.Shape()];
-    } catch (...) {
-        return nil;
-    }
+    const TopoDS_Shape result = blendEdges(_shape, edgeVector(realEdgesOfFace(_faces, face)), radius, false);
+    return result.IsNull() ? nil : [[PCKShape alloc] initWithShape:result];
 }
 
 - (nullable PCKShape *)chamferingEdgesOfFace:(NSInteger)face distance:(double)distance {
-    const TopTools_IndexedMapOfShape edges = realEdgesOfFace(_faces, face);
-    if (edges.IsEmpty() || distance <= 0) return nil;
-    try {
-        BRepFilletAPI_MakeChamfer chamfer(_shape);
-        for (int i = 1; i <= edges.Extent(); ++i) {
-            chamfer.Add(distance, TopoDS::Edge(edges(i)));
-        }
-        chamfer.Build();
-        if (!chamfer.IsDone()) return nil;
-        return [[PCKShape alloc] initWithShape:chamfer.Shape()];
-    } catch (...) {
-        return nil;
-    }
+    const TopoDS_Shape result = blendEdges(_shape, edgeVector(realEdgesOfFace(_faces, face)), distance, true);
+    return result.IsNull() ? nil : [[PCKShape alloc] initWithShape:result];
 }
 
 /// Kanten aus Nummern (ab 1); ungültige Nummern werden übersprungen.
@@ -918,35 +997,13 @@ static std::vector<TopoDS_Edge> edgesFromNumbers(const TopTools_IndexedMapOfShap
 }
 
 - (nullable PCKShape *)filletingEdges:(NSArray<NSNumber *> *)numbers radius:(double)radius {
-    const std::vector<TopoDS_Edge> edges = edgesFromNumbers(_edges, numbers);
-    if (edges.empty() || radius <= 0) return nil;
-    try {
-        BRepFilletAPI_MakeFillet fillet(_shape);
-        for (const auto &edge : edges) {
-            fillet.Add(radius, edge);
-        }
-        fillet.Build();
-        if (!fillet.IsDone()) return nil;
-        return [[PCKShape alloc] initWithShape:fillet.Shape()];
-    } catch (...) {
-        return nil;
-    }
+    const TopoDS_Shape result = blendEdges(_shape, edgesFromNumbers(_edges, numbers), radius, false);
+    return result.IsNull() ? nil : [[PCKShape alloc] initWithShape:result];
 }
 
 - (nullable PCKShape *)chamferingEdges:(NSArray<NSNumber *> *)numbers distance:(double)distance {
-    const std::vector<TopoDS_Edge> edges = edgesFromNumbers(_edges, numbers);
-    if (edges.empty() || distance <= 0) return nil;
-    try {
-        BRepFilletAPI_MakeChamfer chamfer(_shape);
-        for (const auto &edge : edges) {
-            chamfer.Add(distance, edge);
-        }
-        chamfer.Build();
-        if (!chamfer.IsDone()) return nil;
-        return [[PCKShape alloc] initWithShape:chamfer.Shape()];
-    } catch (...) {
-        return nil;
-    }
+    const TopoDS_Shape result = blendEdges(_shape, edgesFromNumbers(_edges, numbers), distance, true);
+    return result.IsNull() ? nil : [[PCKShape alloc] initWithShape:result];
 }
 
 - (nullable NSArray<NSNumber *> *)handleOfEdge:(NSInteger)index {

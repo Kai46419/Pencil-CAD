@@ -140,6 +140,13 @@ struct SnapIndex {
             return SnapResult(point: best.point, kind: best.kind)
         }
 
+        // 1b. Auf Kurve – vor Ausrichtung und Winkel, sonst fanden Kreis und Linie viele Stellen einer Linie
+        //     nicht. Mit Raster rastet der Punkt im Rastermaß entlang der Linie ein (ab ihrem Anfang).
+        if kinds.contains(.onCurve),
+           let point = onCurve(p, tolerance: tolerance * 0.7, step: kinds.contains(.grid) ? gridStep : 0) {
+            return SnapResult(point: point, kind: .onCurve)
+        }
+
         // 2. Winkelschritte und Ausrichtung
         var result = SnapResult(point: p, kind: nil)
         let keyPoints = endpoints + centers + midpoints + extra
@@ -197,20 +204,6 @@ struct SnapIndex {
             result.guides.append((anchor, result.point))
         }
 
-        // 3. Auf Kurve, wenn sonst nichts greift
-        if result.kind == nil, kinds.contains(.onCurve) {
-            var nearest: (distance: Double, point: Point2)?
-            for curve in curves where curve.count >= 2 {
-                let hit = polylineDistance(from: p, to: curve, closed: false)
-                if hit.distance <= tolerance * 0.7, hit.distance < (nearest?.distance ?? .infinity) {
-                    nearest = (hit.distance, hit.point)
-                }
-            }
-            if let nearest {
-                return SnapResult(point: nearest.point, kind: .onCurve)
-            }
-        }
-
         // 4. Raster für die noch freien Richtungen
         if kinds.contains(.grid), direction == nil, gridStep > 0 {
             let rounded = (p / gridStep).rounded(.toNearestOrAwayFromZero) * gridStep
@@ -222,6 +215,44 @@ struct SnapIndex {
     }
 
     // MARK: Intern
+
+    /// Nächster Punkt auf einer Kurve innerhalb tolerance. step > 0: im Rastermaß entlang der Kurve – bei
+    /// Linienzügen ab der Ecke der getroffenen Strecke, bei fein abgetasteten Bögen/Splines ab Kurvenanfang.
+    private func onCurve(_ p: Point2, tolerance: Double, step: Double) -> Point2? {
+        var best: (distance: Double, curve: Int, segment: Int, point: Point2)?
+        for (index, curve) in curves.enumerated() where curve.count >= 2 {
+            for k in 0..<(curve.count - 1) {
+                let a = curve[k], b = curve[k + 1]
+                let ab = b - a
+                let lengthSquared = simd_length_squared(ab)
+                let t = lengthSquared > 1e-18 ? min(max(simd_dot(p - a, ab) / lengthSquared, 0), 1) : 0
+                let foot = a + ab * t
+                let distance = simd_distance(p, foot)
+                if distance <= tolerance, distance < (best?.distance ?? .infinity) {
+                    best = (distance, index, k, foot)
+                }
+            }
+        }
+        guard let best else { return nil }
+        guard step > 0 else { return best.point }
+        let curve = curves[best.curve]
+        if curve.count <= 8 {
+            let a = curve[best.segment], b = curve[best.segment + 1]
+            let length = simd_distance(a, b)
+            guard length > 1e-9 else { return best.point }
+            let along = min(max((simd_distance(a, best.point) / step).rounded() * step, 0), length)
+            return a + (b - a) * (along / length)
+        }
+        var lengths = [0.0]
+        for k in 1..<curve.count { lengths.append(lengths[k - 1] + simd_distance(curve[k - 1], curve[k])) }
+        let total = lengths[lengths.count - 1]
+        let travelled = lengths[best.segment] + simd_distance(curve[best.segment], best.point)
+        let target = min(max((travelled / step).rounded() * step, 0), total)
+        guard let k = lengths.firstIndex(where: { $0 >= target }), k > 0 else { return curve[0] }
+        let piece = lengths[k] - lengths[k - 1]
+        let f = piece > 1e-12 ? (target - lengths[k - 1]) / piece : 0
+        return curve[k - 1] + (curve[k] - curve[k - 1]) * f
+    }
 
     private static func unique(_ points: [Point2]) -> [Point2] {
         var result: [Point2] = []

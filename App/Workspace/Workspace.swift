@@ -325,8 +325,9 @@ final class Workspace: ObservableObject {
     // MARK: Werkzeuge
 
     func activate(_ newTool: ModelTool) {
+        // Ein 3D-Werkzeug verlässt die Skizze – gespeichert wie mit dem grünen Haken, nie verworfen
         if sketch.isActive {
-            endSketch()
+            finishSketch()
         }
         let previousBody = model.selectedBody
         let previousBodies = model.selectedBodies
@@ -448,12 +449,12 @@ final class Workspace: ObservableObject {
     /// „Fertig“: aktuelles Werkzeug bzw. Vorschau übernehmen.
     func done() {
         if sketch.isActive {
+            // Wie Fusion 360: „Fertig“ schließt nur die laufende Eingabe ab. Die Skizze bleibt offen,
+            // bis der grüne Haken „Skizzieren beenden“ getippt wird.
             if sketch.isChoosingPlane {
                 chooseSketchPlane(.top)
-            } else if sketch.hasOffsetTarget {
-                sketch.applyOffset()
             } else {
-                finishSketch()
+                sketch.finishCurrentInput()
             }
             return
         }
@@ -479,13 +480,12 @@ final class Workspace: ObservableObject {
     /// „Abbrechen“: Vorschau verwerfen, zurück zur Auswahl.
     func cancel() {
         if sketch.isActive {
-            if sketch.hasOffsetTarget {
-                sketch.cancelOffset()
-            } else if !sketch.isEmpty, editingSketchIndex == nil {
-                // Neue Skizze: erst leeren, ein zweites „Abbrechen“ verlässt den Skizzenmodus
-                sketch.reset()
-            } else {
+            // Verwirft nur die laufende Eingabe; die Skizze bleibt offen (Ende nur über den grünen Haken).
+            // Vor der Ebenenwahl gibt es noch nichts zu verlieren: dann zurück ins Modell.
+            if sketch.isChoosingPlane {
                 endSketch()
+            } else {
+                sketch.cancelCurrentInput()
             }
             return
         }

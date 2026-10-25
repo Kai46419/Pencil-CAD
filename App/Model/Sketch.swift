@@ -623,7 +623,16 @@ final class SketchController: ObservableObject {
             moveSelectDrag(to: point, tolerance: tolerance)
             return
         }
-        guard dragStart != nil else { return }
+        guard let start = dragStart else { return }
+        // Strich beginnt woanders als am Ende des offenen Linienzugs (z. B. an einer Rechteckecke): neue Linie
+        // ab dem eingerasteten Startpunkt statt Fortsetzung des alten Zugs. Ausnahmen: Antippen (Punkt für
+        // Punkt), Bogen-Taste und der schließende Strich ab dem Zuganfang.
+        if tool == .polyline, !arcActive, let end = chainEnd, simd_distance(end, start) > strokeTolerance,
+           simd_distance(start, point) > strokeTolerance,
+           chainStart.map({ simd_distance($0, start) > strokeTolerance }) ?? true {
+            chainStart = nil
+            chainEnd = nil
+        }
         dragCurrent = snap(point, tolerance: tolerance, anchor: strokeAnchor)
         if strokeSamples.count < 4000 { strokeSamples.append(point) }
         if tool == .polyline, strokeSamples.count % 4 == 0 { strokeShape = recognizedShape() }
@@ -1249,7 +1258,10 @@ final class SketchController: ObservableObject {
                 guideLines.append((middle, [[a, b], [middle - across * half, middle + across * half]]))
             }
             capturedPoints = []
-            notice = "Mitte gesetzt (Dreieck, fangbar) – gestrichelt die Mittellinie."
+            // Wie Messen: Abstand und Lage der beiden Punkte gleich mit anzeigen
+            let d = b - a
+            let mm = { (value: Double) in value.formatted(.number.precision(.fractionLength(0...3))) }
+            notice = "Abstand \(mm(simd_length(d))) mm (ΔX \(mm(abs(d.x))), ΔY \(mm(abs(d.y)))) – Mitte gesetzt (Dreieck, fangbar), gestrichelt die Mittellinie."
         } else {
             notice = "Punkt 1 gemerkt – zweiten Punkt merken (Stift darüber drücken bzw. doppeltippen)."
         }
@@ -1698,9 +1710,86 @@ final class SketchController: ObservableObject {
         entitiesChanged()
     }
 
+    /// Versatz am Ziehpfeil einrasten: dort, wo die versetzte Kurve durch einen Fangpunkt (Ende, Mitte, Zentrum,
+    /// Schnittpunkt) geht oder der Pfeil eine andere Linie kreuzt. nil = nichts in der Nähe (dann Rasterschritt).
+    func snapOffset(_ raw: Double, tolerance: Double) -> Double? {
+        guard snapEnabled, let target = offsetTarget, simd_length(target.direction) > 1e-12 else {
+            activeSnap = nil
+            return nil
+        }
+        let a = target.anchor, d = simd_normalize(target.direction)
+        var best: (gap: Double, t: Double, source: Point2, kind: SnapKind)?
+        func consider(_ t: Double, source: Point2, kind: SnapKind) {
+            let gap = abs(t - raw)
+            guard abs(t) > 1e-6, gap <= tolerance, gap < (best?.gap ?? .infinity) else { return }
+            best = (gap, t, source, kind)
+        }
+        for node in snapIndex.nodes where snapKinds.contains(node.kind) {
+            consider(simd_dot(node.point - a, d), source: node.point, kind: node.kind)
+        }
+        // Wo der Pfeil (Senkrechte durch den Ansatzpunkt) andere Linien und Kurven kreuzt
+        for curve in snapIndex.curves where curve.count >= 2 {
+            for (p, q) in zip(curve, curve.dropFirst()) {
+                let s = q - p
+                let denominator = d.x * s.y - d.y * s.x
+                guard abs(denominator) > 1e-12 else { continue }
+                let w = p - a
+                let t = (w.x * s.y - w.y * s.x) / denominator
+                let u = (w.x * d.y - w.y * d.x) / denominator
+                guard u >= -1e-9, u <= 1 + 1e-9 else { continue }
+                consider(t, source: a + d * t, kind: .intersection)
+            }
+        }
+        guard let best else {
+            activeSnap = nil
+            return nil
+        }
+        let point = a + d * best.t
+        activeSnap = SnapResult(point: point, kind: best.kind, guides: [(best.source, point), (a, point)])
+        return best.t
+    }
+
+    /// Ziehpfeil losgelassen: Fangsymbol des Versatzes ausblenden.
+    func endOffsetSnap() {
+        guard activeSnap != nil, dragStart == nil else { return }
+        activeSnap = nil
+        changed()
+    }
+
     func cancelOffset() {
         offsetTarget = nil
         updateOffsetPreview()
+    }
+
+    /// „Fertig“ unten im Skizzenmodus: laufende Eingabe abschließen (Versatz übernehmen, Linienzug/Spline
+    /// beenden), Auswahl und Hilfslinien weg – die Skizze bleibt offen. Beendet wird sie nur über den grünen Haken.
+    func finishCurrentInput() {
+        if offsetTarget != nil, offsetDistance != 0 {
+            applyOffset()
+        }
+        finishInput()
+        pendingAction = nil
+        clearHelpers()
+    }
+
+    /// „Abbrechen“ unten im Skizzenmodus: laufende Eingabe verwerfen, die Skizze bleibt offen.
+    func cancelCurrentInput() {
+        if dragStart != nil { cancelStroke() }
+        splinePoints = []
+        finishInput()
+        pendingAction = nil
+        clearHelpers()
+    }
+
+    /// Auswahl, gemerkte Punkte, Hilfspunkte und Mittellinien entfernen.
+    private func clearHelpers() {
+        selection = []
+        selectedMarks = []
+        capturedPoints = []
+        marks = []
+        guideLines = []
+        notice = nil
+        changed()
     }
 
     // MARK: Zurücksetzen und Rückgängig
@@ -2218,8 +2307,10 @@ final class SketchController: ObservableObject {
         if radians < 0 { radians += 2 * .pi }
         let half = radians / 2
         let label = a + Point2(cos(half), sin(half)) * length * 0.45
-        return [SketchDimension(kind: .angle, value: radians * 180 / .pi, position: label, direction: Point2(0, 1),
-                                isEditable: false).tagged("live-angle", .display)]
+        // span: Linienanfang (Scheitel) und -ende, damit das Etikett Abstand zur Linie halten kann
+        return [SketchDimension(kind: .angle, value: radians * 180 / .pi, position: label,
+                                direction: Point2(cos(half), sin(half)), isEditable: false, span: [a, b])
+                    .tagged("live-angle", .display)]
     }
 
     private static func lineDimensions(_ a: Point2, _ b: Point2, editable: Bool) -> [SketchDimension] {
@@ -2438,9 +2529,16 @@ final class SketchController: ObservableObject {
         var pointRef = false
         if case .point? = ref { pointRef = true }
         // Hilfspunkte vor Kurven, Elementpunkte vor Hilfspunkten
-        let mark: Int? = pointRef ? nil : marks.indices
+        var mark: Int? = pointRef ? nil : marks.indices
             .filter { simd_distance(marks[$0], p) <= tolerance * 0.6 }
             .min { simd_distance(marks[$0], p) < simd_distance(marks[$1], p) }
+        // Mittellinie antippen (nicht nur ihren Mittelpunkt): wählt sie aus, „Löschen“ entfernt sie
+        if mark == nil, ref == nil,
+           let guide = guideLines.first(where: { guide in
+               guide.lines.contains { polylineDistance(from: p, to: $0, closed: false).distance <= tolerance * 0.6 }
+           }) {
+            mark = marks.firstIndex { simd_distance($0, guide.mark) < 1e-9 }
+        }
         if let mark {
             if let index = selectedMarks.firstIndex(of: mark) {
                 selectedMarks.remove(at: index)

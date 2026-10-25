@@ -71,6 +71,14 @@ final class ViewportView: MTKView {
     private let valueLabel = PaddedLabel()
     private var planeLabels: [PaddedLabel] = []
     private var dimensionFields: [String: DimensionField] = [:]
+    /// Kleines Ziffernfeld am gerade bearbeiteten Maß (statt der Bildschirmtastatur, die die Maße verdeckt)
+    private lazy var keypad: DimensionKeypad = {
+        let keypad = DimensionKeypad()
+        keypad.isHidden = true
+        keypad.onKey = { [weak self] key in self?.keypadPressed(key) }
+        self.addSubview(keypad)
+        return keypad
+    }()
     /// Kurzzeichen der Einschränkungen am Element
     private var badgeLabels: [PaddedLabel] = []
     /// Geladene Bilder (Canvas) je Datei
@@ -610,7 +618,12 @@ final class ViewportView: MTKView {
         case .radius:
             return ([[a, b], arrowHead(at: b, from: a)], b + dimension.direction * 6 * perPoint, false)
         case .angle:
-            return ([], dimension.position, true)
+            // Winkel beim Zeichnen: auf der Winkelhalbierenden, mindestens 70 pt vom Linienanfang entfernt
+            // (bei kurzen Linien lag das Etikett sonst auf der Linie)
+            let bisector = dimension.position - a
+            guard simd_length(bisector) > 1e-9 else { return ([], dimension.position, true) }
+            let radius = max(simd_length(bisector), 70 * perPoint)
+            return ([], a + simd_normalize(bisector) * radius, true)
         }
     }
 
@@ -642,7 +655,16 @@ final class ViewportView: MTKView {
             dx /= length
             dy /= length
             // Auf der Maßlinie mittig, sonst neben das Element, Abstand passend zur Größe des Felds
-            let distance = geometry.onLine ? 0 : abs(dx) * field.bounds.width / 2 + abs(dy) * field.bounds.height / 2
+            let extent = abs(dx) * field.bounds.width / 2 + abs(dy) * field.bounds.height / 2
+            var distance = geometry.onLine ? 0 : extent
+            // Nie auf der gemessenen Linie: beim Zeichnen lag das Feld sonst teils über der Linie (Kai sah die
+            // Länge nicht). Abstand Feldmitte–Linie mindestens halbe Feldgröße plus Luft.
+            if geometry.onLine, dimension.span.count == 2,
+               let a = renderer.camera.project(SIMD3<Float>(plane.world(dimension.span[0])), viewSize: bounds.size),
+               let b = renderer.camera.project(SIMD3<Float>(plane.world(dimension.span[1])), viewSize: bounds.size) {
+                let gap = anchor.distance(toSegment: a, b)
+                distance = max(0, extent + 6 - gap)
+            }
             field.center = CGPoint(x: anchor.x + dx * distance, y: anchor.y + dy * distance)
             field.isHidden = false
         }
@@ -653,6 +675,47 @@ final class ViewportView: MTKView {
             }
             field.isHidden = true
         }
+        placeKeypad()
+    }
+
+    /// Ziffernfeld neben das bearbeitete Maß: darunter, sonst darüber, immer ganz im Bild.
+    private func placeKeypad() {
+        guard let field = dimensionFields.values.first(where: { $0.isFirstResponder && !$0.isHidden }) else {
+            keypad.isHidden = true
+            return
+        }
+        let size = keypad.sizeThatFits(.zero)
+        let gap: CGFloat = 12
+        var y = field.frame.maxY + gap
+        if y + size.height > bounds.height - safeAreaInsets.bottom - 90 {
+            y = field.frame.minY - gap - size.height
+        }
+        let margin: CGFloat = 8
+        let x = min(max(field.center.x - size.width / 2, margin), max(bounds.width - size.width - margin, margin))
+        y = min(max(y, safeAreaInsets.top + margin), max(bounds.height - size.height - margin, margin))
+        keypad.frame = CGRect(origin: CGPoint(x: x, y: y), size: size)
+        bringSubviewToFront(keypad)
+        keypad.isHidden = false
+    }
+
+    private func keypadPressed(_ key: DimensionKeypad.Key) {
+        guard let field = dimensionFields.values.first(where: { $0.isFirstResponder }) else { return }
+        switch key {
+        case .digit(let text):
+            // Ein Komma genügt
+            if text == ",", (field.text ?? "").contains(where: { $0 == "," || $0 == "." }) { return }
+            field.insertText(text)
+        case .delete:
+            field.deleteBackward()
+        case .clear:
+            field.text = ""
+        case .cancel:
+            field.appliesOnEnd = false
+            field.resignFirstResponder()
+        case .done:
+            field.resignFirstResponder()
+        }
+        field.sizeToFit()
     }
 
     private func makeDimensionField(_ id: String) -> DimensionField {
@@ -1053,7 +1116,11 @@ final class ViewportView: MTKView {
         if let drag = handleDrag, touches.contains(drag.touch) {
             if let parameter = axisParameter(at: drag.touch.location(in: self), handle: drag.handle) {
                 let raw = drag.handle.value + Double(parameter - drag.startParameter)
-                let snapped = (raw / drag.step).rounded() * drag.step
+                var snapped = (raw / drag.step).rounded() * drag.step
+                // Skizze versetzen: rastet an Punkten und gekreuzten Linien ein
+                if drag.handle.kind == .offset, let sketch, let hit = sketch.snapOffset(raw, tolerance: snapTolerance) {
+                    snapped = hit
+                }
                 workspace?.apply(drag.handle.kind, value: snapped)
                 refresh()
             }
@@ -1081,6 +1148,7 @@ final class ViewportView: MTKView {
         updateHeldFingers(ended: touches)
         if let drag = handleDrag, touches.contains(drag.touch) {
             handleDrag = nil
+            if drag.handle.kind == .offset { sketch?.endOffsetSnap() }
             refresh()
             return
         }
@@ -1117,6 +1185,7 @@ final class ViewportView: MTKView {
         updateHeldFingers(ended: touches)
         if let drag = handleDrag, touches.contains(drag.touch) {
             handleDrag = nil
+            if drag.handle.kind == .offset { sketch?.endOffsetSnap() }
             refresh()
             return
         }
@@ -1304,14 +1373,20 @@ final class ViewportView: MTKView {
     /// Während und kurz nach einem Strich (bzw. mit aufgelegtem Finger) wird nichts ausgelöst: Ein festerer
     /// Griff beim Zeichnen meldet der Pencil Pro als Drücken, das hat ungewollt „Punkt 1 gemerkt“ ergeben.
     /// Gemerkt wird nur, wenn der Stift gerade wirklich über dem Punkt schwebt.
+    /// Im Skizzenmodus öffnet Drücken nie das Werkzeugrad (Kai: Drücken = Punkt markieren, auch bei
+    /// Konstruktionslinien). Fehlt die Schwebeposition im Ereignis, gilt die letzte bekannte des Stifts.
     fileprivate func pencilAction(at location: CGPoint?) {
-        if let sketch, sketch.isActive {
+        if let sketch, sketch.isActive, !sketch.isChoosingPlane {
             guard sketchTouch == nil, heldFingers.isEmpty, CACurrentMediaTime() - strokeEndedAt > 0.8 else { return }
-            if !sketch.isChoosingPlane, let location,
-               let point = sketchPoint(at: location), sketch.captureHovered(at: point, tolerance: snapTolerance) {
-                refresh()
+            guard let location = location ?? lastHoverLocation, let point = sketchPoint(at: location) else {
+                sketch.notice = "Stift über den Punkt halten (nicht aufsetzen) und drücken."
                 return
             }
+            if !sketch.captureHovered(at: point, tolerance: snapTolerance * 1.25) {
+                sketch.notice = "Kein Punkt unter dem Stift – Ende, Mitte, Zentrum oder Schnittpunkt anpeilen und drücken."
+            }
+            refresh()
+            return
         }
         showQuickTools(at: location)
     }
@@ -1374,7 +1449,8 @@ extension ViewportView: UIGestureRecognizerDelegate {
 
     /// Antippen eines Maßfelds öffnet nur das Feld.
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-        !(touch.view is UITextField)
+        guard let view = touch.view else { return true }
+        return !(view is UITextField) && !view.isDescendant(of: keypad)
     }
 }
 
@@ -1383,9 +1459,17 @@ extension ViewportView: UITextFieldDelegate {
         (textField as? DimensionField)?.allowsEditing ?? false
     }
 
+    /// Cursor hinter die letzte Ziffer (nicht davor, nicht alles markiert) und das Ziffernfeld daneben öffnen.
     func textFieldDidBeginEditing(_ textField: UITextField) {
         (textField as? DimensionField)?.appliesOnEnd = true
-        textField.selectAll(nil)
+        let toEnd = { [weak textField] in
+            guard let textField else { return }
+            textField.selectedTextRange = textField.textRange(from: textField.endOfDocument, to: textField.endOfDocument)
+        }
+        toEnd()
+        // Das Antippen setzt den Cursor erst nach diesem Aufruf – darum gleich danach nochmal ans Ende
+        DispatchQueue.main.async(execute: toEnd)
+        placeKeypad()
     }
 
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {
@@ -1394,6 +1478,7 @@ extension ViewportView: UITextFieldDelegate {
     }
 
     func textFieldDidEndEditing(_ textField: UITextField) {
+        keypad.isHidden = true
         guard let field = textField as? DimensionField, field.appliesOnEnd else { return }
         apply(field)
     }
@@ -1510,6 +1595,10 @@ final class DimensionField: UITextField {
         keyboardType = .decimalPad
         returnKeyType = .done
         autocorrectionType = .no
+        // Keine Bildschirmtastatur (sie verdeckte die Maße): der Viewport zeigt ein kleines Ziffernfeld daneben
+        inputView = UIView(frame: .zero)
+        inputAssistantItem.leadingBarButtonGroups = []
+        inputAssistantItem.trailingBarButtonGroups = []
         backgroundColor = .white
         textColor = .black
         layer.cornerRadius = 8
@@ -1554,5 +1643,91 @@ final class DimensionField: UITextField {
 
     override func editingRect(forBounds bounds: CGRect) -> CGRect {
         textRect(forBounds: bounds)
+    }
+}
+
+/// Kleines Ziffernfeld für Maße (schwebt neben dem Maß statt der großen Bildschirmtastatur).
+final class DimensionKeypad: UIView {
+    enum Key {
+        case digit(String)
+        case delete, clear, cancel, done
+    }
+
+    var onKey: (Key) -> Void = { _ in }
+
+    private static let keySize = CGSize(width: 48, height: 42)
+    private static let spacing: CGFloat = 6
+    private static let padding: CGFloat = 8
+
+    /// Zeilen: Titel und Taste; „✓“ in der letzten Zeile doppelt breit
+    private static let rows: [[(String, Key)]] = [
+        [("7", .digit("7")), ("8", .digit("8")), ("9", .digit("9")), ("⌫", .delete)],
+        [("4", .digit("4")), ("5", .digit("5")), ("6", .digit("6")), ("C", .clear)],
+        [("1", .digit("1")), ("2", .digit("2")), ("3", .digit("3")), ("✕", .cancel)],
+        [(",", .digit(",")), ("0", .digit("0")), ("✓", .done)],
+    ]
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = UIColor.systemBackground.withAlphaComponent(0.97)
+        layer.cornerRadius = 16
+        layer.shadowColor = UIColor.black.cgColor
+        layer.shadowOpacity = 0.2
+        layer.shadowRadius = 10
+        layer.shadowOffset = CGSize(width: 0, height: 3)
+        let stack = UIStackView()
+        stack.axis = .vertical
+        stack.spacing = Self.spacing
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        for row in Self.rows {
+            let line = UIStackView()
+            line.axis = .horizontal
+            line.spacing = Self.spacing
+            for (title, key) in row {
+                let button = UIButton(type: .system)
+                button.setTitle(title, for: .normal)
+                button.titleLabel?.font = .monospacedDigitSystemFont(ofSize: 20, weight: .semibold)
+                var isDone = false
+                if case .done = key { isDone = true }
+                var isAction = isDone
+                switch key {
+                case .delete, .clear, .cancel: isAction = true
+                default: break
+                }
+                button.backgroundColor = isDone ? .systemBlue
+                    : isAction ? .tertiarySystemFill : .secondarySystemBackground
+                button.setTitleColor(isDone ? .white : .label, for: .normal)
+                button.layer.cornerRadius = 10
+                let width = isDone ? Self.keySize.width * 2 + Self.spacing : Self.keySize.width
+                button.widthAnchor.constraint(equalToConstant: width).isActive = true
+                button.heightAnchor.constraint(equalToConstant: Self.keySize.height).isActive = true
+                button.addAction(UIAction { [weak self] _ in
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    self?.onKey(key)
+                }, for: .touchUpInside)
+                line.addArrangedSubview(button)
+            }
+            stack.addArrangedSubview(line)
+        }
+        addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.padding),
+            stack.topAnchor.constraint(equalTo: topAnchor, constant: Self.padding),
+        ])
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) wird nicht verwendet")
+    }
+
+    // Berührungen neben den Tasten nicht an den Viewport weiterreichen (sonst begänne dort ein Strich)
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {}
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {}
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {}
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {}
+
+    override func sizeThatFits(_ size: CGSize) -> CGSize {
+        CGSize(width: Self.keySize.width * 4 + Self.spacing * 3 + Self.padding * 2,
+               height: Self.keySize.height * 4 + Self.spacing * 3 + Self.padding * 2)
     }
 }
