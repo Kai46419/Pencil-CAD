@@ -89,6 +89,9 @@ final class ViewportView: MTKView {
     private var needsSync = true
     /// Letzte Position des schwebenden Stifts (für Drücken/Doppeltippen ohne eigene Position)
     private var lastHoverLocation: CGPoint?
+    /// Punkt merken durch ruhiges Schweben (2 s)
+    private var hoverDwell: DispatchWorkItem?
+    private var hoverDwellOrigin: CGPoint?
     /// Aufgelegte Finger beim Skizzieren mit dem Stift (Finger auflegen = tangentialer Bogen)
     private var heldFingers = Set<UITouch>()
     /// Der aufgelegte Finger hat als Bogen-Taste gedient: sein Loslassen ist kein Antippen
@@ -182,9 +185,13 @@ final class ViewportView: MTKView {
         // Schwebender Stift (iPad Pro mit Apple Pencil Pro / 2. Gen.)
         let hover = UIHoverGestureRecognizer(target: self, action: #selector(handleHover))
 
-        // Punkte merken nur per Stift drücken bzw. doppeltippen (pencilAction): ein 1-s-Halten hat beim
-        // langsamen Zeichnen und bei aufgelegtem Finger ungewollt „Punkt 1 gemerkt“ ausgelöst.
-        for recognizer in [orbit, pan, pinch, tap, hover] as [UIGestureRecognizer] {
+        // Punkt merken: Finger doppeltippen (Stift: 2 s schweben). Ein 1-s-Halten mit aufgesetztem Stift hatte
+        // beim langsamen Zeichnen ungewollt Punkte gemerkt – darum nur schwebend.
+        let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap))
+        doubleTap.numberOfTapsRequired = 2
+        doubleTap.allowedTouchTypes = fingersOnly
+
+        for recognizer in [orbit, pan, pinch, tap, hover, doubleTap] as [UIGestureRecognizer] {
             recognizer.delegate = self
             addGestureRecognizer(recognizer)
         }
@@ -1359,36 +1366,66 @@ final class ViewportView: MTKView {
         case .began, .changed:
             lastHoverLocation = gesture.location(in: self)
             guard sketch.isActive, !sketch.isChoosingPlane, sketchTouch == nil,
-                  let point = sketchPoint(at: gesture.location(in: self)) else { return }
+                  let point = sketchPoint(at: gesture.location(in: self)) else {
+                updateHoverDwell(at: nil)
+                return
+            }
+            updateHoverDwell(at: gesture.location(in: self))
             sketch.hover(at: point, tolerance: snapTolerance)
         default:
             lastHoverLocation = nil
+            updateHoverDwell(at: nil)
             sketch.endHover()
         }
         refresh()
     }
 
-    /// Stift drücken bzw. doppeltippen: Schwebt der Stift im Skizzenmodus über einem Fangpunkt, wird er gemerkt
-    /// (zwei gemerkte Punkte ergeben Mitte und Mittellinie). Sonst öffnet sich das Werkzeugrad.
-    /// Während und kurz nach einem Strich (bzw. mit aufgelegtem Finger) wird nichts ausgelöst: Ein festerer
-    /// Griff beim Zeichnen meldet der Pencil Pro als Drücken, das hat ungewollt „Punkt 1 gemerkt“ ergeben.
-    /// Gemerkt wird nur, wenn der Stift gerade wirklich über dem Punkt schwebt.
-    /// Im Skizzenmodus öffnet Drücken nie das Werkzeugrad (Kai: Drücken = Punkt markieren, auch bei
-    /// Konstruktionslinien). Fehlt die Schwebeposition im Ereignis, gilt die letzte bekannte des Stifts.
+    /// Stift drücken bzw. doppeltippen öffnet das Werkzeugrad – in der Skizze mit „Bogen“ (tangential ohne
+    /// Finger). Punkte merken: Stift 2 s über dem Punkt schweben lassen oder mit dem Finger doppeltippen.
+    /// Während und kurz nach einem Strich wird nichts ausgelöst (fester Griff beim Zeichnen zählt als Drücken).
     fileprivate func pencilAction(at location: CGPoint?) {
-        if let sketch, sketch.isActive, !sketch.isChoosingPlane {
+        if let sketch, sketch.isActive {
             guard sketchTouch == nil, heldFingers.isEmpty, CACurrentMediaTime() - strokeEndedAt > 0.8 else { return }
-            guard let location = location ?? lastHoverLocation, let point = sketchPoint(at: location) else {
-                sketch.notice = "Stift über den Punkt halten (nicht aufsetzen) und drücken."
-                return
-            }
-            if !sketch.captureHovered(at: point, tolerance: snapTolerance * 1.25) {
-                sketch.notice = "Kein Punkt unter dem Stift – Ende, Mitte, Zentrum oder Schnittpunkt anpeilen und drücken."
-            }
-            refresh()
+        }
+        showQuickTools(at: location ?? lastHoverLocation)
+    }
+
+    /// Stift schwebt 2 s ruhig (innerhalb weniger Punkte) über einem Fangpunkt: Punkt merken.
+    private func updateHoverDwell(at location: CGPoint?) {
+        guard let location else {
+            hoverDwell?.cancel()
+            hoverDwell = nil
             return
         }
-        showQuickTools(at: location)
+        if let origin = hoverDwellOrigin, hypot(location.x - origin.x, location.y - origin.y) <= 6, hoverDwell != nil {
+            return
+        }
+        hoverDwell?.cancel()
+        hoverDwellOrigin = location
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, let sketch = self.sketch, sketch.isActive, !sketch.isChoosingPlane,
+                  self.sketchTouch == nil, let hover = self.lastHoverLocation,
+                  hypot(hover.x - location.x, hover.y - location.y) <= 6,
+                  let point = self.sketchPoint(at: hover) else { return }
+            if sketch.captureHovered(at: point, tolerance: self.snapTolerance) {
+                if #available(iOS 17.5, *) {
+                    UICanvasFeedbackGenerator(view: self).alignmentOccurred(at: hover)
+                }
+                self.refresh()
+            }
+        }
+        hoverDwell = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: work)
+    }
+
+    /// Doppeltippen mit dem Finger auf einen Fangpunkt: Punkt merken (wie 2 s Schweben mit dem Stift).
+    @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
+        guard let sketch, sketch.isActive, !sketch.isChoosingPlane,
+              let point = sketchPoint(at: gesture.location(in: self)) else { return }
+        if !sketch.captureHovered(at: point, tolerance: snapTolerance) {
+            sketch.notice = "Kein Punkt zum Merken – auf ein Ende, eine Mitte, ein Zentrum oder einen Schnittpunkt doppeltippen."
+        }
+        refresh()
     }
 
     /// Während ein Ziehpfeil gezogen wird, drehen und wählen die Finger nicht. Während der Stift zeichnet,

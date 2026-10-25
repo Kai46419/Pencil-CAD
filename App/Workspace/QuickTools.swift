@@ -73,12 +73,19 @@ struct QuickToolsPalette: View {
     private var items: [Item] {
         let model = workspace.model
         if sketch.isActive {
-            let tools: [SketchTool] = [.select, .polyline, .rectangle, .circle, .arc, .spline, .offset]
+            let tools: [SketchTool] = [.select, .polyline, .rectangle, .circle, .offset, .trim, .measure]
             return tools.map { tool in
-                Item(id: tool.rawValue, systemImage: tool.systemImage, isActive: sketch.tool == tool) {
+                Item(id: tool.rawValue, systemImage: tool.systemImage,
+                     isActive: sketch.tool == tool && !(tool == .polyline && sketch.arcNext)) {
                     sketch.tool = tool
                 }
             } + [
+                // Tangentialer Bogen ohne Finger: nächster Strich ist ein Bogen am Linienende
+                Item(id: "Bogen", systemImage: SketchTool.arc.systemImage,
+                     isActive: sketch.tool == .polyline && sketch.arcNext) {
+                    if sketch.tool != .polyline { sketch.tool = .polyline }
+                    sketch.arcNext = true
+                },
                 Item(id: "Fang", systemImage: "dot.scope", isActive: sketch.snapEnabled) {
                     sketch.snapEnabled.toggle()
                 },

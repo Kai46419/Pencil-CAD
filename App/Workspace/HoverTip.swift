@@ -173,7 +173,7 @@ enum ToolTips {
         "Loft": "Körper durch mehrere Querschnitte (Bereiche verschiedener Skizzen) bilden.",
         // Skizzenmodus links
         "Skizzieren beenden": "Skizze übernehmen und zurück ins 3D-Modell. Geschlossene Bereiche lassen sich danach extrudieren.",
-        "Auswählen": "Pfeil: zeichnet nicht. Antippen wählt, Ecken und Enden ziehen ändert die Größe, Linien ziehen verschiebt, Kreisrand ziehen ändert den Radius. Stift über einem Punkt schweben lassen und drücken (bzw. doppeltippen) merkt ihn – zwei gemerkte Punkte zeigen Mitte und Mittellinie.",
+        "Auswählen": "Pfeil: zeichnet nicht. Antippen wählt, Ecken und Enden ziehen ändert die Größe, Linien ziehen verschiebt, Kreisrand ziehen ändert den Radius. Stift 2 s ruhig über einem Punkt schweben lassen oder mit dem Finger doppeltippen merkt ihn – zwei gemerkte Punkte zeigen Abstand, Mitte und Mittellinie. Stift drücken öffnet das Werkzeugrad.",
         "Aktive Ebene": "Ebene, auf der gerade gezeichnet wird.",
         "Keine aktive Ebene": "Erst eine Ebene (grau) oder eine ebene Körperfläche antippen.",
         "Linie/Bogen": "Linie: Punkt für Punkt ziehen, zurück zum Start schließt. Rund gezogen wird automatisch ein Kreis (geschlossen) oder Bogen. Finger auflegen, während der Stift zeichnet: tangentialer Bogen am Linienende – Finger heben setzt ihn an der Stiftspitze. Kritzeln über Elemente löscht sie.",

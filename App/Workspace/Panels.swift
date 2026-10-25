@@ -147,7 +147,6 @@ struct ParameterCard: View {
     private var hasToolOptions: Bool {
         switch sketch.tool {
         case .select: !sketch.selection.isEmpty
-        case .polyline: sketch.hasOpenChain
         case .ellipse, .point: false
         default: true
         }
@@ -303,8 +302,16 @@ struct ParameterCard: View {
             Text("Körperkante oder Fläche antippen")
                 .foregroundStyle(.secondary)
         case .polyline:
-            if sketch.hasOpenChain {
-                Button("Linie absetzen", systemImage: "scissors", action: sketch.endChain)
+            HStack(spacing: 14) {
+                // Bogen ohne Finger: der nächste Strich wird ein tangentialer Bogen
+                Toggle(isOn: $sketch.arcNext) {
+                    Label("Bogen", systemImage: SketchTool.arc.systemImage)
+                }
+                .toggleStyle(.button)
+                .hoverTip("Bogen", "Der nächste Strich wird ein tangentialer Bogen am Linienende – ohne Finger. Danach geht es mit Linien weiter. Auch im Werkzeugrad (Stift drücken).")
+                if sketch.hasOpenChain {
+                    Button("Linie absetzen", systemImage: "scissors", action: sketch.endChain)
+                }
             }
         case .spline:
             HStack(spacing: 14) {

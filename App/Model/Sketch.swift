@@ -460,6 +460,9 @@ final class SketchController: ObservableObject {
         }
     }
     private var arcLatched = false
+    /// Bogen ohne Finger (Werkzeugrad bzw. Knopf „Bogen“): der nächste Strich mit dem Linienwerkzeug wird ein
+    /// tangentialer Bogen, danach geht es mit Linien weiter
+    @Published var arcNext = false
     /// Ein Finger liegt auf (auch einer, den der Viewport nicht als Bogen-Taste gezählt hat): Strich wird Bogen
     func latchArc() {
         guard dragStart != nil, tool == .polyline, !arcLatched else { return }
@@ -607,7 +610,7 @@ final class SketchController: ObservableObject {
         strokeSamples = [point]
         strokeShape = nil
         strokeTolerance = tolerance
-        arcLatched = arcModifier
+        arcLatched = arcModifier || (arcNext && tool == .polyline)
         if tool == .arc, arcMode == .center, let base = stepBase {
             let a0 = atan2(base.end.y - base.start.y, base.end.x - base.start.x)
             arcLastAngle = atan2(p.y - base.start.y, p.x - base.start.x)
@@ -733,9 +736,19 @@ final class SketchController: ObservableObject {
                 if let arc = shownArc ?? arcPreview(to: end, origin: start, samples: samples)
                     ?? arcPreview(to: point, origin: start, samples: samples) {
                     commitTangentArc(arc)
+                    arcNext = false
                     break
                 }
-                notice = "Kein Bogen möglich: Der Strich ist gerade – Gerade gezeichnet."
+                // Bogen verlangt, aber weder tangential noch aus dem Strich möglich: Halbkreis von Anfang bis
+                // Ende, zur Seite, zu der der Strich ausholt (sonst links). Nie eine Gerade.
+                if let half = Self.semicircle(from: start, to: end, samples: samples) {
+                    add(half)
+                    chainStart = chainStart ?? start
+                    chainEnd = end
+                    arcNext = false
+                    break
+                }
+                notice = "Kein Bogen möglich: Anfang und Ende liegen aufeinander – Gerade gezeichnet."
             }
             // Rund gezogen: Kreis bzw. Bogen statt Linie
             if !endShapeStroke(samples, start: start, end: end, tolerance: tolerance, preview: previewShape) {
@@ -1111,6 +1124,19 @@ final class SketchController: ObservableObject {
         if simd_dot(mid - from, normal) * side < 0 { mid = circle.center * 2 - mid }
         guard circleThrough(from, mid, end) != nil else { return nil }
         return (.arc(start: from, mid: mid, end: end), nil)
+    }
+
+    /// Halbkreis von a nach b, ausgebeult zur Seite der weitesten Strichabweichung (gerader Strich: links).
+    private static func semicircle(from a: Point2, to b: Point2, samples: [Point2]) -> SketchEntity? {
+        let chord = b - a
+        let length = simd_length(chord)
+        guard length > 1e-6 else { return nil }
+        let normal = Point2(-chord.y, chord.x) / length
+        let far = samples.max { abs(simd_dot($0 - a, normal)) < abs(simd_dot($1 - a, normal)) }
+        let side: Double = far.map { simd_dot($0 - a, normal) < -1e-9 ? -1 : 1 } ?? 1
+        let mid = (a + b) / 2 + normal * side * (length / 2)
+        guard circleThrough(a, mid, b) != nil else { return nil }
+        return .arc(start: a, mid: mid, end: b)
     }
 
     /// Tangential-Einschränkung zwischen dem gerade angefügten Bogen und dem Element, an das er ansetzt.
@@ -1828,6 +1854,7 @@ final class SketchController: ObservableObject {
     /// Laufende Eingabe beim Werkzeugwechsel abschließen.
     private func finishInput() {
         if tool != .select { pendingAction = nil }
+        arcNext = false
         if splinePoints.count >= 2 {
             add(.spline(points: splinePoints, kind: splineKind, closed: false))
         }

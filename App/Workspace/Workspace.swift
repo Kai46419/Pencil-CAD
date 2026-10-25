@@ -975,7 +975,9 @@ final class Workspace: ObservableObject {
             if !sketch.selection.isEmpty {
                 return "\(sketch.selection.count) gewählt · unten „Verankern“ hält sie fest · rechts Einschränkung wählen"
             }
-            return "Antippen wählt · Ecke/Ende ziehen ändert die Größe · über einem Punkt Stift drücken merkt ihn (zwei → Mitte)"
+            return "Antippen wählt · Ecke/Ende ziehen ändert die Größe · Stift 2 s über einem Punkt halten oder mit dem Finger doppeltippen merkt ihn (zwei → Mitte)"
+        case .polyline where sketch.arcNext:
+            return "Bogen: vom Linienende zum Ziel ziehen – tangential, sonst als Halbkreis"
         case .polyline where sketch.hasOpenChain:
             if sketch.arcActive { return "Bogen-Taste erkannt: Stift zum Endpunkt, dann Finger heben (oder Stift heben)" }
             return "Nächsten Punkt setzen · Finger auflegen: tangentialer Bogen · zurück zum Start schließt"
