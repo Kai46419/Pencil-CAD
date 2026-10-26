@@ -784,6 +784,10 @@ final class ViewportView: MTKView {
         case .hole where !workspace.holePoints.isEmpty:
             groups.append(LineGroup(polylines: [], color: Self.snapOrange, width: 0,
                                     dots: workspace.holePoints.map { SIMD3<Float>($0.point) }, dotRadius: 5, onTop: true))
+        case .part(.thread) where !workspace.parts.threadHole.points.isEmpty:
+            // Gewindebohrungen am Tippunkt (Gewinde-Werkzeug)
+            let dots: [SIMD3<Float>] = workspace.parts.threadHole.points.map { SIMD3<Float>($0.point) }
+            groups.append(LineGroup(polylines: [], color: Self.snapOrange, width: 0, dots: dots, dotRadius: 5, onTop: true))
         case .construct:
             let points = workspace.constructPoints.map { SIMD3<Float>($0) }
             if !points.isEmpty {

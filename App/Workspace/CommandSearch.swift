@@ -59,7 +59,7 @@ extension Workspace {
             toolItem(.sweep, "Bereich entlang Pfad", "point.3.connected.trianglepath.dotted", "sweep"),
             toolItem(.loft, "Durch Querschnitte", "square.3.layers.3d", "loft"),
             toolItem(.part(.helix), "Feder, Gewinde", PartTool.helix.systemImage, "helix spirale feder gewinde thread spring"),
-            toolItem(.part(.thread), "Metrisch, UNC, G, Trapez … an Bolzen und Bohrung", PartTool.thread.systemImage,
+            toolItem(.part(.thread), "Metrisch, UNC, G, Trapez … an Bolzen, Bohrung oder als Gewindebohrung", PartTool.thread.systemImage,
                      "gewinde thread schraube mutter metrisch m6 m8 unc unf trapez whitworth npt rohrgewinde"),
             toolItem(.part(.thinLines), "Linien einer Skizze als Wand", PartTool.thinLines.systemImage, "thin dünn wand linie"),
             toolItem(.part(.draft), "Flächen neigen, Entformungsschräge", PartTool.draft.systemImage, "draft verjüngung schräge"),

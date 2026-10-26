@@ -11,7 +11,8 @@ enum PartTool: Equatable {
     case template
     /// Erstellen › Helix (Feder, Gewinde)
     case helix
-    /// Erstellen › Gewinde: Zylinderfläche antippen, Normgewinde modellieren (ThreadPanel.swift)
+    /// Erstellen › Gewinde: Bolzen bzw. Bohrung antippen, Normgewinde modellieren; andere Flächen bekommen eine
+    /// Gewindebohrung am Tippunkt (ThreadPanel.swift, SurfaceHoles.swift)
     case thread
     /// Erstellen › Dünn extrudieren: Linien einer Skizze (auch offene) als Wand
     case thinLines
@@ -57,6 +58,8 @@ final class PartSettings: ObservableObject {
     @Published var template = TemplateSpec()
     @Published var helix = HelixSpec()
     @Published var thread = ThreadSpec()
+    /// Gewindebohrungen am Tippunkt (Flächen, die kein Bolzen und keine Bohrung sind; SurfaceHoles.swift)
+    @Published var threadHole = ThreadHoleSettings()
     // Dünn extrudieren (Linien)
     @Published var thinSketch: Int?
     @Published var thinThickness: Double = 2
@@ -98,6 +101,8 @@ extension Workspace {
         case .thread:
             // Körpernummern können sich geändert haben: Fläche neu antippen
             parts.thread.target = nil
+            parts.threadHole.points = []
+            parts.threadHole.lastTap = nil
         case .standard, .template:
             break
         }
@@ -115,7 +120,7 @@ extension Workspace {
         case .helix:
             model.previewHelix(parts.helix)
         case .thread:
-            model.previewThread(parts.thread)
+            previewThreadTool()
         case .thinLines:
             model.previewThinLines(sketch: parts.thinSketch, thickness: parts.thinThickness, side: parts.thinSide,
                                    height: parts.thinHeight, symmetric: parts.thinSymmetric, mode: parts.thinMode)
@@ -161,7 +166,7 @@ extension Workspace {
             updatePartPreview()
         case .thread:
             guard let face else { return }
-            threadTapped(face)
+            threadTapped(face, point: point)
         case .draft:
             guard let face else { return }
             if let first = model.selection, first.body != face.body {
@@ -184,9 +189,10 @@ extension Workspace {
             return parts.helix.onCylinder ? "Gewinde wird in die Fläche geschnitten – „Fertig“ tippen"
                 : "Maße eingeben · Zylinderfläche antippen schneidet ein Gewinde"
         case .thread:
-            return parts.thread.target == nil
-                ? "Zylinderfläche antippen: Bolzen = Außengewinde, Bohrung = Innengewinde"
-                : "Gewindeart und Größe wählen, dann „Fertig“"
+            if parts.thread.target != nil { return "Gewindeart und Größe wählen, dann „Fertig“" }
+            return parts.threadHole.points.isEmpty
+                ? "Fläche antippen: Bolzen = Außengewinde, Bohrung = Innengewinde, sonst Gewindebohrung am Tippunkt"
+                : "Weitere Stellen antippen · Gewindebohrung erneut antippen entfernt sie · dann „Fertig“"
         case .thinLines: return parts.thinSketch == nil ? "Skizze mit Linien wählen" : "Stärke, Seite und Höhe einstellen"
         case .draft:
             return model.selection == nil ? "Seitenflächen antippen, die geneigt werden" : "Winkel und Zugrichtung einstellen"

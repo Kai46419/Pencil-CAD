@@ -1017,15 +1017,15 @@ final class Workspace: ObservableObject {
         updatePreview()
     }
 
-    /// Bohrung setzen bzw. entfernen: Punkt rastet an Ecken, Kantenmitten und Kreismitten und liegt in der Fläche.
+    /// Bohrung setzen bzw. entfernen: Punkt rastet an Ecken, Kantenmitten und Kreismitten und liegt in der Fläche
+    /// (eben oder gewölbt, SurfaceHoles.swift).
     private func holeTapped(face: FaceRef?, point: SIMD3<Float>?) {
-        guard let face, let point, let plane = model.plane(of: face) else {
-            if face != nil { model.message = "Bohrungen gehen auf ebenen Flächen." }
+        guard let face, let point,
+              let found = model.holeSpot(on: face, near: SIMD3<Double>(point), tolerance: pickTolerance) else {
+            if face != nil { model.message = "An dieser Stelle ist keine Bohrung möglich." }
             return
         }
-        let normal = simd_normalize(plane.normal)
-        var spot = model.snappedModelPoint(SIMD3<Double>(point), tolerance: pickTolerance)
-        spot -= normal * simd_dot(spot - plane.anchor, normal)
+        let spot = found.point
         let reach = max(pickTolerance, (holeSpec.diameter + holeSpec.clearance) / 2)
         if let index = holePoints.firstIndex(where: { simd_distance($0.point, spot) < reach }) {
             holePoints.remove(at: index)
@@ -2102,7 +2102,7 @@ final class Workspace: ObservableObject {
             case .sketch: return splitRegions.isEmpty ? "Skizzenbereiche antippen oder unten eine Skizze wählen" : "„Fertig“ tippen"
             }
         case .hole:
-            return holePoints.isEmpty ? "Ebene Fläche antippen – rastet an Ecken, Kantenmitten und Kreismitten"
+            return holePoints.isEmpty ? "Fläche antippen (eben oder gewölbt) – rastet an Ecken, Kantenmitten und Kreismitten"
                 : "Weitere Stellen antippen · Bohrung erneut antippen entfernt sie"
         case .printCheck:
             return printBody == nil ? "Körper antippen, der gedruckt werden soll" : "Rot = Überhang, Orange = zu dünne Wand"

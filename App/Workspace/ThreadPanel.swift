@@ -4,23 +4,75 @@ import simd
 // MARK: - Werkzeug „Gewinde“ (Erstellen › Gewinde) und Option „Gewinde“ im Bohrungswerkzeug
 
 extension Workspace {
-    /// Zylinderfläche angetippt: Bolzen → Außengewinde, Bohrung → Innengewinde; passende Normgröße vorschlagen.
-    func threadTapped(_ face: FaceRef) {
-        model.cancelPreview()
-        guard let target = model.threadTarget(for: face) else {
-            model.message = "Für ein Gewinde eine Zylinderfläche antippen: Bolzen (Außengewinde) oder Bohrung (Innengewinde)."
-            parts.thread.target = nil
+    /// Fläche angetippt: Bolzen → Außengewinde, Bohrung → Innengewinde (passende Normgröße vorschlagen); jede andere
+    /// Fläche (eben oder gewölbt, auch eine Rundung, die nicht ganz herum läuft) → Gewindebohrung am Tippunkt.
+    func threadTapped(_ face: FaceRef, point: SIMD3<Float>?) {
+        let tap: SIMD3<Double>? = point.map { SIMD3<Double>($0) }
+        // Gesetzte Gewindebohrung erneut antippen: entfernen
+        if parts.thread.target == nil, let tap, let index = threadHoleIndex(near: tap) {
+            parts.threadHole.points.remove(at: index)
+            updatePartPreview()
             return
         }
-        var spec = parts.thread
-        spec.target = target
-        spec.offset = 0
-        spec.fullLength = true
-        spec.length = target.length
-        spec.fromOtherEnd = false
-        spec.sizeIndex = spec.family.suggestedSize(forDiameter: 2 * target.radius, external: target.external)
-        spec.pitch = spec.size.pitch
-        parts.thread = spec
+        model.cancelPreview()
+        if let target = model.threadTarget(for: face), model.isFullRound(face, target: target) {
+            var spec = parts.thread
+            spec.target = target
+            spec.offset = 0
+            spec.fullLength = true
+            spec.length = target.length
+            spec.fromOtherEnd = false
+            spec.sizeIndex = spec.family.suggestedSize(forDiameter: 2 * target.radius, external: target.external)
+            spec.pitch = spec.size.pitch
+            parts.thread = spec
+            parts.threadHole.points = []
+            // Stelle merken: „Gewindebohrung hier“ bohrt stattdessen quer hinein (z. B. Madenschraube in einer Nabe)
+            let spot: SurfaceSpot? = tap.flatMap { model.holeSpot(on: face, near: $0, tolerance: pickTolerance) }
+            parts.threadHole.lastTap = spot.map { HolePoint(face: face, point: $0.point) }
+            updatePartPreview()
+            return
+        }
+        guard let tap, let spot = model.holeSpot(on: face, near: tap, tolerance: pickTolerance) else {
+            model.message = "Hier ist keine Gewindebohrung möglich – eine andere Stelle antippen."
+            updatePartPreview()
+            return
+        }
+        parts.thread.target = nil
+        parts.threadHole.lastTap = nil
+        parts.threadHole.points.append(HolePoint(face: face, point: spot.point))
+        updatePartPreview()
+    }
+
+    /// Nummer der gesetzten Gewindebohrung nahe point (Antippen am Eingang der Bohrung).
+    private func threadHoleIndex(near point: SIMD3<Double>) -> Int? {
+        let reach: Double = max(pickTolerance, parts.thread.size.diameter / 2 + 0.5)
+        return parts.threadHole.points.firstIndex { simd_distance($0.point, point) < reach }
+    }
+
+    /// Vorschau des Gewinde-Werkzeugs: Gewinde an Bolzen bzw. Bohrung oder Gewindebohrungen an den Tippunkten
+    /// (gleiche Logik wie das Bohrungswerkzeug mit Gewinde).
+    func previewThreadTool() {
+        if parts.thread.target == nil, !parts.threadHole.points.isEmpty {
+            let holes = parts.threadHole.points.map { (face: $0.face, point: $0.point) }
+            model.previewHoles(holes, spec: parts.thread.holeSpec(parts.threadHole))
+        } else {
+            model.previewThread(parts.thread)
+        }
+    }
+
+    /// Statt des Gewindes an Bolzen bzw. Bohrung eine Gewindebohrung an der angetippten Stelle.
+    func threadHoleAtLastTap() {
+        guard let tap = parts.threadHole.lastTap else { return }
+        model.cancelPreview()
+        parts.thread.target = nil
+        parts.threadHole.lastTap = nil
+        parts.threadHole.points = [tap]
+        updatePartPreview()
+    }
+
+    func removeLastThreadHole() {
+        guard !parts.threadHole.points.isEmpty else { return }
+        parts.threadHole.points.removeLast()
         updatePartPreview()
     }
 
@@ -98,7 +150,11 @@ struct ThreadCard: View {
     }
 
     private var targetText: String {
-        guard let target = parts.thread.target else { return "Zylinderfläche antippen" }
+        guard let target = parts.thread.target else {
+            let count = parts.threadHole.points.count
+            if count == 0 { return "Fläche antippen" }
+            return count == 1 ? "Gewindebohrung · 1 Stelle" : "Gewindebohrung · \(count) Stellen"
+        }
         let diameter = LengthUnit.current.format(2 * target.radius)
         return target.external ? "Außengewinde · Bolzen Ø \(diameter)" : "Innengewinde · Bohrung Ø \(diameter)"
     }
@@ -106,13 +162,16 @@ struct ThreadCard: View {
     private var infoText: String {
         let spec = parts.thread
         let form = spec.family.form
-        var text = "\(spec.designation) · \(form.angleText) · \(spec.family.standard)"
-        if spec.starts > 1 {
+        // Gewindebohrung: immer eingängig (wie im Bohrungswerkzeug)
+        let holeName: String? = spec.target == nil ? spec.holeSpec(parts.threadHole).thread?.designation : nil
+        var text = "\(holeName ?? spec.designation) · \(form.angleText) · \(spec.family.standard)"
+        if spec.starts > 1, spec.target != nil {
             let lead = spec.lead.formatted(.number.precision(.fractionLength(0...3)))
             text += " · \(lead) mm je Umdrehung"
         }
         if spec.family.isTapered { text += " · Kegel 1:16, Spitzen zylindrisch" }
-        if let target = spec.target, !target.external, !spec.family.isTapered {
+        let inside: Bool = spec.target.map { !$0.external } ?? true
+        if inside, !spec.family.isTapered {
             let drill: String = LengthUnit.current.format(spec.tapDrill)
             let source: String = spec.family.tapDrillIsTabulated(spec.size, pitch: spec.pitch) ? "Bohrer" : "gerechnet"
             text += " · Kernloch Ø \(drill) (\(source))"
@@ -145,36 +204,10 @@ struct ThreadCard: View {
                     .foregroundStyle(.secondary)
                     .fixedSize()
             }
-            HStack(spacing: 12) {
-                ThreadModePicker(cosmetic: parts.thread.cosmetic) { value in
-                    parts.thread.cosmetic = value
-                    workspace.updatePartPreview()
-                }
-                Toggle("Volle Länge", isOn: binding(\.fullLength))
-                    .fixedSize()
-                if !parts.thread.fullLength {
-                    field("Länge", \.length, minimum: 0.1, maximum: 10_000)
-                }
-                field("Versatz", \.offset, minimum: 0, maximum: 10_000)
-                    .hoverTip("Versatz", "Abstand vom Gewindeanfang (freies Ende des Bolzens bzw. Eingang der Bohrung).")
-                Text("Gänge")
-                    .foregroundStyle(.secondary)
-                    .fixedSize()
-                Picker("Gänge", selection: binding(\.starts)) {
-                    ForEach(1...4, id: \.self) { count in
-                        Text("\(count)").tag(count)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .fixedSize()
-                .hoverTip("Gangzahl", "Mehrgängige Gewinde (z. B. Tr 8×8 mit P2 und 4 Gängen für Gewindespindeln): Steigung je Umdrehung = Gangzahl × Steigung.")
-                Toggle("Linksgewinde", isOn: binding(\.leftHanded))
-                    .fixedSize()
-                if let target = parts.thread.target, workspace.model.threadHasBlindEnd(parts.thread, target: target) {
-                    Toggle("Auslauf DIN 76", isOn: binding(\.runoutDIN76))
-                        .fixedSize()
-                        .hoverTip("Gewindeauslauf DIN 76", "Sackloch: das Gewinde endet um den Auslauf e1 vor dem Grund, wie beim Gewindebohren (z. B. M6: 5,1 mm, M8: 6,2 mm). Aus = Gewinde bis zum Grund (gut für den 3D-Druck).")
-                }
+            if parts.thread.target == nil {
+                ThreadHoleControls(workspace: workspace, parts: parts)
+            } else {
+                surfaceControls
             }
             HStack(spacing: 12) {
                 field("Druckspiel", \.clearance, width: 48, minimum: 0, maximum: 0.6)
@@ -183,10 +216,10 @@ struct ThreadCard: View {
                     parts.thread.clearance = value
                     workspace.updatePartPreview()
                 }
-                Toggle("Anschnitt", isOn: binding(\.chamfer))
-                    .fixedSize()
-                    .hoverTip("Anschnitt", "Fase am freien Ende des Bolzens bzw. Senkung am Eingang der Bohrung, damit Schraube und Mutter gut ansetzen.")
                 if parts.thread.target != nil {
+                    Toggle("Anschnitt", isOn: binding(\.chamfer))
+                        .fixedSize()
+                        .hoverTip("Anschnitt", "Fase am freien Ende des Bolzens bzw. Senkung am Eingang der Bohrung, damit Schraube und Mutter gut ansetzen.")
                     Button("Anderes Ende", systemImage: "arrow.up.arrow.down") {
                         parts.thread.fromOtherEnd.toggle()
                         workspace.updatePartPreview()
@@ -194,6 +227,14 @@ struct ThreadCard: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .hoverTip("Anderes Ende", "Gewindeanfang (Versatz, Anschnitt) am anderen Ende der Fläche.")
+                    if parts.threadHole.lastTap != nil {
+                        Button("Gewindebohrung hier", systemImage: "smallcircle.filled.circle") {
+                            workspace.threadHoleAtLastTap()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .hoverTip("Gewindebohrung hier", "Statt des Gewindes an Bolzen bzw. Bohrung eine Gewindebohrung an der angetippten Stelle quer in die Fläche (z. B. für eine Madenschraube).")
+                    }
                 }
                 Text(infoText)
                     .foregroundStyle(.secondary)
@@ -201,6 +242,41 @@ struct ThreadCard: View {
             }
         }
         .fixedSize()
+    }
+
+    /// Länge, Versatz, Gänge usw. für das Gewinde an Bolzen bzw. Bohrung.
+    private var surfaceControls: some View {
+        HStack(spacing: 12) {
+            ThreadModePicker(cosmetic: parts.thread.cosmetic) { value in
+                parts.thread.cosmetic = value
+                workspace.updatePartPreview()
+            }
+            Toggle("Volle Länge", isOn: binding(\.fullLength))
+                .fixedSize()
+            if !parts.thread.fullLength {
+                field("Länge", \.length, minimum: 0.1, maximum: 10_000)
+            }
+            field("Versatz", \.offset, minimum: 0, maximum: 10_000)
+                .hoverTip("Versatz", "Abstand vom Gewindeanfang (freies Ende des Bolzens bzw. Eingang der Bohrung).")
+            Text("Gänge")
+                .foregroundStyle(.secondary)
+                .fixedSize()
+            Picker("Gänge", selection: binding(\.starts)) {
+                ForEach(1...4, id: \.self) { count in
+                    Text("\(count)").tag(count)
+                }
+            }
+            .pickerStyle(.segmented)
+            .fixedSize()
+            .hoverTip("Gangzahl", "Mehrgängige Gewinde (z. B. Tr 8×8 mit P2 und 4 Gängen für Gewindespindeln): Steigung je Umdrehung = Gangzahl × Steigung.")
+            Toggle("Linksgewinde", isOn: binding(\.leftHanded))
+                .fixedSize()
+            if let target = parts.thread.target, workspace.model.threadHasBlindEnd(parts.thread, target: target) {
+                Toggle("Auslauf DIN 76", isOn: binding(\.runoutDIN76))
+                    .fixedSize()
+                    .hoverTip("Gewindeauslauf DIN 76", "Sackloch: das Gewinde endet um den Auslauf e1 vor dem Grund, wie beim Gewindebohren (z. B. M6: 5,1 mm, M8: 6,2 mm). Aus = Gewinde bis zum Grund (gut für den 3D-Druck).")
+            }
+        }
     }
 
     private var pitchControl: some View {
@@ -346,6 +422,87 @@ struct HoleThreadRow: View {
                     .foregroundStyle(.secondary)
                     .fixedSize()
             }
+        }
+    }
+}
+
+// MARK: - Gewindebohrung am Tippunkt (Gewinde-Werkzeug)
+
+/// Zeile der Gewinde-Karte, wenn keine Zylinderfläche gewählt ist: Gewindebohrungen an den angetippten Stellen
+/// (eben oder gewölbt) mit Tiefe bzw. durchgehend und Gewindeende im Sackloch.
+struct ThreadHoleControls: View {
+    @ObservedObject var workspace: Workspace
+    @ObservedObject var parts: PartSettings
+
+    private func update(_ change: (inout ThreadHoleSettings) -> Void) {
+        var settings = parts.threadHole
+        change(&settings)
+        parts.threadHole = settings
+        workspace.updatePartPreview()
+    }
+
+    private var countText: String {
+        let count = parts.threadHole.points.count
+        return count == 1 ? "1 Bohrung" : "\(count) Bohrungen"
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ThreadModePicker(cosmetic: parts.thread.cosmetic) { value in
+                parts.thread.cosmetic = value
+                workspace.updatePartPreview()
+            }
+            Toggle("Durchgehend", isOn: Binding(get: { parts.threadHole.through }, set: { value in
+                update { $0.through = value }
+            }))
+            .fixedSize()
+            if !parts.threadHole.through {
+                NumberField(title: "Tiefe", value: parts.threadHole.depth, width: 56) { value in
+                    guard value >= 0.5, value <= 10_000 else { return }
+                    update { $0.depth = value }
+                }
+                blindControls
+            }
+            Toggle("Linksgewinde", isOn: Binding(get: { parts.thread.leftHanded }, set: { value in
+                parts.thread.leftHanded = value
+                workspace.updatePartPreview()
+            }))
+            .fixedSize()
+            Text(countText)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+                .fixedSize()
+            Button("Letzte entfernen", systemImage: "arrow.uturn.backward", action: workspace.removeLastThreadHole)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(parts.threadHole.points.isEmpty)
+        }
+    }
+
+    /// Sackloch: Gewindeende (bis Grund, DIN 76, Maß) und Bohrspitze.
+    private var blindControls: some View {
+        HStack(spacing: 8) {
+            Picker("Gewindeende", selection: Binding(get: { parts.threadHole.runout }, set: { value in
+                update { $0.runout = value }
+            })) {
+                ForEach(ThreadRunout.allCases) { runout in
+                    Text(runout.rawValue).tag(runout)
+                }
+            }
+            .pickerStyle(.menu)
+            .fixedSize()
+            .hoverTip("Gewindeende im Sackloch", "Bis Grund: Gewinde über die ganze Bohrtiefe (gut für den 3D-Druck). DIN 76: das Gewinde endet um den Auslauf e1 vor dem Grund, wie beim Gewindebohren. Maß: eigene Gewindelänge ab der Fläche. Das Kernloch geht immer bis zur vollen Tiefe.")
+            if parts.threadHole.runout == .custom {
+                NumberField(title: "Länge", value: parts.threadHole.runoutLength, width: 52) { value in
+                    guard value >= 0.5 else { return }
+                    update { $0.runoutLength = value }
+                }
+            }
+            Toggle("Bohrspitze", isOn: Binding(get: { parts.threadHole.drillPoint }, set: { value in
+                update { $0.drillPoint = value }
+            }))
+            .fixedSize()
+            .hoverTip("Bohrspitze", "Kegel mit 118° am Grund der Sackbohrung wie bei einem echten Bohrer.")
         }
     }
 }

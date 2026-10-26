@@ -268,6 +268,10 @@ enum HelpTopic: String, CaseIterable, Identifiable {
             ]
         case .news:
             [
+                "Gewindebohrung überall: Im Werkzeug Gewinde setzt Antippen einer Fläche, die kein Bolzen und keine "
+                    + "Bohrung ist (Oberseite, Unterseite, Seite oder Rundung), eine Gewindebohrung am Tippunkt ins "
+                    + "Material – senkrecht zur Fläche, mit Tiefe oder durchgehend, mehrere Stellen möglich. Auch das "
+                    + "Werkzeug Bohrung geht jetzt auf gewölbten Flächen.",
                 "Neue Skizze: Die Ebenen Oben, Vorne, Rechts liegen beschriftet und größer neben den Körpern, unten gibt "
                     + "es Kacheln dafür (auch für eigene Konstruktionsebenen). Ebene Körperflächen leuchten unter dem "
                     + "Stift auf – antippen und darauf skizzieren.",
