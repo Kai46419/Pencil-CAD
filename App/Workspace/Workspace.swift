@@ -355,6 +355,8 @@ final class Workspace: ObservableObject {
     @Published var sketchScaleFactor: Double = 2
     // Fläche versetzen / ersetzen
     @Published var offsetFaceMode: OffsetFaceMode = .distance
+    /// Kurze Erklärung des gerade geöffneten Werkzeugs (Kapsel unten, ToolExplainer.swift)
+    @Published var toolExplanation: ToolExplanation?
     @Published var offsetFaceValue: Double = 0
     /// Pfeil zum Versetzen: an der zuerst gewählten Fläche, entlang ihrer Normale (vor der Vorschau berechnet,
     /// weil sich die Flächennummern in der Vorschau ändern)
@@ -627,6 +629,7 @@ final class Workspace: ObservableObject {
         let previousFaces = model.selectedFaces
         model.cancelPreview()
         tool = newTool
+        explain(ToolExplainer.explanation(for: newTool))
         if newTool != .move && newTool != .translate { model.moveCopies = false }
         measureLines = []
         measurePoints = []

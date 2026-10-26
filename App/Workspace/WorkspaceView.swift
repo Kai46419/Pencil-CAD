@@ -329,6 +329,9 @@ private struct WorkspaceContent: View {
 
     private var bottomArea: some View {
         VStack(spacing: 10) {
+            if !sketch.isActive, let explanation = workspace.toolExplanation {
+                ToolExplainerCapsule(explanation: explanation) { workspace.toolExplanation = nil }
+            }
             if sketch.isActive, let notice = sketch.notice {
                 Button {
                     sketch.notice = nil

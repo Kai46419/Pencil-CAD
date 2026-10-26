@@ -211,7 +211,14 @@ struct ToolRail: View {
                         }
                     }
                     .onLongPressGesture(minimumDuration: 0.35) {
-                        guard entry.flyout != nil else { return }
+                        guard entry.flyout != nil else {
+                            // Ohne Varianten: kurze Erklärung als Kapsel unten
+                            if let text = ToolTips.detail(for: entry.title) {
+                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                workspace.explain(ToolExplanation(title: entry.title, text: text))
+                            }
+                            return
+                        }
                         UIImpactFeedbackGenerator(style: .light).impactOccurred()
                         openEntry = entry.id
                     }
