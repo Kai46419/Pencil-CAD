@@ -365,6 +365,8 @@ final class SketchController: ObservableObject {
     }
     /// Spline-Tangentengriff, der gerade gezogen wird (SketchSplineHandles.swift)
     var splineHandleDrag: SplineHandleDrag?
+    /// Radiusgriff an Bogen bzw. Kreis, der gerade gezogen wird (SketchArcHandle.swift)
+    var radiusHandleDrag: RadiusHandleDrag?
     @Published var rectangleMode: RectangleMode = .diagonal {
         didSet {
             rectangleBase = nil
@@ -671,6 +673,7 @@ final class SketchController: ObservableObject {
         hoverNodes = []
         if tool == .select {
             if beginSplineHandleDrag(at: point, tolerance: tolerance) { return }  // Spline-Tangentengriffe
+            if beginRadiusHandleDrag(at: point, tolerance: tolerance) { return }  // Radiusgriff Bogen/Kreis
             beginSelectDrag(at: point, tolerance: tolerance)
             return
         }
@@ -699,6 +702,7 @@ final class SketchController: ObservableObject {
     func moved(to point: Point2, tolerance: Double) {
         if tool == .select {
             if moveSplineHandleDrag(to: point, tolerance: tolerance) { return }  // Spline-Tangentengriffe
+            if moveRadiusHandleDrag(to: point, tolerance: tolerance) { return }  // Radiusgriff Bogen/Kreis
             moveSelectDrag(to: point, tolerance: tolerance)
             return
         }
@@ -738,6 +742,7 @@ final class SketchController: ObservableObject {
     func ended(at point: Point2, tolerance: Double) {
         if tool == .select {
             if endSplineHandleDrag(at: point, tolerance: tolerance) { return }  // Spline-Tangentengriffe
+            if endRadiusHandleDrag(at: point, tolerance: tolerance) { return }  // Radiusgriff Bogen/Kreis
             endSelectDrag(at: point, tolerance: tolerance)
             return
         }
@@ -951,6 +956,8 @@ final class SketchController: ObservableObject {
             selectDrag = nil
         }
         selectStart = nil
+        // Radiusgriff: bis dahin Gezogenes bleibt (ein Rückgängig-Schritt)
+        radiusHandleDrag = nil
         dragStart = nil
         dragCurrent = nil
         strokeSamples = []
@@ -4275,6 +4282,35 @@ extension SketchController {
         if begin { remember() }
         entities[index] = entity
         if final { entitiesChanged() } else { changed(publish: false) }
+    }
+
+    /// Radiusgriff an Bogen und Kreis (SketchArcHandle.swift): Maß am Element beim Ziehen ändern wie beim Eintippen
+    /// (changeEntityDimension), aber ohne Rückgängig-Schritt je Bild: begin legt einmal den Stand vor dem Ziehen ab,
+    /// spätere Aufrufe keinen. Ein festes Maß gleicher Art zieht mit. false = Wert nicht erreichbar, Maße wie vorher.
+    func dragEntityDimension(_ kind: SketchDimension.Kind, of index: Int, to value: Double, begin: Bool) -> Bool {
+        guard entities.indices.contains(index), value > 0 else { return false }
+        if begin { remember() }
+        let savedUndo = undoStack
+        let beforeConstraints = constraints, beforeEntities = entities
+        let fixed = constraints.firstIndex { constraint in
+            guard !constraint.isSuspended, let owner = fixedEntityKind(of: constraint) else { return false }
+            return owner.entity == index && owner.kind == kind
+        }
+        if let fixed { constraints[fixed] = constraints[fixed].withDimensionValue(value) }
+        changeEntityDimension(kind, of: index, to: value)
+        undoStack = savedUndo
+        let target: Double = kind == .diameter ? value / 2 : value
+        var reached = false
+        if entities.indices.contains(index), case .circle(_, let radius) = entities[index].constraintCurve(0) {
+            reached = abs(radius - target) <= 1e-5 * max(1, target)
+        }
+        if !reached {
+            entities = beforeEntities
+            constraints = beforeConstraints
+            if begin, !undoStack.isEmpty { undoStack.removeLast() }
+            entitiesChanged()
+        }
+        return reached
     }
 
     /// Rahmen- bzw. Lassoauswahl: Elemente zur Auswahl hinzufügen (wie mehrmals Antippen).
