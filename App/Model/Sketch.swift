@@ -363,6 +363,8 @@ final class SketchController: ObservableObject {
     @Published var splineInput: SplineInput = .points {
         didSet { if oldValue != splineInput { finishSpline() } }
     }
+    /// Spline-Tangentengriff, der gerade gezogen wird (SketchSplineHandles.swift)
+    var splineHandleDrag: SplineHandleDrag?
     @Published var rectangleMode: RectangleMode = .diagonal {
         didSet {
             rectangleBase = nil
@@ -664,6 +666,7 @@ final class SketchController: ObservableObject {
         hoverSnap = nil
         hoverNodes = []
         if tool == .select {
+            if beginSplineHandleDrag(at: point, tolerance: tolerance) { return }  // Spline-Tangentengriffe
             beginSelectDrag(at: point, tolerance: tolerance)
             return
         }
@@ -691,6 +694,7 @@ final class SketchController: ObservableObject {
 
     func moved(to point: Point2, tolerance: Double) {
         if tool == .select {
+            if moveSplineHandleDrag(to: point, tolerance: tolerance) { return }  // Spline-Tangentengriffe
             moveSelectDrag(to: point, tolerance: tolerance)
             return
         }
@@ -729,6 +733,7 @@ final class SketchController: ObservableObject {
 
     func ended(at point: Point2, tolerance: Double) {
         if tool == .select {
+            if endSplineHandleDrag(at: point, tolerance: tolerance) { return }  // Spline-Tangentengriffe
             endSelectDrag(at: point, tolerance: tolerance)
             return
         }
@@ -4126,6 +4131,15 @@ extension SketchController {
         editableIndex = nil
         selection = []
         entitiesChanged()
+    }
+
+    /// Spline-Tangentengriffe (SketchSplineHandles.swift): Element beim Ziehen ersetzen, Auswahl bleibt.
+    /// begin merkt den Stand für Rückgängig, final baut Bereiche und Fang neu auf.
+    func setDraggedElement(_ entity: SketchEntity, at index: Int, begin: Bool, final: Bool) {
+        guard entities.indices.contains(index) else { return }
+        if begin { remember() }
+        entities[index] = entity
+        if final { entitiesChanged() } else { changed(publish: false) }
     }
 
     /// Rahmen- bzw. Lassoauswahl: Elemente zur Auswahl hinzufügen (wie mehrmals Antippen).

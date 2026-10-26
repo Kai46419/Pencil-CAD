@@ -299,6 +299,13 @@ enum HelpTopic: String, CaseIterable, Identifiable {
                 "Komponenten: „Als Komponente“ im Ebenen-Browser – Kopien bleiben verknüpft, ändert man eine, ändern "
                     + "sich alle. „Verknüpfung lösen“ macht eine Kopie eigenständig.",
                 "Frischere Oberfläche: feine Ränder, weichere Schatten, Knöpfe geben beim Drücken nach.",
+                "Loft › Führung hinzufügen: eine Skizzenkurve führt die Querschnitte (eine zweite steuert die "
+                    + "Verdrehung). Ohne Führung lässt „Start/Ende tangential“ den Loft senkrecht zur Skizzenebene "
+                    + "aus- bzw. einlaufen.",
+                "Spline-Tangenten: Fit-Spline im Pfeil-Werkzeug wählen, an den Griffen der Punkte ziehen ändert "
+                    + "Richtung und Stärke (orange = eigene Tangente). Griff antippen stellt die automatische wieder her.",
+                "Material (lange drücken auf einen Körper im Ebenen-Browser): PLA, PETG, ABS, TPU, Aluminium, Stahl, "
+                    + "Messing, Holz … – Messen und Druckprüfung zeigen das Gewicht im Material, Metalle glänzen.",
             ]
         }
     }

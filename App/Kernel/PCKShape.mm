@@ -670,6 +670,90 @@ static TopoDS_Face faceFromWires(NSArray<NSArray<NSNumber *> *> *wires) {
     }
 }
 
+/// Kopie eines Drahts, um vector verschoben. Leer bei Fehler.
+static TopoDS_Wire shiftedWire(const TopoDS_Wire &wire, simd_double3 vector) {
+    gp_Trsf move;
+    move.SetTranslation(gp_Vec(vector.x, vector.y, vector.z));
+    BRepBuilderAPI_Transform transform(wire, move, Standard_True);
+    if (!transform.IsDone()) return TopoDS_Wire();
+    const TopoDS_Shape shape = transform.Shape();
+    if (shape.IsNull() || shape.ShapeType() != TopAbs_WIRE) return TopoDS_Wire();
+    return TopoDS::Wire(shape);
+}
+
++ (nullable PCKShape *)loftThroughWires:(NSArray<NSArray<NSNumber *> *> *)sections
+                            startOffset:(simd_double3)startOffset endOffset:(simd_double3)endOffset {
+    if (sections.count < 2) return nil;
+    try {
+        std::vector<TopoDS_Wire> wires;
+        for (NSArray<NSNumber *> *code in sections) {
+            const TopoDS_Wire wire = wireFromCode(toVector(code));
+            if (wire.IsNull()) return nil;
+            wires.push_back(wire);
+        }
+        // Tangential: verschobene Kopie dicht hinter dem ersten bzw. vor dem letzten Querschnitt. Die Fläche
+        // (Approximation durch alle Drähte) verlässt den Querschnitt dann in Richtung der Verschiebung.
+        std::vector<TopoDS_Wire> all;
+        all.push_back(wires.front());
+        if (simd_length(startOffset) > 1e-9) {
+            const TopoDS_Wire helper = shiftedWire(wires.front(), startOffset);
+            if (!helper.IsNull()) all.push_back(helper);
+        }
+        for (size_t k = 1; k + 1 < wires.size(); ++k) all.push_back(wires[k]);
+        if (simd_length(endOffset) > 1e-9) {
+            const TopoDS_Wire helper = shiftedWire(wires.back(), endOffset);
+            if (!helper.IsNull()) all.push_back(helper);
+        }
+        all.push_back(wires.back());
+        BRepOffsetAPI_ThruSections loft(Standard_True, Standard_False);
+        for (const auto &wire : all) loft.AddWire(wire);
+        loft.CheckCompatibility(Standard_True);
+        loft.Build();
+        if (!loft.IsDone()) return nil;
+        return [[PCKShape alloc] initWithShape:loft.Shape()];
+    } catch (...) {
+        return nil;
+    }
+}
+
++ (nullable PCKShape *)loftThroughWires:(NSArray<NSArray<NSNumber *> *> *)sections
+                                 guides:(NSArray<NSArray<NSNumber *> *> *)guides {
+    if (sections.count < 2 || guides.count == 0) return nil;
+    try {
+        const TopoDS_Wire spine = wireFromCode(toVector(guides[0]));
+        if (spine.IsNull()) return nil;
+        TopoDS_Wire auxiliary;
+        if (guides.count >= 2) auxiliary = wireFromCode(toVector(guides[1]));
+        std::vector<TopoDS_Wire> profiles;
+        for (NSArray<NSNumber *> *code in sections) {
+            const TopoDS_Wire wire = wireFromCode(toVector(code));
+            if (wire.IsNull()) return nil;
+            profiles.push_back(wire);
+        }
+        // Querschnitte bleiben, wo sie sind (ohne Kontakt/Korrektur); BRepFill macht sie untereinander
+        // verträglich und blendet sie entlang der Leitkurve über
+        auto sweep = [&](bool useAuxiliary) -> TopoDS_Shape {
+            try {
+                BRepOffsetAPI_MakePipeShell pipe(spine);
+                if (useAuxiliary) pipe.SetMode(auxiliary, Standard_True, BRepFill_NoContact);
+                for (const auto &profile : profiles) pipe.Add(profile, Standard_False, Standard_False);
+                pipe.Build();
+                if (pipe.IsDone() && pipe.MakeSolid() && !pipe.Shape().IsNull()) return pipe.Shape();
+            } catch (...) {
+            }
+            return TopoDS_Shape();
+        };
+        TopoDS_Shape result;
+        if (!auxiliary.IsNull()) result = sweep(true);
+        // Rückfall: nur die erste Führung (korrigiertes Frenet-Dreibein)
+        if (result.IsNull()) result = sweep(false);
+        if (result.IsNull()) return nil;
+        return [[PCKShape alloc] initWithShape:result];
+    } catch (...) {
+        return nil;
+    }
+}
+
 + (nullable PCKShape *)compoundOfShapes:(NSArray<PCKShape *> *)shapes {
     if (shapes.count == 0) return nil;
     if (shapes.count == 1) return shapes[0];
@@ -2193,6 +2277,16 @@ static TopoDS_Shape variableFilletOnce(const TopoDS_Shape &shape, const std::vec
 }
 
 + (nullable PCKShape *)loftThroughWires:(NSArray<NSArray<NSNumber *> *> *)sections {
+    return nil;
+}
+
++ (nullable PCKShape *)loftThroughWires:(NSArray<NSArray<NSNumber *> *> *)sections
+                            startOffset:(simd_double3)startOffset endOffset:(simd_double3)endOffset {
+    return nil;
+}
+
++ (nullable PCKShape *)loftThroughWires:(NSArray<NSArray<NSNumber *> *> *)sections
+                                 guides:(NSArray<NSArray<NSNumber *> *> *)guides {
     return nil;
 }
 

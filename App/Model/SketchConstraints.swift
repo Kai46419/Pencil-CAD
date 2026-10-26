@@ -282,7 +282,7 @@ extension SketchEntity {
         case .ellipse(let c, let r): [c.x, c.y, r.x, r.y]
         case .regularPolygon(let c, let r, _, let a): [c.x, c.y, r, a]
         case .arc(let a, let m, let b): [a.x, a.y, m.x, m.y, b.x, b.y]
-        case .spline(let points, _, _), .polyline(let points, _): points.flatMap { [$0.x, $0.y] }
+        case .spline(let points, _, _, _), .polyline(let points, _): points.flatMap { [$0.x, $0.y] }
         case .point(let p): [p.x, p.y]
         case .text(let t): [t.anchor.x, t.anchor.y]
         }
@@ -299,7 +299,8 @@ extension SketchEntity {
         case .regularPolygon(_, _, let sides, _):
             return .regularPolygon(center: Point2(v[0], v[1]), radius: abs(v[2]), sides: sides, angle: v[3])
         case .arc: return .arc(start: Point2(v[0], v[1]), mid: Point2(v[2], v[3]), end: Point2(v[4], v[5]))
-        case .spline(let points, let kind, let closed): return .spline(points: pts(points.count), kind: kind, closed: closed)
+        case .spline(let points, let kind, let closed, let tangents):
+            return .spline(points: pts(points.count), kind: kind, closed: closed, tangents: tangents)
         case .polyline(let points, let closed): return .polyline(pts(points.count), closed: closed)
         case .point: return .point(Point2(v[0], v[1]))
         case .text(let t):
@@ -320,7 +321,7 @@ extension SketchEntity {
             return [c] + SketchEntity.polygonCorners(center: c, radius: r, sides: n, angle: a)
         case .arc(let a, let m, let b):
             return [a, b] + (circleThrough(a, m, b).map { [$0.center] } ?? [])
-        case .spline(let points, _, _), .polyline(let points, _): return points
+        case .spline(let points, _, _, _), .polyline(let points, _): return points
         case .point(let p): return [p]
         case .text(let t): return [t.anchor]
         }
@@ -357,10 +358,10 @@ extension SketchEntity {
             default:
                 return nil
             }
-        case .spline(var points, let kind, let closed):
+        case .spline(var points, let kind, let closed, let tangents):
             guard points.indices.contains(k) else { return nil }
             points[k] = p
-            return .spline(points: points, kind: kind, closed: closed)
+            return .spline(points: points, kind: kind, closed: closed, tangents: tangents)
         case .polyline(var points, let closed):
             guard points.indices.contains(k) else { return nil }
             points[k] = p

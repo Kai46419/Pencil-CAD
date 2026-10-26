@@ -956,7 +956,9 @@ struct ParameterCard: View {
                     }
                 }
                 if let report = workspace.printReport {
-                    let gram = Double(report.volume) / 1000 * 1.24
+                    // Gewicht im Material des Körpers (ohne Material PLA, Materials.swift)
+                    let printMaterial = model.weighingMaterial(ofBody: workspace.printBody)
+                    let gram = Double(report.volume) / 1000 * printMaterial.density
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Überhang: \(NumberField.format(Double(report.overhangArea))) mm²" + (report.overhang.isEmpty ? " – keine Stützen nötig" : " (rot)"))
                         if let wall = report.thinnestWall {
@@ -964,7 +966,7 @@ struct ParameterCard: View {
                         }
                         Text(report.openEdges == 0 ? "Netz geschlossen" : "\(report.openEdges) offene Kanten – Körper prüfen")
                         Text("Auflage: \(NumberField.format(Double(report.bedContactArea))) mm² · Höhe \(NumberField.format(Double(report.height))) mm")
-                        Text("Volumen \(NumberField.format(Double(report.volume) / 1000)) cm³ · ≈ \(NumberField.format(gram)) g PLA (voll)")
+                        Text("Volumen \(NumberField.format(Double(report.volume) / 1000)) cm³ · ≈ \(NumberField.format(gram)) g \(printMaterial.name) (voll)")
                         if workspace.printUp != [0, 0, 1] {
                             Text("Vorschlag: oben = (\(Self.vectorText(workspace.printUp)))")
                                 .foregroundStyle(Color.accentColor)
@@ -1336,19 +1338,23 @@ extension ParameterCard {
 
     var loftCard: some View {
         Card {
-            HStack(spacing: 14) {
-                Label("Loft", systemImage: "square.3.layers.3d")
-                    .font(.callout.weight(.semibold))
-                Text(model.selectedRegions.isEmpty ? "Querschnitte nacheinander antippen"
-                     : "\(model.selectedRegions.count) Querschnitte")
-                    .foregroundStyle(.secondary)
-                    .fixedSize()
-                solidModePicker
-                if !model.selectedRegions.isEmpty {
-                    Button("Neu beginnen", systemImage: "arrow.counterclockwise") {
-                        model.resetSelection()
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 14) {
+                    Label("Loft", systemImage: "square.3.layers.3d")
+                        .font(.callout.weight(.semibold))
+                    Text(model.selectedRegions.isEmpty ? "Querschnitte nacheinander antippen"
+                         : "\(model.selectedRegions.count) Querschnitte")
+                        .foregroundStyle(.secondary)
+                        .fixedSize()
+                    solidModePicker
+                    if !model.selectedRegions.isEmpty {
+                        Button("Neu beginnen", systemImage: "arrow.counterclockwise") {
+                            model.resetSelection()
+                        }
                     }
                 }
+                // Führungen und Tangentenbedingung (LoftPanel.swift)
+                LoftGuideControls(workspace: workspace, model: model)
             }
         }
     }
@@ -2015,6 +2021,7 @@ struct LayersPanel: View {
             }
             Button("In Einzelkörper trennen", systemImage: "square.split.2x1") { model.separateBody(index) }
             ComponentMenuItems(model: model, index: index)
+            MaterialMenuItems(model: model, index: index, targets: folderTargets(index))
             Button("Löschen", systemImage: "trash", role: .destructive) {
                 model.toggleBody(index, exclusive: true)
                 model.deleteSelected()

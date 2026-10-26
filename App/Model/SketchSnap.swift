@@ -154,7 +154,7 @@ struct SnapIndex {
                 centers.append(center)
             case .regularPolygon(let center, _, _, _):
                 centers.append(center)
-            case .spline(let points, .fit, _):
+            case .spline(let points, .fit, _, _):
                 // Fit-Punkte liegen auf der Kurve
                 endpoints += points
             default:

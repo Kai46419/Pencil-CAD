@@ -590,6 +590,16 @@ final class ViewportView: MTKView {
                 groups.append(LineGroup(polylines: selected.map { $0.map(world) }, color: Self.selectionOrange,
                                         width: 4.2, dots: selectedPoints.map(world), dotRadius: 6))
             }
+            // Spline-Tangentengriffe (SketchSplineHandles.swift): automatische blau, eigene orange
+            let tangentHandles = sketch.splineTangentHandleGeometry(unit: perPoint)
+            if !tangentHandles.automatic.isEmpty {
+                groups.append(LineGroup(polylines: tangentHandles.automatic.map { $0.map(world) }, color: Self.previewBlue,
+                                        width: 1.4, dots: tangentHandles.automaticKnobs.map(world), dotRadius: 4))
+            }
+            if !tangentHandles.custom.isEmpty {
+                groups.append(LineGroup(polylines: tangentHandles.custom.map { $0.map(world) }, color: Self.helperOrange,
+                                        width: 1.8, dots: tangentHandles.customKnobs.map(world), dotRadius: 4.5))
+            }
             let preview = sketch.previewPolylines
             if !preview.isEmpty {
                 groups.append(LineGroup(polylines: preview.map { $0.map(world) }, color: Self.previewBlue, width: 2.6))
@@ -1563,6 +1573,7 @@ final class ViewportView: MTKView {
         guard acceptsForSketch(touch), let sketch, sketch.tool == .select, sketch.pendingAction == nil,
               let point = sketchPoint(for: touch) else { return false }
         return sketch.pick(at: point, tolerance: snapTolerance) == nil
+            && !sketch.hitsSplineHandle(at: point, tolerance: snapTolerance)  // Spline-Tangentengriffe
     }
 
     /// Rahmen bzw. Lasso fertig: Skizzenelemente oder Körper wählen.
