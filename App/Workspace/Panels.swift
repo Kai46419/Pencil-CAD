@@ -212,7 +212,9 @@ struct ParameterCard: View {
     @ViewBuilder
     private var sketchCard: some View {
         let planeOptions = !sketch.plane.isOnFace && sketch.isEmpty
-        if !sketch.isChoosingPlane, planeOptions || hasToolOptions {
+        if sketch.isChoosingPlane {
+            planeChoiceCard
+        } else if planeOptions || hasToolOptions {
             Card {
                 VStack(alignment: .leading, spacing: 10) {
                     if planeOptions {
@@ -227,6 +229,54 @@ struct ParameterCard: View {
                 }
             }
         }
+    }
+
+    /// Ebenenwahl als Kacheln (Kai): Standardebenen und eigene Konstruktionsebenen direkt antippen –
+    /// alternativ ein Feld im Viewport oder eine ebene Körperfläche.
+    private var planeChoiceCard: some View {
+        Card {
+            HStack(spacing: 10) {
+                Text("Skizzieren auf")
+                    .font(.callout.weight(.semibold))
+                ForEach([BasePlane.top, .front, .right]) { side in
+                    planeTile(side.rawValue, systemImage: Self.planeSymbol(side)) { workspace.chooseSketchPlane(side) }
+                }
+                ForEach(model.constructions.filter { $0.kind == .plane && !$0.isHidden }) { item in
+                    planeTile(item.name, systemImage: "square.dashed") { workspace.chooseSketchPlane(item.sketchPlane) }
+                }
+                Text("oder Körperfläche antippen")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+            }
+        }
+    }
+
+    private static func planeSymbol(_ side: BasePlane) -> String {
+        switch side {
+        case .top, .bottom: "square.split.bottomrightquarter"
+        case .front, .back: "square.bottomhalf.filled"
+        case .right, .left: "square.righthalf.filled"
+        }
+    }
+
+    private func planeTile(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 3) {
+                Image(systemName: systemImage)
+                    .font(.title3)
+                Text(title)
+                    .font(.caption.weight(.medium))
+                    .lineLimit(1)
+            }
+            .frame(minWidth: 54)
+            .padding(.vertical, 6)
+            .padding(.horizontal, 6)
+            .background(Theme.rowHighlight, in: RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .hoverTip(title, "Neue Skizze auf dieser Ebene beginnen.")
     }
 
     /// Ob das aktive Skizzenwerkzeug Einstellungen zeigt.

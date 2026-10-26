@@ -268,6 +268,9 @@ enum HelpTopic: String, CaseIterable, Identifiable {
             ]
         case .news:
             [
+                "Neue Skizze: Die Ebenen Oben, Vorne, Rechts liegen beschriftet und größer neben den Körpern, unten gibt "
+                    + "es Kacheln dafür (auch für eigene Konstruktionsebenen). Ebene Körperflächen leuchten unter dem "
+                    + "Stift auf – antippen und darauf skizzieren.",
                 "Gewinde (Erstellen › Gewinde): Zylinderfläche antippen – Bolzen bekommen ein Außen-, Bohrungen ein "
                     + "Innengewinde, die passende Normgröße wird vorgeschlagen. Metrisch ISO (Regel- und Feingewinde "
                     + "M1–M64), UNC/UNF, Whitworth, Rohrgewinde G, R und NPT (kegelig), Trapez, Rund- und Sägengewinde; "
