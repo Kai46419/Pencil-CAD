@@ -1904,6 +1904,15 @@ final class Workspace: ObservableObject {
 
     // MARK: Hinweise
 
+    /// „Körper 1: 30 × 30 × 27 mm“ – Außenmaße (Länge X × Breite Y × Höhe Z) des Körpers.
+    func bodySizeText(_ index: Int) -> String? {
+        guard model.bodies.indices.contains(index), let box = model.mesh.bounds(ofBody: index) else { return nil }
+        let size: SIMD3<Float> = box.max - box.min
+        let unit = LengthUnit.current
+        let x = unit.number(Double(size.x)), y = unit.number(Double(size.y))
+        return "\(model.bodies[index].name): \(x) × \(y) × \(unit.format(Double(size.z))) (L × B × H)"
+    }
+
     var hint: String? {
         if sketch.isActive {
             return sketchHint
@@ -1914,12 +1923,17 @@ final class Workspace: ObservableObject {
                 return "Pfeil ziehen · andere Fläche antippen extrudiert bis dorthin"
             }
             if model.selectedBodies.count > 1 { return "„Vereinigen“ verschmilzt die Körper · Antippen nimmt hinzu/heraus" }
+            if let body = model.selectedBodies.first, let size = bodySizeText(body) {
+                return size + " · weitere Körper antippen oder Rahmen aufziehen"
+            }
             if !model.selectedBodies.isEmpty { return "Weitere Körper antippen oder Rahmen aufziehen" }
             if !model.selectedEdges.isEmpty { return "Pfeil ziehen · weitere Kanten antippen" }
             if !model.selectedRegions.isEmpty { return "Pfeil ziehen · weitere Bereiche antippen · Körperfläche antippen = Höhe bis dorthin" }
             if model.selection != nil {
                 if model.selectedFaces.count > 1 { return "\(model.selectedFaces.count) Flächen · Pfeil ziehen zieht alle zugleich" }
-                return model.faceHandle != nil ? "Pfeil ziehen · weitere Flächen antippen zieht sie mit" : "Fläche gewählt"
+                // Kai: beim Antippen eines Körpers gleich seine Maße sehen
+                let size = model.selection.flatMap { bodySizeText($0.body) }.map { $0 + " · " } ?? ""
+                return size + (model.faceHandle != nil ? "Pfeil ziehen · weitere Flächen antippen zieht sie mit" : "Fläche gewählt")
             }
             if boxSelects { return "Rahmen aufziehen: nach rechts ganz umschlossene, nach links auch angeschnittene Körper" }
             if selectsBodies { return "Körper antippen – mehrere möglich, dann Vereinigen, Abziehen oder Schneiden" }
