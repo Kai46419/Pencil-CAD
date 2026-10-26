@@ -292,6 +292,13 @@ enum HelpTopic: String, CaseIterable, Identifiable {
                 "Zeichnungen: Unter dem Projektnamen steht „Created by Kai Rosenfeld“ – änderbar im Zeichnungsfenster "
                     + "(„Erstellt von“).",
                 "Der KI-Assistent ist entfernt; ein gespeicherter API-Schlüssel wird beim Start gelöscht.",
+                "Rundung ändern: Runde Fläche (z. B. extrudierter Bogen) mit der Auswahl antippen – am Pfeil ziehen "
+                    + "ändert den Radius, unten lassen sich Radius oder Ø eingeben. Geht auch bei Bohrungen.",
+                "Fläche versetzen startet gleich mit 1 mm und Vorschau, erklärt sich in der Karte und versetzt ebene "
+                    + "und runde Flächen notfalls nacheinander. Geht es nicht, nennt die Meldung den Grund und den "
+                    + "größten möglichen Wert.",
+                "Jedes Werkzeug zeigt beim Öffnen unten kurz, was es macht (antippen schließt). Lange drücken auf "
+                    + "eine Werkzeugkachel zeigt die Erklärung erneut.",
                 "Schlanke Maße: kleinere Schilder mit dünnem Schloss. Feste (grüne) Maße erscheinen nur als kleines "
                     + "Schloss – antippen öffnet das Maß. Abschalten in der Skizzenpalette („Feste Maße als Schloss“).",
                 "Parametrischer Verlauf: Zeitleiste unten (Menü … › Zeitleiste ein-/ausblenden). Schritt antippen ändert "
