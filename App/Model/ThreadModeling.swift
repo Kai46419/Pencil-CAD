@@ -60,6 +60,11 @@ extension ModelStore {
             dropPreview()
             return
         }
+        // Kosmetisch: keine Geometrie, nur Eigenschaft am Körper (ThreadNotes.swift)
+        if spec.cosmetic {
+            previewCosmeticThread(spec, target: target)
+            return
+        }
         let outcome = threadedBody(bodies[target.body].shape, spec: spec, target: target)
         guard let shape = outcome.shape else {
             message = outcome.error ?? "Gewinde hier nicht möglich."
@@ -68,6 +73,7 @@ extension ModelStore {
         }
         var preview = bodies
         preview[target.body] = preview[target.body].with(shape)
+        if let note = spec.note(for: target) { preview[target.body].addThread(note) }
         message = threadSummary(spec, target: target)
         showPreview(preview, name: "Gewinde \(spec.designation)")
     }
@@ -190,7 +196,8 @@ extension ModelStore {
             guard let voidTool = PCKShape.thread(base: start + inward * toolFrom, axis: inward, length: toolTo - toolFrom,
                                              lead: lead, starts: spec.starts, taper: geometry.taper,
                                              leftHanded: spec.leftHanded, profileRZ: profile,
-                                             coreRadius: geometry.minor(at: toolFrom)) else {
+                                             coreRadius: spec.coreRadius(minor: geometry.minor(at: toolFrom),
+                                                                         external: false)) else {
                 return (nil, "Gewindegang konnte nicht erzeugt werden (Maße prüfen, Länge kürzen).")
             }
             guard let threaded = shape.cutting(voidTool) else { return (nil, failed) }

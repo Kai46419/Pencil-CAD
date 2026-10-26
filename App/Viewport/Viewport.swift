@@ -550,6 +550,7 @@ final class ViewportView: MTKView {
         }
 
         addConstructionItems(to: &groups, perPoint: perPoint, sketching: sketching)
+        addCosmeticThreads(to: &groups)
         if !sketching {
             addRotationRing(to: &groups)
             addPlaneHandles(to: &fills, groups: &groups)

@@ -365,6 +365,10 @@ struct PropertiesPanel: View {
         }
         let counts = model.topologyCounts(ofBody: body)
         rows.append(.init(label: "Flächen · Kanten", value: "\(counts.faces) · \(counts.edges)"))
+        // Gewinde am Körper (ThreadNotes.swift): „M6×1 · 12 mm · innen · modelliert“
+        for line in model.bodies[body].threadSummaries {
+            rows.append(.init(label: "Gewinde", value: line))
+        }
         return rows
     }
 

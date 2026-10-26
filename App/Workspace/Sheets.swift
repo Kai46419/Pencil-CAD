@@ -271,6 +271,12 @@ enum HelpTopic: String, CaseIterable, Identifiable {
                 "Neue Skizze: Die Ebenen Oben, Vorne, Rechts liegen beschriftet und größer neben den Körpern, unten gibt "
                     + "es Kacheln dafür (auch für eigene Konstruktionsebenen). Ebene Körperflächen leuchten unter dem "
                     + "Stift auf – antippen und darauf skizzieren.",
+                "Gewinde: Kernloch jetzt nach Bohrertabelle (ISO 2306, z. B. M6 → Ø 5,0; UNC/UNF/G/NPT nach üblichen "
+                    + "Tabellen), Druckspiel kommt dazu. Neben dem Druckspiel gibt es Vorlagen (FDM 0,3 · Harz 0,1 · "
+                    + "Fräsen 6H/6g 0); die letzte Wahl wird gemerkt.",
+                "Gewinde „Kosmetisch“: keine Gewindegeometrie, Bohrung nur mit Kernloch, Bolzen bleibt – dünne Ringe "
+                    + "zeigen das Gewinde. Jedes Gewinde steht jetzt als Eigenschaft am Körper (Eigenschaften-Fenster: "
+                    + "„Gewinde: M6×1 · 12 mm · innen · modelliert“) und wird mit dem Projekt gespeichert.",
                 "Gewinde (Erstellen › Gewinde): Zylinderfläche antippen – Bolzen bekommen ein Außen-, Bohrungen ein "
                     + "Innengewinde, die passende Normgröße wird vorgeschlagen. Metrisch ISO (Regel- und Feingewinde "
                     + "M1–M64), UNC/UNF, Whitworth, Rohrgewinde G, R und NPT (kegelig), Trapez, Rund- und Sägengewinde; "

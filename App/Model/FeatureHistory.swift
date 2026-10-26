@@ -133,6 +133,8 @@ struct SnapshotBodyMeta: Codable, Hashable {
     var placement: [Double]?
     /// Material (Materials.swift); fehlt in älteren Ständen
     var material: String? = nil
+    /// Gewinde (ThreadNotes.swift); fehlt in älteren Ständen
+    var threads: [ThreadNote]? = nil
 }
 
 /// Fester Stand: full = alle Körper, sonst nur die geänderten (changed, in dieser Reihenfolge) und die neuen.
@@ -1275,7 +1277,8 @@ extension ModelStore {
     private static func snapshotMeta(_ body: SceneBody) -> SnapshotBodyMeta {
         SnapshotBodyMeta(name: body.name, color: [body.color.x, body.color.y, body.color.z], isHidden: body.isHidden,
                          sketchID: body.sketchID, folder: body.folder, componentID: body.componentID,
-                         placement: body.componentID == nil ? nil : body.placementValues, material: body.material)
+                         placement: body.componentID == nil ? nil : body.placementValues, material: body.material,
+                         threads: body.threads)
     }
 
     private static func snapshotBody(_ shape: PCKShape, meta: SnapshotBodyMeta, number: Int) -> SceneBody {
@@ -1287,6 +1290,7 @@ extension ModelStore {
         var body = SceneBody(shape: shape, name: meta.name, color: color, isHidden: meta.isHidden,
                              sketchID: meta.sketchID, folder: meta.folder)
         body.material = meta.material
+        body.threads = meta.threads
         return body.restoringComponent(meta.componentID, placement: meta.placement)
     }
 

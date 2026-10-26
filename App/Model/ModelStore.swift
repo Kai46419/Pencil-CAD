@@ -109,6 +109,8 @@ struct SceneBody {
     var placement: simd_double4x4 = matrix_identity_double4x4
     /// Material (Kurzname aus BodyMaterial.all, Materials.swift); nil = keins
     var material: String? = nil
+    /// Gewinde am Körper, modelliert oder kosmetisch (ThreadNotes.swift); nil = keine
+    var threads: [ThreadNote]? = nil
 
     func with(_ shape: PCKShape) -> SceneBody {
         var body = self
@@ -373,6 +375,8 @@ final class ModelStore: ObservableObject {
     var canRedo: Bool { !future.isEmpty }
     var isEmpty: Bool { bodies.isEmpty && sketches.isEmpty }
     var hasPreview: Bool { previewBodies != nil }
+    /// Angezeigte Körper (Vorschau bzw. Stand)
+    var shownBodies: [SceneBody] { previewBodies ?? bodies }
 
     /// Körper der aktuellen Auswahl (Fläche, Kanten oder Körper).
     var selectedBody: Int? { selection?.body ?? selectedEdges.first?.body ?? selectedBodies.first }
@@ -1841,6 +1845,7 @@ final class ModelStore: ObservableObject {
                 body.name = metas[index].name
                 body.color = SIMD3(metas[index].color[0], metas[index].color[1], metas[index].color[2])
                 body.material = metas[index].material
+                body.threads = metas[index].threads
             }
             body.folder = name
             return body
@@ -1946,6 +1951,8 @@ final class ModelStore: ObservableObject {
         var placement: [Double]?
         /// Material (Materials.swift); fehlt in älteren Projekten
         var material: String?
+        /// Gewinde (ThreadNotes.swift); fehlt in älteren Projekten
+        var threads: [ThreadNote]?
     }
 
     private var modelURL: URL? { folder?.appending(path: "model.step") }
@@ -1986,6 +1993,7 @@ final class ModelStore: ObservableObject {
                                      isHidden: meta.isHidden, sketchID: meta.sketchID, folder: meta.folder)
                     .restoringComponent(meta.componentID, placement: meta.placement)
                 body.material = meta.material
+                body.threads = meta.threads
                 return body
             }
             return SceneBody(shape: shape, name: "Körper \(index + 1)", color: SceneBody.palette[index % SceneBody.palette.count])
@@ -2017,7 +2025,8 @@ final class ModelStore: ObservableObject {
         let metas = bodies.map {
             BodyMeta(name: $0.name, color: [$0.color.x, $0.color.y, $0.color.z], isHidden: $0.isHidden, sketchID: $0.sketchID,
                      folder: $0.folder, componentID: $0.componentID,
-                     placement: $0.componentID == nil ? nil : $0.placementValues, material: $0.material)
+                     placement: $0.componentID == nil ? nil : $0.placementValues, material: $0.material,
+                     threads: $0.threads)
         }
         if let data = try? JSONEncoder().encode(metas) {
             try? data.write(to: metaURL)
@@ -2741,6 +2750,8 @@ extension ModelStore {
                 return
             }
             preview[body] = preview[body].with(cut)
+            // Gewinde als Eigenschaft am Körper (ThreadNotes.swift)
+            if let note = spec.threadNote(at: hole.point, outward: n, reach: reach) { preview[body].addThread(note) }
         }
         message = holes.count == 1 ? spec.summary : "\(holes.count) Bohrungen · \(spec.summary)"
         showPreview(preview, name: holes.count == 1 ? "Bohrung" : "Bohrungen")
@@ -2855,7 +2866,8 @@ struct HoleSpec: Equatable {
         let r = (diameter + clearance) / 2
         guard r > 0 else { return nil }
         let length = (through ? reach : depth) + lift
-        if let thread {
+        // Kosmetisches Gewinde: nur das Kernloch (diameter = Kernlochbohrer)
+        if let thread, !thread.cosmetic {
             return threadedTool(thread, top: top, axis: -n, length: length, lift: lift)
         }
         guard var shape = PCKShape.cylinder(base: top, axis: -n, radius: r, height: length) else { return nil }

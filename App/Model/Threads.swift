@@ -152,7 +152,8 @@ enum ThreadFamily: String, CaseIterable, Identifiable {
         var best = 0
         var bestError = Double.infinity
         for (index, size) in sizes.enumerated() {
-            let reference = external ? size.diameter : coreDiameter(size, pitch: size.pitch)
+            // Bohrung: nach dem Kernlochbohrer (ThreadNotes.swift)
+            let reference = external ? size.diameter : tapDrill(size, pitch: size.pitch)
             let error = abs(reference - diameter)
             if error < bestError {
                 best = index
@@ -584,7 +585,10 @@ struct ThreadSpec: Equatable {
     /// Gangzahl 1–4 (Steigung je Umdrehung = Gangzahl × P)
     var starts = 1
     /// Druckspiel in mm: Außengewinde radial um die Hälfte kleiner, Innengewinde um die Hälfte größer
-    var clearance: Double = 0.2
+    /// (Standard: zuletzt gewählte Toleranz-Vorlage, ThreadNotes.swift)
+    var clearance: Double = ThreadTolerancePreset.defaultClearance
+    /// Kosmetisch: keine Gewindegeometrie, nur Eigenschaft am Körper und Ringe im Viewport
+    var cosmetic = false
     /// Fase bzw. Senkung am freien Ende, damit Schraube und Mutter gut ansetzen
     var chamfer = true
     /// Anfang am anderen Ende der Fläche
@@ -640,6 +644,8 @@ struct HoleThread: Equatable {
     var sizeIndex = ThreadTables.metric.firstIndex { $0.name == "M3" } ?? 0
     var pitch: Double = 0.5
     var leftHanded = false
+    /// Kosmetisch: nur das Kernloch bohren, Gewinde als Eigenschaft am Körper (ThreadNotes.swift)
+    var cosmetic = false
 
     var size: ThreadSize {
         let list = family.sizes
@@ -654,9 +660,11 @@ struct HoleThread: Equatable {
     var designation: String { family.designation(size, pitch: pitch, starts: 1, leftHanded: leftHanded) }
 
     func summary(clearance: Double, through: Bool, depth: Double) -> String {
-        let core = (coreDiameter + clearance).formatted(.number.precision(.fractionLength(0...2)))
+        let core: String = (tapDrill + clearance).formatted(.number.precision(.fractionLength(0...2)))
+        let drill: String = tapDrill.formatted(.number.precision(.fractionLength(0...2)))
         let depthText = through ? "durch" : "\(depth.formatted()) mm tief"
-        return "Gewinde \(designation), Kernloch Ø \(core) mm, \(depthText)"
+        let kind: String = cosmetic ? " (kosmetisch)" : ""
+        return "Gewinde \(designation)\(kind), Kernloch Ø \(core) mm (Bohrer \(drill)), \(depthText)"
     }
 }
 
@@ -676,13 +684,18 @@ extension HoleSpec {
         let bottomMinor = geometry.minor(at: length)
         guard minor > 0.2, bottomMinor > 0.2,
               let profile = ThreadProfile.kernelProfile(form, pitch: p, major: major, external: false) else { return nil }
+        // Kernloch nach Bohrertabelle plus Druckspiel (mindestens der Kern nach Grundprofil; kegelig wie bisher)
+        let tapped: Bool = !family.isTapered
+        let drilled: Double = (thread.tapDrill + clearance) / 2
+        let core: Double = tapped ? max(minor, drilled) : minor
+        let bottomCore: Double = tapped ? core : bottomMinor
         let numbers: [NSNumber] = profile.map { NSNumber(value: $0) }
         guard var tool = PCKShape.thread(base: top, axis: axis, length: length, lead: p, starts: 1, taper: geometry.taper,
                                          leftHanded: thread.leftHanded, profileRZ: numbers,
-                                         coreRadius: minor) else { return nil }
+                                         coreRadius: core) else { return nil }
         if drillPoint, !through {
-            let tipHeight = bottomMinor / tan(59 * .pi / 180)
-            if let tip = PCKShape.cone(base: top + axis * length, axis: axis, bottomRadius: bottomMinor, topRadius: 0,
+            let tipHeight = bottomCore / tan(59 * .pi / 180)
+            if let tip = PCKShape.cone(base: top + axis * length, axis: axis, bottomRadius: bottomCore, topRadius: 0,
                                        height: tipHeight),
                let joined = tool.fusing(tip) {
                 tool = joined
@@ -692,7 +705,7 @@ extension HoleSpec {
         let surface = top + axis * lift
         let e = min(0.1, 0.2 * minor)
         let sinkHeight = geometry.depth + 2 * e + 1
-        if let sink = PCKShape.cone(base: surface - axis, axis: axis, bottomRadius: major + e + 1, topRadius: minor - e,
+        if let sink = PCKShape.cone(base: surface - axis, axis: axis, bottomRadius: major + e + 1, topRadius: core - e,
                                     height: sinkHeight),
            let joined = tool.fusing(sink) {
             tool = joined
