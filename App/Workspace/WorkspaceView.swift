@@ -38,6 +38,8 @@ private struct WorkspaceContent: View {
     @State private var photoItem: PhotosPickerItem?
     /// AR Quick Look: USDZ-Datei, die gerade gezeigt wird
     @State private var arPreview: URL?
+    /// Zeitleiste des Verlaufs: automatisch, ein- oder ausgeblendet (TimelineBar.swift)
+    @AppStorage(TimelineVisibility.storageKey) private var timelineVisibility = TimelineVisibility.automatic.rawValue
 
     private var projectName: String {
         projects.project(workspace.project.id)?.name ?? workspace.project.name
@@ -310,6 +312,11 @@ private struct WorkspaceContent: View {
                 Button("In AR ansehen", systemImage: "arkit") {
                     arPreview = model.usdzFile()
                 }
+                Button(timelineSetting ? "Zeitleiste ausblenden" : "Zeitleiste einblenden",
+                       systemImage: "clock.arrow.circlepath") {
+                    let next: TimelineVisibility = timelineSetting ? .hidden : .shown
+                    timelineVisibility = next.rawValue
+                }
                 Divider()
                 Button("Projekt umbenennen …", systemImage: "pencil") {
                     newName = projectName
@@ -382,6 +389,9 @@ private struct WorkspaceContent: View {
             if workspace.showsDoneBar {
                 doneBar
             }
+            if timelineSetting, !sketch.isActive {
+                TimelineBar(model: model)
+            }
         }
         .padding(.horizontal, 120)
         .padding(.bottom, 18)
@@ -423,6 +433,12 @@ private struct WorkspaceContent: View {
     }
 
     // MARK: Aktionen
+
+    /// Zeitleiste gewünscht (automatisch: ab zwei Features)
+    private var timelineSetting: Bool {
+        let setting = TimelineVisibility(rawValue: timelineVisibility) ?? .automatic
+        return setting.isVisible(featureCount: model.features.count)
+    }
 
     /// In der Skizze nimmt Rückgängig zuerst Skizzenschritte zurück.
     private var canUndo: Bool {

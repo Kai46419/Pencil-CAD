@@ -43,7 +43,7 @@ struct VariablesSheet: View {
                 } footer: {
                     Text("In jedem Zahlenfeld und in Skizzenmaßen nutzbar, z. B. „2 × wand“, „breite / 2 + 5“, "
                          + "„sqrt(a^2 + b^2)“. Einheiten: mm, cm, m, in, ft, deg. Ein Skizzenmaß mit Variable (ƒ) "
-                         + "folgt ihr; Körper ändern sich nicht nachträglich.")
+                         + "folgt ihr; Körper daraus werden über den Verlauf (Zeitleiste) neu berechnet.")
                 }
                 Section("Neue Variable") {
                     HStack(spacing: 10) {
@@ -263,8 +263,9 @@ enum HelpTopic: String, CaseIterable, Identifiable {
                 "Jedes Zahlenfeld rechnet: „40 / 2“, „3 × 12,5“, „1,5 cm“, „30°“, „sqrt(2) × 10“.",
                 "Einfügen › Variable legt benannte Werte an, z. B. wand = 2 mm, breite = 40. Danach geht überall "
                     + "„breite − 2 × wand“.",
-                "Ein Skizzenmaß mit Variable trägt ein ƒ und folgt, wenn die Variable sich ändert. Fertige Körper bleiben, "
-                    + "wie sie sind (PencilCAD speichert keinen Konstruktionsverlauf).",
+                "Ein Skizzenmaß mit Variable trägt ein ƒ und folgt, wenn die Variable sich ändert; Körper aus der Skizze "
+                    + "werden über den Verlauf neu berechnet. Auch Werte in der Zeitleiste (Abstand, Radius …) können "
+                    + "Formeln mit Variablen sein.",
                 "Funktionen: " + Formula.functionNames.joined(separator: ", ") + ". Winkelfunktionen rechnen in Grad.",
             ]
         case .assistant:
@@ -277,6 +278,13 @@ enum HelpTopic: String, CaseIterable, Identifiable {
             ]
         case .news:
             [
+                "Parametrischer Verlauf: Zeitleiste unten (Menü … › Zeitleiste ein-/ausblenden). Schritt antippen ändert "
+                    + "Abstand, Radius, Winkel … (auch als Formel mit Variablen), unterdrückt oder löscht ihn – die "
+                    + "folgenden Schritte werden neu berechnet. Ebenso nach dem Bearbeiten einer Skizze und beim Ändern "
+                    + "von Variablen. Rot = beim Nachbau fehlgeschlagen und übersprungen. Import, KI und ähnliche "
+                    + "direkte Änderungen bleiben als fester Stand stehen.",
+                "Formeln in Skizzenmaßen rechnen in der Projekteinheit („10“ im Zollprojekt = 10 in, „10 mm“ bleibt "
+                    + "10 mm); Winkel an der Ecke kippen beim Nachrechnen nicht mehr.",
                 "Skizze: Bemaßte Formen bleiben starr – ist alles bemaßt, verschiebt Ziehen nur noch das ganze Teil. "
                     + "Bögen klappen nicht mehr um, und ein Maß, das die Form zusammenklappen würde, wird abgelehnt.",
                 "Winkel an der Ecke (z. B. 27° statt 153°) mit Schloss. Jedes änderbare Maß hat ein Schloss: rot antippen "
