@@ -13,6 +13,9 @@ struct DrawingSheet: View {
     @State private var layout: DrawingLayout?
     @State private var preview: UIImage?
     @State private var isWorking = false
+    /// Fortschritt: berechnete und zu berechnende Ansichten
+    @State private var finishedViews = 0
+    @State private var totalViews = 0
     @State private var exportFile: ExportFile?
     @State private var exportType: UTType = .pdf
     @State private var isExporting = false
@@ -45,7 +48,7 @@ struct DrawingSheet: View {
                             .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
                     if isWorking {
-                        ProgressView("Ansichten werden berechnet …")
+                        progressBadge
                             .padding()
                             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
                     }
@@ -88,6 +91,18 @@ struct DrawingSheet: View {
                       defaultFilename: fileName) { _ in }
     }
 
+    @ViewBuilder
+    private var progressBadge: some View {
+        if totalViews > 0 {
+            ProgressView(value: Double(finishedViews), total: Double(totalViews)) {
+                Text("Ansichten werden berechnet … (\(finishedViews) von \(totalViews))")
+            }
+            .frame(maxWidth: 280)
+        } else {
+            ProgressView("Ansichten werden berechnet …")
+        }
+    }
+
     private var optionsBar: some View {
         HStack(spacing: 16) {
             if !selectedBodies.isEmpty {
@@ -125,10 +140,32 @@ struct DrawingSheet: View {
         let shapes = indices.map { model.bodies[$0].shape }
         var views: [DrawingView] = [.front, .top, options.method.sideView]
         if options.showsIso { views.append(.iso) }
-        if !shapes.isEmpty {
-            for view in views where cache[view] == nil {
-                cache[view] = TechnicalDrawing.project(shapes, view: view)
+        let missing: [DrawingView] = shapes.isEmpty ? [] : views.filter { cache[$0] == nil }
+        if !missing.isEmpty {
+            // Verdeckte Kanten (HLR) dauern bei großen Körpern: im Hintergrund rechnen, damit die App bedienbar
+            // bleibt. Der Kernel bekommt eigene Kopien (BRepBuilderAPI_Transform mit Kopie), weil die App die
+            // Originale währenddessen weiter benutzt (z. B. Netz neu berechnen); OpenCASCADE-Formen sind
+            // nicht für gleichzeitigen Zugriff gemacht.
+            let copies = shapes.compactMap { $0.translated(by: SIMD3<Double>(0, 0, 0)) }
+            let inBackground = copies.count == shapes.count
+            finishedViews = 0
+            totalViews = missing.count
+            for view in missing {
+                let projection: DrawingProjection
+                if inBackground {
+                    projection = await Task.detached(priority: .userInitiated) {
+                        TechnicalDrawing.project(copies, view: view)
+                    }.value
+                } else {
+                    projection = TechnicalDrawing.project(shapes, view: view)
+                }
+                // Inzwischen andere Körper gewählt: Ergebnis gehört nicht mehr zu dieser Zeichnung
+                guard indices == cachedBodies else { return }
+                cache[view] = projection
+                finishedViews += 1
+                guard !Task.isCancelled else { return }
             }
+            totalViews = 0
         }
         let subtitle = indices.count == 1 ? model.bodies[indices[0]].name : "\(indices.count) Körper"
         let result = TechnicalDrawing.layout(shapes.isEmpty ? [:] : cache, options: options, title: projectName,

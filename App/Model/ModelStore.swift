@@ -990,6 +990,8 @@ final class ModelStore: ObservableObject {
     func cancelPreview() {
         dropPreview()
         edgeValue = 0
+        // Variable Rundung gilt nur für die eine Rundung, nicht für die nächste Auswahl bzw. das nächste Werkzeug
+        edgeEndValue = nil
         faceValue = 0
         regionValue = 0
         moveOffset = .zero
@@ -1454,6 +1456,7 @@ final class ModelStore: ObservableObject {
         edgeHandle = nil
         faceHandle = nil
         edgeValue = 0
+        edgeEndValue = nil
         faceValue = 0
         moveOffset = .zero
         movingSketch = nil
@@ -2409,9 +2412,9 @@ extension ModelStore {
                 message = "Skalieren nicht möglich."
                 return
             }
-            preview[index] = preview[index].with(scaled)
+            preview[index] = preview[index].scaledInstance(scaled)
         }
-        message = nil
+        message = scaledComponentNote(selectedBodies)
         showPreview(preview, name: "Skalieren")
     }
 

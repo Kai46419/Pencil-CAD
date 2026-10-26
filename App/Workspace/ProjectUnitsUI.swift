@@ -12,6 +12,21 @@ extension Workspace {
         }
     }
 
+    /// Fenster wird (wieder) aktiv: Die Einheit dieses Projekts gilt. LengthUnit.current ist global – mit zwei
+    /// Fenstern (iPad) würde sonst das zuletzt geöffnete Projekt die Einheit des anderen bestimmen.
+    func activateLengthUnit() {
+        let unit = LengthUnit.stored(in: project.folder)
+        guard unit != LengthUnit.current else { return }
+        LengthUnit.current = unit
+        objectWillChange.send()
+        sketch.objectWillChange.send()
+    }
+
+    /// Projekt geschlossen: zurück auf mm, damit die Einheit nicht in Startseite bzw. nächstes Projekt durchsickert.
+    static func resetLengthUnit() {
+        LengthUnit.current = .mm
+    }
+
     /// Einheit des Projekts ändern: nur Anzeige und Eingabe der Maße, die Geometrie bleibt unverändert (mm).
     func setLengthUnit(_ unit: LengthUnit) {
         guard unit != LengthUnit.current else { return }

@@ -122,6 +122,9 @@ private struct WorkspaceContent: View {
         .onChange(of: scenePhase) { _, phase in
             if phase != .active {
                 workspace.saveThumbnail()
+            } else {
+                // Mehrere Fenster (iPad) teilen sich LengthUnit.current: das aktive Projekt bestimmt die Einheit
+                workspace.activateLengthUnit()
             }
         }
         .alert("Projekt umbenennen", isPresented: $isRenaming) {

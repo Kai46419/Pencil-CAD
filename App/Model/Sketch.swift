@@ -2586,23 +2586,18 @@ final class SketchController: ObservableObject {
         applyDimension(updated, anchor: nil)
     }
 
-    /// Treibendes Maß einhalten; das zuerst gewählte Element bleibt nach Möglichkeit stehen.
+    /// Treibendes Maß einhalten. Kai: Nur die Form, deren Maß sich ändert, und wo nötig ihre direkten Nachbarn
+    /// bewegen sich (siehe ConstraintSolver.solveLocally); das zuerst gewählte Element bleibt nach Möglichkeit stehen.
     private func applyDimension(_ updated: [SketchConstraint], anchor: Int?) {
         remember()
         let before = entities, beforeConstraints = constraints
         constraints = updated
-        let locked: Set<Int> = anchor.map { [$0] } ?? []
-        lastSolveFolded = false
-        let candidates = [ConstraintSolver.solve(entities, constraints: constraints, locked: locked),
-                          ConstraintSolver.solve(entities, constraints: constraints)].compactMap { $0 }
-        // Kai (Parallelogramm): Lösungen, die die Form zusammenklappen, gelten nicht
-        let usable = candidates.first { !ConstraintSolver.folds(from: before, to: $0) }
-        if usable == nil, !candidates.isEmpty { lastSolveFolded = true }
-        if let solved = usable {
-            entities = solved
+        let tiers = dimensionChangeTrials(from: beforeConstraints, anchor: anchor)
+        if let found = solveDimensionTrials(tiers, before: before) {
+            entities = found.entities
             selection = []
             selectedMarks = []
-            notice = nil
+            notice = found.isGlobal ? widerDimensionNotice : nil
         } else {
             entities = before
             constraints = beforeConstraints
@@ -2611,6 +2606,31 @@ final class SketchController: ObservableObject {
         }
         editableIndex = nil
         entitiesChanged()
+    }
+
+    /// Lösungsversuche nach dem Ändern treibender Maße: Ein Maß am Element (Länge, Radius, …) wie bei der
+    /// Eingabe am Element, sonst die beteiligten Elemente; das Ankerelement bleibt nach Möglichkeit stehen.
+    private func dimensionChangeTrials(from old: [SketchConstraint], anchor: Int?) -> [[DimensionTrial]] {
+        var changed: [Int] = []
+        for index in constraints.indices where index >= old.count || old[index] != constraints[index] {
+            changed.append(index)
+        }
+        if changed.count == 1, !constraints[changed[0]].isSuspended,
+           let owner = fixedEntityKind(of: constraints[changed[0]]),
+           let value = constraints[changed[0]].dimensionValue {
+            let tiers = dimensionTrials(owner.kind, of: owner.entity, to: value)
+            if !tiers.isEmpty { return tiers }
+        }
+        var focus = Set<Int>()
+        for index in changed { focus.formUnion(constraints[index].entities) }
+        focus = focus.filter { entities.indices.contains($0) }
+        var pinned = Set<Int>()
+        if let anchor, entities.indices.contains(anchor), focus.count > 1 || !focus.contains(anchor) {
+            pinned.insert(anchor)
+        }
+        var tiers: [[DimensionTrial]] = [[DimensionTrial(entities: entities, focus: focus, pinned: pinned)]]
+        if !pinned.isEmpty { tiers.append([DimensionTrial(entities: entities, focus: focus, pinned: [])]) }
+        return tiers
     }
 
     /// Maß eines Elements setzen. Startecke, Mitte bzw. Startpunkt bleiben fest. Kai: Ein eingegebenes Maß ist
@@ -2649,50 +2669,173 @@ final class SketchController: ObservableObject {
         entitiesChanged()
     }
 
-    /// Geometrie für ein Maß am Element ändern (ohne es festzulegen).
+    /// Geometrie für ein Maß am Element ändern. Kai: „Nur diese Form ändern, nicht die ganzen anderen Striche und
+    /// Bögen.“ Es bewegen sich die Form und wo nötig ihre direkten Nachbarn: Linien verkürzen bzw. verlängern sich,
+    /// Bogenenden gleiten auf ihnen (wie Fusion beim Radius einer Abrundung); eine Linie wächst an ihrem freien
+    /// Ende. Verankerte Punkte schließen Lösungen aus, die sie verschieben würden.
     private func changeEntityDimension(_ kind: SketchDimension.Kind, of index: Int, to value: Double) {
-        guard entities.indices.contains(index) else { return }
-        let entity = entities[index]
+        let tiers = dimensionTrials(kind, of: index, to: value)
+        guard !tiers.isEmpty else { return }
+        let before = entities
+        guard let found = solveDimensionTrials(tiers, before: before) else {
+            notice = lastSolveFolded ? dimensionConflictNotice
+                : "Maß widerspricht den Einschränkungen (z. B. verankerten Punkten)."
+            return
+        }
+        remember()
+        entities = found.entities
+        if found.isGlobal { notice = widerDimensionNotice }
+        // Laufender Linienzug geht am neuen Ende weiter
+        if let end = chainEnd, case .line(let oldA, let oldB) = before[index], case .line(let newA, let newB) = entities[index] {
+            if simd_distance(end, oldB) < 1e-6 { chainEnd = newB } else if simd_distance(end, oldA) < 1e-6 { chainEnd = newA }
+        }
+        entitiesChanged()
+    }
+
+    /// Ein Lösungsversuch für ein Maß: Skizze mit (vorläufig) geänderter Form, die betroffenen Elemente (focus)
+    /// und die davon, die dabei fest stehen (pinned).
+    private struct DimensionTrial {
+        var entities: [SketchEntity]
+        var focus: Set<Int>
+        var pinned: Set<Int>
+    }
+
+    /// Lösungsversuche für ein Maß am Element, in Stufen (die erste Stufe mit einer Lösung gilt):
+    /// Bogen und Kreis geben zuerst selbst nach (Fusion: Abrundung wird kleiner, die Enden gleiten auf den
+    /// Nachbarlinien, der Mittelpunkt wandert auf der Winkelhalbierenden); eine Linie wächst an einem Ende
+    /// (erst Anfang oder Ende fest, dann die Mitte); Rechteck, Ellipse und Polygon behalten Ecke bzw. Mitte.
+    private func dimensionTrials(_ kind: SketchDimension.Kind, of index: Int, to value: Double) -> [[DimensionTrial]] {
+        guard entities.indices.contains(index), value > 0 else { return [] }
+        let focus: Set<Int> = [index]
+        // Hält ein treibendes Maß den Wert fest, darf die Form selbst nachgeben
+        let held = fixedKinds(of: index).contains(kind)
+        let current = entities
+        func trial(_ shape: SketchEntity, pinned: Bool) -> DimensionTrial {
+            var changed = current
+            changed[index] = shape
+            return DimensionTrial(entities: changed, focus: focus, pinned: pinned ? focus : [])
+        }
+        let entity = current[index]
+        switch (entity, kind) {
+        case (.line(let a, let b), .length):
+            guard simd_distance(a, b) > 1e-9 else { return [] }
+            let direction = simd_normalize(b - a)
+            let middle: Point2 = (a + b) / 2
+            let half: Point2 = direction * (value / 2)
+            let atStart = SketchEntity.line(a, a + direction * value)
+            let atEnd = SketchEntity.line(b - direction * value, b)
+            let centered = SketchEntity.line(middle - half, middle + half)
+            var tiers: [[DimensionTrial]] = [[trial(atStart, pinned: true), trial(atEnd, pinned: true)],
+                                             [trial(centered, pinned: true)]]
+            if held { tiers.append([trial(entity, pinned: false)]) }
+            return tiers
+        case (.arc(let a, let m, let b), .radius):
+            var pinnedShapes: [SketchEntity] = []
+            var guess = entity
+            if let mid = Self.arc(a, m, b, radius: value) {
+                guess = .arc(start: a, mid: mid, end: b)
+                pinnedShapes.append(guess)
+            }
+            if let circle = circleThrough(a, m, b), circle.radius > 1e-9 {
+                let k = value / circle.radius
+                // Ähnlich vergrößern: um ein Ende (dort bleibt die Tangente) bzw. um die Mitte
+                for pivot in [a, b, circle.center] {
+                    let start: Point2 = pivot + (a - pivot) * k
+                    let through: Point2 = pivot + (m - pivot) * k
+                    let end: Point2 = pivot + (b - pivot) * k
+                    pinnedShapes.append(.arc(start: start, mid: through, end: end))
+                }
+            }
+            let pinnedTier = pinnedShapes.map { trial($0, pinned: true) }
+            guard held else { return [pinnedTier] }
+            return [[trial(guess, pinned: false)], pinnedTier]
+        case (.circle(let center, _), .diameter):
+            let resized = SketchEntity.circle(center: center, radius: value / 2)
+            guard held else { return [[trial(resized, pinned: true)]] }
+            return [[trial(resized, pinned: false)], [trial(resized, pinned: true)]]
+        default:
+            break
+        }
         var updated: SketchEntity?
         switch (entity, kind) {
         case (.rectangle(let corner, let size), .width):
             updated = .rectangle(corner: corner, size: Point2(size.x < 0 ? -value : value, size.y))
         case (.rectangle(let corner, let size), .height):
             updated = .rectangle(corner: corner, size: Point2(size.x, size.y < 0 ? -value : value))
-        case (.circle(let center, _), .diameter):
-            updated = .circle(center: center, radius: value / 2)
         case (.ellipse(let center, let radii), .width):
             updated = .ellipse(center: center, radii: Point2(value / 2, radii.y))
         case (.ellipse(let center, let radii), .height):
             updated = .ellipse(center: center, radii: Point2(radii.x, value / 2))
         case (.regularPolygon(let center, _, let sides, let angle), .radius):
             updated = .regularPolygon(center: center, radius: value, sides: sides, angle: angle)
-        case (.line, .length), (.arc, .radius):
-            setStretchableDimension(of: index, to: value)
-            return
         default:
             break
         }
-        guard let updated else { return }
-        let before = entities
-        remember()
-        entities[index] = updated
-        // Verbundene Elemente folgen über die Einschränkungen
-        if !constraints.isEmpty {
-            if let solved = solveKeepingLines(entities, moving: index)?.entities {
-                entities = solved
-            } else {
-                entities = before
-                undoStack.removeLast()
-                notice = dimensionConflictNotice
-            }
-        }
-        entitiesChanged()
+        guard let updated else { return [] }
+        var tiers: [[DimensionTrial]] = [[trial(updated, pinned: true)]]
+        if held { tiers.append([trial(updated, pinned: false)]) }
+        return tiers
     }
 
-    /// Einschränkungen lösen; gerade Elemente (Linien, Rechtecke, Polygone, Linienzüge) bleiben dabei stehen,
-    /// solange es geht – Bögen und Kreise passen sich an (Kai: einen Bogen ändern darf keine Linie verschieben).
-    /// Erst wenn das nicht lösbar ist, dürfen auch Linien mitgehen (linesMoved).
+    /// Versuche stufenweise lösen: In jeder Stufe gilt die Lösung, bei der sich der Rest der Skizze am wenigsten
+    /// bewegt (Lösungen über die ganze Skizze nur, wenn es örtlich nicht geht); die erste Stufe mit einer
+    /// Lösung gewinnt.
+    private func solveDimensionTrials(_ tiers: [[DimensionTrial]], before: [SketchEntity])
+        -> ConstraintSolver.LocalSolution? {
+        var folded = false
+        let accept: ([SketchEntity]) -> Bool = { candidate in
+            // Kai (Parallelogramm): Zusammenklappen auf eine Gerade ist keine Lösung
+            if ConstraintSolver.folds(from: before, to: candidate) {
+                folded = true
+                return false
+            }
+            return true
+        }
+        let current = constraints
+        var result: ConstraintSolver.LocalSolution?
+        for tier in tiers {
+            var best: (solution: ConstraintSolver.LocalSolution, cost: Double)?
+            for trial in tier {
+                guard let found = ConstraintSolver.solveLocally(trial.entities, constraints: current,
+                                                                focus: trial.focus, locked: trial.pinned,
+                                                                accept: accept) else { continue }
+                let cost = Self.movement(from: before, to: found.entities, ignoring: trial.focus)
+                if let previous = best {
+                    if found.isGlobal, !previous.solution.isGlobal { continue }
+                    let sameKind = found.isGlobal == previous.solution.isGlobal
+                    if sameKind, cost >= previous.cost - 1e-9 { continue }
+                }
+                best = (found, cost)
+            }
+            if let best {
+                result = best.solution
+                break
+            }
+        }
+        lastSolveFolded = result == nil && folded
+        return result
+    }
+
+    /// Wie weit sich die übrigen Elemente bewegen: Weg der Griffpunkte, dazu die Radiusänderung fremder Bögen
+    /// und Kreise doppelt (eine andere Form zu verändern ist schlimmer, als sie zu verschieben).
+    private static func movement(from before: [SketchEntity], to after: [SketchEntity], ignoring: Set<Int>) -> Double {
+        var cost = 0.0
+        for index in before.indices where after.indices.contains(index) && !ignoring.contains(index) {
+            let old = before[index].handlePoints, new = after[index].handlePoints
+            if old.count == new.count {
+                for k in old.indices { cost += simd_distance(old[k], new[k]) }
+            }
+            if case .circle(_, let r0) = before[index].constraintCurve(0),
+               case .circle(_, let r1) = after[index].constraintCurve(0) {
+                cost += 2 * abs(r1 - r0)
+            }
+        }
+        return cost
+    }
+
+    /// Beim Ziehen: Einschränkungen lösen; gerade Elemente (Linien, Rechtecke, Polygone, Linienzüge) bleiben
+    /// dabei stehen, solange es geht – Bögen und Kreise passen sich an (Kai: einen Bogen ändern darf keine Linie
+    /// verschieben). Erst wenn das nicht lösbar ist, dürfen auch Linien mitgehen (linesMoved).
     private func solveKeepingLines(_ trial: [SketchEntity], moving index: Int)
         -> (entities: [SketchEntity], linesMoved: Bool)? {
         guard !constraints.isEmpty else { return (trial, false) }
@@ -2728,62 +2871,9 @@ final class SketchController: ObservableObject {
             : "Maß widerspricht den Einschränkungen."
     }
 
-    /// Linienlänge bzw. Bogenradius: Mehrere Arten, das Element zu ändern (Anfang, Ende, Mitte bzw. Enden
-    /// fest), und es gilt die, bei der sich der Rest der Skizze am wenigsten bewegt. Verankerte Punkte
-    /// schließen die Arten aus, die sie verschieben würden. Vorher wanderte beim Radius die ganze Kontur,
-    /// weil die Bogenenden immer stehen blieben und tangentiale Linien kippen mussten.
-    private func setStretchableDimension(of index: Int, to value: Double) {
-        var candidates: [SketchEntity] = []
-        switch entities[index] {
-        case .line(let a, let b):
-            let direction = simd_normalize(b - a)
-            let middle = (a + b) / 2
-            candidates = [.line(a, a + direction * value), .line(b - direction * value, b),
-                          .line(middle - direction * value / 2, middle + direction * value / 2)]
-        case .arc(let a, let m, let b):
-            if let mid = Self.arc(a, m, b, radius: value) { candidates.append(.arc(start: a, mid: mid, end: b)) }
-            if let circle = circleThrough(a, m, b), circle.radius > 1e-9 {
-                let k = value / circle.radius
-                // Ähnlich vergrößern: um ein Ende (dort bleibt die Tangente) bzw. um die Mitte
-                for pivot in [a, b, circle.center] {
-                    candidates.append(.arc(start: pivot + (a - pivot) * k, mid: pivot + (m - pivot) * k,
-                                           end: pivot + (b - pivot) * k))
-                }
-            }
-        default:
-            return
-        }
-        let before = entities
-        var best: (cost: Double, entities: [SketchEntity])?
-        for candidate in candidates {
-            var trial = entities
-            trial[index] = candidate
-            guard let found = solveKeepingLines(trial, moving: index) else { continue }
-            let solved = found.entities
-            // Bewegung der übrigen Elemente; Linien zu verschieben kommt nur in Frage, wenn es nicht anders geht
-            var cost = found.linesMoved ? 1e12 : 0.0
-            for other in solved.indices where other != index {
-                let old = before[other].parameters, new = solved[other].parameters
-                guard old.count == new.count else { continue }
-                cost += zip(old, new).reduce(0) { $0 + ($1.0 - $1.1) * ($1.0 - $1.1) }
-            }
-            if cost < (best?.cost ?? .infinity) - 1e-12 { best = (cost, solved) }
-        }
-        guard let best else {
-            notice = lastSolveFolded ? dimensionConflictNotice
-                : "Maß widerspricht den Einschränkungen (z. B. verankerten Punkten)."
-            return
-        }
-        remember()
-        entities = best.entities
-        if best.cost >= 1e12 {
-            notice = "Dafür mussten Linien mitgehen – Punkte verankern (Auswählen › Verankern) hält sie fest."
-        }
-        // Laufender Linienzug geht am neuen Ende weiter
-        if let end = chainEnd, case .line(let oldA, let oldB) = before[index], case .line(let newA, let newB) = entities[index] {
-            if simd_distance(end, oldB) < 1e-6 { chainEnd = newB } else if simd_distance(end, oldA) < 1e-6 { chainEnd = newA }
-        }
-        entitiesChanged()
+    /// Meldung, wenn für ein Maß mehr als die Form und ihre Nachbarn mitgehen musste.
+    private var widerDimensionNotice: String {
+        "Dafür musste ein größerer Teil der Skizze mitgehen – Punkte verankern (Auswählen › Verankern) hält Teile fest."
     }
 
     /// Richtung von p zurück entlang der letzten Linie des laufenden Zugs (endet in p), sonst nil.
@@ -3032,22 +3122,26 @@ final class SketchController: ObservableObject {
         return bestCurve.map { .curve($0.ref) }
     }
 
+    /// Gemerkter Punkt (bzw. seine Mittellinie) unter dem Finger; Elementpunkte gehen vor, Kurven nicht.
+    func markIndex(at p: Point2, tolerance: Double, curveHit: Bool) -> Int? {
+        let mark: Int? = marks.indices
+            .filter { simd_distance(marks[$0], p) <= tolerance * 0.6 }
+            .min { simd_distance(marks[$0], p) < simd_distance(marks[$1], p) }
+        if let mark { return mark }
+        // Mittellinie antippen (nicht nur ihren Mittelpunkt): wählt sie aus, „Löschen“ entfernt sie
+        guard !curveHit, let guide = guideLines.first(where: { guide in
+            guide.lines.contains { polylineDistance(from: p, to: $0, closed: false).distance <= tolerance * 0.6 }
+        }) else { return nil }
+        return marks.firstIndex { simd_distance($0, guide.mark) < 1e-9 }
+    }
+
     /// Finger antippen: Element zur Auswahl hinzufügen bzw. entfernen; ins Leere tippen leert die Auswahl.
     func select(at p: Point2, tolerance: Double) {
         let ref = pick(at: p, tolerance: tolerance)
         var pointRef = false
         if case .point? = ref { pointRef = true }
         // Hilfspunkte vor Kurven, Elementpunkte vor Hilfspunkten
-        var mark: Int? = pointRef ? nil : marks.indices
-            .filter { simd_distance(marks[$0], p) <= tolerance * 0.6 }
-            .min { simd_distance(marks[$0], p) < simd_distance(marks[$1], p) }
-        // Mittellinie antippen (nicht nur ihren Mittelpunkt): wählt sie aus, „Löschen“ entfernt sie
-        if mark == nil, ref == nil,
-           let guide = guideLines.first(where: { guide in
-               guide.lines.contains { polylineDistance(from: p, to: $0, closed: false).distance <= tolerance * 0.6 }
-           }) {
-            mark = marks.firstIndex { simd_distance($0, guide.mark) < 1e-9 }
-        }
+        let mark: Int? = pointRef ? nil : markIndex(at: p, tolerance: tolerance, curveHit: ref != nil)
         if let mark {
             if let index = selectedMarks.firstIndex(of: mark) {
                 selectedMarks.remove(at: index)
