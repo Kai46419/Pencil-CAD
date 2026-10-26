@@ -160,7 +160,10 @@ struct DrawingSheet: View {
                     projection = TechnicalDrawing.project(shapes, view: view)
                 }
                 // Inzwischen andere Körper gewählt: Ergebnis gehört nicht mehr zu dieser Zeichnung
-                guard indices == cachedBodies else { return }
+                guard indices == cachedBodies else {
+                    totalViews = 0
+                    return
+                }
                 cache[view] = projection
                 finishedViews += 1
                 guard !Task.isCancelled else { return }
