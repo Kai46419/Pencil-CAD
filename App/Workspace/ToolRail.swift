@@ -750,6 +750,7 @@ struct ToolRail: View {
                 item(.sweep, "Sweep", subtitle: "Bereich entlang Pfad", "point.3.connected.trianglepath.dotted"),
                 item(.loft, "Loft", subtitle: "Durch Querschnitte", "square.3.layers.3d"),
                 item(.part(.helix), "Helix", subtitle: "Feder, Gewinde", PartTool.helix.systemImage),
+                item(.part(.thread), "Gewinde", subtitle: "Bolzen, Bohrung", PartTool.thread.systemImage),
                 item(.part(.thinLines), "Dünn extrudieren", subtitle: "Linien als Wand", PartTool.thinLines.systemImage),
             ] + Primitive.allCases.map { primitive in
                 item(.insert(primitive), primitive.rawValue, subtitle: "Grundkörper", primitive.systemImage)

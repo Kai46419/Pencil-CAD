@@ -11,6 +11,8 @@ enum PartTool: Equatable {
     case template
     /// Erstellen › Helix (Feder, Gewinde)
     case helix
+    /// Erstellen › Gewinde: Zylinderfläche antippen, Normgewinde modellieren (ThreadPanel.swift)
+    case thread
     /// Erstellen › Dünn extrudieren: Linien einer Skizze (auch offene) als Wand
     case thinLines
     /// Ändern › Verjüngung (Entformungsschräge an Seitenflächen)
@@ -21,6 +23,7 @@ enum PartTool: Equatable {
         case .standard: "Normteile"
         case .template: "Vorlagen"
         case .helix: "Helix"
+        case .thread: "Gewinde"
         case .thinLines: "Dünn extrudieren"
         case .draft: "Verjüngung"
         }
@@ -31,6 +34,7 @@ enum PartTool: Equatable {
         case .standard: "screwdriver"
         case .template: "gearshape.2"
         case .helix: "tornado"
+        case .thread: "barcode"
         case .thinLines: "square.dashed"
         case .draft: "trapezoid.and.line.vertical"
         }
@@ -40,7 +44,7 @@ enum PartTool: Equatable {
     var group: ToolGroup {
         switch self {
         case .standard, .template: .insert
-        case .helix, .thinLines: .create
+        case .helix, .thread, .thinLines: .create
         case .draft: .modify
         }
     }
@@ -52,6 +56,7 @@ final class PartSettings: ObservableObject {
     @Published var standard = StandardPartSpec()
     @Published var template = TemplateSpec()
     @Published var helix = HelixSpec()
+    @Published var thread = ThreadSpec()
     // Dünn extrudieren (Linien)
     @Published var thinSketch: Int?
     @Published var thinThickness: Double = 2
@@ -90,6 +95,9 @@ extension Workspace {
             parts.helix.origin = .zero
             parts.helix.axis = [0, 0, 1]
             parts.helix.sourceBody = nil
+        case .thread:
+            // Körpernummern können sich geändert haben: Fläche neu antippen
+            parts.thread.target = nil
         case .standard, .template:
             break
         }
@@ -106,6 +114,8 @@ extension Workspace {
             model.previewGenerated(PartBuilder.build(parts.template), step: "\(parts.template.kind.rawValue) einfügen")
         case .helix:
             model.previewHelix(parts.helix)
+        case .thread:
+            model.previewThread(parts.thread)
         case .thinLines:
             model.previewThinLines(sketch: parts.thinSketch, thickness: parts.thinThickness, side: parts.thinSide,
                                    height: parts.thinHeight, symmetric: parts.thinSymmetric, mode: parts.thinMode)
@@ -149,6 +159,9 @@ extension Workspace {
             }
             parts.helix = spec
             updatePartPreview()
+        case .thread:
+            guard let face else { return }
+            threadTapped(face)
         case .draft:
             guard let face else { return }
             if let first = model.selection, first.body != face.body {
@@ -170,6 +183,10 @@ extension Workspace {
         case .helix:
             return parts.helix.onCylinder ? "Gewinde wird in die Fläche geschnitten – „Fertig“ tippen"
                 : "Maße eingeben · Zylinderfläche antippen schneidet ein Gewinde"
+        case .thread:
+            return parts.thread.target == nil
+                ? "Zylinderfläche antippen: Bolzen = Außengewinde, Bohrung = Innengewinde"
+                : "Gewindeart und Größe wählen, dann „Fertig“"
         case .thinLines: return parts.thinSketch == nil ? "Skizze mit Linien wählen" : "Stärke, Seite und Höhe einstellen"
         case .draft:
             return model.selection == nil ? "Seitenflächen antippen, die geneigt werden" : "Winkel und Zugrichtung einstellen"
@@ -218,6 +235,7 @@ struct PartCard: View {
             case .standard: standardCard
             case .template: templateCard
             case .helix: helixCard
+            case .thread: ThreadCard(workspace: workspace, parts: parts)
             case .thinLines: thinLinesCard
             case .draft: draftCard
             }

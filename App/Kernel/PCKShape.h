@@ -137,6 +137,19 @@ NS_ASSUME_NONNULL_BEGIN
                                 profileRZ:(NSArray<NSNumber *> *)profileRZ
     NS_SWIFT_NAME(helixSweep(base:axis:radius:pitch:height:leftHanded:profileRZ:));
 
+/// Gewindekörper (Werkzeug „Gewinde“): ein Gang als geschlossenes Polygon profileRZ in der Achsebene (Paare r, z;
+/// r = Abstand von der Achse bei z = 0, z relativ zur Gangmitte) wird entlang einer Schraubenlinie mit der Steigung
+/// lead je Umdrehung gezogen (feste Binormale = Achse), starts Gänge gleichmäßig verteilt. Der Gang läuft eine
+/// Umdrehung über beide Enden hinaus und wird dann eben bei 0 und length (entlang axis ab base) abgeschnitten.
+/// taper = Radiusänderung je mm entlang axis (0 = zylindrisch, Kegel 1:16 = 1/32; Kegelschraubenlinie auf einer
+/// Kegelfläche). coreRadius > 0 vereinigt die Gänge mit einem Kernzylinder dieses Radius (auch bei Kegel zylindrisch).
+/// Das Ergebnis wird geprüft (BRepCheck_Analyzer, ggf. ShapeFix_Shape). nil bei Fehler oder ohne Kernel.
++ (nullable PCKShape *)threadWithBase:(simd_double3)base axis:(simd_double3)axis length:(double)length
+                                 lead:(double)lead starts:(NSInteger)starts taper:(double)taper
+                           leftHanded:(BOOL)leftHanded profileRZ:(NSArray<NSNumber *> *)profileRZ
+                           coreRadius:(double)coreRadius
+    NS_SWIFT_NAME(thread(base:axis:length:lead:starts:taper:leftHanded:profileRZ:coreRadius:));
+
 /// Fasst mehrere Körper zu einem Verbund zusammen (ohne Kernel: nur der erste).
 + (nullable PCKShape *)compoundOfShapes:(NSArray<PCKShape *> *)shapes NS_SWIFT_NAME(compound(_:));
 
@@ -202,6 +215,13 @@ NS_ASSUME_NONNULL_BEGIN
 /// Getrennte Teilkörper: sich berührende Solids werden verschmolzen, voneinander getrennte einzeln geliefert
 /// (mindestens ein Eintrag; ohne Kernel bzw. bei Fehler der Körper selbst).
 - (NSArray<PCKShape *> *)separatedSolids NS_SWIFT_NAME(separatedSolids());
+
+/// YES, wenn der Punkt im Inneren eines Teilkörpers liegt (BRepClass3d_SolidClassifier); ohne Kernel NO.
+- (BOOL)containsPoint:(simd_double3)point NS_SWIFT_NAME(contains(point:));
+
+/// Gültiger, geschlossener Körper: dieser selbst, wenn BRepCheck_Analyzer ihn als gültig erkennt, sonst die mit
+/// ShapeFix_Shape reparierte Fassung; nil, wenn er ungültig bleibt oder kein Volumen hat (ohne Kernel: dieser selbst).
+- (nullable PCKShape *)validatedSolid NS_SWIFT_NAME(validatedSolid());
 
 /// Messwerte (mm, mm², mm³); 0 ohne Kernel.
 @property (nonatomic, readonly) double volume;

@@ -896,7 +896,9 @@ struct ParameterCard: View {
                         .disabled(workspace.holePoints.isEmpty)
                 }
                 HStack(spacing: 14) {
-                    holeField("Ø", \.diameter)
+                    if workspace.holeSpec.thread == nil {
+                        holeField("Ø", \.diameter)
+                    }
                     Toggle("Durchgehend", isOn: holeBinding(\.through))
                         .fixedSize()
                     if !workspace.holeSpec.through {
@@ -918,6 +920,7 @@ struct ParameterCard: View {
                     holeField("Zugabe", \.clearance, width: 48, minimum: 0)
                         .hoverTip("Druckzugabe", "Wird auf alle Durchmesser addiert, weil gedruckte Löcher meist etwas kleiner werden. 0,1 bis 0,3 mm sind üblich.")
                 }
+                HoleThreadRow(workspace: workspace)
             }
             .fixedSize()
         }

@@ -278,6 +278,12 @@ enum HelpTopic: String, CaseIterable, Identifiable {
             ]
         case .news:
             [
+                "Gewinde (Erstellen › Gewinde): Zylinderfläche antippen – Bolzen bekommen ein Außen-, Bohrungen ein "
+                    + "Innengewinde, die passende Normgröße wird vorgeschlagen. Metrisch ISO (Regel- und Feingewinde "
+                    + "M1–M64), UNC/UNF, Whitworth, Rohrgewinde G, R und NPT (kegelig), Trapez, Rund- und Sägengewinde; "
+                    + "Steigung, Länge, Versatz, Links/Rechts und 1–4 Gänge wählbar. Das Gewinde wird echt modelliert "
+                    + "(druckbar), mit Druckspiel (Standard 0,2 mm) und Anschnitt am freien Ende. Auch im Werkzeug "
+                    + "Bohrung gibt es jetzt die Option „Gewinde“ (Kernloch nach Norm plus Innengewinde).",
                 "Schlanke Maße: kleinere Schilder mit dünnem Schloss. Feste (grüne) Maße erscheinen nur als kleines "
                     + "Schloss – antippen öffnet das Maß. Abschalten in der Skizzenpalette („Feste Maße als Schloss“).",
                 "Parametrischer Verlauf: Zeitleiste unten (Menü … › Zeitleiste ein-/ausblenden). Schritt antippen ändert "

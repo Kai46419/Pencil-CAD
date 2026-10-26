@@ -94,6 +94,8 @@
 #include <BRepOffsetAPI_MakePipeShell.hxx>
 #include <Geom2d_Line.hxx>
 #include <Geom_CylindricalSurface.hxx>
+#include <Geom_ConicalSurface.hxx>
+#include <ShapeFix_Shape.hxx>
 #include <gp.hxx>
 #include <gp_Ax3.hxx>
 #include <gp_Dir2d.hxx>
@@ -1071,6 +1073,165 @@ static TopoDS_Shape placedOnAxis(const TopoDS_Shape &shape, simd_double3 base, s
     } catch (...) {
         return nil;
     }
+}
+
+// MARK: Gewinde
+
+/// Prüft einen Körper (BRepCheck_Analyzer) und repariert ihn bei Bedarf (ShapeFix_Shape). Leer, wenn er ungültig
+/// bleibt, kein Solid enthält oder kein Volumen hat.
+static TopoDS_Shape validSolid(const TopoDS_Shape &shape) {
+    if (shape.IsNull()) return TopoDS_Shape();
+    try {
+        TopoDS_Shape candidate = shape;
+        if (!BRepCheck_Analyzer(candidate).IsValid()) {
+            ShapeFix_Shape fix(candidate);
+            fix.Perform();
+            candidate = fix.Shape();
+            if (candidate.IsNull() || !BRepCheck_Analyzer(candidate).IsValid()) return TopoDS_Shape();
+        }
+        TopExp_Explorer solids(candidate, TopAbs_SOLID);
+        if (!solids.More()) return TopoDS_Shape();
+        GProp_GProps props;
+        BRepGProp::VolumeProperties(candidate, props);
+        if (std::fabs(props.Mass()) < 1e-9) return TopoDS_Shape();
+        return candidate;
+    } catch (...) {
+        return TopoDS_Shape();
+    }
+}
+
+/// Schraubenlinie für Gewinde um die Z-Achse: beginnt bei z = zStart im Winkel 0 (auf +X) und steigt um height.
+/// radius gilt bei z = 0; taper ≠ 0 legt sie auf eine Kegelfläche (Radius ändert sich um taper je mm).
+static TopoDS_Wire threadSpine(double radius, double lead, double zStart, double height, bool leftHanded,
+                               double taper) {
+    if (radius <= 0 || lead <= 0 || height <= 0) return TopoDS_Wire();
+    Handle(Geom_Surface) surface;
+    double scale = 1;
+    if (std::fabs(taper) > 1e-9) {
+        // Kegel: Parameter v läuft entlang der Mantellinie, Höhe = v · cos(Winkel)
+        const double angle = std::atan(taper);
+        surface = new Geom_ConicalSurface(gp_Ax3(gp::XOY()), angle, radius);
+        scale = 1 / std::cos(angle);
+    } else {
+        surface = new Geom_CylindricalSurface(gp_Ax3(gp::XOY()), radius);
+    }
+    const double v0 = zStart * scale;
+    const double vTurn = lead * scale;
+    const gp_Dir2d direction(leftHanded ? -2 * M_PI : 2 * M_PI, vTurn);
+    const Handle(Geom2d_Line) line = new Geom2d_Line(gp_Pnt2d(0, v0), direction);
+    const double turns = height / lead;
+    const double length = turns * std::sqrt(4 * M_PI * M_PI + vTurn * vTurn);
+    BRepBuilderAPI_MakeEdge edge(line, surface, 0, length);
+    if (!edge.IsDone()) return TopoDS_Wire();
+    const TopoDS_Edge result = edge.Edge();
+    BRepLib::BuildCurves3d(result, 1e-6, GeomAbs_C1, 14, std::max(32, int(std::ceil(turns * 16))));
+    BRepBuilderAPI_MakeWire wire(result);
+    return wire.IsDone() ? wire.Wire() : TopoDS_Wire();
+}
+
++ (nullable PCKShape *)threadWithBase:(simd_double3)base axis:(simd_double3)axis length:(double)length
+                                 lead:(double)lead starts:(NSInteger)starts taper:(double)taper
+                           leftHanded:(BOOL)leftHanded profileRZ:(NSArray<NSNumber *> *)profileRZ
+                           coreRadius:(double)coreRadius {
+    if (length <= 0 || lead <= 0 || profileRZ.count < 6 || simd_length(axis) == 0) return nil;
+    if (starts < 1 || starts > 8) return nil;
+    // Eine Umdrehung Vorlauf und Nachlauf, damit die Enden nach dem Abschneiden voll ausgebildet sind
+    const double zStart = -lead;
+    const double zEnd = length + lead;
+    const double height = zEnd - zStart;
+    if (height / lead > 400) return nil;
+    try {
+        const std::vector<double> rz = toVector(profileRZ);
+        const size_t count = rz.size() / 2;
+        if (count < 3) return nil;
+        double rMin = INFINITY, rMax = 0, rSum = 0;
+        for (size_t i = 0; i < count; ++i) {
+            rMin = std::min(rMin, rz[2 * i]);
+            rMax = std::max(rMax, rz[2 * i]);
+            rSum += rz[2 * i];
+        }
+        // Kleinster Radius entlang des ganzen Zugs muss positiv bleiben
+        const double lowest = rMin + std::min(taper * zStart, taper * zEnd);
+        if (lowest <= 0) return nil;
+        const double spineRadius = rSum / double(count);
+        const TopoDS_Wire spine = threadSpine(spineRadius, lead, zStart, height, leftHanded, taper);
+        if (spine.IsNull()) return nil;
+        // Profil in der Achsebene (XZ) am Anfang der Schraubenlinie
+        BRepBuilderAPI_MakePolygon polygon;
+        const double shift = taper * zStart;
+        for (size_t i = 0; i < count; ++i) {
+            polygon.Add(gp_Pnt(rz[2 * i] + shift, 0, rz[2 * i + 1] + zStart));
+        }
+        polygon.Close();
+        if (!polygon.IsDone()) return nil;
+        const TopoDS_Shape gang = helixPipe(spine, polygon.Wire());
+        if (gang.IsNull()) return nil;
+
+        // Ebene Enden: Schnitt mit einem Zylinder von z = 0 bis length, dessen Mantel weit außerhalb liegt
+        const gp_Ax2 frame(gp::Origin(), gp::DZ());
+        const double outer = rMax + std::fabs(taper) * height + 1;
+        const TopoDS_Shape trim = BRepPrimAPI_MakeCylinder(frame, outer, length).Shape();
+
+        TopoDS_Shape result;
+        if (coreRadius > 0) {
+            // Kern immer zylindrisch: Boolesche Operationen zwischen einem flachen Kegel und dem kegeligen Gang
+            // scheitern in OpenCASCADE (getestet), mit einem Zylinder gelingen sie
+            result = BRepPrimAPI_MakeCylinder(frame, coreRadius, length).Shape();
+        }
+        BRep_Builder builder;
+        TopoDS_Compound ridges;
+        builder.MakeCompound(ridges);
+        for (NSInteger k = 0; k < starts; ++k) {
+            TopoDS_Shape copy = gang;
+            if (k > 0) {
+                gp_Trsf rotation;
+                rotation.SetRotation(gp::OZ(), 2 * M_PI * double(k) / double(starts));
+                BRepBuilderAPI_Transform turn(gang, rotation, Standard_True);
+                if (!turn.IsDone()) return nil;
+                copy = turn.Shape();
+            }
+            BRepAlgoAPI_Common common(copy, trim);
+            if (!common.IsDone() || common.Shape().IsNull()) return nil;
+            const TopoDS_Shape piece = common.Shape();
+            if (coreRadius > 0) {
+                BRepAlgoAPI_Fuse fuse(result, piece);
+                if (!fuse.IsDone() || fuse.Shape().IsNull()) return nil;
+                result = fuse.Shape();
+            } else {
+                builder.Add(ridges, piece);
+            }
+        }
+        if (coreRadius <= 0) result = ridges;
+        TopoDS_Shape valid = validSolid(result);
+        if (valid.IsNull()) {
+            // Als Werkzeug trotzdem verwenden, solange es Solids enthält: geprüft wird der fertige Körper
+            TopExp_Explorer solids(result, TopAbs_SOLID);
+            if (!solids.More()) return nil;
+            valid = result;
+        }
+        const TopoDS_Shape placed = placedOnAxis(valid, base, axis);
+        return placed.IsNull() ? nil : [[PCKShape alloc] initWithShape:placed];
+    } catch (...) {
+        return nil;
+    }
+}
+
+- (BOOL)containsPoint:(simd_double3)point {
+    try {
+        const gp_Pnt p = toPnt(point);
+        for (TopExp_Explorer it(_shape, TopAbs_SOLID); it.More(); it.Next()) {
+            BRepClass3d_SolidClassifier classifier(it.Current(), p, 1e-6);
+            if (classifier.State() == TopAbs_IN) return YES;
+        }
+    } catch (...) {
+    }
+    return NO;
+}
+
+- (nullable PCKShape *)validatedSolid {
+    const TopoDS_Shape valid = validSolid(_shape);
+    if (valid.IsNull()) return nil;
+    return valid.IsSame(_shape) ? self : [[PCKShape alloc] initWithShape:valid];
 }
 
 - (nullable PCKShape *)cutting:(PCKShape *)tool {
@@ -2307,6 +2468,21 @@ static TopoDS_Shape variableFilletOnce(const TopoDS_Shape &shape, const std::vec
                                     pitch:(double)pitch height:(double)height leftHanded:(BOOL)leftHanded
                                 profileRZ:(NSArray<NSNumber *> *)profileRZ {
     return nil;
+}
+
++ (nullable PCKShape *)threadWithBase:(simd_double3)base axis:(simd_double3)axis length:(double)length
+                                 lead:(double)lead starts:(NSInteger)starts taper:(double)taper
+                           leftHanded:(BOOL)leftHanded profileRZ:(NSArray<NSNumber *> *)profileRZ
+                           coreRadius:(double)coreRadius {
+    return nil;
+}
+
+- (BOOL)containsPoint:(simd_double3)point {
+    return NO;
+}
+
+- (nullable PCKShape *)validatedSolid {
+    return self;
 }
 
 - (nullable PCKShape *)filletingEdges:(NSArray<NSNumber *> *)edges radius:(double)radius endRadius:(double)endRadius {
