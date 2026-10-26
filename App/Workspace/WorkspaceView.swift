@@ -1,4 +1,5 @@
 import PhotosUI
+import QuickLook
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -35,6 +36,8 @@ private struct WorkspaceContent: View {
     /// Erklärung zur Auswahl eingeklappt (bleibt gespeichert)
     @State private var screenshot: Screenshot?
     @State private var photoItem: PhotosPickerItem?
+    /// AR Quick Look: USDZ-Datei, die gerade gezeigt wird
+    @State private var arPreview: URL?
 
     private var projectName: String {
         projects.project(workspace.project.id)?.name ?? workspace.project.name
@@ -127,12 +130,22 @@ private struct WorkspaceContent: View {
         }
         .fileExporter(isPresented: $isExporting, document: exportFile, contentType: exportType,
                       defaultFilename: exportName ?? projectName) { _ in }
-        .fileImporter(isPresented: $isImporting, allowedContentTypes: [.stepFile, .stpFile]) { result in
-            if case .success(let url) = result {
+        .fileImporter(isPresented: $isImporting, allowedContentTypes: [.stepFile, .stpFile, .svg, .dxfFile]) { result in
+            guard case .success(let url) = result else { return }
+            if ["svg", "dxf"].contains(url.pathExtension.lowercased()) {
+                workspace.importVectorFile(url)
+            } else {
                 model.importSTEP(from: url)
                 workspace.send(.fitAll)
             }
         }
+        .onChange(of: workspace.pendingExport?.id) {
+            guard let pending = workspace.pendingExport else { return }
+            workspace.pendingExport = nil
+            export(pending.data, as: pending.type, name: pending.name)
+        }
+        .quickLookPreview($arPreview)
+        .sheet(isPresented: $workspace.showsCommandSearch) { CommandSearchSheet(workspace: workspace) }
         .sheet(item: $screenshot) { ScreenshotSheet(screenshot: $0) }
         .sheet(isPresented: $workspace.showsVariables) { VariablesSheet(model: model) }
         .sheet(isPresented: $workspace.showsProjectPicker) {
@@ -241,6 +254,17 @@ private struct WorkspaceContent: View {
             Divider()
                 .frame(height: 20)
             Button {
+                workspace.showsCommandSearch = true
+            } label: {
+                Image(systemName: "magnifyingglass")
+                    .frame(width: 40, height: 36)
+            }
+            .keyboardShortcut("k", modifiers: .command)
+            .accessibilityLabel("Befehl suchen")
+            .hoverTip("Befehl suchen", "Jedes Werkzeug per Name finden. Mit Tastatur: ⌘K, Eingabe startet den ersten Treffer.")
+            Divider()
+                .frame(height: 20)
+            Button {
                 assistant.isOpen.toggle()
             } label: {
                 Image(systemName: "sparkles")
@@ -252,7 +276,7 @@ private struct WorkspaceContent: View {
             Divider()
                 .frame(height: 20)
             Menu {
-                Button("STEP importieren …", systemImage: "square.and.arrow.down") { isImporting = true }
+                Button("Importieren (STEP, SVG, DXF) …", systemImage: "square.and.arrow.down") { isImporting = true }
                 Menu {
                     ForEach(ExportFormat.allCases) { format in
                         Button {
@@ -263,6 +287,9 @@ private struct WorkspaceContent: View {
                     }
                 } label: {
                     Label("Alle Körper exportieren", systemImage: "square.and.arrow.up")
+                }
+                Button("In AR ansehen", systemImage: "arkit") {
+                    arPreview = model.usdzFile()
                 }
                 Divider()
                 Button("Projekt umbenennen …", systemImage: "pencil") {

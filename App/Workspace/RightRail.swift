@@ -125,6 +125,9 @@ struct SnapMenu: View {
                 Toggle(isOn: $sketch.snapHaptics) {
                     row("Fühlbares Einrasten", "Kurzes Klicken, wenn ein Fangpunkt greift", "hand.tap")
                 }
+                Toggle(isOn: $sketch.autoConstrain) {
+                    row("Automatisch einschränken", "Waagerecht, senkrecht, parallel und rechtwinklig beim Zeichnen festhalten", "link")
+                }
             }
             .font(.callout)
             .padding(16)
@@ -341,6 +344,8 @@ struct RightRail: View {
         Toggle("Punkte", systemImage: "circle.grid.cross", isOn: $sketch.showsPoints)
         Toggle("Bemaßungen", systemImage: "ruler", isOn: $sketch.showsDimensions)
         Toggle("Abhängigkeiten", systemImage: "link", isOn: $sketch.showsConstraintBadges)
+        Toggle("Bestimmtheit (grün = fest)", systemImage: "checkmark.seal", isOn: $sketch.showsDefinition)
+        Toggle("Automatisch einschränken", systemImage: "wand.and.rays", isOn: $sketch.autoConstrain)
         Toggle("Konstruktionsgeometrie", systemImage: "square.dashed", isOn: $sketch.showsConstruction)
     }
 
@@ -380,6 +385,24 @@ struct RightRail: View {
             RailButton(systemImage: "arrow.up.left.and.arrow.down.right", label: "Einpassen") {
                 workspace.send(.fitAll)
             }
+            Menu {
+                Button("Aktuelle Ansicht speichern", systemImage: "plus", action: workspace.saveCurrentView)
+                if !workspace.savedViews.isEmpty {
+                    Divider()
+                    ForEach(workspace.savedViews) { view in
+                        Button(view.name, systemImage: "camera.viewfinder") { workspace.restoreView(view) }
+                    }
+                    Menu("Löschen", systemImage: "trash") {
+                        ForEach(workspace.savedViews) { view in
+                            Button(view.name, role: .destructive) { workspace.deleteView(view.id) }
+                        }
+                    }
+                }
+            } label: {
+                RailIcon(systemImage: "camera.viewfinder")
+                    .accessibilityLabel("Ansichten")
+            }
+            .hoverTip("Ansichten", "Blickwinkel und Zoom speichern und später mit einem Tipp wiederherstellen.")
             Menu {
                 displayModePicker
             } label: {

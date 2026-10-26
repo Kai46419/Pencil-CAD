@@ -29,6 +29,7 @@ struct Viewport: UIViewRepresentable {
         }
         view.workspace = workspace
         workspace.snapshot = { [weak view] size in view?.snapshot(size: size) }
+        workspace.currentCamera = { [weak view] in view?.renderer?.camera }
         return view
     }
 
@@ -306,6 +307,12 @@ final class ViewportView: MTKView {
             // Drauf- und Untersicht gerade ausrichten (X waagerecht)
             let flat = abs(simd_normalize(normal).z) > 0.999
             renderer.camera.look(along: normal, at: renderer.camera.target, right: flat ? SIMD3(1, 0, 0) : nil)
+        case .restore(let saved):
+            guard saved.target.count == 3 else { return }
+            renderer.camera.yaw = saved.yaw
+            renderer.camera.pitch = saved.pitch
+            renderer.camera.distance = saved.distance
+            renderer.camera.target = SIMD3<Float>(saved.target[0], saved.target[1], saved.target[2])
         }
         cameraMoved()
     }
@@ -434,6 +441,7 @@ final class ViewportView: MTKView {
     // MARK: Linien und Bereiche
 
     private static let sketchInk = SIMD3<Float>(0.05, 0.06, 0.09)
+    private static let definedGreen = SIMD3<Float>(0.08, 0.55, 0.22)
     private static let previewBlue = SIMD3<Float>(0.05, 0.4, 0.98)
     private static let snapOrange = SIMD3<Float>(0.98, 0.45, 0.05)
     private static let constructionGray = SIMD3<Float>(0.4, 0.42, 0.48)
@@ -505,6 +513,7 @@ final class ViewportView: MTKView {
             groups.append(LineGroup(polylines: points.count == 2 ? [points] : [], color: Self.previewBlue, width: 2,
                                     dots: points, dotRadius: 5))
         }
+        if !sketch.isActive { addToolOverlays(to: &groups, fills: &fills) }
         // Übersetzen: Start- und Zielpunkt mit Verbindung
         if !sketch.isActive, workspace.tool == .translate, let start = workspace.translateStart {
             let points = ([start] + (workspace.translateEnd.map { [$0] } ?? [])).map { SIMD3<Float>($0) }
@@ -522,8 +531,14 @@ final class ViewportView: MTKView {
             if sketch.showsProfiles {
                 fills += sketchFills.map { FillGroup(triangles: $0, color: SIMD4(0.2, 0.45, 0.95, 0.16)) }
             }
-            groups.append(LineGroup(polylines: sketch.entityPolylines.map { $0.map(world) }, color: Self.sketchInk,
+            // Wie Shapr3D: vollständig bestimmte Elemente grün, freie in Tinte
+            let states = sketch.entityPolylinesByState
+            groups.append(LineGroup(polylines: states.free.map { $0.map(world) }, color: Self.sketchInk,
                                     width: 2.6))
+            if !states.determined.isEmpty {
+                groups.append(LineGroup(polylines: states.determined.map { $0.map(world) }, color: Self.definedGreen,
+                                        width: 2.6))
+            }
             // Punkte wie in Fusion 360: Enden und Ecken als kleine Punkte
             if sketch.showsPoints {
                 let points = sketch.entityPoints
@@ -660,6 +675,48 @@ final class ViewportView: MTKView {
         }
     }
 
+    /// Bohrungen, angetippte Konstruktionspunkte und -kanten, Druckprüfung (Überhang rot, dünne Wände orange).
+    private func addToolOverlays(to groups: inout [LineGroup], fills: inout [FillGroup]) {
+        guard let workspace, let model else { return }
+        switch workspace.tool {
+        case .hole where !workspace.holePoints.isEmpty:
+            groups.append(LineGroup(polylines: [], color: Self.snapOrange, width: 0,
+                                    dots: workspace.holePoints.map { SIMD3<Float>($0.point) }, dotRadius: 5, onTop: true))
+        case .construct:
+            let points = workspace.constructPoints.map { SIMD3<Float>($0) }
+            if !points.isEmpty {
+                groups.append(LineGroup(polylines: points.count > 1 ? [points] : [], color: Self.snapOrange, width: 1.6,
+                                        dots: points, dotRadius: 5, onTop: true))
+            }
+            if let edge = workspace.constructEdge {
+                groups.append(LineGroup(polylines: [[SIMD3<Float>(edge.a), SIMD3<Float>(edge.b)]], color: Self.snapOrange,
+                                        width: 4, onTop: true))
+            }
+            for plane in workspace.constructPlanes {
+                groups.append(LineGroup(polylines: [], color: Self.snapOrange, width: 0, dots: [SIMD3<Float>(plane.origin)],
+                                        dotRadius: 6, onTop: true))
+            }
+        case .printCheck:
+            guard let report = workspace.printReport else { return }
+            if !report.overhang.isEmpty {
+                fills.append(FillGroup(triangles: report.overhang, color: SIMD4(0.92, 0.12, 0.1, 0.6)))
+            }
+            if !report.thin.isEmpty {
+                fills.append(FillGroup(triangles: report.thin, color: SIMD4(1, 0.6, 0.05, 0.65)))
+            }
+            // Pfeil „oben beim Drucken“ von der Körpermitte aus (grün)
+            if let body = workspace.printBody, let box = model.mesh.bounds(ofBody: body) {
+                let center = (box.min + box.max) / 2
+                let reach = max(simd_length(box.max - box.min) * 0.75, 10)
+                let tip = center + simd_normalize(workspace.printUp) * reach
+                groups.append(LineGroup(polylines: [[center, tip]], color: Self.definedGreen, width: 3, dots: [tip],
+                                        dotRadius: 6, onTop: true))
+            }
+        default:
+            break
+        }
+    }
+
     /// Was ein Antippen an dieser Stelle treffen würde (gleiche Regeln wie handleTap): Kante vor Fläche,
     /// Skizzenbereich vor der Fläche, auf der er liegt. Nur ebene Flächen (extrudierbar) werden gezeigt.
     private func updateHoverPick(at location: CGPoint?) {
@@ -677,10 +734,10 @@ final class ViewportView: MTKView {
                       workspace.tool != .select || model.hasPreview || model.plane(of: face) != nil {
                 pick = .face(face)
             }
-        } else if let location, let renderer, let model, let workspace, workspace.tool == .translate,
-                  !model.selectedBodies.isEmpty, let ray = renderer.camera.ray(through: location, viewSize: bounds.size),
+        } else if let location, let renderer, let model, let workspace, let sketch, !sketch.isActive,
+                  workspace.picksModelPoints, let ray = renderer.camera.ray(through: location, viewSize: bounds.size),
                   let hit = model.pick(origin: ray.origin, direction: ray.direction) {
-            // Übersetzen: Fangpunkt unter dem Stift zeigen
+            // Übersetzen, Bohrung, Konstruktion aus Punkten: Fangpunkt unter dem Stift zeigen
             pick = .point(model.snappedModelPoint(SIMD3<Double>(hit.point), tolerance: snapTolerance))
         }
         if pick != hoverPick {
@@ -1950,6 +2007,10 @@ final class ViewportView: MTKView {
 
     /// Doppeltippen mit dem Finger auf einen Fangpunkt: Punkt merken (wie 1 s Schweben mit dem Stift).
     @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
+        if let sketch, !sketch.isActive {
+            repeatLastExtrude(at: gesture.location(in: self))
+            return
+        }
         guard let sketch, sketch.isActive, !sketch.isChoosingPlane,
               let point = sketchPoint(at: gesture.location(in: self)) else { return }
         if !sketch.captureHovered(at: point, tolerance: snapTolerance) {
@@ -1983,6 +2044,21 @@ final class ViewportView: MTKView {
     @objc private func handleRedoTap(_ gesture: UITapGestureRecognizer) {
         guard handleDrag == nil, ringDrag == nil else { return }
         workspace?.redo()
+        refresh()
+    }
+
+    /// Doppeltippen auf einen Skizzenbereich bzw. eine ebene Fläche: zuletzt verwendete Höhe extrudieren
+    /// (Shapr3D). Die beiden Einzeltipps davor haben die Auswahl schon umgeschaltet; hier wird sie neu gesetzt.
+    private func repeatLastExtrude(at location: CGPoint) {
+        guard let renderer, let model, let workspace, workspace.tool == .select, handleDrag == nil,
+              let ray = renderer.camera.ray(through: location, viewSize: bounds.size) else { return }
+        let hit = model.pick(origin: ray.origin, direction: ray.direction)
+        var region: RegionRef?
+        if let regionHit = model.pickRegion(origin: ray.origin, direction: ray.direction),
+           regionHit.t <= (hit.map { simd_dot($0.point - ray.origin, ray.direction) } ?? .infinity) + 0.05 {
+            region = regionHit.ref
+        }
+        workspace.repeatLastExtrude(region: region, face: region == nil ? hit?.face : nil)
         refresh()
     }
 

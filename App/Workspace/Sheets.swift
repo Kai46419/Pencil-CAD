@@ -277,18 +277,24 @@ enum HelpTopic: String, CaseIterable, Identifiable {
             ]
         case .news:
             [
-                "Stift-Schweben zeigt Flächen, Bereiche und Kanten vor dem Antippen.",
-                "Mehrere Flächen auf einmal extrudieren.",
-                "Rechner-Tastatur, Formeln und Variablen.",
-                "Fang wie Shapr3D: 3D-Leitpunkte, entfernte Kanten, Einrasthinweise.",
-                "Verschieben mit Kopieren, Ebenengriffen und Drehbögen um X/Y/Z; neues Werkzeug Übersetzen.",
-                "Fläche versetzen und ersetzen, Umhüllen und Prägen, Kante abdrücken.",
-                "Ordner und Filter im Browser, Projekt einfügen, Mikrofon im KI-Assistenten, diese Hilfe.",
-                "Aus dem Vergleich mit Shapr3D, Fusion 360 und SketchUp: Schale mit mehreren offenen Flächen oder als "
-                    + "Hohlkörper, Fase mit zwei Abständen, Spiegeln an Fläche oder Konstruktionsebene, boolesche "
-                    + "Operationen mit „Werkzeuge behalten“.",
-                "Messen zeigt Schwerpunkt, Gewicht in PLA und den kürzesten Abstand zwischen zwei Körpern.",
-                "Zwei Finger tippen = Rückgängig, drei Finger = Wiederholen; fühlbares Einrasten in der Skizze.",
+                "Skizze: Fang erkennt parallele und rechtwinklige Richtungen zu vorhandenen Linien sowie die "
+                    + "Verlängerung von Linien; „Automatisch einschränken“ (Fang-Menü) setzt dabei gleich die "
+                    + "Einschränkung. Im Linienzug-Fenster lässt sich die Richtung sperren (waagerecht, senkrecht, "
+                    + "parallel, rechtwinklig).",
+                "Bestimmtheit: vollständig festgelegte Skizzenelemente werden grün (Skizzenpalette).",
+                "Bohrung (Ändern): Einfach, Senkbohrung, Kegelsenkung, Sackloch mit Bohrspitze, Druckzugabe und "
+                    + "Vorlagen für M2 bis M8, Kernlöcher und Gewindeeinsätze.",
+                "Druckprüfung (Prüfen): Überhänge rot, zu dünne Wände orange, offene Kanten, Auflage, Höhe, Gewicht; "
+                    + "„Beste Ausrichtung“ dreht den Körper auf Wunsch druckfertig aufs Bett.",
+                "Körper teilen mit Ebene, mit einem anderen Körper oder mit einer Skizze.",
+                "Konstruktionsebenen: Mittelebene, durch drei Punkte, senkrecht zur Kante, Kante und Winkel. "
+                    + "Achsen: zwei Punkte, zwei Ebenen, Zylinderachse.",
+                "SVG und DXF: über Einfügen als Skizze laden, im Ebenen-Browser (lange drücken) als Datei sichern.",
+                "Doppeltippen auf Bereich oder Fläche wiederholt die letzte Extrusionshöhe. Kopieren in Reihe: "
+                    + "× (je um den Versatz) oder ÷ (aufgeteilt).",
+                "In AR ansehen (Menü …) und Export als USDZ. Gespeicherte Ansichten (rechts), Befehlssuche (Lupe, ⌘K).",
+                "Messen: Radius und Durchmesser runder Flächen, Winkel bzw. Abstand zweier ebener Flächen. Fase auch "
+                    + "mit Abstand und Winkel.",
             ]
         }
     }

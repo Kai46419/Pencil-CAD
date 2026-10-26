@@ -9,6 +9,7 @@ import UniformTypeIdentifiers
 extension UTType {
     static let threeMF = UTType(filenameExtension: "3mf", conformingTo: .data) ?? .data
     static let objFile = UTType(filenameExtension: "obj", conformingTo: .data) ?? .data
+    static let dxfFile = UTType(filenameExtension: "dxf", conformingTo: .data) ?? .data
 }
 
 enum ExportFormat: String, CaseIterable, Identifiable {
@@ -16,6 +17,7 @@ enum ExportFormat: String, CaseIterable, Identifiable {
     case stl = "STL"
     case obj = "OBJ"
     case step = "STEP"
+    case usdz = "USDZ"
 
     var id: Self { self }
 
@@ -25,6 +27,7 @@ enum ExportFormat: String, CaseIterable, Identifiable {
         case .stl: .stl
         case .obj: .objFile
         case .step: .stepFile
+        case .usdz: .usdz
         }
     }
 
@@ -34,6 +37,7 @@ enum ExportFormat: String, CaseIterable, Identifiable {
         case .stl: "3D-Druck, Netz"
         case .obj: "Netz für 3D-Programme"
         case .step: "CAD, exakte Geometrie"
+        case .usdz: "AR, Keynote, Nachrichten"
         }
     }
 
@@ -43,6 +47,7 @@ enum ExportFormat: String, CaseIterable, Identifiable {
         case .stl: "triangle"
         case .obj: "cube.transparent"
         case .step: "doc.badge.gearshape"
+        case .usdz: "arkit"
         }
     }
 }

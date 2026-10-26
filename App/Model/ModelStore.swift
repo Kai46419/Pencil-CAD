@@ -272,6 +272,12 @@ final class ModelStore: ObservableObject {
     @Published private(set) var moveOffset: SIMD3<Double> = .zero
     /// Verschieben, Drehen und Übersetzen erzeugen Kopien; die Originale bleiben stehen
     @Published var moveCopies = false
+    /// Kopieren als Reihe (Shapr3D „×5“ bzw. „÷5“): Anzahl der Kopien
+    @Published var moveArrayCount = 1
+    /// true = Kopien gleichmäßig zwischen Original und Ziel verteilen (÷), false = Abstand je Kopie (×)
+    @Published var moveArrayDivides = false
+    /// Zuletzt übernommene Extrusionshöhe (Doppeltippen auf Bereich bzw. Fläche wiederholt sie)
+    @Published private(set) var lastExtrudeValue: Double?
     /// Skizze, die mit „Verschieben/Rotieren“ bewegt wird (Übernahme mit „Fertig“).
     @Published var movingSketch: Int?
     /// Extrusion gewählter Skizzenbereiche: Wert in mm entlang der Normale der Skizze.
@@ -763,21 +769,26 @@ final class ModelStore: ObservableObject {
             return
         }
         var preview = bodies
+        // Reihe: × = jede Kopie um den vollen Versatz weiter, ÷ = Versatz auf die Kopien aufgeteilt
+        let count = moveCopies ? max(1, min(moveArrayCount, 200)) : 1
+        let step = moveArrayDivides ? offset / Double(count) : offset
         for index in selectedBodies where preview.indices.contains(index) {
-            guard let moved = bodies[index].shape.translated(by: offset) else {
-                message = "Verschieben nicht möglich."
-                return
-            }
-            if moveCopies {
-                var copy = bodies[index].with(moved)
-                copy.name += " (Kopie)"
-                preview.append(copy)
-            } else {
-                preview[index] = preview[index].with(moved)
+            for k in 1...count {
+                guard let moved = bodies[index].shape.translated(by: step * Double(k)) else {
+                    message = "Verschieben nicht möglich."
+                    return
+                }
+                if moveCopies {
+                    var copy = bodies[index].with(moved)
+                    copy.name += count > 1 ? " (Kopie \(k))" : " (Kopie)"
+                    preview.append(copy)
+                } else {
+                    preview[index] = preview[index].with(moved)
+                }
             }
         }
         message = nil
-        showPreview(preview, name: moveCopies ? "Kopieren" : "Verschieben")
+        showPreview(preview, name: count > 1 ? "Reihe kopieren" : moveCopies ? "Kopieren" : "Verschieben")
     }
 
     /// Gewählte Körper um ihre Mitte drehen (sofort übernommen).
@@ -902,6 +913,11 @@ final class ModelStore: ObservableObject {
         guard let preview = previewBodies, let name = previewName else { return }
         previewBodies = nil
         previewName = nil
+        if regionValue != 0 {
+            lastExtrudeValue = regionValue
+        } else if faceValue != 0 {
+            lastExtrudeValue = faceValue
+        }
         // Die Skizze bleibt sichtbar, damit weitere Bereiche (z. B. bei sich überschneidenden Kreisen)
         // extrudiert werden können; ausblenden über „Sichtbarkeit“ bzw. „Elemente“. Nur nach Abrunden/Fase
         // verschwindet sie, weil ihre eckige Kontur sonst neben der Rundung stehen bleibt (rückgängig machbar).
@@ -1205,6 +1221,10 @@ final class ModelStore: ObservableObject {
         if format == .step {
             return stepData(chosen)
         }
+        if format == .usdz {
+            guard let url = usdzFile(chosen), let data = try? Data(contentsOf: url) else { return nil }
+            return data
+        }
         // Feinere Triangulierung als für die Anzeige, damit Rundungen im Druck glatt werden
         let meshes = chosen.map { index in
             ExportMesh(name: bodies[index].name, color: bodies[index].color,
@@ -1214,8 +1234,27 @@ final class ModelStore: ObservableObject {
         case .threeMF: return MeshExport.threeMF(meshes)
         case .stl: return MeshExport.stl(meshes)
         case .obj: return MeshExport.obj(meshes)
-        case .step: return nil
+        case .step, .usdz: return nil
         }
+    }
+
+    /// USDZ-Datei im temporären Ordner (für AR Quick Look und den Export); nil bei Fehler.
+    func usdzFile(_ indices: [Int]? = nil) -> URL? {
+        let chosen = (indices ?? Array(bodies.indices)).filter { bodies.indices.contains($0) && (indices != nil || !bodies[$0].isHidden) }
+        guard !chosen.isEmpty else {
+            message = "Kein sichtbarer Körper."
+            return nil
+        }
+        let url = FileManager.default.temporaryDirectory.appending(path: "PencilCAD-AR.usdz")
+        let list = chosen.map { index in
+            (name: bodies[index].name, color: bodies[index].color,
+             mesh: Mesh(bodies[index].shape.triangulate(deflection: 0.05), body: index))
+        }
+        guard USDZExport.write(list, to: url) else {
+            message = "USDZ konnte nicht geschrieben werden."
+            return nil
+        }
+        return url
     }
 
     func stepData(_ indices: [Int]? = nil) -> Data? {
@@ -1605,12 +1644,25 @@ final class ModelStore: ObservableObject {
             for line in chain3D(segments) where line.count >= 2 {
                 points += [line[0], line[line.count - 1]]
                 if line.count == 2 { points.append((line[0] + line[1]) / 2) }
+                if let center = Self.circleCenter(line) { points.append(center) }
             }
         }
         return points
     }
 
-    /// Nächster Fangpunkt (Ecke, Kantenmitte) innerhalb tolerance, sonst point selbst.
+    /// Mittelpunkt einer geschlossenen, kreisförmigen Kante (Bohrungen, Zylinder); nil bei anderen Kanten.
+    static func circleCenter(_ line: [SIMD3<Double>]) -> SIMD3<Double>? {
+        guard line.count >= 8, let first = line.first, let last = line.last,
+              simd_distance(first, last) < 1e-4 else { return nil }
+        let points = Array(line.dropLast())
+        let center = points.reduce(SIMD3<Double>(repeating: 0), +) / Double(points.count)
+        let radii = points.map { simd_distance($0, center) }
+        let mean = radii.reduce(0, +) / Double(radii.count)
+        guard mean > 1e-6, radii.allSatisfy({ abs($0 - mean) < mean * 0.03 }) else { return nil }
+        return center
+    }
+
+    /// Nächster Fangpunkt (Ecke, Kantenmitte, Kreismitte) innerhalb tolerance, sonst point selbst.
     func snappedModelPoint(_ point: SIMD3<Double>, tolerance: Double) -> SIMD3<Double> {
         var best = point, distance = tolerance
         for candidate in modelKeyPoints() {
@@ -2418,6 +2470,115 @@ extension ModelStore {
         showPreview(preview, name: "Körper teilen")
     }
 
+    /// Teilen mit einem Werkzeug (anderer Körper bzw. Prisma aus Skizzenbereichen); alle Teile werden Körper.
+    func previewSplit(tool: PCKShape) {
+        guard requireKernel(), let body = selectedBodies.first, bodies.indices.contains(body) else { return }
+        guard let parts = bodies[body].shape.split(by: tool), parts.count >= 2 else {
+            message = "Das Werkzeug teilt den Körper nicht."
+            dropPreview()
+            return
+        }
+        message = nil
+        var preview = bodies
+        preview[body] = preview[body].with(parts[0])
+        for (k, part) in parts.dropFirst().enumerated() {
+            var piece = bodies[body].with(part)
+            piece.name += " (Teil \(k + 2))"
+            piece.color = SceneBody.palette[(bodies.count + k + 1) % SceneBody.palette.count]
+            preview.append(piece)
+        }
+        showPreview(preview, name: "Körper teilen")
+    }
+
+    /// Prisma aus Skizzenbereichen, das jeden Körper ganz durchdringt (Werkzeug zum Teilen).
+    func throughPrism(regions refs: [RegionRef]) -> PCKShape? {
+        guard let first = refs.first, sketches.indices.contains(first.sketch) else { return nil }
+        let sketch = sketches[first.sketch]
+        let regions = refs.filter { $0.sketch == first.sketch && sketch.regions.indices.contains($0.region) }
+            .map { sketch.regions[$0.region] }
+        let reach = sceneExtent * 2 + 10
+        let prisms = regions.compactMap { region in
+            PCKShape.prism(profileWires: profileWires(region, plane: sketch.plane, offset: -reach),
+                           direction: sketch.plane.normal * (2 * reach))
+        }
+        guard !prisms.isEmpty else { return nil }
+        return prisms.count == 1 ? prisms[0] : PCKShape.compound(prisms)
+    }
+
+    /// Größte Ausdehnung der Szene vom Ursprung (für Werkzeuge „durch alles“).
+    var sceneExtent: Double {
+        guard let box = mesh.bounds else { return 1000 }
+        return Double(max(simd_length(box.min), simd_length(box.max)))
+    }
+
+    // MARK: Druckausrichtung
+
+    /// Körper so drehen, dass up nach +Z zeigt, und auf das Druckbett (Z = 0) stellen.
+    func orientForPrint(_ body: Int, up: SIMD3<Double>) {
+        guard requireKernel(), bodies.indices.contains(body), let center = center(ofBody: body),
+              simd_length(up) > 1e-9 else { return }
+        commitPreview()
+        let u = simd_normalize(up)
+        let dot = simd_dot(u, [0, 0, 1])
+        var shape = bodies[body].shape
+        var rotation = simd_quatd(ix: 0, iy: 0, iz: 0, r: 1)
+        if dot < 1 - 1e-9 {
+            let axis: SIMD3<Double> = dot < -1 + 1e-9 ? [1, 0, 0] : simd_normalize(simd_cross(u, [0, 0, 1]))
+            let angle = acos(max(-1, min(1, dot)))
+            guard let rotated = shape.rotated(origin: center, axis: axis, angle: angle) else {
+                message = "Drehen nicht möglich."
+                return
+            }
+            shape = rotated
+            rotation = simd_quatd(angle: angle, axis: axis)
+        }
+        // Tiefster Punkt nach dem Drehen (aus dem Anzeigenetz) kommt auf Z = 0
+        var lowest = Double.infinity
+        for (t, ref) in mesh.triangleFaces.enumerated() where ref.body == body {
+            for k in 0..<3 {
+                let p = SIMD3<Double>(mesh.vertices[Int(mesh.indices[t * 3 + k])].position)
+                lowest = min(lowest, (center + rotation.act(p - center)).z)
+            }
+        }
+        if lowest.isFinite, abs(lowest) > 1e-6, let placed = shape.translated(by: [0, 0, -lowest]) {
+            shape = placed
+        }
+        var result = bodies
+        result[body] = result[body].with(shape)
+        commit(result, name: "Druckausrichtung")
+        message = "\(bodies[body].name) liegt jetzt druckfertig auf dem Bett."
+    }
+
+    // MARK: Bohrungen
+
+    /// Bohrungen (wie Fusion 360 „Bohrung“): je angetippter Punkt eine Bohrung senkrecht in die Fläche.
+    func previewHoles(_ holes: [(face: FaceRef, point: SIMD3<Double>)], spec: HoleSpec) {
+        guard requireKernel(), !holes.isEmpty else {
+            dropPreview()
+            return
+        }
+        var preview = bodies
+        for hole in holes {
+            let body = hole.face.body
+            guard bodies.indices.contains(body), let plane = plane(of: hole.face) else {
+                message = "Bohrungen nur auf ebenen Flächen."
+                dropPreview()
+                return
+            }
+            // Normale zeigt aus dem Körper heraus; gebohrt wird entgegen
+            let n = simd_normalize(plane.normal)
+            guard let tool = spec.tool(at: hole.point, outward: n, through: sceneExtent * 2 + 10),
+                  let cut = preview[body].shape.cutting(tool) else {
+                message = "Bohrung an dieser Stelle nicht möglich."
+                dropPreview()
+                return
+            }
+            preview[body] = preview[body].with(cut)
+        }
+        message = holes.count == 1 ? spec.summary : "\(holes.count) Bohrungen · \(spec.summary)"
+        showPreview(preview, name: holes.count == 1 ? "Bohrung" : "Bohrungen")
+    }
+
     // MARK: Skizzen bewegen
 
     /// Mitte der Bereiche bzw. Linien einer Skizze (Welt).
@@ -2481,3 +2642,123 @@ extension ModelStore {
         commit(bodies, sketches: result, name: "Skizze skalieren")
     }
 }
+
+// MARK: Bohrungen
+
+enum HoleKind: String, CaseIterable, Identifiable {
+    case simple = "Einfach"
+    case counterbore = "Senkbohrung"
+    case countersink = "Kegelsenkung"
+
+    var id: Self { self }
+}
+
+/// Maße einer Bohrung (mm, Grad). Für den 3D-Druck kommt die Druckzugabe auf alle Durchmesser.
+struct HoleSpec: Equatable {
+    var kind: HoleKind = .simple
+    var diameter: Double = 3.4
+    var depth: Double = 10
+    var through = true
+    var counterDiameter: Double = 6.5
+    var counterDepth: Double = 3.3
+    var sinkAngle: Double = 90
+    /// Spitze am Grund einer Sackbohrung (118°)
+    var drillPoint = false
+    var clearance: Double = 0.2
+
+    var summary: String {
+        let d = (diameter + clearance).formatted(.number.precision(.fractionLength(0...2)))
+        let depthText = through ? "durch" : "\(depth.formatted()) mm tief"
+        switch kind {
+        case .simple: return "Ø \(d) mm, \(depthText)"
+        case .counterbore:
+            return "Ø \(d) mm, \(depthText), Senkung Ø \((counterDiameter + clearance).formatted()) × \(counterDepth.formatted()) mm"
+        case .countersink:
+            return "Ø \(d) mm, \(depthText), Kegelsenkung Ø \((counterDiameter + clearance).formatted()) mm \(sinkAngle.formatted())°"
+        }
+    }
+
+    /// Werkzeugkörper der Bohrung: beginnt knapp über der Fläche bei point und geht entgegen outward.
+    func tool(at point: SIMD3<Double>, outward n: SIMD3<Double>, through reach: Double) -> PCKShape? {
+        let lift = 0.05
+        let top = point + n * lift
+        let r = (diameter + clearance) / 2
+        guard r > 0 else { return nil }
+        let length = (through ? reach : depth) + lift
+        guard var shape = PCKShape.cylinder(base: top, axis: -n, radius: r, height: length) else { return nil }
+        if drillPoint, !through {
+            let tipHeight = r / tan(59 * .pi / 180)
+            if let tip = PCKShape.cone(base: top - n * length, axis: -n, bottomRadius: r, topRadius: 0, height: tipHeight),
+               let joined = shape.fusing(tip) {
+                shape = joined
+            }
+        }
+        let R = (counterDiameter + clearance) / 2
+        switch kind {
+        case .simple:
+            break
+        case .counterbore:
+            guard R > r, counterDepth > 0,
+                  let bore = PCKShape.cylinder(base: top, axis: -n, radius: R, height: counterDepth + lift),
+                  let joined = shape.fusing(bore) else { return nil }
+            shape = joined
+        case .countersink:
+            let half = max(1, min(89, sinkAngle / 2)) * .pi / 180
+            // Kegel von Ø R an der Fläche bis Ø r, dazu der Abschnitt über der Fläche
+            let height = (R - r) / tan(half)
+            guard R > r, height > 0,
+                  let sink = PCKShape.cone(base: top, axis: -n, bottomRadius: R + lift * tan(half), topRadius: r,
+                                           height: height + lift),
+                  let joined = shape.fusing(sink) else { return nil }
+            shape = joined
+        }
+        return shape
+    }
+
+    /// Name und Maße einer Bohrungsvorlage
+    typealias Preset = (name: String, spec: HoleSpec)
+
+    private static func preset(_ name: String, _ kind: HoleKind, _ d: Double, through: Bool = true, depth: Double = 10,
+                               cd: Double = 0, cdepth: Double = 0, clearance: Double = 0.2) -> Preset {
+        (name, HoleSpec(kind: kind, diameter: d, depth: depth, through: through, counterDiameter: cd,
+                        counterDepth: cdepth, sinkAngle: 90, drillPoint: false, clearance: clearance))
+    }
+
+    private static let throughPresets: [Preset] = [
+        preset("M2", .simple, 2.4), preset("M2,5", .simple, 2.9), preset("M3", .simple, 3.4),
+        preset("M4", .simple, 4.5), preset("M5", .simple, 5.5), preset("M6", .simple, 6.6), preset("M8", .simple, 9.0),
+    ]
+    private static let counterborePresets: [Preset] = [
+        preset("M3", .counterbore, 3.4, cd: 6.5, cdepth: 3.3), preset("M4", .counterbore, 4.5, cd: 8, cdepth: 4.4),
+        preset("M5", .counterbore, 5.5, cd: 10, cdepth: 5.4), preset("M6", .counterbore, 6.6, cd: 11, cdepth: 6.4),
+    ]
+    private static let countersinkPresets: [Preset] = [
+        preset("M3", .countersink, 3.4, cd: 6.4), preset("M4", .countersink, 4.5, cd: 8.6),
+        preset("M5", .countersink, 5.5, cd: 10.4), preset("M6", .countersink, 6.6, cd: 12.4),
+    ]
+    private static let corePresets: [Preset] = [
+        preset("M2", .simple, 1.6, through: false, depth: 6, clearance: 0),
+        preset("M2,5", .simple, 2.0, through: false, depth: 7, clearance: 0),
+        preset("M3", .simple, 2.5, through: false, depth: 8, clearance: 0),
+        preset("M4", .simple, 3.3, through: false, depth: 10, clearance: 0),
+        preset("M5", .simple, 4.2, through: false, depth: 12, clearance: 0),
+    ]
+    private static let insertPresets: [Preset] = [
+        preset("M2", .simple, 3.2, through: false, depth: 4.5, clearance: 0),
+        preset("M2,5", .simple, 3.6, through: false, depth: 6.2, clearance: 0),
+        preset("M3", .simple, 4.0, through: false, depth: 6.2, clearance: 0),
+        preset("M4", .simple, 5.6, through: false, depth: 8.6, clearance: 0),
+        preset("M5", .simple, 6.4, through: false, depth: 10, clearance: 0),
+    ]
+
+    /// Vorlagen für den 3D-Druck (Richtwerte; Durchgang nach ISO 273 mittel, Kernloch für selbstschneidende
+    /// Schrauben in Kunststoff, Gewindeeinsätze nach Herstellerangabe ruthex – vor dem Druck prüfen).
+    static let presets: [(group: String, items: [Preset])] = [
+        (group: "Durchgang", items: throughPresets),
+        (group: "Zylinderkopf (ISO 4762)", items: counterborePresets),
+        (group: "Senkkopf (90°)", items: countersinkPresets),
+        (group: "Kernloch Kunststoff", items: corePresets),
+        (group: "Gewindeeinsatz (ruthex)", items: insertPresets),
+    ]
+}
+

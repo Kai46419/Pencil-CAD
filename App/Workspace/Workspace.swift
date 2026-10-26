@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import simd
 
 enum PatternKind: String, CaseIterable, Identifiable {
@@ -29,6 +30,50 @@ enum OffsetFaceMode: String, CaseIterable, Identifiable {
     case diameter = "Durchmesser"
 
     var id: Self { self }
+}
+
+/// Körper teilen: womit geteilt wird.
+enum SplitMode: String, CaseIterable, Identifiable {
+    case plane = "Ebene"
+    case body = "Körper"
+    case sketch = "Skizze"
+
+    var id: Self { self }
+}
+
+/// Konstruktionsebene: wie sie bestimmt wird (wie Fusion 360).
+enum PlaneMethod: String, CaseIterable, Identifiable {
+    case offset = "Versetzt"
+    case midplane = "Mittelebene"
+    case threePoints = "Drei Punkte"
+    case normalToEdge = "Senkrecht zur Kante"
+    case edgeAngle = "Kante und Winkel"
+
+    var id: Self { self }
+}
+
+/// Konstruktionsachse: wie sie bestimmt wird.
+enum AxisMethod: String, CaseIterable, Identifiable {
+    case pick = "Wählen"
+    case twoPoints = "Zwei Punkte"
+    case twoPlanes = "Zwei Ebenen"
+    case cylinder = "Zylinderachse"
+
+    var id: Self { self }
+}
+
+/// Datei, die die Oberfläche sichern bzw. teilen soll (z. B. Skizze als SVG/DXF).
+struct PendingExport: Equatable {
+    let id = UUID()
+    let data: Data
+    let type: UTType
+    let name: String
+}
+
+/// Eine gesetzte Bohrung: Fläche und Punkt auf der Fläche.
+struct HolePoint {
+    var face: FaceRef
+    var point: SIMD3<Double>
 }
 
 /// Achse aus einer Kante oder Flächennormale (für „Achse“ im Konstruieren-Werkzeug).
@@ -72,6 +117,10 @@ enum ModelTool: Equatable {
     case imprint
     /// Körper von einem Punkt zu einem anderen verschieben bzw. kopieren (Shapr3D „Translate“)
     case translate
+    /// Bohrungen für Schrauben und Gewindeeinsätze (Fusion 360 „Bohrung“)
+    case hole
+    /// Druckbarkeit prüfen: Überhänge, dünne Wände, Ausrichtung
+    case printCheck
 
     var title: String {
         switch self {
@@ -100,6 +149,8 @@ enum ModelTool: Equatable {
         case .wrap: "Umhüllen und Prägen"
         case .imprint: "Kante abdrücken"
         case .translate: "Übersetzen"
+        case .hole: "Bohrung"
+        case .printCheck: "Druckprüfung"
         }
     }
 
@@ -147,6 +198,17 @@ struct DragHandle {
     var pointing: SIMD3<Float> { value < 0 ? -direction : direction }
 }
 
+/// Gespeicherte Ansicht (Kamerawinkel, Abstand, Ziel, Projektion), je Projekt.
+struct SavedView: Codable, Equatable, Identifiable {
+    var id = UUID()
+    var name: String
+    var yaw: Float
+    var pitch: Float
+    var distance: Float
+    var target: [Float]
+    var orthographic: Bool
+}
+
 /// Einmalige Kamerabefehle aus der Oberfläche. Eine neue id löst den Befehl aus.
 struct ViewCommand: Equatable {
     enum Kind: Equatable {
@@ -154,6 +216,8 @@ struct ViewCommand: Equatable {
         case fitAll
         /// Blick entgegen der Normale (Kamera auf der Seite von normal)
         case look(SIMD3<Float>)
+        /// Gespeicherte Ansicht wiederherstellen
+        case restore(SavedView)
     }
 
     var id = 0
@@ -220,6 +284,10 @@ final class Workspace: ObservableObject {
     @Published var sweepPath: Int?
     @Published var splitPlane: ReferencePlane = .world(2)
     @Published var splitOffset: Double = 0
+    @Published var splitMode: SplitMode = .plane
+    /// Teilen mit einem Körper bzw. mit Skizzenbereichen (ein Prisma durch alles)
+    @Published private(set) var splitToolBody: Int?
+    @Published private(set) var splitRegions: [RegionRef] = []
     /// Schnittansicht im 3D-Modus (nil = aus)
     @Published var section: SectionSettings?
     /// Schnittansicht im Skizzenmodus: alles vor der Skizzenebene ausblenden
@@ -228,11 +296,35 @@ final class Workspace: ObservableObject {
     @Published private(set) var measurePoints: [SIMD3<Double>] = []
     /// Zuletzt gemessene Körper (für den kürzesten Abstand zwischen zwei Körpern)
     private var measureBodies: [Int] = []
+    /// Zuletzt gemessene Flächen (Winkel bzw. Abstand zweier ebener Flächen)
+    private var measureFaces: [FaceRef] = []
     @Published var constructReference: ReferencePlane = .world(2)
     @Published var constructOffset: Double = 10
     @Published var constructAxis: ReferenceAxis = .world(2)
     @Published var constructCustomAxis: AxisSpec?
     @Published var constructPoint: SIMD3<Double> = .zero
+    @Published var planeMethod: PlaneMethod = .offset
+    @Published var axisMethod: AxisMethod = .pick
+    /// Angetippte ebene Flächen (Mittelebene, Achse aus zwei Ebenen)
+    @Published private(set) var constructPlanes: [(origin: SIMD3<Double>, normal: SIMD3<Double>)] = []
+    /// Angetippte Punkte (Ebene durch drei Punkte, Achse durch zwei Punkte)
+    @Published private(set) var constructPoints: [SIMD3<Double>] = []
+    /// Angetippte gerade Kante (Ebene senkrecht zur Kante, Ebene durch Kante mit Winkel)
+    @Published private(set) var constructEdge: (a: SIMD3<Double>, b: SIMD3<Double>)?
+    /// Lage auf der Kante in Prozent (Ebene senkrecht zur Kante)
+    @Published var constructEdgePosition: Double = 50
+    @Published var constructAngle: Double = 45
+    // Bohrung
+    @Published var holeSpec = HoleSpec()
+    @Published private(set) var holePoints: [HolePoint] = []
+    // Druckprüfung
+    @Published private(set) var printReport: PrintReport?
+    @Published private(set) var printBody: Int?
+    /// Richtung, die beim Drucken nach oben zeigt (Welt)
+    @Published private(set) var printUp: SIMD3<Float> = [0, 0, 1]
+    @Published private(set) var printBusy = false
+    @Published var printOverhangAngle: Double = 45
+    @Published var printMinWall: Double = 0.8
     @Published var sketchScaleFactor: Double = 2
     // Fläche versetzen / ersetzen
     @Published var offsetFaceMode: OffsetFaceMode = .distance
@@ -257,6 +349,10 @@ final class Workspace: ObservableObject {
     @Published var showsVariables = false
     /// Einfügen › Projekt
     @Published var showsProjectPicker = false
+    /// Befehlssuche (⌘K)
+    @Published var showsCommandSearch = false
+    /// Wird von der Oberfläche als Datei gesichert und dann geleert
+    @Published var pendingExport: PendingExport?
     /// Hilfe-Menü: gewählte Hilfeseite
     @Published var helpTopic: HelpTopic?
     /// Fotoauswahl für „Bild einfügen“
@@ -275,12 +371,94 @@ final class Workspace: ObservableObject {
 
     /// Liefert ein Bild der Ansicht (vom Viewport gesetzt).
     var snapshot: ((CGSize) -> UIImage?)?
+    /// Aktuelle Kamera (vom Viewport gesetzt), für „Ansicht speichern“
+    var currentCamera: (() -> OrbitCamera?)?
+    /// Gespeicherte Ansichten dieses Projekts
+    @Published private(set) var savedViews: [SavedView] = []
 
     init(project: Project) {
         self.project = project
         model = ModelStore(folder: project.folder)
         assistant = AIAssistant(model: model)
         assistant.onPreview = { [weak self] in self?.send(.fitAll) }
+        if let data = UserDefaults.standard.data(forKey: savedViewsKey),
+           let views = try? JSONDecoder().decode([SavedView].self, from: data) {
+            savedViews = views
+        }
+    }
+
+    // MARK: SVG und DXF
+
+    /// SVG- bzw. DXF-Datei als neue Skizze auf der XY-Ebene (Oben) einfügen.
+    func importVectorFile(_ url: URL) {
+        let access = url.startAccessingSecurityScopedResource()
+        defer { if access { url.stopAccessingSecurityScopedResource() } }
+        guard let data = try? Data(contentsOf: url) else {
+            model.message = "Datei konnte nicht gelesen werden."
+            return
+        }
+        let isSVG = url.pathExtension.lowercased() == "svg"
+        do {
+            let result = try (isSVG ? VectorFiles.importSVG(data) : VectorFiles.importDXF(data))
+            guard !result.entities.isEmpty else {
+                model.message = "Keine Linien, Bögen oder Kurven in der Datei gefunden."
+                return
+            }
+            var entities = result.entities
+            // SVG liegt sonst unterhalb der X-Achse: linke untere Ecke auf den Ursprung
+            let points = entities.flatMap { $0.drawing.flatMap { $0 } }
+            if isSVG, let first = points.first {
+                let low = points.reduce(first) { simd_min($0, $1) }
+                entities = entities.map { $0.translated(by: -low) }
+            }
+            if sketch.isActive { finishSketch() }
+            activate(.select)
+            model.storeSketch(plane: .base(.top), entities: entities, replacing: nil)
+            var text = "\(url.lastPathComponent): \(entities.count) Elemente als Skizze auf „Oben“ eingefügt"
+            if result.skipped > 0 { text += " (\(result.skipped) nicht übernommen, z. B. Text oder Blöcke)" }
+            model.message = text + "."
+            send(.fitAll)
+        } catch {
+            model.message = error.localizedDescription
+        }
+    }
+
+    /// Gespeicherte Skizze als SVG (Laser, Plotter, Grafik) bzw. DXF (CAD, CNC) sichern.
+    func exportSketch(_ index: Int, svg: Bool) {
+        guard model.sketches.indices.contains(index) else { return }
+        let stored = model.sketches[index]
+        let data = svg ? VectorFiles.exportSVG(stored.entities, construction: stored.construction)
+            : VectorFiles.exportDXF(stored.entities, construction: stored.construction)
+        pendingExport = PendingExport(data: data, type: svg ? .svg : .dxfFile, name: stored.name)
+    }
+
+    // MARK: Gespeicherte Ansichten
+
+    private var savedViewsKey: String { "savedViews.\(project.id.uuidString)" }
+
+    func saveCurrentView() {
+        guard let camera = currentCamera?() else { return }
+        savedViews.append(SavedView(name: "Ansicht \(savedViews.count + 1)", yaw: camera.yaw, pitch: camera.pitch,
+                                    distance: camera.distance, target: [camera.target.x, camera.target.y, camera.target.z],
+                                    orthographic: isOrthographic))
+        persistViews()
+        model.message = "\(savedViews.last?.name ?? "Ansicht") gespeichert – rechts unter „Ansichten“."
+    }
+
+    func restoreView(_ view: SavedView) {
+        isOrthographic = view.orthographic
+        send(.restore(view))
+    }
+
+    func deleteView(_ id: UUID) {
+        savedViews.removeAll { $0.id == id }
+        persistViews()
+    }
+
+    private func persistViews() {
+        if let data = try? JSONEncoder().encode(savedViews) {
+            UserDefaults.standard.set(data, forKey: savedViewsKey)
+        }
     }
 
     // MARK: Kamera
@@ -423,6 +601,7 @@ final class Workspace: ObservableObject {
         measureLines = []
         measurePoints = []
         measureBodies = []
+        measureFaces = []
         switch newTool {
         case .move where previousBody == nil && !previousRegions.isEmpty:
             // Skizze verschieben/drehen
@@ -431,6 +610,8 @@ final class Workspace: ObservableObject {
             return
         case .pattern, .scale, .align, .split:
             model.resetSelection()
+            splitToolBody = nil
+            splitRegions = []
             if previousBodies.count > 1, newTool != .split {
                 model.selectBodies(previousBodies)
             } else if let previousBody {
@@ -462,6 +643,7 @@ final class Workspace: ObservableObject {
         case .construct(let kind):
             model.resetSelection()
             constructCustomAxis = nil
+            resetConstructPicks()
             if let previousFace {
                 switch kind {
                 case .plane: constructReference = .face(previousFace)
@@ -492,6 +674,17 @@ final class Workspace: ObservableObject {
             if !previousRegions.isEmpty { model.selectRegions(previousRegions) }
             if newTool == .wrap, let previousFace, model.cylinder(of: previousFace) != nil { wrapFace = previousFace }
             updateWrapPreview()
+            return
+        case .hole:
+            model.resetSelection()
+            holePoints = []
+            return
+        case .printCheck:
+            model.resetSelection()
+            printReport = nil
+            printUp = [0, 0, 1]
+            printBody = previousBody ?? previousFace?.body
+            runPrintCheck()
             return
         case .translate:
             model.resetSelection()
@@ -608,6 +801,7 @@ final class Workspace: ObservableObject {
         measureLines = []
         measurePoints = []
         measureBodies = []
+        measureFaces = []
     }
 
     /// Fläche versetzen: Wert je nach Art in einen Versatz umrechnen und als Vorschau zeigen.
@@ -683,6 +877,143 @@ final class Workspace: ObservableObject {
         model.cancelPreview()
     }
 
+    // MARK: Teilen, Bohrung, Druckprüfung
+
+    /// Körper teilen: erst den Körper, dann je nach Art Werkzeugkörper bzw. Skizzenbereiche antippen.
+    private func splitTapped(face: FaceRef?, edge: EdgeRef?, region: RegionRef?) {
+        if splitMode == .sketch, let region {
+            if splitRegions.first?.sketch != region.sketch {
+                splitRegions = [region]
+            } else if let index = splitRegions.firstIndex(of: region) {
+                splitRegions.remove(at: index)
+            } else {
+                splitRegions.append(region)
+            }
+            updatePreview()
+            return
+        }
+        guard let body = face?.body ?? edge?.body, model.bodies.indices.contains(body) else { return }
+        if splitMode == .body, let target = model.selectedBodies.first, target != body {
+            splitToolBody = body
+        } else {
+            model.toggleBody(body, exclusive: true)
+            if splitToolBody == body { splitToolBody = nil }
+        }
+        updatePreview()
+    }
+
+    /// Teilen mit allen Bereichen einer gespeicherten Skizze.
+    func splitWithSketch(_ index: Int) {
+        guard model.sketches.indices.contains(index) else { return }
+        splitRegions = model.sketches[index].regions.indices.map { RegionRef(sketch: index, region: $0) }
+        if splitRegions.isEmpty { model.message = "Diese Skizze hat keine geschlossenen Bereiche." }
+        updatePreview()
+    }
+
+    /// Art des Teilens wechseln: Vorschau und Werkzeug neu.
+    func setSplitMode(_ mode: SplitMode) {
+        splitMode = mode
+        splitToolBody = nil
+        splitRegions = []
+        let chosen = model.selectedBodies
+        model.cancelPreview()
+        if !chosen.isEmpty { model.selectBodies(chosen) }
+        updatePreview()
+    }
+
+    /// Bohrung setzen bzw. entfernen: Punkt rastet an Ecken, Kantenmitten und Kreismitten und liegt in der Fläche.
+    private func holeTapped(face: FaceRef?, point: SIMD3<Float>?) {
+        guard let face, let point, let plane = model.plane(of: face) else {
+            if face != nil { model.message = "Bohrungen gehen auf ebenen Flächen." }
+            return
+        }
+        let normal = simd_normalize(plane.normal)
+        var spot = model.snappedModelPoint(SIMD3<Double>(point), tolerance: pickTolerance)
+        spot -= normal * simd_dot(spot - plane.anchor, normal)
+        let reach = max(pickTolerance, (holeSpec.diameter + holeSpec.clearance) / 2)
+        if let index = holePoints.firstIndex(where: { simd_distance($0.point, spot) < reach }) {
+            holePoints.remove(at: index)
+        } else {
+            holePoints.append(HolePoint(face: face, point: spot))
+        }
+        updateHolePreview()
+    }
+
+    func updateHolePreview() {
+        guard tool == .hole else { return }
+        model.previewHoles(holePoints.map { (face: $0.face, point: $0.point) }, spec: holeSpec)
+    }
+
+    func removeLastHole() {
+        guard !holePoints.isEmpty else { return }
+        holePoints.removeLast()
+        updateHolePreview()
+    }
+
+    /// Druckprüfung im Hintergrund (Wandstärke per Strahlen kann bei großen Netzen dauern).
+    /// best = beste Ausrichtung suchen.
+    func runPrintCheck(best: Bool = false) {
+        guard let body = printBody, model.bodies.indices.contains(body) else {
+            printReport = nil
+            return
+        }
+        let mesh = model.mesh
+        let angle = Float(printOverhangAngle), wall = Float(printMinWall), current = printUp
+        printBusy = true
+        Task {
+            let result = await Task.detached(priority: .userInitiated) { () -> (up: SIMD3<Float>, report: PrintReport) in
+                let up = best ? PrintCheck.bestOrientation(mesh: mesh, body: body, overhangAngle: angle).up : current
+                return (up, PrintCheck.analyze(mesh: mesh, body: body, up: up, overhangAngle: angle, minWall: wall))
+            }.value
+            printBusy = false
+            guard printBody == body, tool == .printCheck else { return }
+            printUp = result.up
+            printReport = result.report
+        }
+    }
+
+    /// Werkzeuge, in denen Antippen einen Punkt auf dem Modell setzt (Fangpunkt unter dem Stift zeigen).
+    var picksModelPoints: Bool {
+        switch tool {
+        case .translate: return !model.selectedBodies.isEmpty
+        case .hole: return true
+        case .construct(.plane): return planeMethod == .threePoints
+        case .construct(.axis): return axisMethod == .twoPoints
+        default: return false
+        }
+    }
+
+    /// Doppeltippen: Bereich bzw. ebene Fläche um die zuletzt verwendete Höhe extrudieren.
+    func repeatLastExtrude(region: RegionRef?, face: FaceRef?) {
+        guard let value = model.lastExtrudeValue else {
+            model.message = "Noch keine Extrusion – erst einmal am Pfeil ziehen, dann wiederholt Doppeltippen die Höhe."
+            return
+        }
+        if let region {
+            model.cancelPreview()
+            model.resetSelection()
+            model.toggleRegion(region)
+            model.setRegionValue(value)
+        } else if let face, model.plane(of: face) != nil {
+            model.cancelPreview()
+            model.resetSelection()
+            model.select(face: face)
+            guard model.faceHandle != nil else { return }
+            model.setFaceValue(value)
+        } else {
+            return
+        }
+        model.message = "Letzte Höhe wiederholt: \(NumberField.format(value)) mm"
+    }
+
+    /// Gefundene Ausrichtung übernehmen: Körper drehen und aufs Druckbett (Z = 0) stellen.
+    func applyPrintOrientation() {
+        guard let body = printBody else { return }
+        model.orientForPrint(body, up: SIMD3<Double>(printUp))
+        printUp = [0, 0, 1]
+        runPrintCheck()
+    }
+
     /// „Fertig“: aktuelles Werkzeug bzw. Vorschau übernehmen.
     func done() {
         if sketch.isActive {
@@ -742,7 +1073,7 @@ final class Workspace: ObservableObject {
         if sketch.isActive { return true }
         switch tool {
         case .boolean: return model.selectedBodies.count > 1
-        case .color, .construct, .measure, .section, .canvas, .offsetEdges: return true
+        case .color, .construct, .measure, .section, .canvas, .offsetEdges, .printCheck: return true
         case .translate: return model.hasPreview
         case .move where model.movingSketch != nil: return model.moveOffset != .zero
         case .scaleSketch: return !model.selectedRegions.isEmpty
@@ -759,7 +1090,7 @@ final class Workspace: ObservableObject {
         // die Flächen der echten Körper sammeln, die passende echte Fläche unter dem Punkt suchen
         var face = tappedFace
         switch tool {
-        case .shell, .offsetFace, .replaceFace, .wrap, .imprint, .mirror:
+        case .shell, .offsetFace, .replaceFace, .wrap, .imprint, .mirror, .hole, .split:
             face = tappedFace.flatMap { model.originalFace($0, near: point) }
         default:
             break
@@ -770,9 +1101,7 @@ final class Workspace: ObservableObject {
             model.toggleBody(body)
             updatePreview()
         case .split:
-            guard let body = face?.body ?? edge?.body else { return }
-            model.toggleBody(body, exclusive: true)
-            updatePreview()
+            splitTapped(face: face, edge: edge, region: region)
         case .revolve, .sweep, .scaleSketch:
             guard let region else { return }
             if tool == .scaleSketch || model.selectedRegions.first?.sketch != region.sketch {
@@ -788,25 +1117,14 @@ final class Workspace: ObservableObject {
         case .measure:
             measure(face: face, edge: edge, point: point)
         case .construct(let kind):
-            switch kind {
-            case .plane:
-                if let face, model.plane(of: face) != nil {
-                    constructReference = .face(face)
-                } else if face != nil {
-                    model.message = "Für eine Ebene eine ebene Fläche antippen."
-                }
-            case .axis:
-                if let edge {
-                    let points = model.edgePolylines(edge).flatMap { $0 }
-                    if let a = points.first, let b = points.last, simd_distance(a, b) > 1e-6 {
-                        constructCustomAxis = AxisSpec(origin: a, direction: simd_normalize(b - a), name: "Kante")
-                    }
-                } else if let face {
-                    setCustomAxis(normalOf: face)
-                }
-            case .point:
-                if let point { constructPoint = SIMD3<Double>(point) }
-            }
+            constructTapped(kind, face: face, edge: edge, point: point)
+        case .hole:
+            holeTapped(face: face, point: point)
+        case .printCheck:
+            guard let body = face?.body ?? edge?.body else { return }
+            if body != printBody { printUp = [0, 0, 1] }
+            printBody = body
+            runPrintCheck()
         case .section:
             if let face, model.plane(of: face) != nil { section?.plane = .face(face) }
         case .offsetEdges:
@@ -949,10 +1267,24 @@ final class Workspace: ObservableObject {
         case .loft:
             model.previewLoft(mode: solidMode)
         case .split:
-            guard let body = model.selectedBodies.first, let plane = model.resolve(splitPlane) else { return }
-            var origin = plane.origin
-            if case .world = splitPlane, let center = model.center(ofBody: body) { origin = center }
-            model.previewSplit(origin: origin + plane.normal * splitOffset, normal: plane.normal)
+            guard let body = model.selectedBodies.first else { return }
+            switch splitMode {
+            case .plane:
+                guard let plane = model.resolve(splitPlane) else { return }
+                var origin = plane.origin
+                if case .world = splitPlane, let center = model.center(ofBody: body) { origin = center }
+                model.previewSplit(origin: origin + plane.normal * splitOffset, normal: plane.normal)
+            case .body:
+                guard let toolBody = splitToolBody, toolBody != body, model.bodies.indices.contains(toolBody) else { return }
+                model.previewSplit(tool: model.bodies[toolBody].shape)
+            case .sketch:
+                guard !splitRegions.isEmpty else { return }
+                guard let prism = model.throughPrism(regions: splitRegions) else {
+                    model.message = "Aus diesen Skizzenbereichen lässt sich kein Werkzeug bilden."
+                    return
+                }
+                model.previewSplit(tool: prism)
+            }
         default:
             break
         }
@@ -1090,14 +1422,157 @@ final class Workspace: ObservableObject {
     /// Achse, die „Fertig“ im Konstruieren-Werkzeug erstellen würde (Vorschau im Viewport).
     var pendingAxis: (origin: SIMD3<Double>, direction: SIMD3<Double>)? {
         guard tool == .construct(.axis) else { return nil }
-        if let custom = constructCustomAxis { return (custom.origin, custom.direction) }
-        return model.resolve(constructAxis)
+        switch axisMethod {
+        case .pick, .cylinder:
+            if let custom = constructCustomAxis { return (custom.origin, custom.direction) }
+            return axisMethod == .pick ? model.resolve(constructAxis) : nil
+        case .twoPoints:
+            guard constructPoints.count == 2, simd_distance(constructPoints[0], constructPoints[1]) > 1e-6 else { return nil }
+            return (constructPoints[0], simd_normalize(constructPoints[1] - constructPoints[0]))
+        case .twoPlanes:
+            guard constructPlanes.count == 2 else { return nil }
+            return Self.intersection(constructPlanes[0], constructPlanes[1])
+        }
     }
 
     /// Ebene, die „Fertig“ im Konstruieren-Werkzeug erstellen würde (Vorschau im Viewport).
     var pendingPlane: (origin: SIMD3<Double>, normal: SIMD3<Double>)? {
-        guard tool == .construct(.plane), let reference = model.resolve(constructReference) else { return nil }
-        return (reference.origin + reference.normal * constructOffset, reference.normal)
+        guard tool == .construct(.plane) else { return nil }
+        switch planeMethod {
+        case .offset:
+            guard let reference = model.resolve(constructReference) else { return nil }
+            return (reference.origin + reference.normal * constructOffset, reference.normal)
+        case .midplane:
+            guard constructPlanes.count == 2 else { return nil }
+            return Self.midplane(constructPlanes[0], constructPlanes[1])
+        case .threePoints:
+            guard constructPoints.count == 3 else { return nil }
+            let p = constructPoints
+            let normal = simd_cross(p[1] - p[0], p[2] - p[0])
+            guard simd_length(normal) > 1e-9 else { return nil }
+            return ((p[0] + p[1] + p[2]) / 3, simd_normalize(normal))
+        case .normalToEdge:
+            guard let edge = constructEdge else { return nil }
+            let t = min(max(constructEdgePosition, 0), 100) / 100
+            return (edge.a + (edge.b - edge.a) * t, simd_normalize(edge.b - edge.a))
+        case .edgeAngle:
+            guard let edge = constructEdge, let reference = model.resolve(constructReference) else { return nil }
+            let d = simd_normalize(edge.b - edge.a)
+            // 0° = Ebene durch die Kante, parallel zur Bezugsebene (soweit möglich); gedreht um die Kante
+            let flat = reference.normal - simd_dot(reference.normal, d) * d
+            guard simd_length(flat) > 1e-9 else { return nil }
+            let rotation = simd_quatd(angle: constructAngle * .pi / 180, axis: d)
+            return ((edge.a + edge.b) / 2, rotation.act(simd_normalize(flat)))
+        }
+    }
+
+    /// Mittelebene zweier Ebenen: parallel genau in der Mitte, sonst die winkelhalbierende Ebene.
+    static func midplane(_ a: (origin: SIMD3<Double>, normal: SIMD3<Double>),
+                         _ b: (origin: SIMD3<Double>, normal: SIMD3<Double>)) -> (origin: SIMD3<Double>, normal: SIMD3<Double>)? {
+        let n1 = simd_normalize(a.normal)
+        var n2 = simd_normalize(b.normal)
+        if simd_dot(n1, n2) < 0 { n2 = -n2 }
+        if simd_dot(n1, n2) > 0.9999 {
+            let distance = simd_dot(b.origin - a.origin, n1)
+            return (a.origin + n1 * distance / 2, n1)
+        }
+        // Punkte gleichen Abstands: (n1 − n2) · x = n1 · o1 − n2 · o2
+        let difference = n1 - n2
+        let length = simd_length(difference)
+        guard length > 1e-9 else { return nil }
+        let normal = difference / length
+        let c = (simd_dot(n1, a.origin) - simd_dot(n2, b.origin)) / length
+        let middle = (a.origin + b.origin) / 2
+        return (middle - normal * (simd_dot(normal, middle) - c), normal)
+    }
+
+    /// Schnittgerade zweier Ebenen (nil bei parallelen Ebenen); Punkt nahe der Mitte der beiden Ursprünge.
+    static func intersection(_ a: (origin: SIMD3<Double>, normal: SIMD3<Double>),
+                             _ b: (origin: SIMD3<Double>, normal: SIMD3<Double>)) -> (origin: SIMD3<Double>, direction: SIMD3<Double>)? {
+        let n1 = simd_normalize(a.normal), n2 = simd_normalize(b.normal)
+        let d = simd_cross(n1, n2)
+        let lengthSquared = simd_length_squared(d)
+        guard lengthSquared > 1e-10 else { return nil }
+        let c1 = simd_dot(n1, a.origin), c2 = simd_dot(n2, b.origin)
+        let point = (c1 * simd_cross(n2, d) + c2 * simd_cross(d, n1)) / lengthSquared
+        let direction = simd_normalize(d)
+        let middle = (a.origin + b.origin) / 2
+        return (point + direction * simd_dot(middle - point, direction), direction)
+    }
+
+    /// Angetippte Punkte, Flächen und Kanten des Konstruieren-Werkzeugs vergessen.
+    func resetConstructPicks() {
+        constructPlanes = []
+        constructPoints = []
+        constructEdge = nil
+        if axisMethod != .pick { constructCustomAxis = nil }
+    }
+
+    private func constructTapped(_ kind: ConstructionKind, face: FaceRef?, edge: EdgeRef?, point: SIMD3<Float>?) {
+        func addPlane(of face: FaceRef?) {
+            guard let face, let plane = model.plane(of: face) else {
+                model.message = "Ebene Flächen antippen."
+                return
+            }
+            let entry = (origin: model.mesh.centroid(of: face).map { SIMD3<Double>($0) } ?? plane.anchor, normal: plane.normal)
+            constructPlanes = constructPlanes.count >= 2 ? [entry] : constructPlanes + [entry]
+        }
+        func addPoint(limit: Int) {
+            guard let point else { return }
+            let snapped = model.snappedModelPoint(SIMD3<Double>(point), tolerance: pickTolerance)
+            constructPoints = constructPoints.count >= limit ? [snapped] : constructPoints + [snapped]
+        }
+        switch kind {
+        case .plane:
+            switch planeMethod {
+            case .offset:
+                if let face, model.plane(of: face) != nil {
+                    constructReference = .face(face)
+                } else if face != nil {
+                    model.message = "Für eine Ebene eine ebene Fläche antippen."
+                }
+            case .midplane:
+                addPlane(of: face)
+            case .threePoints:
+                addPoint(limit: 3)
+            case .normalToEdge, .edgeAngle:
+                if let edge, let line = straightEdge(edge) {
+                    constructEdge = line
+                } else if planeMethod == .edgeAngle, let face, model.plane(of: face) != nil {
+                    constructReference = .face(face)
+                } else {
+                    model.message = "Eine gerade Kante antippen."
+                }
+            }
+        case .axis:
+            switch axisMethod {
+            case .pick:
+                if let edge, let line = straightEdge(edge) {
+                    constructCustomAxis = AxisSpec(origin: line.a, direction: simd_normalize(line.b - line.a), name: "Kante")
+                } else if let face {
+                    setCustomAxis(normalOf: face)
+                }
+            case .twoPoints:
+                addPoint(limit: 2)
+            case .twoPlanes:
+                addPlane(of: face)
+            case .cylinder:
+                guard let face, let cylinder = model.cylinder(of: face) else {
+                    model.message = "Eine Zylinderfläche antippen (Zapfen oder Bohrung)."
+                    return
+                }
+                constructCustomAxis = AxisSpec(origin: cylinder.origin, direction: cylinder.axis, name: "Zylinderachse")
+            }
+        case .point:
+            if let point { constructPoint = SIMD3<Double>(point) }
+        }
+    }
+
+    /// Anfang und Ende einer Kante (nil bei geschlossenen Kanten wie Kreisen).
+    private func straightEdge(_ edge: EdgeRef) -> (a: SIMD3<Double>, b: SIMD3<Double>)? {
+        let points = model.edgePolylines(edge).flatMap { $0 }
+        guard let a = points.first, let b = points.last, simd_distance(a, b) > 1e-6 else { return nil }
+        return (a, b)
     }
 
     private func setCustomAxis(normalOf face: FaceRef) {
@@ -1109,15 +1584,11 @@ final class Workspace: ObservableObject {
     private func createConstruction(_ kind: ConstructionKind) {
         switch kind {
         case .plane:
-            guard let reference = model.resolve(constructReference) else { return }
-            model.addConstruction(.plane, origin: reference.origin + reference.normal * constructOffset,
-                                  direction: reference.normal)
+            guard let plane = pendingPlane else { return }
+            model.addConstruction(.plane, origin: plane.origin, direction: plane.normal)
         case .axis:
-            if let custom = constructCustomAxis {
-                model.addConstruction(.axis, origin: custom.origin, direction: custom.direction)
-            } else if let axis = model.resolve(constructAxis) {
-                model.addConstruction(.axis, origin: axis.origin, direction: axis.direction)
-            }
+            guard let axis = pendingAxis else { return }
+            model.addConstruction(.axis, origin: axis.origin, direction: axis.direction)
         case .point:
             model.addConstruction(.point, origin: constructPoint, direction: [0, 0, 1])
         }
@@ -1136,6 +1607,19 @@ final class Workspace: ObservableObject {
         } else if let face {
             model.select(face: face)
             lines.append("Fläche: \(mm(model.area(of: face), "mm²"))")
+            if let cylinder = model.cylinder(of: face) {
+                lines.append("\(cylinder.convex ? "Zapfen" : "Bohrung"): Radius \(mm(cylinder.radius)) · Ø \(mm(cylinder.radius * 2))")
+            }
+            if measureFaces.last != face { measureFaces = Array((measureFaces + [face]).suffix(2)) }
+            if measureFaces.count == 2, let a = model.plane(of: measureFaces[0]), let b = model.plane(of: measureFaces[1]) {
+                let cosine = abs(simd_dot(simd_normalize(a.normal), simd_normalize(b.normal)))
+                let degrees = acos(min(1, cosine)) * 180 / .pi
+                if degrees < 0.01 {
+                    lines.append("Parallel · Abstand der Flächen: \(mm(abs(simd_dot(b.anchor - a.anchor, simd_normalize(a.normal)))))")
+                } else {
+                    lines.append("Winkel zur vorigen Fläche: \(mm(degrees, "°")) (Ergänzung \(mm(180 - degrees, "°")))")
+                }
+            }
             let volume = model.volume(ofBody: face.body)
             if volume > 0, model.bodies.indices.contains(face.body) {
                 lines.append("Volumen \(model.bodies[face.body].name): \(mm(volume / 1000, "cm³"))")
@@ -1387,11 +1871,35 @@ final class Workspace: ObservableObject {
         case .loft:
             return model.selectedRegions.count < 2 ? "Querschnitte nacheinander antippen (je Skizze einen)"
                 : "Weitere Querschnitte antippen oder „Fertig“"
-        case .split: return model.selectedBodies.isEmpty ? "Körper antippen" : "Teilungsebene wählen"
+        case .split:
+            if model.selectedBodies.isEmpty { return "Körper antippen, der geteilt wird" }
+            switch splitMode {
+            case .plane: return "Teilungsebene wählen"
+            case .body: return splitToolBody == nil ? "Werkzeugkörper antippen" : "„Fertig“ – alle Teile werden eigene Körper"
+            case .sketch: return splitRegions.isEmpty ? "Skizzenbereiche antippen oder unten eine Skizze wählen" : "„Fertig“ tippen"
+            }
+        case .hole:
+            return holePoints.isEmpty ? "Ebene Fläche antippen – rastet an Ecken, Kantenmitten und Kreismitten"
+                : "Weitere Stellen antippen · Bohrung erneut antippen entfernt sie"
+        case .printCheck:
+            return printBody == nil ? "Körper antippen, der gedruckt werden soll" : "Rot = Überhang, Orange = zu dünne Wand"
         case .section: return "Ebene wählen oder ebene Fläche antippen"
         case .measure: return "Kante, Fläche oder zwei Punkte antippen"
-        case .construct(.plane): return "Bezug wählen oder ebene Fläche antippen, Abstand eingeben"
-        case .construct(.axis): return "Achse wählen, Kante oder Fläche antippen"
+        case .construct(.plane):
+            switch planeMethod {
+            case .offset: return "Bezug wählen oder ebene Fläche antippen, Abstand eingeben"
+            case .midplane: return "Zwei ebene Flächen antippen (\(constructPlanes.count) von 2)"
+            case .threePoints: return "Drei Punkte antippen (\(constructPoints.count) von 3)"
+            case .normalToEdge: return constructEdge == nil ? "Gerade Kante antippen" : "Lage auf der Kante einstellen"
+            case .edgeAngle: return constructEdge == nil ? "Gerade Kante antippen" : "Winkel eingeben · ebene Fläche antippen ändert den Bezug"
+            }
+        case .construct(.axis):
+            switch axisMethod {
+            case .pick: return "Achse wählen, Kante oder Fläche antippen"
+            case .twoPoints: return "Zwei Punkte antippen (\(constructPoints.count) von 2)"
+            case .twoPlanes: return "Zwei ebene Flächen antippen (\(constructPlanes.count) von 2)"
+            case .cylinder: return "Zylinderfläche antippen"
+            }
         case .construct(.point): return "Punkt auf einem Körper antippen oder Koordinaten eingeben"
         case .canvas: return "Größe und Lage des Bilds einstellen"
         case .scaleSketch: return model.selectedRegions.isEmpty ? "Skizzenbereich antippen" : "Faktor eingeben"

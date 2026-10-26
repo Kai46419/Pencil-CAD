@@ -68,6 +68,36 @@ enum SnapKind: String, CaseIterable, Identifiable, Codable {
     }
 }
 
+/// Richtungssperre beim Zeichnen (SketchUp: Shift bzw. Pfeiltasten, auf dem iPad als Werkzeugmodus).
+enum DirectionLock: String, CaseIterable, Identifiable {
+    case horizontal = "Waagerecht"
+    case vertical = "Senkrecht"
+    case parallel = "Parallel"
+    case perpendicular = "Rechtwinklig"
+
+    var id: Self { self }
+
+    var systemImage: String {
+        switch self {
+        case .horizontal: "arrow.left.and.right"
+        case .vertical: "arrow.up.and.down"
+        case .parallel: "equal"
+        case .perpendicular: "angle"
+        }
+    }
+}
+
+/// Beim Zeichnen erkannte Beziehung der neuen Linie zu einer vorhandenen.
+enum InferredRelation: Equatable {
+    case parallel(SketchCurveRef)
+    case perpendicular(SketchCurveRef)
+
+    var isPerpendicular: Bool {
+        if case .perpendicular = self { return true }
+        return false
+    }
+}
+
 /// Ergebnis des Fangs: gefangener Punkt, Art und Hilfslinien (Punktpaare, lokal).
 struct SnapResult {
     var point: Point2

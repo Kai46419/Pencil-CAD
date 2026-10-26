@@ -182,6 +182,10 @@ struct ParameterCard: View {
                 }
             case .translate:
                 translateCard
+            case .hole:
+                holeCard
+            case .printCheck:
+                printCheckCard
             }
         }
     }
@@ -380,6 +384,22 @@ struct ParameterCard: View {
                 if sketch.hasOpenChain {
                     Button("Linie absetzen", systemImage: "scissors", action: sketch.endChain)
                 }
+                Divider()
+                    .frame(height: 24)
+                // Richtungssperre für den nächsten Strich (SketchUp: Shift bzw. Pfeiltasten)
+                ForEach(DirectionLock.allCases) { lock in
+                    Button {
+                        sketch.directionLock = sketch.directionLock == lock ? nil : lock
+                    } label: {
+                        Image(systemName: lock.systemImage)
+                            .frame(width: 22, height: 22)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(sketch.directionLock == lock ? Color.accentColor : Color.secondary)
+                    .hoverTip("Sperre: \(lock.rawValue)", lock == .parallel || lock == .perpendicular
+                              ? "Der nächste Strich bleibt \(lock.rawValue.lowercased()) zur zuletzt gezeichneten bzw. erkannten Linie."
+                              : "Der nächste Strich bleibt \(lock.rawValue.lowercased()), egal wohin der Stift zieht.")
+                }
             }
         case .spline:
             HStack(spacing: 14) {
@@ -447,6 +467,13 @@ struct ParameterCard: View {
                     .hoverTip("Zwei Abstände", "Wie Fusion 360: die Fase ist auf beiden Nachbarflächen verschieden breit, z. B. 2 × 4 mm.")
                     if let second = model.edgeSecondValue {
                         NumberField(title: "Abstand 2", value: second) { model.setEdgeSecondValue($0) }
+                        // Fase „Abstand und Winkel“ (Fusion 360): Abstand 2 aus dem Winkel
+                        NumberField(title: "Winkel", value: atan2(second, max(model.edgeValue, 1e-9)) * 180 / .pi,
+                                    unit: "°", width: 48) { angle in
+                            guard angle > 0, angle < 90, model.edgeValue > 0 else { return }
+                            model.setEdgeSecondValue(model.edgeValue * tan(angle * .pi / 180))
+                        }
+                        .hoverTip("Fasenwinkel", "Wie „Abstand und Winkel“ in Fusion 360: Abstand 1 bleibt, Abstand 2 folgt aus dem Winkel.")
                     }
                 }
                 Text(model.selectedEdges.count == 1 ? "1 Kante" : "\(model.selectedEdges.count) Kanten")
@@ -502,6 +529,7 @@ struct ParameterCard: View {
                     }
                     NumberField(title: model.regionDirection == .symmetric ? "Je Seite" : "Abstand",
                                 value: model.regionValue) { model.setRegionValue($0) }
+                    lastValueButton { model.setRegionValue($0) }
                     if model.regionDirection == .twoSides {
                         NumberField(title: "Seite 2", value: model.regionSecondValue) { model.regionSecondValue = abs($0) }
                     }
@@ -519,7 +547,20 @@ struct ParameterCard: View {
                 Label("Extrudieren", systemImage: "square.stack.3d.up")
                     .font(.callout.weight(.semibold))
                 NumberField(title: "Abstand", value: model.faceValue) { model.setFaceValue($0) }
+                lastValueButton { model.setFaceValue($0) }
             }
+        }
+    }
+
+    /// Letzte Extrusionshöhe wiederholen (auch per Doppeltippen auf Bereich bzw. Fläche).
+    @ViewBuilder
+    private func lastValueButton(_ apply: @escaping (Double) -> Void) -> some View {
+        if let last = model.lastExtrudeValue {
+            Button("\(NumberField.format(last)) mm", systemImage: "arrow.uturn.backward") { apply(last) }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .fixedSize()
+                .hoverTip("Letzter Wert", "Übernimmt die zuletzt verwendete Höhe. Schneller: Bereich oder Fläche doppelt antippen.")
         }
     }
 
@@ -625,14 +666,19 @@ struct ParameterCard: View {
                 .controlSize(.small)
                 .disabled(model.selectedBodies.isEmpty && model.movingSketch == nil)
                 if model.movingSketch == nil {
-                    Toggle(isOn: Binding(get: { model.moveCopies }, set: { copies in
-                        model.moveCopies = copies
-                        if model.moveOffset != .zero { model.setMoveOffset(model.moveOffset) }
-                    })) {
-                        Label("Kopieren", systemImage: "plus.square.on.square")
+                    HStack(spacing: 14) {
+                        Toggle(isOn: Binding(get: { model.moveCopies }, set: { copies in
+                            model.moveCopies = copies
+                            if model.moveOffset != .zero { model.setMoveOffset(model.moveOffset) }
+                        })) {
+                            Label("Kopieren", systemImage: "plus.square.on.square")
+                        }
+                        .fixedSize()
+                        .disabled(model.selectedBodies.isEmpty)
+                        if model.moveCopies {
+                            copyArrayControls
+                        }
                     }
-                    .fixedSize()
-                    .disabled(model.selectedBodies.isEmpty)
                 }
             }
         }
@@ -726,6 +772,9 @@ struct ParameterCard: View {
                     }
                 }))
                 .fixedSize()
+                if model.moveCopies {
+                    copyArrayControls
+                }
                 if let start = workspace.translateStart, let end = workspace.translateEnd {
                     let d = end - start
                     Text("Δ \(NumberField.format(simd_length(d))) mm")
@@ -737,6 +786,173 @@ struct ParameterCard: View {
                     .disabled(workspace.translateStart == nil)
             }
         }
+    }
+
+    // MARK: Bohrung und Druckprüfung
+
+    private func holeBinding<T>(_ keyPath: WritableKeyPath<HoleSpec, T>) -> Binding<T> {
+        Binding(get: { workspace.holeSpec[keyPath: keyPath] }, set: { value in
+            workspace.holeSpec[keyPath: keyPath] = value
+            workspace.updateHolePreview()
+        })
+    }
+
+    private func holeField(_ title: String, _ keyPath: WritableKeyPath<HoleSpec, Double>, unit: String = "mm",
+                           width: CGFloat = 56, minimum: Double = 0.01) -> some View {
+        NumberField(title: title, value: workspace.holeSpec[keyPath: keyPath], unit: unit, width: width) { value in
+            guard value >= minimum else { return }
+            workspace.holeSpec[keyPath: keyPath] = value
+            workspace.updateHolePreview()
+        }
+    }
+
+    private var holeCard: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 14) {
+                    Label("Bohrung", systemImage: "circle.circle")
+                        .font(.callout.weight(.semibold))
+                    Picker("Art", selection: holeBinding(\.kind)) {
+                        ForEach(HoleKind.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .fixedSize()
+                    Menu {
+                        ForEach(HoleSpec.presets.indices, id: \.self) { group in
+                            Section(HoleSpec.presets[group].group) {
+                                ForEach(HoleSpec.presets[group].items.indices, id: \.self) { item in
+                                    let preset = HoleSpec.presets[group].items[item]
+                                    Button(preset.name) {
+                                        workspace.holeSpec = preset.spec
+                                        workspace.updateHolePreview()
+                                    }
+                                }
+                            }
+                        }
+                    } label: {
+                        Label("Vorlagen", systemImage: "list.bullet.rectangle")
+                    }
+                    .fixedSize()
+                    .hoverTip("Vorlagen", "Richtwerte für den 3D-Druck: Durchgangsbohrungen, Senkungen für Zylinder- und Senkkopf, Kernlöcher für Schrauben in Kunststoff und Löcher für Gewindeeinsätze. Vor dem Druck mit den eigenen Teilen prüfen.")
+                    Text(workspace.holePoints.count == 1 ? "1 Bohrung" : "\(workspace.holePoints.count) Bohrungen")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                        .fixedSize()
+                    Button("Letzte entfernen", systemImage: "arrow.uturn.backward", action: workspace.removeLastHole)
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(workspace.holePoints.isEmpty)
+                }
+                HStack(spacing: 14) {
+                    holeField("Ø", \.diameter)
+                    Toggle("Durchgehend", isOn: holeBinding(\.through))
+                        .fixedSize()
+                    if !workspace.holeSpec.through {
+                        holeField("Tiefe", \.depth)
+                        Toggle("Bohrspitze", isOn: holeBinding(\.drillPoint))
+                            .fixedSize()
+                            .hoverTip("Bohrspitze", "Kegel mit 118° am Grund der Sackbohrung wie bei einem echten Bohrer.")
+                    }
+                    switch workspace.holeSpec.kind {
+                    case .simple:
+                        EmptyView()
+                    case .counterbore:
+                        holeField("Senkung Ø", \.counterDiameter)
+                        holeField("Senktiefe", \.counterDepth)
+                    case .countersink:
+                        holeField("Senkung Ø", \.counterDiameter)
+                        holeField("Winkel", \.sinkAngle, unit: "°", width: 48, minimum: 1)
+                    }
+                    holeField("Zugabe", \.clearance, width: 48, minimum: 0)
+                        .hoverTip("Druckzugabe", "Wird auf alle Durchmesser addiert, weil gedruckte Löcher meist etwas kleiner werden. 0,1 bis 0,3 mm sind üblich.")
+                }
+            }
+            .fixedSize()
+        }
+    }
+
+    private var printCheckCard: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 14) {
+                    Label("Druckprüfung", systemImage: "printer")
+                        .font(.callout.weight(.semibold))
+                    NumberField(title: "Überhang ab", value: workspace.printOverhangAngle, unit: "°", width: 44) { value in
+                        guard value > 0, value < 90 else { return }
+                        workspace.printOverhangAngle = value
+                        workspace.runPrintCheck()
+                    }
+                    .hoverTip("Überhang", "Flächen, die steiler als dieser Winkel (gemessen von der Senkrechten) nach unten zeigen, brauchen Stützen. 45° ist ein üblicher Wert.")
+                    NumberField(title: "Mindestwand", value: workspace.printMinWall, width: 48) { value in
+                        guard value > 0 else { return }
+                        workspace.printMinWall = value
+                        workspace.runPrintCheck()
+                    }
+                    .hoverTip("Mindestwand", "Dünnere Stellen werden orange. 0,8 mm sind zwei Linien mit einer 0,4-mm-Düse.")
+                    Button("Beste Ausrichtung", systemImage: "wand.and.stars") { workspace.runPrintCheck(best: true) }
+                        .buttonStyle(.bordered)
+                        .disabled(workspace.printBody == nil || workspace.printBusy)
+                        .hoverTip("Beste Ausrichtung", "Probiert die sechs Achsrichtungen und die größten ebenen Flächen als Unterseite: wenig Überhang, viel Auflage, geringe Höhe.")
+                    if workspace.printUp != [0, 0, 1] {
+                        Button("Übernehmen", systemImage: "checkmark", action: workspace.applyPrintOrientation)
+                            .buttonStyle(.borderedProminent)
+                            .disabled(workspace.printBusy)
+                            .hoverTip("Ausrichtung übernehmen", "Dreht den Körper in die gefundene Lage und stellt ihn auf das Druckbett (Z = 0).")
+                    }
+                    if workspace.printBusy {
+                        ProgressView()
+                    }
+                }
+                if let report = workspace.printReport {
+                    let gram = Double(report.volume) / 1000 * 1.24
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Überhang: \(NumberField.format(Double(report.overhangArea))) mm²" + (report.overhang.isEmpty ? " – keine Stützen nötig" : " (rot)"))
+                        if let wall = report.thinnestWall {
+                            Text("Dünnste Wand: \(NumberField.format(Double(wall))) mm" + (report.thin.isEmpty ? "" : " – zu dünn (orange)"))
+                        }
+                        Text(report.openEdges == 0 ? "Netz geschlossen" : "\(report.openEdges) offene Kanten – Körper prüfen")
+                        Text("Auflage: \(NumberField.format(Double(report.bedContactArea))) mm² · Höhe \(NumberField.format(Double(report.height))) mm")
+                        Text("Volumen \(NumberField.format(Double(report.volume) / 1000)) cm³ · ≈ \(NumberField.format(gram)) g PLA (voll)")
+                        if workspace.printUp != [0, 0, 1] {
+                            Text("Vorschlag: oben = (\(Self.vectorText(workspace.printUp)))")
+                                .foregroundStyle(Color.accentColor)
+                        }
+                    }
+                    .font(.callout)
+                    .monospacedDigit()
+                } else if workspace.printBody == nil {
+                    Text("Körper antippen")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .fixedSize()
+        }
+    }
+
+    private static func vectorText(_ v: SIMD3<Float>) -> String {
+        [v.x, v.y, v.z].map { NumberField.format((Double($0) * 100).rounded() / 100) }.joined(separator: "; ")
+    }
+
+    /// Shapr3D „×5“ bzw. „÷5“: mehrere Kopien in einer Reihe, je um den Versatz weiter oder aufgeteilt.
+    private var copyArrayControls: some View {
+        HStack(spacing: 8) {
+            Picker("Reihe", selection: Binding(get: { model.moveArrayDivides }, set: { divides in
+                model.moveArrayDivides = divides
+                if model.moveOffset != .zero { model.setMoveOffset(model.moveOffset) }
+            })) {
+                Text("×").tag(false)
+                Text("÷").tag(true)
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 80)
+            Stepper("\(model.moveArrayCount)", value: Binding(get: { model.moveArrayCount }, set: { count in
+                model.moveArrayCount = max(1, min(count, 200))
+                if model.moveOffset != .zero { model.setMoveOffset(model.moveOffset) }
+            }), in: 1...200)
+            .monospacedDigit()
+            .fixedSize()
+        }
+        .hoverTip("Kopien in Reihe", "× 5: fünf Kopien, jede um den Versatz weiter. ÷ 5: fünf Kopien gleichmäßig zwischen Original und Ziel verteilt.")
     }
 
     private static func unitAxis(_ axis: Int) -> SIMD3<Double> {
@@ -1082,10 +1298,36 @@ extension ParameterCard {
             HStack(spacing: 14) {
                 Label("Körper teilen", systemImage: "rectangle.split.2x1")
                     .font(.callout.weight(.semibold))
-                planePicker("Ebene", selection: preview(\.splitPlane))
-                NumberField(title: "Versatz", value: workspace.splitOffset, width: 60) { value in
-                    workspace.splitOffset = value
-                    workspace.updatePreview()
+                Picker("Mit", selection: Binding(get: { workspace.splitMode }, set: { workspace.setSplitMode($0) })) {
+                    ForEach(SplitMode.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
+                .hoverTip("Teilen mit", "Ebene: an einer Ebene in zwei Teile. Körper: ein zweiter Körper schneidet wie ein Messer, alle Stücke werden eigene Körper. Skizze: geschlossene Bereiche werden als Prisma durch alles geführt.")
+                switch workspace.splitMode {
+                case .plane:
+                    planePicker("Ebene", selection: preview(\.splitPlane))
+                    NumberField(title: "Versatz", value: workspace.splitOffset, width: 60) { value in
+                        workspace.splitOffset = value
+                        workspace.updatePreview()
+                    }
+                case .body:
+                    if let toolBody = workspace.splitToolBody, model.bodies.indices.contains(toolBody) {
+                        Text("Werkzeug: \(model.bodies[toolBody].name)")
+                    } else {
+                        Text("Werkzeugkörper antippen")
+                            .foregroundStyle(.secondary)
+                    }
+                case .sketch:
+                    Menu {
+                        ForEach(model.sketches.indices.filter { !model.sketches[$0].regions.isEmpty }, id: \.self) { index in
+                            Button(model.sketches[index].name) { workspace.splitWithSketch(index) }
+                        }
+                    } label: {
+                        Label(workspace.splitRegions.isEmpty ? "Skizze wählen"
+                              : "\(workspace.splitRegions.count) Bereich(e)", systemImage: "pencil.and.outline")
+                    }
+                    .fixedSize()
                 }
                 bodyCount()
             }
@@ -1139,18 +1381,62 @@ extension ParameterCard {
                     .font(.callout.weight(.semibold))
                 switch kind {
                 case .plane:
-                    planePicker("Bezug", selection: $workspace.constructReference)
-                    NumberField(title: "Abstand", value: workspace.constructOffset, width: 60) {
-                        workspace.constructOffset = $0
+                    Picker("Art", selection: Binding(get: { workspace.planeMethod }, set: { method in
+                        workspace.planeMethod = method
+                        workspace.resetConstructPicks()
+                    })) {
+                        ForEach(PlaneMethod.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.menu)
+                    .fixedSize()
+                    switch workspace.planeMethod {
+                    case .offset:
+                        planePicker("Bezug", selection: $workspace.constructReference)
+                        NumberField(title: "Abstand", value: workspace.constructOffset, width: 60) {
+                            workspace.constructOffset = $0
+                        }
+                    case .midplane:
+                        pickCount(workspace.constructPlanes.count, of: 2, "Flächen")
+                    case .threePoints:
+                        pickCount(workspace.constructPoints.count, of: 3, "Punkte")
+                    case .normalToEdge:
+                        pickCount(workspace.constructEdge == nil ? 0 : 1, of: 1, "Kante")
+                        NumberField(title: "Lage", value: workspace.constructEdgePosition, unit: "%", width: 52) {
+                            workspace.constructEdgePosition = min(max($0, 0), 100)
+                        }
+                    case .edgeAngle:
+                        pickCount(workspace.constructEdge == nil ? 0 : 1, of: 1, "Kante")
+                        planePicker("Bezug", selection: $workspace.constructReference)
+                        NumberField(title: "Winkel", value: workspace.constructAngle, unit: "°", width: 52) {
+                            workspace.constructAngle = $0
+                        }
                     }
                 case .axis:
-                    if let custom = workspace.constructCustomAxis {
-                        Text("Durch \(custom.name)")
-                        Button("Andere Achse", systemImage: "xmark") { workspace.constructCustomAxis = nil }
-                    } else {
-                        axisPicker("Achse", selection: $workspace.constructAxis)
-                        Text("oder Kante/Fläche antippen")
-                            .foregroundStyle(.secondary)
+                    Picker("Art", selection: Binding(get: { workspace.axisMethod }, set: { method in
+                        workspace.axisMethod = method
+                        workspace.constructCustomAxis = nil
+                        workspace.resetConstructPicks()
+                    })) {
+                        ForEach(AxisMethod.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.menu)
+                    .fixedSize()
+                    switch workspace.axisMethod {
+                    case .pick:
+                        if let custom = workspace.constructCustomAxis {
+                            Text("Durch \(custom.name)")
+                            Button("Andere Achse", systemImage: "xmark") { workspace.constructCustomAxis = nil }
+                        } else {
+                            axisPicker("Achse", selection: $workspace.constructAxis)
+                            Text("oder Kante/Fläche antippen")
+                                .foregroundStyle(.secondary)
+                        }
+                    case .twoPoints:
+                        pickCount(workspace.constructPoints.count, of: 2, "Punkte")
+                    case .twoPlanes:
+                        pickCount(workspace.constructPlanes.count, of: 2, "Flächen")
+                    case .cylinder:
+                        pickCount(workspace.constructCustomAxis == nil ? 0 : 1, of: 1, "Zylinder")
                     }
                 case .point:
                     ForEach(0..<3, id: \.self) { axis in
@@ -1161,6 +1447,14 @@ extension ParameterCard {
                 }
             }
         }
+    }
+
+    /// Wie viele Punkte bzw. Flächen schon angetippt sind (grün, sobald alle da sind).
+    private func pickCount(_ count: Int, of total: Int, _ noun: String) -> some View {
+        Label("\(min(count, total)) von \(total) \(noun)", systemImage: count >= total ? "checkmark.circle.fill" : "hand.tap")
+            .foregroundStyle(count >= total ? Color.green : Color.secondary)
+            .monospacedDigit()
+            .fixedSize()
     }
 
     @ViewBuilder
@@ -1554,6 +1848,12 @@ struct LayersPanel: View {
                     renaming = .sketch(index)
                 }
                 Button("Skizze bearbeiten", systemImage: "pencil.and.outline") { workspace.editSketch(index) }
+                Menu {
+                    Button("SVG – Laser, Plotter, Grafik", systemImage: "scribble") { workspace.exportSketch(index, svg: true) }
+                    Button("DXF – CAD, CNC", systemImage: "doc.plaintext") { workspace.exportSketch(index, svg: false) }
+                } label: {
+                    Label("Skizze exportieren", systemImage: "square.and.arrow.up")
+                }
                 if !bodies.isEmpty {
                     exportMenu(title: "Körper der Ebene exportieren", bodies: bodies, name: Self.layerName(item.name))
                 }

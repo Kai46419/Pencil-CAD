@@ -645,11 +645,11 @@ struct ToolRail: View {
             return group == .construct
         case .move, .mirror, .pattern, .scale, .align, .scaleSketch:
             return group == .transform
-        case .boolean, .shell, .split, .offsetEdges, .offsetFace, .replaceFace, .wrap, .imprint:
+        case .boolean, .shell, .split, .offsetEdges, .offsetFace, .replaceFace, .wrap, .imprint, .hole:
             return group == .modify
         case .translate:
             return group == .transform
-        case .section, .measure:
+        case .section, .measure, .printCheck:
             return group == .inspect
         case .color:
             return group == .visualize
@@ -707,6 +707,7 @@ struct ToolRail: View {
                 }
             }
             items += [
+                item(.hole, "Bohrung", subtitle: "Schrauben, Einsätze", "circle.circle"),
                 item(.shell, "Schale", subtitle: "Fläche öffnen", "shippingbox"),
                 item(.offsetFace, "Fläche versetzen", subtitle: "Auch Bohrungen", "arrow.up.and.down.square"),
                 item(.replaceFace, "Fläche ersetzen", subtitle: "Bis Zielfläche", "rectangle.portrait.and.arrow.forward"),
@@ -717,7 +718,7 @@ struct ToolRail: View {
             items += BooleanKind.allCases.map { kind in
                 item(.boolean(kind), kind.rawValue, subtitle: "Kombinieren", kind.systemImage)
             }
-            items.append(item(.split, "Körper teilen", subtitle: "An Ebene", "rectangle.split.2x1"))
+            items.append(item(.split, "Körper teilen", subtitle: "Ebene, Körper, Skizze", "rectangle.split.2x1"))
             items.append(ToolItem(id: "tools.delete", title: "Löschen", subtitle: "Körper", systemImage: "trash",
                                   isEnabled: model.hasSelection) {
                 model.deleteSelected()
@@ -741,6 +742,7 @@ struct ToolRail: View {
         case .inspect:
             return [
                 item(.measure, "Messen", subtitle: "Länge, Fläche, Abstand", "ruler"),
+                item(.printCheck, "Druckprüfung", subtitle: "Überhang, Wände", "printer"),
                 item(.section, "Schnittansicht", subtitle: workspace.section == nil ? "Aus" : "Ein",
                      "square.split.diagonal.2x2"),
                 ToolItem(id: "inspect.isolate", title: "Isolieren",
@@ -753,6 +755,8 @@ struct ToolRail: View {
             return [
                 ToolItem(id: "insert.step", title: "STEP-Datei", subtitle: ".step / .stp",
                          systemImage: "square.and.arrow.down", action: importSTEP),
+                ToolItem(id: "insert.vector", title: "SVG / DXF", subtitle: "Als Skizze (Laser, CNC, Logos)",
+                         systemImage: "scribble.variable", action: importSTEP),
                 ToolItem(id: "insert.image", title: "Bild", subtitle: "Aus Fotos, als Vorlage", systemImage: "photo") {
                     workspace.isPickingImage = true
                 },

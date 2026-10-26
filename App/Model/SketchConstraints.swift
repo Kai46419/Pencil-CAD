@@ -497,6 +497,75 @@ enum ConstraintSolver {
         return norm(r) < 1e-5 ? build(x) : nil
     }
 
+    /// Shapr3D „Sketch states“: Elemente, deren Parameter alle durch Einschränkungen festgelegt sind
+    /// (Freiheitsgrade 0). Ein Parameter ist fest, wenn er senkrecht zum Nullraum der Jacobi-Matrix liegt:
+    /// Zeilenraum per Gram-Schmidt orthonormieren, dann Σ q[i]² ≈ 1.
+    static func determined(_ entities: [SketchEntity], constraints all: [SketchConstraint]) -> Set<Int> {
+        let constraints = all.filter { !$0.isSuspended }
+        guard !constraints.isEmpty else { return [] }
+        let involved = Set(constraints.flatMap(\.entities)).filter { entities.indices.contains($0) }.sorted()
+        var offsets: [Int: Int] = [:]
+        var x: [Double] = []
+        for index in involved {
+            offsets[index] = x.count
+            x += entities[index].parameters
+        }
+        let n = x.count
+        // Große Skizzen: nicht bei jedem Strich hunderte Spalten numerisch ableiten
+        guard n > 0, n <= 600 else { return [] }
+        func build(_ x: [Double]) -> [SketchEntity] {
+            var result = entities
+            for index in involved {
+                guard let start = offsets[index] else { continue }
+                let count = entities[index].parameters.count
+                result[index] = entities[index].with(parameters: Array(x[start..<(start + count)]))
+            }
+            return result
+        }
+        func residuals(_ x: [Double]) -> [Double] {
+            let current = build(x)
+            return constraints.flatMap { residual($0, current) }
+        }
+        let r = residuals(x)
+        let m = r.count
+        guard m > 0 else { return [] }
+        // Jacobi-Matrix zeilenweise (m Zeilen der Länge n)
+        var rows = [[Double]](repeating: [Double](repeating: 0, count: n), count: m)
+        for column in 0..<n {
+            let h = 1e-6 * max(1, abs(x[column]))
+            var shifted = x
+            shifted[column] += h
+            let rs = residuals(shifted)
+            guard rs.count == m else { return [] }
+            for row in 0..<m { rows[row][column] = (rs[row] - r[row]) / h }
+        }
+        // Orthonormalbasis des Zeilenraums (abhängige Zeilen = überzählige Einschränkungen fallen weg)
+        var basis: [[Double]] = []
+        for var row in rows {
+            for q in basis {
+                var dot = 0.0
+                for k in 0..<n { dot += row[k] * q[k] }
+                for k in 0..<n { row[k] -= dot * q[k] }
+            }
+            let length = row.reduce(0) { $0 + $1 * $1 }.squareRoot()
+            guard length > 1e-7 else { continue }
+            basis.append(row.map { $0 / length })
+        }
+        var fixed = [Bool](repeating: false, count: n)
+        for k in 0..<n {
+            var sum = 0.0
+            for q in basis { sum += q[k] * q[k] }
+            fixed[k] = sum > 1 - 1e-5
+        }
+        var result = Set<Int>()
+        for index in involved {
+            guard let start = offsets[index] else { continue }
+            let count = entities[index].parameters.count
+            if count > 0, (start..<(start + count)).allSatisfy({ fixed[$0] }) { result.insert(index) }
+        }
+        return result
+    }
+
     private static func norm(_ v: [Double]) -> Double {
         v.reduce(0) { $0 + $1 * $1 }.squareRoot()
     }

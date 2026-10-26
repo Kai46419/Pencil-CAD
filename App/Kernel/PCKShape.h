@@ -156,6 +156,9 @@ NS_ASSUME_NONNULL_BEGIN
 /// Teilt den Körper an einer Ebene in zwei Körper; nil, wenn die Ebene ihn nicht schneidet.
 - (nullable NSArray<PCKShape *> *)splitAtPlaneOrigin:(simd_double3)origin normal:(simd_double3)normal
     NS_SWIFT_NAME(split(planeOrigin:normal:));
+/// Teilt den Körper mit einem Werkzeug (anderer Körper, Prisma aus Skizzenbereichen …) in alle entstehenden
+/// Teilkörper; nil, wenn weniger als zwei Teile entstehen.
+- (nullable NSArray<PCKShape *> *)splitByTool:(PCKShape *)tool NS_SWIFT_NAME(split(by:));
 
 /// Messwerte (mm, mm², mm³); 0 ohne Kernel.
 @property (nonatomic, readonly) double volume;

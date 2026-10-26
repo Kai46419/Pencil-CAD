@@ -330,6 +330,17 @@ final class SketchController: ObservableObject {
     @Published var gridStep: Double = 1
     /// Fang insgesamt (Magnet in der rechten Leiste)
     @Published var snapEnabled = true
+    /// Shapr3D „Auto-Constraining“: beim Zeichnen gefundene Richtungen (waagerecht, senkrecht, parallel,
+    /// rechtwinklig) werden als Einschränkung angelegt
+    @Published var autoConstrain = UserDefaults.standard.object(forKey: "autoConstrain") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(autoConstrain, forKey: "autoConstrain") }
+    }
+    /// Richtungssperre für den nächsten Strich (Linie, gedrehtes Rechteck)
+    @Published var directionLock: DirectionLock?
+    /// Bezugslinie für die Sperre „parallel“ bzw. „senkrecht“: zuletzt erkannte bzw. zuletzt gezeichnete Linie
+    private(set) var lockReference: SketchCurveRef?
+    /// Beim aktuellen Fang erkannte Beziehung zu einer vorhandenen Linie
+    private var inferredRelation: InferredRelation?
     /// Einzelne Fangarten; werden für die nächste Sitzung gemerkt.
     @Published var snapKinds: Set<SnapKind> = SketchController.storedSnapKinds() {
         didSet { UserDefaults.standard.set(snapKinds.map(\.rawValue), forKey: Self.snapKindsKey) }
@@ -692,15 +703,17 @@ final class SketchController: ObservableObject {
             return
         }
         guard let start = dragStart else { return }
-        let previewed = dragCurrent, previewedKind = activeSnap?.kind
+        let previewed = dragCurrent, previewedKind = activeSnap?.kind, previewedRelation = inferredRelation
         var end = snap(point, tolerance: tolerance, anchor: strokeAnchor)
         var endKind = activeSnap?.kind
+        strokeRelation = inferredRelation
         // Beim Abheben zittert der Stift: es gilt der zuletzt angezeigte (eingerastete) Punkt, sonst springt
         // eine gerade noch parallele Linie im letzten Moment aus dem Fang
         if let previewed, strokeSamples.count > 1, let last = strokeSamples.last,
            simd_distance(last, point) <= tolerance * 0.5 {
             end = previewed
             endKind = previewedKind
+            strokeRelation = previewedRelation
         }
         let samples = strokeSamples + [point]
         // Angezeigter Kreis/Bogen des runden Strichs: wird übernommen, auch wenn die Erkennung mit dem
@@ -715,6 +728,8 @@ final class SketchController: ObservableObject {
         dragCurrent = nil
         activeSnap = nil
         parallelLines = []
+        // Die Sperre gilt für einen Strich (wie die Werkzeugmodi in SketchUp für iPad)
+        directionLock = nil
         strokeSamples = []
         strokeShape = nil
 
@@ -1635,21 +1650,55 @@ final class SketchController: ObservableObject {
 
     /// Linie: Jeder Strich setzt den nächsten Punkt, zurück zum Startpunkt schließt den Linienzug.
     private func endLineStroke(start: Point2, end: Point2) {
+        defer {
+            strokeRelation = nil
+            directionLock = nil
+        }
         guard let from = chainEnd else {
             chainStart = start
             if simd_distance(start, end) > 1e-6 {
                 add(.line(start, end), editable: true)
+                autoConstrainLine(entities.count - 1)
             }
             chainEnd = end
             return
         }
         guard simd_distance(from, end) > 1e-6 else { return }
         add(.line(from, end), editable: true)
+        autoConstrainLine(entities.count - 1)
         if let first = chainStart, simd_distance(first, end) < 1e-6 {
             chainStart = nil
             chainEnd = nil
         } else {
             chainEnd = end
+        }
+    }
+
+    /// Beziehung, die beim Abheben des Stifts galt (für die automatische Einschränkung)
+    private var strokeRelation: InferredRelation?
+
+    /// Neue Linie: erkannte Richtung als Einschränkung festhalten (Shapr3D „Auto-Constraining“).
+    private func autoConstrainLine(_ index: Int) {
+        guard entities.indices.contains(index), case .line(let a, let b) = entities[index] else { return }
+        let ref = SketchCurveRef(entity: index, index: 0)
+        lockReference = ref
+        guard autoConstrain else { return }
+        let d = b - a
+        let length = simd_length(d)
+        guard length > 1e-9 else { return }
+        switch strokeRelation {
+        case .parallel(let other)? where entities.indices.contains(other.entity) && other.entity != index:
+            constraints.append(SketchConstraint(variant: .parallel(other, ref)))
+            lockReference = other
+        case .perpendicular(let other)? where entities.indices.contains(other.entity) && other.entity != index:
+            constraints.append(SketchConstraint(variant: .perpendicular(other, ref)))
+            lockReference = other
+        default:
+            if abs(d.y) <= length * 1e-9 {
+                constraints.append(SketchConstraint(variant: .horizontal(ref)))
+            } else if abs(d.x) <= length * 1e-9 {
+                constraints.append(SketchConstraint(variant: .vertical(ref)))
+            }
         }
     }
 
@@ -3219,6 +3268,39 @@ final class SketchController: ObservableObject {
         entities.indices.filter { !construction.contains($0) }.flatMap { entities[$0].drawing }
     }
 
+    /// Shapr3D „Sketch states“: Kurven der vollständig bestimmten Elemente (grün) bzw. der noch freien.
+    var entityPolylinesByState: (determined: [[Point2]], free: [[Point2]]) {
+        let fixed = showsDefinition ? determinedEntities : []
+        var determined: [[Point2]] = [], free: [[Point2]] = []
+        for index in entities.indices where !construction.contains(index) {
+            if fixed.contains(index) { determined += entities[index].drawing } else { free += entities[index].drawing }
+        }
+        return (determined, free)
+    }
+
+    /// Vollständig bestimmte Elemente; gemerkt je Geometrie- und Einschränkungsstand, während eines Strichs
+    /// bzw. Ziehens nicht neu berechnet.
+    var determinedEntities: Set<Int> {
+        let key = DefinitionKey(geometry: geometryRevision, constraints: constraints)
+        if let cached = definitionCache, cached.key == key || dragStart != nil || selectDrag != nil {
+            return cached.value
+        }
+        let value = ConstraintSolver.determined(entities, constraints: constraints)
+        definitionCache = (key, value)
+        return value
+    }
+
+    private struct DefinitionKey: Equatable {
+        var geometry: Int
+        var constraints: [SketchConstraint]
+    }
+    private var definitionCache: (key: DefinitionKey, value: Set<Int>)?
+
+    /// Bestimmtheit farbig zeigen (grün = vollständig bestimmt)
+    @Published var showsDefinition = UserDefaults.standard.object(forKey: "showsDefinition") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(showsDefinition, forKey: "showsDefinition") }
+    }
+
     /// Konstruktionsgeometrie (gestrichelt dargestellt).
     var constructionPolylines: [[Point2]] {
         construction.sorted().filter { entities.indices.contains($0) }.flatMap { entities[$0].drawing }
@@ -3399,9 +3481,18 @@ final class SketchController: ObservableObject {
             activeSnap = nil
             return p
         }
+        if let anchor, directionLock != nil, tool == .polyline || tool == .rectangle && rectangleMode == .threePoint,
+           let result = locked(p, anchor: anchor, tolerance: tolerance) {
+            parallelLines = []
+            activeSnap = result
+            return result.point
+        }
         var result = withParallel(snapIndex.snap(p, tolerance: tolerance, kinds: snapKinds, extra: inputPoints,
                                                  anchor: anchor, gridStep: gridStep),
                                   raw: p, anchor: anchor, tolerance: tolerance)
+        if result.kind == nil || result.kind == .grid, let extended = onExtension(p, tolerance: tolerance) {
+            result = extended
+        }
         // Bogen (Finger aufgelegt): Winkelschritte wie 90° zum Linienende bleiben samt Hilfslinie, nur ein Strahl
         // genau entlang der Tangente fällt weg – auf ihm gäbe es keinen Bogen, nur eine gerade Linie
         // Gilt auch für den Fang auf Kurven (seit Build 57 vor Ausrichtung/Winkel): lag das Bogenende dadurch
@@ -3436,6 +3527,7 @@ final class SketchController: ObservableObject {
     /// Gleicher Winkel wie eine vorhandene Linie: Richtung einrasten und die Linie grün hervorheben.
     private func withParallel(_ snapped: SnapResult, raw p: Point2, anchor: Point2?, tolerance: Double) -> SnapResult {
         parallelLines = []
+        inferredRelation = nil
         guard let anchor, tool == .polyline || tool == .rectangle && rectangleMode == .threePoint,
               snapKinds.contains(.angle) else { return snapped }
         // Punktfang hat Vorrang
@@ -3443,40 +3535,100 @@ final class SketchController: ObservableObject {
            ([.endpoint, .midpoint, .center, .intersection, .onCurve, .modelPoint, .distantEdge] as [SnapKind]).contains(kind) {
             return snapped
         }
-        let lines = entities.indices.flatMap { index -> [(Point2, Point2)] in
-            (0..<entities[index].curveCount).compactMap { k -> (Point2, Point2)? in
-                guard case .line(let a, let b) = entities[index].constraintCurve(k), simd_distance(a, b) > 1e-6 else {
-                    return nil
-                }
-                return (a, b)
-            }
-        }
+        let lines = sketchLines
         guard !lines.isEmpty, simd_distance(p, anchor) > tolerance else { return snapped }
         var result = snapped
-        var best: (distance: Double, point: Point2)?
-        for (a, b) in lines {
-            let d = simd_normalize(b - a)
-            let along = simd_dot(p - anchor, d)
-            let projected = anchor + d * along
-            let distance = simd_distance(projected, p)
-            if distance <= tolerance, distance < (best?.distance ?? .infinity) { best = (distance, projected) }
+        // Wie SketchUp: parallel oder senkrecht zu einer vorhandenen Linie (magenta Inferenz)
+        var best: (distance: Double, point: Point2, relation: InferredRelation)?
+        for line in lines {
+            let d = simd_normalize(line.b - line.a)
+            for (direction, perpendicular) in [(d, false), (Point2(-d.y, d.x), true)] {
+                let along = simd_dot(p - anchor, direction)
+                let projected = anchor + direction * along
+                let distance = simd_distance(projected, p)
+                if distance <= tolerance, distance < (best?.distance ?? .infinity) {
+                    best = (distance, projected,
+                            perpendicular ? InferredRelation.perpendicular(line.ref) : .parallel(line.ref))
+                }
+            }
         }
         guard let best else { return snapped.kind == .angle ? alignedOnRay(snapped, anchor: anchor, tolerance: tolerance) : snapped }
-        // Parallel zu einer vorhandenen Linie schlägt den 15°-Schritt, wenn es näher am Stift liegt
+        // Parallel bzw. senkrecht schlägt den 15°-Schritt, wenn es näher am Stift liegt
         if snapped.kind != .angle || best.distance < simd_distance(snapped.point, p) - 1e-9 {
             result.point = best.point
             result.kind = .angle
             result.guides = [(anchor, best.point)]
+            inferredRelation = best.relation
         }
         result = alignedOnRay(result, anchor: anchor, tolerance: tolerance)
-        // Alle Linien mit diesem Winkel leuchten grün
+        // Alle Linien mit diesem Winkel (bzw. senkrecht dazu) leuchten grün
         let current = result.point - anchor
         guard simd_length(current) > 1e-9 else { return result }
         let direction = simd_normalize(current)
         parallelLines = lines.filter { line in
-            let d = simd_normalize(line.1 - line.0)
-            return abs(d.x * direction.y - d.y * direction.x) < 1e-4
-        }.map { [$0.0, $0.1] }
+            let d = simd_normalize(line.b - line.a)
+            let cross = abs(d.x * direction.y - d.y * direction.x)
+            return cross < 1e-4 || (inferredRelation?.isPerpendicular == true && abs(cross - 1) < 1e-4)
+        }.map { [$0.a, $0.b] }
+        return result
+    }
+
+    /// Alle geraden Kurven der Skizze mit ihrer Kurvenreferenz (für Inferenz und Sperre).
+    private var sketchLines: [(a: Point2, b: Point2, ref: SketchCurveRef)] {
+        entities.indices.flatMap { index -> [(a: Point2, b: Point2, ref: SketchCurveRef)] in
+            (0..<entities[index].curveCount).compactMap { k -> (a: Point2, b: Point2, ref: SketchCurveRef)? in
+                guard case .line(let a, let b) = entities[index].constraintCurve(k), simd_distance(a, b) > 1e-6 else {
+                    return nil
+                }
+                return (a, b, SketchCurveRef(entity: index, index: k))
+            }
+        }
+    }
+
+    /// Wie SketchUp „Auf Linie“: Punkt auf der gedachten Verlängerung einer Linie (gestrichelt von ihrem Ende).
+    private func onExtension(_ p: Point2, tolerance: Double) -> SnapResult? {
+        guard snapKinds.contains(.alignment) else { return nil }
+        var best: (distance: Double, result: SnapResult)?
+        for line in sketchLines {
+            let v = line.b - line.a
+            let length = simd_length(v)
+            let d = v / length
+            let t = simd_dot(p - line.a, d)
+            // Nur außerhalb der Linie (sonst greift „Auf Kurve“)
+            guard t < -tolerance || t > length + tolerance else { continue }
+            let foot = line.a + d * t
+            let distance = simd_distance(foot, p)
+            guard distance <= tolerance, distance < (best?.distance ?? .infinity) else { continue }
+            let from = t < 0 ? line.a : line.b
+            best = (distance, SnapResult(point: foot, kind: .alignment, guides: [(from, foot)]))
+        }
+        return best?.result
+    }
+
+    /// Richtungssperre (wie SketchUp mit Shift bzw. den Pfeiltasten): Linie bleibt waagerecht, senkrecht,
+    /// parallel oder senkrecht zur zuletzt gefundenen Linie, bis der Strich endet.
+    private func locked(_ p: Point2, anchor: Point2, tolerance: Double) -> SnapResult? {
+        guard let lock = directionLock else { return nil }
+        var direction: Point2
+        switch lock {
+        case .horizontal: direction = Point2(1, 0)
+        case .vertical: direction = Point2(0, 1)
+        case .parallel, .perpendicular:
+            guard let reference = lockReference, entities.indices.contains(reference.entity),
+                  case .line(let a, let b) = entities[reference.entity].constraintCurve(reference.index),
+                  simd_distance(a, b) > 1e-9 else { return nil }
+            direction = simd_normalize(b - a)
+            if lock == .perpendicular { direction = Point2(-direction.y, direction.x) }
+        }
+        let foot = anchor + direction * simd_dot(p - anchor, direction)
+        var result = SnapResult(point: foot, kind: .angle, guides: [(anchor, foot)])
+        switch lock {
+        case .parallel: inferredRelation = lockReference.map { .parallel($0) }
+        case .perpendicular: inferredRelation = lockReference.map { .perpendicular($0) }
+        default: inferredRelation = nil
+        }
+        // Länge rastet weiter an Fluchtpunkten ein
+        result = alignedOnRay(result, anchor: anchor, tolerance: tolerance)
         return result
     }
 

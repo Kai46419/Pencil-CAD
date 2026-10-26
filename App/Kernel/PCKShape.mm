@@ -1026,6 +1026,28 @@ static TopoDS_Shape unified(const TopoDS_Shape &shape) {
     }
 }
 
+- (nullable NSArray<PCKShape *> *)splitByTool:(PCKShape *)tool {
+    try {
+        BRepAlgoAPI_Splitter splitter;
+        TopTools_ListOfShape arguments, tools;
+        arguments.Append(_shape);
+        tools.Append(tool->_shape);
+        splitter.SetArguments(arguments);
+        splitter.SetTools(tools);
+        splitter.Build();
+        if (!splitter.IsDone()) return nil;
+        NSMutableArray<PCKShape *> *parts = [NSMutableArray array];
+        for (TopExp_Explorer it(splitter.Shape(), TopAbs_SOLID); it.More(); it.Next()) {
+            GProp_GProps props;
+            BRepGProp::VolumeProperties(it.Current(), props);
+            if (std::abs(props.Mass()) > 1e-6) [parts addObject:[[PCKShape alloc] initWithShape:unified(it.Current())]];
+        }
+        return parts.count >= 2 ? parts : nil;
+    } catch (...) {
+        return nil;
+    }
+}
+
 - (nullable NSArray<PCKShape *> *)splitAtPlaneOrigin:(simd_double3)origin normal:(simd_double3)normal {
     if (simd_length(normal) == 0) return nil;
     try {
@@ -1626,6 +1648,10 @@ static std::vector<TopoDS_Edge> edgesFromNumbers(const TopTools_IndexedMapOfShap
 }
 
 - (nullable NSArray<PCKShape *> *)splitAtPlaneOrigin:(simd_double3)origin normal:(simd_double3)normal {
+    return nil;
+}
+
+- (nullable NSArray<PCKShape *> *)splitByTool:(PCKShape *)tool {
     return nil;
 }
 
