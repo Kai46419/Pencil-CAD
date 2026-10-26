@@ -185,6 +185,8 @@ enum HandleKind: Equatable {
     case offsetFace
     /// Skalieren (Kai): Pfeil von der Mitte zur Ecke der Auswahl, Wert = Faktor × Abstand Mitte–Ecke
     case scale
+    /// Rundung ändern: Pfeil an der Zylinderfläche, Wert = Versatz aus dem Material heraus (RadiusHandle.swift)
+    case radius
 }
 
 /// Ziehpfeil: Achse (Ursprung + Richtung), aktueller Wert in mm entlang der Achse.
@@ -284,6 +286,9 @@ final class Workspace: ObservableObject {
     @Published var scaleUniform = true
     /// Mitte, Richtung und Abstand Mitte–Ecke der Auswahl vor dem Skalieren (Bezug für den Ziehpfeil)
     private var scaleReference: (bodies: [Int], center: SIMD3<Double>, direction: SIMD3<Double>, radius: Double)?
+    /// Gewählte Zylinderfläche samt Ausgangsradius und jetzigem Versatz (RadiusHandle.swift)
+    var radiusCache: RadiusTarget?
+    var radiusOffset = 0.0
     @Published var alignModes: [AlignMode] = [.center, .center, .none]
     @Published var revolveAxis: ReferenceAxis = .world(2)
     @Published var revolveAngle: Double = 360
@@ -1788,6 +1793,7 @@ final class Workspace: ObservableObject {
                                    direction: simd_normalize(SIMD3<Float>(handle.direction)),
                                    value: model.faceValue, color: blue)]
             }
+            if let handle = radiusHandle { return [handle] }
             return []
         case .offsetFace:
             guard offsetFaceMode == .distance, let handle = offsetFaceHandle else { return [] }
@@ -1876,6 +1882,8 @@ final class Workspace: ObservableObject {
             scaleFactors = SIMD3(repeating: factor)
             scaleUniform = true
             updatePreview()
+        case .radius:
+            setRadiusOffset(value)
         }
     }
 
@@ -1983,6 +1991,9 @@ final class Workspace: ObservableObject {
                 if model.selectedFaces.count > 1 { return "\(model.selectedFaces.count) Flächen · Pfeil ziehen zieht alle zugleich" }
                 // Kai: beim Antippen eines Körpers gleich seine Maße sehen
                 let size = model.selection.flatMap { bodySizeText($0.body) }.map { $0 + " · " } ?? ""
+                if model.faceHandle == nil, radiusTarget() != nil {
+                    return size + "Pfeil ziehen ändert die Rundung · Radius oder Ø unten eingeben"
+                }
                 return size + (model.faceHandle != nil ? "Pfeil ziehen · weitere Flächen antippen zieht sie mit" : "Fläche gewählt")
             }
             if boxSelects { return "Rahmen aufziehen: nach rechts ganz umschlossene, nach links auch angeschnittene Körper" }

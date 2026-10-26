@@ -132,6 +132,8 @@ struct ParameterCard: View {
                     regionCard
                 } else if model.selection != nil, model.faceHandle != nil {
                     faceCard
+                } else if model.selection != nil, workspace.radiusTarget() != nil {
+                    RadiusCard(workspace: workspace, model: model)
                 } else if !model.selectedBodies.isEmpty {
                     bodiesCard
                 }

@@ -1622,6 +1622,9 @@ final class ViewportView: MTKView {
         if active.kind == .scale, let workspace {
             // Skalieren: Faktor statt Länge
             valueLabel.text = "× " + workspace.scaleFactors.x.formatted(.number.precision(.fractionLength(2)))
+        } else if active.kind == .radius, let radius = workspace?.currentRadius {
+            // Rundung: neuer Radius statt Versatz
+            valueLabel.text = "R " + LengthUnit.current.format(radius)
         } else {
             valueLabel.text = LengthUnit.current.format(active.value)
         }
