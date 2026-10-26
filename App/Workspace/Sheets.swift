@@ -268,6 +268,10 @@ enum HelpTopic: String, CaseIterable, Identifiable {
             ]
         case .news:
             [
+                "Ansichtswürfel: mit Stift oder Finger ziehen dreht die Ansicht weich und läuft kurz nach; Antippen "
+                    + "einer Seite, Kante oder Ecke schwenkt animiert dorthin.",
+                "Skizzenlinien in Graphit: beim Zeichnen und fertig dieselbe feine Linie mit kleinen Endpunkten, "
+                    + "Profilflächen dezent grau statt blau.",
                 "Neue Skizze: Die Ebenen Oben, Vorne, Rechts liegen beschriftet und größer neben den Körpern, unten gibt "
                     + "es Kacheln dafür (auch für eigene Konstruktionsebenen). Ebene Körperflächen leuchten unter dem "
                     + "Stift auf – antippen und darauf skizzieren.",

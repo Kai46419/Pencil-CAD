@@ -197,7 +197,7 @@ struct RightRail: View {
     private var sketchColumn: some View {
         VStack(alignment: .trailing, spacing: 10) {
             HStack(alignment: .top, spacing: 8) {
-                ViewCube(camera: workspace.camera) { normal in
+                ViewCube(camera: workspace.camera, motion: workspace.cameraMotion) { normal in
                     workspace.send(.look(normal))
                 }
                 // Nach der Ebenenwahl bleibt die Ansicht senkrecht auf der Skizzenebene
@@ -396,11 +396,11 @@ struct RightRail: View {
             gridMenu(stacked: false)
                 .hoverTip("Raster")
 
-            ViewCube(camera: workspace.camera) { normal in
+            ViewCube(camera: workspace.camera, motion: workspace.cameraMotion) { normal in
                 workspace.send(.look(normal))
             }
             .padding(.vertical, 4)
-            .hoverTip("Ansichtswürfel", "Seite antippen: Ansicht senkrecht auf diese Seite drehen.")
+            .hoverTip("Ansichtswürfel", "Seite, Kante oder Ecke antippen: Ansicht dorthin drehen. Ziehen dreht frei.")
 
             RailButton(systemImage: "arrow.up.left.and.arrow.down.right", label: "Einpassen") {
                 workspace.send(.fitAll)
@@ -629,12 +629,52 @@ struct RailIcon: View {
     }
 }
 
-/// Würfel, der die Blickrichtung zeigt. Antippen einer Seite dreht die Ansicht senkrecht auf diese Seite.
+/// Würfel, der die Blickrichtung zeigt. Antippen einer Seite dreht die Ansicht senkrecht auf diese Seite,
+/// Antippen nahe einer Kante bzw. Ecke schräg auf diese (wie Fusion). Ziehen mit Stift oder Finger dreht die
+/// Ansicht frei um den Drehpunkt und läuft beim Loslassen kurz nach (CameraMotion.swift).
 struct ViewCube: View {
     @ObservedObject var camera: CameraState
+    let motion: CameraMotion
     let look: (SIMD3<Float>) -> Void
 
     private let size: CGFloat = 92
+    /// Bis zu dieser Strecke (Punkte) gilt eine Berührung als Antippen, darüber wird gedreht.
+    private static let tapSlop: CGFloat = 5
+    /// Anteil der halben Seitenlänge, ab dem ein Tipp als Kante bzw. Ecke zählt
+    private static let edgeZone: CGFloat = 0.6
+    /// Zeitfenster für die Loslass-Geschwindigkeit (Sekunden)
+    private static let velocityWindow: TimeInterval = 0.08
+
+    /// Ziehzustand als Referenz: Ändern baut die Ansicht nicht neu auf.
+    private final class DragTracker {
+        var last = CGSize.zero
+        var isTurning = false
+        var samples: [(time: Date, translation: CGSize)] = []
+
+        func record(_ value: DragGesture.Value) {
+            samples.append((time: value.time, translation: value.translation))
+            let oldest = value.time.addingTimeInterval(-ViewCube.velocityWindow)
+            samples.removeAll { $0.time < oldest }
+        }
+
+        /// Geschwindigkeit der letzten Bewegung in Punkten/s (Stift vor dem Abheben angehalten → fast null).
+        var velocity: CGSize {
+            guard samples.count >= 2, let first = samples.first, let latest = samples.last else { return .zero }
+            let dt = latest.time.timeIntervalSince(first.time)
+            guard dt > 0.005 else { return .zero }
+            let vx: CGFloat = (latest.translation.width - first.translation.width) / dt
+            let vy: CGFloat = (latest.translation.height - first.translation.height) / dt
+            return CGSize(width: vx, height: vy)
+        }
+
+        func reset() {
+            last = .zero
+            isTurning = false
+            samples = []
+        }
+    }
+
+    @State private var tracker = DragTracker()
 
     private struct Side {
         let name: String
@@ -655,12 +695,17 @@ struct ViewCube: View {
         Side(name: "Links", normal: [-1, 0, 0], a: [0, 1, 0], b: [0, 0, 1]),
     ]
 
-    var body: some View {
-        let projection = Projection(yaw: camera.yaw, pitch: camera.pitch, size: size)
-        let visible = Self.sides
+    /// Sichtbare Seiten, die hinterste zuerst.
+    private static func visibleSides(_ projection: Projection) -> [(side: Side, facing: Float)] {
+        sides
             .map { (side: $0, facing: simd_dot($0.normal, projection.toCamera)) }
             .filter { $0.facing > 0.01 }
             .sorted { $0.facing < $1.facing }
+    }
+
+    var body: some View {
+        let projection = Projection(yaw: camera.yaw, pitch: camera.pitch, size: size)
+        let visible = Self.visibleSides(projection)
 
         Canvas { context, _ in
             for entry in visible {
@@ -680,33 +725,79 @@ struct ViewCube: View {
         }
         .frame(width: size, height: size)
         .contentShape(Rectangle())
-        .onTapGesture { location in
-            // Vorderste Seite unter dem Finger
-            for entry in visible.reversed() {
-                let polygon = entry.side.corners.map(projection.point)
-                if contains(polygon, location) {
-                    look(entry.side.normal)
-                    return
-                }
-            }
-        }
+        // Ein Griff für Antippen und Ziehen: erst ab tapSlop Punkten wird gedreht, sonst gilt es als Antippen.
+        .gesture(
+            DragGesture(minimumDistance: 0, coordinateSpace: .local)
+                .onChanged { value in dragChanged(value) }
+                .onEnded { value in dragEnded(value) }
+        )
         .accessibilityLabel("Ansichtswürfel")
     }
 
-    private func contains(_ polygon: [CGPoint], _ p: CGPoint) -> Bool {
-        var sign: CGFloat = 0
-        for i in polygon.indices {
-            let a = polygon[i], b = polygon[(i + 1) % polygon.count]
-            let cross = (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x)
-            if cross != 0 {
-                if sign == 0 {
-                    sign = cross
-                } else if (cross > 0) != (sign > 0) {
-                    return false
-                }
-            }
+    private func dragChanged(_ value: DragGesture.Value) {
+        // Aufsetzen fängt eine noch nachlaufende Drehung ab
+        if tracker.samples.isEmpty, !tracker.isTurning { motion.stop() }
+        tracker.record(value)
+        let t = value.translation
+        if !tracker.isTurning {
+            guard hypot(t.width, t.height) > Self.tapSlop else { return }
+            tracker.isTurning = true
         }
-        return true
+        turn(to: t)
+    }
+
+    private func dragEnded(_ value: DragGesture.Value) {
+        if tracker.isTurning {
+            tracker.record(value)
+            turn(to: value.translation)
+            motion.fling(velocity: tracker.velocity)
+        } else if let direction = direction(at: value.startLocation) {
+            look(direction)
+        }
+        tracker.reset()
+    }
+
+    /// Dreht die Kamera um die Strecke seit dem letzten Aufruf (folgt dem Stift direkt).
+    private func turn(to translation: CGSize) {
+        let dx: CGFloat = translation.width - tracker.last.width
+        let dy: CGFloat = translation.height - tracker.last.height
+        tracker.last = translation
+        if dx != 0 || dy != 0 {
+            motion.drag(dx: dx, dy: dy)
+        }
+    }
+
+    /// Blickrichtung unter dem Punkt: Mitte einer Seite = senkrecht auf die Seite, Rand = Kante, Ecke = Ecke.
+    private func direction(at location: CGPoint) -> SIMD3<Float>? {
+        let projection = Projection(yaw: camera.yaw, pitch: camera.pitch, size: size)
+        let origin = projection.point(SIMD3<Float>(0, 0, 0))
+        // Vorderste Seite unter dem Finger
+        for entry in Self.visibleSides(projection).reversed() {
+            let side = entry.side
+            let center = projection.point(side.normal)
+            let pa = projection.point(side.a)
+            let pb = projection.point(side.b)
+            // Parallelprojektion: Punkt = Mitte + s·A + t·B mit s, t in −1…1 auf der Seite
+            let ax: CGFloat = pa.x - origin.x, ay: CGFloat = pa.y - origin.y
+            let bx: CGFloat = pb.x - origin.x, by: CGFloat = pb.y - origin.y
+            let det: CGFloat = ax * by - ay * bx
+            guard abs(det) > 1e-3 else { continue }
+            let dx: CGFloat = location.x - center.x, dy: CGFloat = location.y - center.y
+            let s: CGFloat = (dx * by - dy * bx) / det
+            let t: CGFloat = (ax * dy - ay * dx) / det
+            guard abs(s) <= 1, abs(t) <= 1 else { continue }
+            var direction = side.normal
+            if abs(s) > Self.edgeZone {
+                let sign: Float = s > 0 ? 1 : -1
+                direction += sign * side.a
+            }
+            if abs(t) > Self.edgeZone {
+                let sign: Float = t > 0 ? 1 : -1
+                direction += sign * side.b
+            }
+            return direction
+        }
+        return nil
     }
 
     /// Parallelprojektion des Würfels passend zur Kamera.
