@@ -249,6 +249,8 @@ final class Workspace: ObservableObject {
     let sketch = SketchController()
     /// Kamerawinkel für den ViewCube (eigenes Objekt, damit Drehen nicht die ganze Oberfläche neu aufbaut).
     let camera = CameraState()
+    /// Weiches Drehen am Ansichtswürfel mit Nachlaufen, animiertes Einschwenken (CameraMotion.swift)
+    let cameraMotion = CameraMotion()
     /// Einstellungen von Normteilen, Vorlagen, Helix, dünnen Linien, Verjüngung, Sweep entlang Kanten
     let parts = PartSettings()
     /// Ändern › Netz bearbeiten (Pinsel, MeshSculpt.swift)

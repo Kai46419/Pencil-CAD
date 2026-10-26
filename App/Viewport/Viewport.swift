@@ -30,6 +30,7 @@ struct Viewport: UIViewRepresentable {
         view.workspace = workspace
         workspace.snapshot = { [weak view] size in view?.snapshot(size: size) }
         workspace.currentCamera = { [weak view] in view?.renderer?.camera }
+        workspace.cameraMotion.view = view
         return view
     }
 
@@ -320,6 +321,8 @@ final class ViewportView: MTKView {
 
     func run(_ command: ViewCommand.Kind) {
         guard let renderer else { return }
+        // Nachlaufen bzw. Einschwenken vom Ansichtswürfel endet bei jedem Ansichtsbefehl
+        workspace?.cameraMotion.stop()
         switch command {
         case .alignToSketchPlane:
             guard let plane = sketch?.plane else { return }
@@ -336,7 +339,14 @@ final class ViewportView: MTKView {
         case .look(let normal):
             // Drauf- und Untersicht gerade ausrichten (X waagerecht)
             let flat = abs(simd_normalize(normal).z) > 0.999
-            renderer.camera.look(along: normal, at: renderer.camera.target, right: flat ? SIMD3(1, 0, 0) : nil)
+            var goal = renderer.camera
+            goal.look(along: normal, at: renderer.camera.target, right: flat ? SIMD3(1, 0, 0) : nil)
+            // Animiert einschwenken (CameraMotion.swift)
+            if let motion = workspace?.cameraMotion {
+                motion.fly(toYaw: goal.yaw, pitch: goal.pitch)
+                return
+            }
+            renderer.camera = goal
         case .restore(let saved):
             guard saved.target.count == 3 else { return }
             renderer.camera.yaw = saved.yaw
@@ -349,7 +359,7 @@ final class ViewportView: MTKView {
 
     /// Meldet die Kamerawinkel an den ViewCube. Asynchron, weil run() aus updateUIView aufgerufen wird
     /// und SwiftUI während eines Updates keine Änderungen veröffentlichen darf.
-    private func cameraMoved() {
+    func cameraMoved() {
         if let camera = renderer?.camera {
             DispatchQueue.main.async { [weak self] in
                 self?.workspace?.cameraChanged(yaw: camera.yaw, pitch: camera.pitch)
@@ -478,6 +488,13 @@ final class ViewportView: MTKView {
     // MARK: Linien und Bereiche
 
     private static let sketchInk = SIMD3<Float>(0.05, 0.06, 0.09)
+    /// Skizzenlinien in Graphit (Kai, Variante 1): sRGB #2F3440, hier linear (Ausgabe ist sRGB).
+    /// Gilt beim Zeichnen und für freie fertige Linien, mit 1,6 pt Strich und Endpunkten r 2,6 pt.
+    private static let sketchGraphite = SIMD3<Float>(0.0284, 0.0343, 0.0513)
+    private static let sketchLineWidth: Float = 1.6
+    private static let sketchPointRadius: Float = 2.6
+    /// Profilfläche: Graphit mit 14 % Deckkraft statt der blauen Tönung
+    private static let profileTint = SIMD4<Float>(0.0284, 0.0343, 0.0513, 0.14)
     private static let definedGreen = SIMD3<Float>(0.08, 0.55, 0.22)
     private static let previewBlue = SIMD3<Float>(0.05, 0.4, 0.98)
     private static let snapOrange = SIMD3<Float>(0.98, 0.45, 0.05)
@@ -548,7 +565,7 @@ final class ViewportView: MTKView {
             for (region, triangles) in stored.fills.enumerated() {
                 let selected = model.selectedRegions.contains(RegionRef(sketch: index, region: region))
                 fills.append(FillGroup(triangles: triangles.map { $0 + shift },
-                                       color: selected ? SIMD4(0.98, 0.55, 0.15, 0.55) : SIMD4(0.2, 0.45, 0.95, 0.14)))
+                                       color: selected ? SIMD4(0.98, 0.55, 0.15, 0.55) : Self.profileTint))
             }
         }
 
@@ -584,22 +601,22 @@ final class ViewportView: MTKView {
                 sketchFills = sketch.regions.map { regionTriangles($0, plane: plane) }
             }
             if sketch.showsProfiles {
-                fills += sketchFills.map { FillGroup(triangles: $0, color: SIMD4(0.2, 0.45, 0.95, 0.16)) }
+                fills += sketchFills.map { FillGroup(triangles: $0, color: Self.profileTint) }
             }
-            // Wie Shapr3D: vollständig bestimmte Elemente grün, freie in Tinte
+            // Wie Shapr3D: vollständig bestimmte Elemente grün, freie in Graphit
             let states = sketch.entityPolylinesByState
-            groups.append(LineGroup(polylines: states.free.map { $0.map(world) }, color: Self.sketchInk,
-                                    width: 2.6))
+            groups.append(LineGroup(polylines: states.free.map { $0.map(world) }, color: Self.sketchGraphite,
+                                    width: Self.sketchLineWidth))
             if !states.determined.isEmpty {
                 groups.append(LineGroup(polylines: states.determined.map { $0.map(world) }, color: Self.definedGreen,
-                                        width: 2.6))
+                                        width: Self.sketchLineWidth))
             }
             // Punkte wie in Fusion 360: Enden und Ecken als kleine Punkte
             if sketch.showsPoints {
                 let points = sketch.entityPoints
                 if !points.isEmpty {
-                    groups.append(LineGroup(polylines: [], color: Self.sketchInk, width: 0,
-                                            dots: points.map(world), dotRadius: 2.6))
+                    groups.append(LineGroup(polylines: [], color: Self.sketchGraphite, width: 0,
+                                            dots: points.map(world), dotRadius: Self.sketchPointRadius))
                 }
             }
             let construction = sketch.showsConstruction
@@ -630,9 +647,22 @@ final class ViewportView: MTKView {
                 groups.append(LineGroup(polylines: radiusHandles.lines.map { $0.map(world) }, color: Self.previewBlue,
                                         width: 2, dots: radiusHandles.knobs.map(world), dotRadius: 3.5))
             }
+            // Linie beim Zeichnen: Graphit wie die fertigen Linien, offene Enden als kleine Punkte
             let preview = sketch.previewPolylines
             if !preview.isEmpty {
-                groups.append(LineGroup(polylines: preview.map { $0.map(world) }, color: Self.previewBlue, width: 2.6))
+                var previewEnds: [Point2] = []
+                if sketch.showsPoints {
+                    for line in preview {
+                        guard let first = line.first, let last = line.last, line.count >= 2 else { continue }
+                        // Geschlossene Züge (Kreis, Rechteck) haben keine Enden
+                        if simd_distance(first, last) <= perPoint { continue }
+                        previewEnds.append(first)
+                        previewEnds.append(last)
+                    }
+                }
+                groups.append(LineGroup(polylines: preview.map { $0.map(world) }, color: Self.sketchGraphite,
+                                        width: Self.sketchLineWidth, dots: previewEnds.map(world),
+                                        dotRadius: Self.sketchPointRadius))
             }
             let dimensionLines = sketch.visibleDimensions.flatMap { dimensionGeometry($0, perPoint: perPoint).lines }
             if !dimensionLines.isEmpty {
@@ -2536,6 +2566,8 @@ final class ViewportView: MTKView {
     }
 
     @objc private func handleOrbit(_ gesture: UIPanGestureRecognizer) {
+        // Greifen hält das Nachlaufen vom Ansichtswürfel an
+        if gesture.state == .began { workspace?.cameraMotion.stop() }
         let t = gesture.translation(in: self)
         // Im Skizzenmodus keine 3D-Ansicht: ein Finger verschiebt nur
         if let sketch, sketch.isActive, !sketch.isChoosingPlane {
