@@ -589,6 +589,8 @@ struct ThreadSpec: Equatable {
     var chamfer = true
     /// Anfang am anderen Ende der Fläche
     var fromOtherEnd = false
+    /// Innengewinde im Sackloch: Gewinde endet um den Auslauf e1 nach DIN 76 vor dem Grund
+    var runoutDIN76 = false
     var target: ThreadTarget?
 
     var size: ThreadSize {
@@ -640,6 +642,10 @@ struct HoleThread: Equatable {
     var sizeIndex = ThreadTables.metric.firstIndex { $0.name == "M3" } ?? 0
     var pitch: Double = 0.5
     var leftHanded = false
+    /// Sackloch: Ende des Gewindes – bis zum Grund, Auslauf nach DIN 76 oder eigenes Maß (runoutLength)
+    var runout: ThreadRunout = .bottom
+    /// Gewindelänge ab der Fläche bei runout = .custom (mm)
+    var runoutLength: Double = 8
 
     var size: ThreadSize {
         let list = family.sizes
@@ -656,14 +662,36 @@ struct HoleThread: Equatable {
     func summary(clearance: Double, through: Bool, depth: Double) -> String {
         let core = (coreDiameter + clearance).formatted(.number.precision(.fractionLength(0...2)))
         let depthText = through ? "durch" : "\(depth.formatted()) mm tief"
-        return "Gewinde \(designation), Kernloch Ø \(core) mm, \(depthText)"
+        var text = "Gewinde \(designation), Kernloch Ø \(core) mm, \(depthText)"
+        if !through, runout != .bottom {
+            let usable: Double = threadLength(depth: depth, through: false)
+            let usableText = usable.formatted(.number.precision(.fractionLength(0...2)))
+            let note = runout == .din76 ? " (Auslauf DIN 76)" : ""
+            text += ", Gewinde \(usableText) mm\(note)"
+        }
+        return text
+    }
+
+    /// Gewindelänge ab der Fläche in einer Bohrung der Tiefe depth (ohne Bohrspitze): durchgehend bzw. „bis Grund“
+    /// die ganze Tiefe, mit DIN 76 Bohrtiefe − e1, sonst das eigene Maß; mindestens zwei Steigungen, höchstens depth.
+    func threadLength(depth: Double, through: Bool) -> Double {
+        guard !through, depth > 0 else { return depth }
+        let wanted: Double
+        switch runout {
+        case .bottom: wanted = depth
+        case .din76: wanted = depth - ThreadRunout.din76Length(pitch: pitch)
+        case .custom: wanted = runoutLength
+        }
+        let shortest: Double = min(depth, 2 * pitch)
+        return min(depth, max(shortest, wanted))
     }
 }
 
 extension HoleSpec {
-    /// Werkzeug einer Gewindebohrung: Kernloch mit modelliertem Innengewinde (Gang des Gegenstücks über dem Kern),
-    /// 90°-Anschnitt an der Fläche und ggf. Bohrspitze. top liegt lift über der Fläche, axis zeigt in den Körper.
-    /// Das Druckspiel ist die Zugabe der Bohrung.
+    /// Werkzeug einer Gewindebohrung als Verbund (wird mit cutting(_:fuzzy:) in einem Schritt abgezogen):
+    /// Gänge des Innengewindes (Gang des Gegenstücks über dem Kern), Kernloch über die ganze Tiefe, ggf. Bohrspitze
+    /// und 90°-Anschnitt an der Fläche. Im Sackloch endet das Gewinde je nach thread.runout vor dem Grund (DIN 76).
+    /// top liegt lift über der Fläche, axis zeigt in den Körper, length = Tiefe + lift. Das Druckspiel ist die Zugabe.
     func threadedTool(_ thread: HoleThread, top: SIMD3<Double>, axis: SIMD3<Double>, length: Double,
                       lift: Double) -> PCKShape? {
         let family = thread.family
@@ -673,30 +701,65 @@ extension HoleSpec {
         let geometry = ThreadGeometry(family: family, size: thread.size, pitch: p, clearance: clearance, external: false)
         let major = geometry.major(at: 0)
         let minor = geometry.minor(at: 0)
-        let bottomMinor = geometry.minor(at: length)
+        // Gewindelänge ab top (mit lift); durchgehend die ganze Länge
+        let boreDepth: Double = max(0, length - lift)
+        let threadLength: Double = thread.threadLength(depth: boreDepth, through: through) + lift
+        let bottomMinor = geometry.minor(at: threadLength)
         guard minor > 0.2, bottomMinor > 0.2,
               let profile = ThreadProfile.kernelProfile(form, pitch: p, major: major, external: false) else { return nil }
         let numbers: [NSNumber] = profile.map { NSNumber(value: $0) }
-        guard var tool = PCKShape.thread(base: top, axis: axis, length: length, lead: p, starts: 1, taper: geometry.taper,
-                                         leftHanded: thread.leftHanded, profileRZ: numbers,
-                                         coreRadius: minor) else { return nil }
+        guard let ridges = PCKShape.thread(base: top, axis: axis, length: threadLength, lead: p, starts: 1,
+                                           taper: geometry.taper, leftHanded: thread.leftHanded, profileRZ: numbers,
+                                           coreRadius: 0) else { return nil }
+        var parts: [PCKShape] = [ridges]
+        // Kernloch über die ganze Tiefe (immer zylindrisch, auch bei kegeligen Gewinden)
+        let coreRadius: Double = minor
+        guard let core = PCKShape.cylinder(base: top, axis: axis, radius: coreRadius, height: length) else { return nil }
+        parts.append(core)
         if drillPoint, !through {
-            let tipHeight = bottomMinor / tan(59 * .pi / 180)
-            if let tip = PCKShape.cone(base: top + axis * length, axis: axis, bottomRadius: bottomMinor, topRadius: 0,
-                                       height: tipHeight),
-               let joined = tool.fusing(tip) {
-                tool = joined
+            let tipHeight = coreRadius / tan(59 * .pi / 180)
+            if let tip = PCKShape.cone(base: top + axis * length, axis: axis, bottomRadius: coreRadius, topRadius: 0,
+                                       height: tipHeight) {
+                parts.append(tip)
             }
         }
         // Anschnitt: 90°-Senkung vom Außen-Ø auf den Kern-Ø an der Fläche
         let surface = top + axis * lift
-        let e = min(0.1, 0.2 * minor)
-        let sinkHeight = geometry.depth + 2 * e + 1
-        if let sink = PCKShape.cone(base: surface - axis, axis: axis, bottomRadius: major + e + 1, topRadius: minor - e,
-                                    height: sinkHeight),
-           let joined = tool.fusing(sink) {
-            tool = joined
+        let e = min(0.1, 0.2 * coreRadius)
+        let sinkHeight = (major - coreRadius) + 2 * e + 1
+        if let sink = PCKShape.cone(base: surface - axis, axis: axis, bottomRadius: major + e + 1,
+                                    topRadius: coreRadius - e, height: sinkHeight) {
+            parts.append(sink)
         }
-        return tool
+        return PCKShape.compound(parts)
+    }
+}
+
+// MARK: - Gewindeauslauf im Sackloch (DIN 76-1)
+
+/// Ende eines Innengewindes im Sackloch.
+enum ThreadRunout: String, CaseIterable, Identifiable {
+    /// Gewinde bis zum Grund der Bohrung (für den 3D-Druck)
+    case bottom = "bis Grund"
+    /// Gewindeauslauf e1 nach DIN 76-1 (Regelfall) vor dem Grund, wie beim Gewindebohren
+    case din76 = "DIN 76"
+    /// Eigene Gewindelänge
+    case custom = "Maß"
+
+    var id: Self { self }
+
+    /// DIN 76-1, Gewindeauslauf für Innengewinde e1 (Regelfall) je Steigung P, in mm
+    static let din76Table: [(pitch: Double, e1: Double)] = [
+        (0.2, 1.3), (0.25, 1.5), (0.3, 1.8), (0.35, 2.1), (0.4, 2.3), (0.45, 2.6), (0.5, 2.8), (0.6, 3.4),
+        (0.7, 3.8), (0.75, 4.0), (0.8, 4.2), (1.0, 5.1), (1.25, 6.2), (1.5, 7.3), (1.75, 8.3), (2.0, 9.3),
+        (2.5, 11.2), (3.0, 13.1), (3.5, 15.2), (4.0, 16.8), (4.5, 18.4), (5.0, 20.8), (5.5, 22.4), (6.0, 24.0),
+    ]
+
+    /// Auslauf e1 (Abstand Gewindeende bis Bohrungsgrund ohne Spitze): Tabellenwert, sonst etwa 4 · P + 1 mm.
+    static func din76Length(pitch: Double) -> Double {
+        for entry in din76Table where abs(entry.pitch - pitch) < 0.005 {
+            return entry.e1
+        }
+        return 4 * pitch + 1
     }
 }

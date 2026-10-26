@@ -157,6 +157,11 @@ struct ThreadCard: View {
                 .hoverTip("Gangzahl", "Mehrgängige Gewinde (z. B. Tr 8×8 mit P2 und 4 Gängen für Gewindespindeln): Steigung je Umdrehung = Gangzahl × Steigung.")
                 Toggle("Linksgewinde", isOn: binding(\.leftHanded))
                     .fixedSize()
+                if let target = parts.thread.target, workspace.model.threadHasBlindEnd(parts.thread, target: target) {
+                    Toggle("Auslauf DIN 76", isOn: binding(\.runoutDIN76))
+                        .fixedSize()
+                        .hoverTip("Gewindeauslauf DIN 76", "Sackloch: das Gewinde endet um den Auslauf e1 vor dem Grund, wie beim Gewindebohren (z. B. M6: 5,1 mm, M8: 6,2 mm). Aus = Gewinde bis zum Grund (gut für den 3D-Druck).")
+                }
             }
             HStack(spacing: 12) {
                 field("Druckspiel", \.clearance, width: 48, minimum: 0, maximum: 0.6)
@@ -218,6 +223,42 @@ struct HoleThreadRow: View {
         workspace.setHoleThread(thread)
     }
 
+    /// Sackloch: wo das Gewinde endet (bis Grund, Auslauf nach DIN 76, eigenes Maß) und die sich ergebende Länge.
+    private func runoutControls(_ thread: HoleThread) -> some View {
+        let usable: Double = thread.threadLength(depth: workspace.holeSpec.depth, through: false)
+        let e1: Double = ThreadRunout.din76Length(pitch: thread.pitch)
+        return HStack(spacing: 8) {
+            Text("Ende")
+                .foregroundStyle(.secondary)
+                .fixedSize()
+            Picker("Gewindeende", selection: Binding(get: { thread.runout }, set: { value in
+                update { $0.runout = value }
+            })) {
+                ForEach(ThreadRunout.allCases) { runout in
+                    Text(runout.rawValue).tag(runout)
+                }
+            }
+            .pickerStyle(.menu)
+            .fixedSize()
+            .hoverTip("Gewindeende im Sackloch", "Bis Grund: Gewinde über die ganze Bohrtiefe (gut für den 3D-Druck). DIN 76: das Gewinde endet um den Auslauf e1 vor dem Grund, wie beim Gewindebohren (z. B. M6: 5,1 mm, M8: 6,2 mm). Maß: eigene Gewindelänge ab der Fläche. Das Kernloch geht immer bis zur vollen Tiefe.")
+            if thread.runout == .custom {
+                NumberField(title: "Länge", value: thread.runoutLength, width: 52) { length in
+                    guard length >= 0.5 else { return }
+                    update { $0.runoutLength = length }
+                }
+            }
+            if thread.runout == .din76 {
+                Text("e1 \(LengthUnit.current.format(e1))")
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+            }
+            Text("Gewinde \(LengthUnit.current.format(usable))")
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+                .fixedSize()
+        }
+    }
+
     var body: some View {
         HStack(spacing: 14) {
             Toggle("Gewinde", isOn: Binding(get: { workspace.holeSpec.thread != nil }, set: { on in
@@ -272,6 +313,9 @@ struct HoleThreadRow: View {
                     update { $0.leftHanded = left }
                 }))
                 .fixedSize()
+                if !workspace.holeSpec.through {
+                    runoutControls(thread)
+                }
                 Text("Kernloch Ø \(LengthUnit.current.format(thread.coreDiameter + workspace.holeSpec.clearance))")
                     .foregroundStyle(.secondary)
                     .fixedSize()

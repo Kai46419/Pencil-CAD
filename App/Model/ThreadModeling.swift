@@ -8,8 +8,14 @@ import simd
 // abziehen. An freien Enden läuft das Gewinde aus und bekommt den Anschnitt (45°-Fase bzw. 90°-Senkung).
 // Die Reihenfolge ist mit OpenCASCADE durchprobiert: Schraubenflächen dürfen keine Randkante eines Zylinders kreuzen
 // und nicht mit flachen Kegeln verrechnet werden – sonst liefert die Boolesche Operation stillschweigend nichts.
+// Werkzeuge kommen als Verbund (Kern + Gänge, nicht vereinigt) aus PCKShape.thread und werden in einem Schritt mit
+// kleinem Fuzzy-Wert abgezogen; die Schraubenlinie besteht aus einer Kante je Umdrehung (lange Gewinde genau).
 // Kegelige Gewinde (R, NPT): Flanken und Grund folgen dem Kegel 1:16, Spitzen sind zylindrisch abgeflacht
 // (außen am kleinsten, innen am größten Ø), damit sie sicher zusammenpassen.
+
+/// Fuzzy-Wert (mm) beim Abziehen von Gewindegängen: kleine Abweichungen der angenäherten Schraubenflächen gelten
+/// als Berührung, so scheitert die Boolesche Operation seltener (Rückfall Werkzeug für Werkzeug im Kernel).
+let threadCutFuzzy: Double = 1e-5
 
 /// Zwei Richtungen senkrecht zu n.
 private func threadBasis(_ n: SIMD3<Double>) -> (u: SIMD3<Double>, v: SIMD3<Double>) {
@@ -72,18 +78,41 @@ extension ModelStore {
         showPreview(preview, name: "Gewinde \(spec.designation)")
     }
 
+    /// Innengewinde mit geschlossenem Ende (Sackloch): dort ist ein Auslauf nach DIN 76 möglich.
+    func threadHasBlindEnd(_ spec: ThreadSpec, target: ThreadTarget) -> Bool {
+        guard !target.external else { return false }
+        return spec.startsAtHigh(target) ? !target.lowOpen : !target.highOpen
+    }
+
+    /// Gewindebereich als Abstand vom Gewindeanfang: Versatz, Länge bzw. volle Länge; im Sackloch mit DIN 76 endet
+    /// das Gewinde um den Auslauf e1 vor dem Grund (mindestens zwei Steigungen lang).
+    func threadRange(_ spec: ThreadSpec, target: ThreadTarget) -> (from: Double, to: Double) {
+        let from = min(max(0, spec.offset), target.length)
+        let wanted = spec.fullLength ? target.length : spec.length
+        var to = min(target.length, from + wanted)
+        if spec.runoutDIN76, threadHasBlindEnd(spec, target: target) {
+            let e1: Double = ThreadRunout.din76Length(pitch: spec.pitch)
+            let shortest: Double = min(to, from + 2 * spec.pitch)
+            to = max(shortest, min(to, target.length - e1))
+        }
+        return (from, to)
+    }
+
     /// Kurzinfo: Bezeichnung, Art, Länge, Kern-Ø.
     func threadSummary(_ spec: ThreadSpec, target: ThreadTarget) -> String {
         let geometry = ThreadGeometry(family: spec.family, size: spec.size, pitch: spec.pitch,
                                       clearance: spec.clearance, external: target.external)
-        let start = min(max(0, spec.offset), target.length)
-        let wanted = spec.fullLength ? target.length : spec.length
-        let length = max(0, min(target.length, start + wanted) - start)
+        let range = threadRange(spec, target: target)
+        let start = range.from
+        let length = max(0, range.to - range.from)
         let kind = target.external ? "Außengewinde" : "Innengewinde"
         let lengthText = length.formatted(.number.precision(.fractionLength(0...2)))
         let core = (2 * geometry.minor(at: start)).formatted(.number.precision(.fractionLength(0...2)))
         let outer = (2 * geometry.major(at: start)).formatted(.number.precision(.fractionLength(0...2)))
-        return "\(spec.designation) \(kind) · \(lengthText) mm · Ø \(outer) / Kern Ø \(core) mm (mit Spiel)"
+        let text = "\(spec.designation) \(kind) · \(lengthText) mm · Ø \(outer) / Kern Ø \(core) mm (mit Spiel)"
+        guard spec.runoutDIN76, threadHasBlindEnd(spec, target: target) else { return text }
+        let e1 = ThreadRunout.din76Length(pitch: spec.pitch).formatted(.number.precision(.fractionLength(0...2)))
+        return text + " · Auslauf DIN 76: \(e1) mm vor dem Grund"
     }
 
     /// Körper mit modelliertem Gewinde; bei Fehler nil und der Grund.
@@ -99,10 +128,10 @@ extension ModelStore {
         let startOpen = fromHigh ? target.highOpen : target.lowOpen
         let endOpen = fromHigh ? target.lowOpen : target.highOpen
 
-        // Gewindebereich ab dem Anfang
-        let zFrom = min(max(0, spec.offset), target.length)
-        let wanted = spec.fullLength ? target.length : spec.length
-        let zTo = min(target.length, zFrom + wanted)
+        // Gewindebereich ab dem Anfang (im Sackloch ggf. mit Auslauf nach DIN 76)
+        let range = threadRange(spec, target: target)
+        let zFrom = range.from
+        let zTo = range.to
         guard zTo - zFrom > 0.05 else {
             let faceLength = target.length.formatted(.number.precision(.fractionLength(0...2)))
             return (nil, "Länge bzw. Versatz prüfen – die Fläche ist \(faceLength) mm lang.")
@@ -160,7 +189,7 @@ extension ModelStore {
                                                coreRadius: 0) else {
                 return (nil, "Gewindegang konnte nicht erzeugt werden (Maße prüfen, Länge kürzen).")
             }
-            guard let grooved = shape.cutting(groove) else { return (nil, failed) }
+            guard let grooved = shape.cutting(groove, fuzzy: threadCutFuzzy) else { return (nil, failed) }
             shape = grooved
             // Verlängerung an den freien Enden abschneiden, dabei die Fase (Anschnitt) anbringen
             var ends: [(point: SIMD3<Double>, into: SIMD3<Double>, z: Double)] = []
@@ -193,7 +222,8 @@ extension ModelStore {
                                              coreRadius: geometry.minor(at: toolFrom)) else {
                 return (nil, "Gewindegang konnte nicht erzeugt werden (Maße prüfen, Länge kürzen).")
             }
-            guard let threaded = shape.cutting(voidTool) else { return (nil, failed) }
+            // Kern und Gänge in einem Schritt abziehen (Verbund aus PCKShape.thread)
+            guard let threaded = shape.cutting(voidTool, fuzzy: threadCutFuzzy) else { return (nil, failed) }
             shape = threaded
             // Senkung (Anschnitt) an den freien Enden
             if spec.chamfer {

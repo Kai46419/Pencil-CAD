@@ -60,6 +60,8 @@
 #include <Geom_Ellipse.hxx>
 #include <Geom_TrimmedCurve.hxx>
 #include <ShapeFix_Face.hxx>
+#include <ShapeFix_ShapeTolerance.hxx>
+#include <ShapeFix_Solid.hxx>
 #include <TColStd_Array1OfInteger.hxx>
 #include <TColStd_Array1OfReal.hxx>
 #include <TColgp_Array1OfPnt.hxx>
@@ -76,6 +78,7 @@
 #include <TopTools_ListOfShape.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Compound.hxx>
+#include <TopoDS_Iterator.hxx>
 #include <TopoDS_Solid.hxx>
 #include <TopoDS_Shape.hxx>
 #include <gp_Ax1.hxx>
@@ -1026,7 +1029,9 @@ static TopoDS_Wire helixWire(double radius, double pitch, double height, bool le
 
 /// Profil entlang der Schraubenlinie ziehen und als Körper schließen. Nacheinander: feste Binormale (Achse),
 /// Frenet, korrigiertes Frenet – je nach Profil klappt nicht jede Führung.
-static TopoDS_Shape helixPipe(const TopoDS_Wire &spine, const TopoDS_Wire &profile) {
+/// transformed: Übergänge zwischen den Kanten der Führung (Schraubenlinie je Umdrehung) als Transformation des
+/// Profils statt mit Ecken (BRepBuilderAPI_Transformed).
+static TopoDS_Shape helixPipe(const TopoDS_Wire &spine, const TopoDS_Wire &profile, bool transformed = false) {
     for (int mode = 0; mode < 3; ++mode) {
         try {
             BRepOffsetAPI_MakePipeShell pipe(spine);
@@ -1035,6 +1040,7 @@ static TopoDS_Shape helixPipe(const TopoDS_Wire &spine, const TopoDS_Wire &profi
             } else {
                 pipe.SetMode(mode == 1 ? Standard_True : Standard_False);
             }
+            if (transformed) pipe.SetTransitionMode(BRepBuilderAPI_Transformed);
             pipe.Add(profile, Standard_False, Standard_False);
             pipe.Build();
             if (!pipe.IsDone()) continue;
@@ -1103,8 +1109,68 @@ static TopoDS_Shape placedOnAxis(const TopoDS_Shape &shape, simd_double3 base, s
 
 // MARK: Gewinde
 
-/// Prüft einen Körper (BRepCheck_Analyzer) und repariert ihn bei Bedarf (ShapeFix_Shape). Leer, wenn er ungültig
-/// bleibt, kein Solid enthält oder kein Volumen hat.
+/// Kleinste erlaubte Toleranz nach dem Zug bzw. beim zweiten Reparaturversuch: bewusst gröber als die
+/// Standardtoleranz, sonst scheitern Boolesche Operationen an den angenäherten Schraubenflächen.
+static const double kThreadTolerance = 1e-5;
+
+/// Zweiter Reparaturversuch: jedes Solid mit ShapeFix_Solid (Schalen, Orientierung), danach die Toleranzen auf
+/// mindestens kThreadTolerance (ShapeFix_ShapeTolerance).
+static TopoDS_Shape repairedSolids(const TopoDS_Shape &shape) {
+    try {
+        BRep_Builder builder;
+        TopoDS_Compound compound;
+        builder.MakeCompound(compound);
+        int count = 0;
+        TopoDS_Shape single;
+        for (TopExp_Explorer it(shape, TopAbs_SOLID); it.More(); it.Next()) {
+            ShapeFix_Solid fix(TopoDS::Solid(it.Current()));
+            fix.Perform();
+            const TopoDS_Shape fixed = fix.Solid();
+            single = fixed.IsNull() ? it.Current() : fixed;
+            builder.Add(compound, single);
+            ++count;
+        }
+        if (count == 0) return TopoDS_Shape();
+        TopoDS_Shape result = count == 1 ? single : TopoDS_Shape(compound);
+        ShapeFix_ShapeTolerance tolerance;
+        tolerance.LimitTolerance(result, kThreadTolerance);
+        return result;
+    } catch (...) {
+        return TopoDS_Shape();
+    }
+}
+
+/// Solids nach außen orientieren: liegt ein unendlich ferner Punkt INNEN, ist das Solid umgestülpt (kommt bei
+/// Zügen entlang linksgängiger Schraubenlinien vor) und wird umgedreht.
+static TopoDS_Shape outwardOriented(const TopoDS_Shape &shape) {
+    try {
+        BRep_Builder builder;
+        TopoDS_Compound compound;
+        builder.MakeCompound(compound);
+        bool flipped = false;
+        int count = 0;
+        TopoDS_Shape single;
+        for (TopExp_Explorer it(shape, TopAbs_SOLID); it.More(); it.Next()) {
+            TopoDS_Shape solid = it.Current();
+            BRepClass3d_SolidClassifier classifier(solid);
+            classifier.PerformInfinitePoint(1e-7);
+            if (classifier.State() == TopAbs_IN) {
+                solid.Reverse();
+                flipped = true;
+            }
+            builder.Add(compound, solid);
+            single = solid;
+            ++count;
+        }
+        if (!flipped) return shape;
+        return count == 1 ? single : TopoDS_Shape(compound);
+    } catch (...) {
+        return shape;
+    }
+}
+
+/// Prüft einen Körper (BRepCheck_Analyzer) und repariert ihn bei Bedarf (ShapeFix_Shape, dann ShapeFix_Solid mit
+/// gröberer Toleranz). Leer, wenn er ungültig bleibt, kein Solid enthält oder kein Volumen hat.
 static TopoDS_Shape validSolid(const TopoDS_Shape &shape) {
     if (shape.IsNull()) return TopoDS_Shape();
     try {
@@ -1113,7 +1179,12 @@ static TopoDS_Shape validSolid(const TopoDS_Shape &shape) {
             ShapeFix_Shape fix(candidate);
             fix.Perform();
             candidate = fix.Shape();
-            if (candidate.IsNull() || !BRepCheck_Analyzer(candidate).IsValid()) return TopoDS_Shape();
+            if (candidate.IsNull()) return TopoDS_Shape();
+            if (!BRepCheck_Analyzer(candidate).IsValid()) {
+                // Zweiter Versuch: Solids einzeln reparieren, Toleranz gröber (nach Schraubenflächen oft nötig)
+                candidate = repairedSolids(candidate);
+                if (candidate.IsNull() || !BRepCheck_Analyzer(candidate).IsValid()) return TopoDS_Shape();
+            }
         }
         TopExp_Explorer solids(candidate, TopAbs_SOLID);
         if (!solids.More()) return TopoDS_Shape();
@@ -1128,12 +1199,16 @@ static TopoDS_Shape validSolid(const TopoDS_Shape &shape) {
 
 /// Schraubenlinie für Gewinde um die Z-Achse: beginnt bei z = zStart im Winkel 0 (auf +X) und steigt um height.
 /// radius gilt bei z = 0; taper ≠ 0 legt sie auf eine Kegelfläche (Radius ändert sich um taper je mm).
+/// Zylindrisch wird sie je Umdrehung als eigene Kante gebaut (eine Gerade auf der abgewickelten Zylinderfläche,
+/// je Kante eigene 3D-Kurve): eine einzige angenäherte Kurve über viele Umdrehungen wird in OpenCASCADE ungenau –
+/// getestet: ab etwa 40 Umdrehungen fehlt Volumen bzw. die Boolesche Operation liefert Unsinn. Kegelig am Stück.
 static TopoDS_Wire threadSpine(double radius, double lead, double zStart, double height, bool leftHanded,
                                double taper) {
     if (radius <= 0 || lead <= 0 || height <= 0) return TopoDS_Wire();
     Handle(Geom_Surface) surface;
     double scale = 1;
-    if (std::fabs(taper) > 1e-9) {
+    const bool tapered = std::fabs(taper) > 1e-9;
+    if (tapered) {
         // Kegel: Parameter v läuft entlang der Mantellinie, Höhe = v · cos(Winkel)
         const double angle = std::atan(taper);
         surface = new Geom_ConicalSurface(gp_Ax3(gp::XOY()), angle, radius);
@@ -1146,13 +1221,39 @@ static TopoDS_Wire threadSpine(double radius, double lead, double zStart, double
     const gp_Dir2d direction(leftHanded ? -2 * M_PI : 2 * M_PI, vTurn);
     const Handle(Geom2d_Line) line = new Geom2d_Line(gp_Pnt2d(0, v0), direction);
     const double turns = height / lead;
-    const double length = turns * std::sqrt(4 * M_PI * M_PI + vTurn * vTurn);
-    BRepBuilderAPI_MakeEdge edge(line, surface, 0, length);
-    if (!edge.IsDone()) return TopoDS_Wire();
-    const TopoDS_Edge result = edge.Edge();
-    BRepLib::BuildCurves3d(result, 1e-6, GeomAbs_C1, 14, std::max(32, int(std::ceil(turns * 16))));
-    BRepBuilderAPI_MakeWire wire(result);
-    return wire.IsDone() ? wire.Wire() : TopoDS_Wire();
+    const double perTurn = std::sqrt(4 * M_PI * M_PI + vTurn * vTurn);
+    const double length = turns * perTurn;
+    if (tapered) {
+        BRepBuilderAPI_MakeEdge edge(line, surface, 0, length);
+        if (!edge.IsDone()) return TopoDS_Wire();
+        const TopoDS_Edge result = edge.Edge();
+        BRepLib::BuildCurves3d(result, 1e-6, GeomAbs_C1, 14, std::max(32, int(std::ceil(turns * 16))));
+        BRepBuilderAPI_MakeWire wire(result);
+        return wire.IsDone() ? wire.Wire() : TopoDS_Wire();
+    }
+    // Grenzen der Kanten: je volle Umdrehung, ein sehr kurzer Rest kommt an die letzte Umdrehung
+    std::vector<double> bounds;
+    const int full = int(std::floor(turns + 1e-9));
+    for (int k = 0; k <= full; ++k) bounds.push_back(double(k) * perTurn);
+    const double rest = length - bounds.back();
+    if (rest > 1e-6 * perTurn) {
+        if (rest < 0.05 * perTurn && bounds.size() > 1) {
+            bounds.back() = length;
+        } else {
+            bounds.push_back(length);
+        }
+    }
+    if (bounds.size() < 2) return TopoDS_Wire();
+    BRepBuilderAPI_MakeWire wire;
+    for (size_t k = 0; k + 1 < bounds.size(); ++k) {
+        BRepBuilderAPI_MakeEdge edge(line, surface, bounds[k], bounds[k + 1]);
+        if (!edge.IsDone()) return TopoDS_Wire();
+        const TopoDS_Edge piece = edge.Edge();
+        BRepLib::BuildCurves3d(piece, 1e-6, GeomAbs_C1, 14, 32);
+        wire.Add(piece);
+        if (!wire.IsDone()) return TopoDS_Wire();
+    }
+    return wire.Wire();
 }
 
 + (nullable PCKShape *)threadWithBase:(simd_double3)base axis:(simd_double3)axis length:(double)length
@@ -1167,18 +1268,30 @@ static TopoDS_Wire threadSpine(double radius, double lead, double zStart, double
     const double height = zEnd - zStart;
     if (height / lead > 400) return nil;
     try {
-        const std::vector<double> rz = toVector(profileRZ);
+        std::vector<double> rz = toVector(profileRZ);
         const size_t count = rz.size() / 2;
         if (count < 3) return nil;
-        double rMin = INFINITY, rMax = 0, rSum = 0;
+        double rMin = INFINITY, rMax = 0, rSum = 0, zMin = INFINITY, zMax = -INFINITY;
         for (size_t i = 0; i < count; ++i) {
             rMin = std::min(rMin, rz[2 * i]);
             rMax = std::max(rMax, rz[2 * i]);
             rSum += rz[2 * i];
+            zMin = std::min(zMin, rz[2 * i + 1]);
+            zMax = std::max(zMax, rz[2 * i + 1]);
         }
         // Kleinster Radius entlang des ganzen Zugs muss positiv bleiben
         const double lowest = rMin + std::min(taper * zStart, taper * zEnd);
         if (lowest <= 0) return nil;
+        // Benachbarte Windungen (auch anderer Gänge) dürfen sich nie flächig berühren: das Profil ist axial
+        // höchstens eine Teilung (Steigung / Gangzahl) minus 2 µm breit, sonst wird es um seine Mitte gestaucht
+        const double period = lead / double(starts);
+        const double room = period - 0.002;
+        if (room <= 0) return nil;
+        if (zMax - zMin > room) {
+            const double center = 0.5 * (zMin + zMax);
+            const double factor = room / (zMax - zMin);
+            for (size_t i = 0; i < count; ++i) rz[2 * i + 1] = center + (rz[2 * i + 1] - center) * factor;
+        }
         const double spineRadius = rSum / double(count);
         const TopoDS_Wire spine = threadSpine(spineRadius, lead, zStart, height, leftHanded, taper);
         if (spine.IsNull()) return nil;
@@ -1190,20 +1303,23 @@ static TopoDS_Wire threadSpine(double radius, double lead, double zStart, double
         }
         polygon.Close();
         if (!polygon.IsDone()) return nil;
-        const TopoDS_Shape gang = helixPipe(spine, polygon.Wire());
+        TopoDS_Shape gang = helixPipe(spine, polygon.Wire(), true);
         if (gang.IsNull()) return nil;
+        // Nach dem Zug absichern: nach außen orientieren, bei Fehlern reparieren (zweiter Versuch)
+        gang = outwardOriented(gang);
+        if (!BRepCheck_Analyzer(gang).IsValid()) {
+            const TopoDS_Shape repaired = repairedSolids(gang);
+            if (!repaired.IsNull()) gang = repaired;
+        }
 
         // Ebene Enden: Schnitt mit einem Zylinder von z = 0 bis length, dessen Mantel weit außerhalb liegt
         const gp_Ax2 frame(gp::Origin(), gp::DZ());
         const double outer = rMax + std::fabs(taper) * height + 1;
         const TopoDS_Shape trim = BRepPrimAPI_MakeCylinder(frame, outer, length).Shape();
 
-        TopoDS_Shape result;
-        if (coreRadius > 0) {
-            // Kern immer zylindrisch: Boolesche Operationen zwischen einem flachen Kegel und dem kegeligen Gang
-            // scheitern in OpenCASCADE (getestet), mit einem Zylinder gelingen sie
-            result = BRepPrimAPI_MakeCylinder(frame, coreRadius, length).Shape();
-        }
+        // Ergebnis: Verbund [Kernzylinder (falls coreRadius > 0), Verbund aller Gänge]. Nicht vereinigt – das
+        // Werkzeug wird in einem Schritt abgezogen (cutting(_:fuzzy:)): die Gänge berühren sich nicht und bleiben
+        // ein Teil (werden nicht gegeneinander geschnitten), der Kern überlappt sie und ist ein eigenes Werkzeug.
         BRep_Builder builder;
         TopoDS_Compound ridges;
         builder.MakeCompound(ridges);
@@ -1219,23 +1335,19 @@ static TopoDS_Wire threadSpine(double radius, double lead, double zStart, double
             BRepAlgoAPI_Common common(copy, trim);
             if (!common.IsDone() || common.Shape().IsNull()) return nil;
             const TopoDS_Shape piece = common.Shape();
-            if (coreRadius > 0) {
-                BRepAlgoAPI_Fuse fuse(result, piece);
-                if (!fuse.IsDone() || fuse.Shape().IsNull()) return nil;
-                result = fuse.Shape();
-            } else {
-                builder.Add(ridges, piece);
-            }
-        }
-        if (coreRadius <= 0) result = ridges;
-        TopoDS_Shape valid = validSolid(result);
-        if (valid.IsNull()) {
-            // Als Werkzeug trotzdem verwenden, solange es Solids enthält: geprüft wird der fertige Körper
-            TopExp_Explorer solids(result, TopAbs_SOLID);
+            TopExp_Explorer solids(piece, TopAbs_SOLID);
             if (!solids.More()) return nil;
-            valid = result;
+            builder.Add(ridges, piece);
         }
-        const TopoDS_Shape placed = placedOnAxis(valid, base, axis);
+        TopoDS_Compound parts;
+        builder.MakeCompound(parts);
+        if (coreRadius > 0) {
+            // Kern immer zylindrisch: Boolesche Operationen zwischen einem flachen Kegel und dem kegeligen Gang
+            // scheitern in OpenCASCADE (getestet), mit einem Zylinder gelingen sie
+            builder.Add(parts, BRepPrimAPI_MakeCylinder(frame, coreRadius, length).Shape());
+        }
+        builder.Add(parts, ridges);
+        const TopoDS_Shape placed = placedOnAxis(parts, base, axis);
         return placed.IsNull() ? nil : [[PCKShape alloc] initWithShape:placed];
     } catch (...) {
         return nil;
@@ -1265,6 +1377,76 @@ static TopoDS_Wire threadSpine(double radius, double lead, double zStart, double
         BRepAlgoAPI_Cut op(_shape, tool->_shape);
         if (!op.IsDone()) return nil;
         return [[PCKShape alloc] initWithShape:unified(op.Shape())];
+    } catch (...) {
+        return nil;
+    }
+}
+
+/// Abziehen mit einer Liste von Werkzeugen (ein Schritt) und optionalem Fuzzy-Wert. Leer bei Fehler oder ohne Solid.
+static TopoDS_Shape cutWithTools(const TopoDS_Shape &body, const TopTools_ListOfShape &tools, double fuzzy) {
+    try {
+        BRepAlgoAPI_Cut op;
+        TopTools_ListOfShape arguments;
+        arguments.Append(body);
+        op.SetArguments(arguments);
+        op.SetTools(tools);
+        if (fuzzy > 0) op.SetFuzzyValue(fuzzy);
+        op.Build();
+        if (!op.IsDone() || op.HasErrors()) return TopoDS_Shape();
+        const TopoDS_Shape result = op.Shape();
+        if (result.IsNull()) return TopoDS_Shape();
+        TopExp_Explorer solids(result, TopAbs_SOLID);
+        return solids.More() ? result : TopoDS_Shape();
+    } catch (...) {
+        return TopoDS_Shape();
+    }
+}
+
+- (nullable PCKShape *)cuttingTool:(PCKShape *)tool fuzzy:(double)fuzzy {
+    try {
+        // Oberste Ebene eines Verbunds = einzelne Werkzeuge (dürfen sich überlappen); tiefer verschachtelte
+        // Verbünde bleiben ein Werkzeug (z. B. alle Gänge eines Gewindes, die sich nicht berühren)
+        TopTools_ListOfShape tools;
+        if (tool->_shape.ShapeType() == TopAbs_COMPOUND) {
+            for (TopoDS_Iterator it(tool->_shape); it.More(); it.Next()) tools.Append(it.Value());
+        } else {
+            tools.Append(tool->_shape);
+        }
+        if (tools.IsEmpty()) return nil;
+        const TopoDS_Shape first = cutWithTools(_shape, tools, fuzzy);
+        if (!first.IsNull() && (tools.Extent() == 1 || BRepCheck_Analyzer(first).IsValid())) {
+            return [[PCKShape alloc] initWithShape:unified(first)];
+        }
+        // Rückfall: Werkzeug für Werkzeug, jeweils erst mit, dann ohne Fuzzy-Wert. Verbünde (die Gänge) zuerst:
+        // nach dem Kernloch abgezogen bleiben kegelige Gänge sonst stillschweigend stehen (getestet, NPT)
+        TopTools_ListOfShape ordered;
+        for (TopTools_ListIteratorOfListOfShape it(tools); it.More(); it.Next()) {
+            if (it.Value().ShapeType() == TopAbs_COMPOUND) ordered.Append(it.Value());
+        }
+        for (TopTools_ListIteratorOfListOfShape it(tools); it.More(); it.Next()) {
+            if (it.Value().ShapeType() != TopAbs_COMPOUND) ordered.Append(it.Value());
+        }
+        TopoDS_Shape current = _shape;
+        bool done = tools.Extent() > 1;
+        for (TopTools_ListIteratorOfListOfShape it(ordered); done && it.More(); it.Next()) {
+            TopTools_ListOfShape single;
+            single.Append(it.Value());
+            TopoDS_Shape next = cutWithTools(current, single, fuzzy);
+            if (next.IsNull() && fuzzy > 0) next = cutWithTools(current, single, 0);
+            if (next.IsNull()) {
+                done = false;
+            } else {
+                current = next;
+            }
+        }
+        if (done) return [[PCKShape alloc] initWithShape:unified(current)];
+        if (!first.IsNull()) return [[PCKShape alloc] initWithShape:unified(first)];
+        // Letzter Versuch ohne Fuzzy-Wert in einem Schritt
+        if (fuzzy > 0) {
+            const TopoDS_Shape plain = cutWithTools(_shape, tools, 0);
+            if (!plain.IsNull()) return [[PCKShape alloc] initWithShape:unified(plain)];
+        }
+        return nil;
     } catch (...) {
         return nil;
     }
@@ -2796,6 +2978,10 @@ static bool isSoftMeshEdge(const TopTools_ListOfShape &faces) {
                                  lead:(double)lead starts:(NSInteger)starts taper:(double)taper
                            leftHanded:(BOOL)leftHanded profileRZ:(NSArray<NSNumber *> *)profileRZ
                            coreRadius:(double)coreRadius {
+    return nil;
+}
+
+- (nullable PCKShape *)cuttingTool:(PCKShape *)tool fuzzy:(double)fuzzy {
     return nil;
 }
 

@@ -139,11 +139,14 @@ NS_ASSUME_NONNULL_BEGIN
 
 /// Gewindekörper (Werkzeug „Gewinde“): ein Gang als geschlossenes Polygon profileRZ in der Achsebene (Paare r, z;
 /// r = Abstand von der Achse bei z = 0, z relativ zur Gangmitte) wird entlang einer Schraubenlinie mit der Steigung
-/// lead je Umdrehung gezogen (feste Binormale = Achse), starts Gänge gleichmäßig verteilt. Der Gang läuft eine
-/// Umdrehung über beide Enden hinaus und wird dann eben bei 0 und length (entlang axis ab base) abgeschnitten.
+/// lead je Umdrehung gezogen (feste Binormale = Achse; zylindrisch je Umdrehung eine Kante), starts Gänge
+/// gleichmäßig verteilt. Der Gang läuft eine Umdrehung über beide Enden hinaus und wird dann eben bei 0 und length
+/// (entlang axis ab base) abgeschnitten. Das Profil wird axial auf höchstens Steigung/Gangzahl − 2 µm begrenzt
+/// (Windungen berühren sich nie); nach dem Zug wird die Orientierung geprüft und bei Bedarf repariert.
 /// taper = Radiusänderung je mm entlang axis (0 = zylindrisch, Kegel 1:16 = 1/32; Kegelschraubenlinie auf einer
-/// Kegelfläche). coreRadius > 0 vereinigt die Gänge mit einem Kernzylinder dieses Radius (auch bei Kegel zylindrisch).
-/// Das Ergebnis wird geprüft (BRepCheck_Analyzer, ggf. ShapeFix_Shape). nil bei Fehler oder ohne Kernel.
+/// Kegelfläche). Ergebnis ist ein Verbund aus einem Kernzylinder mit coreRadius (nur wenn > 0, auch bei Kegel
+/// zylindrisch) und einem Verbund aller Gänge – nicht vereinigt, zum Abziehen mit cutting(_:fuzzy:).
+/// nil bei Fehler oder ohne Kernel.
 + (nullable PCKShape *)threadWithBase:(simd_double3)base axis:(simd_double3)axis length:(double)length
                                  lead:(double)lead starts:(NSInteger)starts taper:(double)taper
                            leftHanded:(BOOL)leftHanded profileRZ:(NSArray<NSNumber *> *)profileRZ
@@ -156,6 +159,11 @@ NS_ASSUME_NONNULL_BEGIN
 /// Boolesche Operationen. nil, wenn die Operation fehlschlägt oder kein Kernel vorhanden ist.
 - (nullable PCKShape *)cutting:(PCKShape *)tool NS_SWIFT_NAME(cutting(_:));
 - (nullable PCKShape *)fusing:(PCKShape *)other NS_SWIFT_NAME(fusing(_:));
+/// Abziehen mehrerer Werkzeuge in einem Schritt: jedes Teil der obersten Ebene eines Verbunds ist ein eigenes
+/// Werkzeug (Werkzeuge dürfen sich überlappen; ein verschachtelter Verbund wie die Gänge eines Gewindes bleibt ein
+/// Werkzeug). fuzzy > 0 setzt den Fuzzy-Wert (z. B. 1e-5 mm bei Gewindegängen). Scheitert der Schritt oder ist das
+/// Ergebnis ungültig, wird Werkzeug für Werkzeug abgezogen (mit, dann ohne Fuzzy-Wert). nil bei Fehler/ohne Kernel.
+- (nullable PCKShape *)cuttingTool:(PCKShape *)tool fuzzy:(double)fuzzy NS_SWIFT_NAME(cutting(_:fuzzy:));
 - (nullable PCKShape *)intersecting:(PCKShape *)other NS_SWIFT_NAME(intersecting(_:));
 
 /// Zieht eine ebene Fläche entlang ihrer Normale: distance > 0 trägt Material auf, < 0 trägt ab.
