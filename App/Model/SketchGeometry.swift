@@ -891,11 +891,11 @@ enum ExtrudeDirection: String, CaseIterable, Identifiable {
 
 /// Körper aus Bereichen einer Skizze. Beim Abziehen beginnt das Werkzeug minimal außerhalb,
 /// damit keine hauchdünnen Restflächen bleiben. taper: Verjüngungswinkel in Grad (Seitenflächen geneigt).
-func extrudeRegions(_ regions: [SketchRegion], plane: SketchPlane, distance: Double, mode: ExtrudeMode,
+func extrudeRegions(_ chosen: [SketchRegion], plane: SketchPlane, distance: Double, mode: ExtrudeMode,
                     direction: ExtrudeDirection = .oneSide, secondDistance: Double = 0, taper: Double = 0) -> PCKShape? {
-    guard !regions.isEmpty, distance != 0, distance.isFinite else { return nil }
+    guard !chosen.isEmpty, distance != 0, distance.isFinite else { return nil }
     // Angrenzende Bereiche (z. B. Zähne einer Gewindestange) als ein Profil: keine Vereinigung vieler Prismen
-    let regions = SketchRegionMerge.merged(regions)
+    let regions = SketchRegionMerge.merged(chosen)
     let sign = plane.extrusionSign(mode: mode)
     let main = sign * distance
     let from: Double

@@ -96,7 +96,7 @@ final class ViewportView: MTKView {
     private lazy var calibrationLoupe: CalibrationLoupe = {
         let loupe = CalibrationLoupe(frame: CGRect(x: 0, y: 0, width: 128, height: 128))
         loupe.isHidden = true
-        addSubview(loupe)
+        self.addSubview(loupe)
         return loupe
     }()
     private var loupeImage: (file: String, image: UIImage)?
