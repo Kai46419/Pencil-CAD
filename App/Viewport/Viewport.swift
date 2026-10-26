@@ -2218,7 +2218,8 @@ final class ViewportView: MTKView {
         }
         if let faceHit {
             let faceT = simd_dot(faceHit.point - ray.origin, ray.direction)
-            if planeHit == nil || faceT < planeHit!.t {
+            // Neue Skizze mit gewähltem Körper: seine Flächen gehen vor (die Standardfelder am Ursprung stören nicht)
+            if planeHit == nil || faceT < planeHit!.t || workspace.sketchOnBody {
                 if let plane = model.plane(of: faceHit.face) {
                     model.message = nil
                     workspace.chooseSketchPlane(plane)

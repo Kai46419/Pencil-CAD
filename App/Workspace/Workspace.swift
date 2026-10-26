@@ -328,6 +328,8 @@ final class Workspace: ObservableObject {
     @Published var constructReference: ReferencePlane = .world(2)
     /// Abstand der Versatzebene; Kai: Standard 0, die Ebene liegt direkt auf der gewählten Fläche
     @Published var constructOffset: Double = 0
+    /// Neue Skizze mit gewähltem Körper: Körperflächen gehen bei der Ebenenwahl vor den Standardebenen
+    var sketchOnBody = false
     @Published var constructAxis: ReferenceAxis = .world(2)
     @Published var constructCustomAxis: AxisSpec?
     @Published var constructPoint: SIMD3<Double> = .zero
@@ -548,11 +550,18 @@ final class Workspace: ObservableObject {
         sketch.tool = .select
         editingSketchIndex = nil
         model.commitPreview()
+        sketchOnBody = false
         if let face = model.selection, let plane = model.plane(of: face) {
             sketch.plane = plane
             sketch.isActive = true
             refreshSketchGuides()
             send(.alignToSketchPlane)
+        } else if model.selection != nil || !model.selectedBodies.isEmpty {
+            // Kai: Körper gewählt → einfach eine seiner Flächen antippen; Ansicht bleibt, Körperflächen gehen vor
+            sketchOnBody = true
+            sketch.isActive = true
+            sketch.isChoosingPlane = true
+            if model.selection != nil { model.message = "Diese Fläche ist gewölbt – eine ebene Fläche antippen." }
         } else {
             sketch.isActive = true
             sketch.isChoosingPlane = true
@@ -2117,7 +2126,10 @@ final class Workspace: ObservableObject {
     }
 
     private var sketchHint: String {
-        if sketch.isChoosingPlane { return "Skizzenebene antippen – oder eine ebene Fläche eines Körpers" }
+        if sketch.isChoosingPlane {
+            return sketchOnBody ? "Ebene Fläche des Körpers antippen – darauf wird skizziert"
+                : "Skizzenebene antippen – oder eine ebene Fläche eines Körpers"
+        }
         switch sketch.tool {
         case .select:
             if !sketch.selection.isEmpty {

@@ -301,6 +301,8 @@ enum HelpTopic: String, CaseIterable, Identifiable {
                     + "eine Werkzeugkachel zeigt die Erklärung erneut.",
                 "Konstruieren › Ebene auf einer Körperfläche startet mit Abstand 0 – direkt auf der Fläche. Versatz "
                     + "nur, wenn du ihn eingibst.",
+                "Neue Skizze mit gewähltem Körper: einfach eine ebene Fläche des Körpers antippen – die Ansicht "
+                    + "bleibt stehen, Körperflächen gehen vor den Standardebenen.",
                 "Schlanke Maße: kleinere Schilder mit dünnem Schloss. Feste (grüne) Maße erscheinen nur als kleines "
                     + "Schloss – antippen öffnet das Maß. Abschalten in der Skizzenpalette („Feste Maße als Schloss“).",
                 "Parametrischer Verlauf: Zeitleiste unten (Menü … › Zeitleiste ein-/ausblenden). Schritt antippen ändert "
