@@ -274,6 +274,18 @@ enum HelpTopic: String, CaseIterable, Identifiable {
                     + "Fläche ein (gestrichelte Leitlinie in Achsfarbe), dazu ΔX/ΔY/ΔZ.",
                 "Viele angrenzende Skizzenbereiche (z. B. Zähne einer Gewindestange) werden vor dem Extrudieren zu "
                     + "einem Profil zusammengefasst – schneller und ohne Absturz.",
+                "Eigenschaften (rechte Leiste, „i“): Körper, Fläche oder Kante antippen – das Fenster zeigt L × B × H, "
+                    + "Volumen, Oberfläche, Gewicht, Schwerpunkt bzw. Flächenart, mm², L × B, Ø, Kantenlänge und Radius. "
+                    + "Darunter „3D-Druck“: Düse, Wandlinien, Schichthöhe, Decken/Böden, Füllung, Filament und Preis "
+                    + "eingeben (bleiben gespeichert) – geschätzt wie ein Slicer in Gramm, Metern und Euro.",
+                "Körper antippen zeigt seine Außenmaße (L × B × H) im Hinweis oben.",
+                "Skalieren: am Pfeil ziehen oder Faktor eingeben, immer gleichmäßig um die Mitte.",
+                "Foto kalibrieren geht jetzt auch in der Skizze und startet nach dem Einfügen gleich. Beim Ziehen mit dem "
+                    + "Stift zeigt eine Lupe die Stelle, der Punkt sitzt beim Absetzen. Danach ist das Foto gesperrt "
+                    + "(Schloss im Bild-Werkzeug löst es).",
+                "Zeichnungen: Unter dem Projektnamen steht „Created by Kai Rosenfeld“ – änderbar im Zeichnungsfenster "
+                    + "(„Erstellt von“).",
+                "Der KI-Assistent ist entfernt; ein gespeicherter API-Schlüssel wird beim Start gelöscht.",
                 "Schlanke Maße: kleinere Schilder mit dünnem Schloss. Feste (grüne) Maße erscheinen nur als kleines "
                     + "Schloss – antippen öffnet das Maß. Abschalten in der Skizzenpalette („Feste Maße als Schloss“).",
                 "Parametrischer Verlauf: Zeitleiste unten (Menü … › Zeitleiste ein-/ausblenden). Schritt antippen ändert "

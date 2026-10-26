@@ -375,33 +375,40 @@ struct PropertiesPanel: View {
     private func faceRows(_ face: FaceRef) -> (title: String, rows: [PropertySnapshot.Row]) {
         let unit = LengthUnit.current
         var rows: [PropertySnapshot.Row] = []
-        let area = model.area(of: face)
+        let area = ModelMeasure.area(model.area(of: face))
         if let plane = model.plane(of: face) {
             rows.append(.init(label: "Art", value: "Ebene Fläche"))
-            rows.append(.init(label: "Fläche", value: unit.formatArea(area)))
-            let boundary = model.edgePolylines(ofFace: face).flatMap { $0 }
-            let points = boundary.isEmpty ? model.mesh.trianglePoints(of: face).map { SIMD3<Double>($0) } : boundary
-            if let rect = FaceExtent.smallestRectangle(points.map { plane.local($0) }) {
-                rows.append(.init(label: "L × B", value: "\(unit.number(rect.length)) × \(unit.format(rect.width))"))
+            rows.append(.init(label: "Fläche", value: area))
+            if let size = ModelMeasure.planarSize(model.outlinePoints(of: face), normal: plane.normal) {
+                rows.append(.init(label: "L × B", value: "\(unit.number(size.length)) × \(unit.format(size.width))"))
             }
-            let n = simd_normalize(plane.normal)
-            rows.append(.init(label: "Normale", value: direction(n)))
+            rows.append(.init(label: "Normale", value: direction(simd_normalize(plane.normal))))
             return ("Fläche", rows)
         }
         if let cylinder = model.cylinder(of: face) {
             rows.append(.init(label: "Art", value: cylinder.convex ? "Zylinder (Zapfen)" : "Zylinder (Bohrung)"))
-            rows.append(.init(label: "Fläche", value: unit.formatArea(area)))
+            rows.append(.init(label: "Fläche", value: area))
             rows.append(.init(label: "Ø", value: unit.format(cylinder.radius * 2)))
             rows.append(.init(label: "Radius", value: unit.format(cylinder.radius)))
-            let heights = model.mesh.trianglePoints(of: face).map { simd_dot(SIMD3<Double>($0) - cylinder.origin, cylinder.axis) }
-            if let low = heights.min(), let high = heights.max() {
-                rows.append(.init(label: "Höhe", value: unit.format(high - low)))
-            }
+            let height = ModelMeasure.extent(model.outlinePoints(of: face), along: cylinder.axis)
+            if height > 1e-6 { rows.append(.init(label: "Höhe", value: unit.format(height))) }
             rows.append(.init(label: "Achse", value: direction(cylinder.axis)))
             return ("Fläche", rows)
         }
-        rows.append(.init(label: "Art", value: "Gekrümmte Fläche"))
-        rows.append(.init(label: "Fläche", value: unit.formatArea(area)))
+        switch model.surfaceMeasurement(face) ?? .other {
+        case .sphere(let radius):
+            rows.append(.init(label: "Art", value: "Kugelfläche"))
+            rows.append(.init(label: "Ø", value: unit.format(radius * 2)))
+        case .cone(let semiAngle):
+            rows.append(.init(label: "Art", value: "Kegelfläche"))
+            rows.append(.init(label: "Öffnung", value: ModelMeasure.degrees(abs(semiAngle) * 2)))
+        case .torus(let major, let minor):
+            rows.append(.init(label: "Art", value: "Torus"))
+            rows.append(.init(label: "Radien", value: "\(unit.number(major)) / \(unit.format(minor))"))
+        default:
+            rows.append(.init(label: "Art", value: "Gekrümmte Fläche"))
+        }
+        rows.append(.init(label: "Fläche", value: area))
         let points = model.mesh.trianglePoints(of: face)
         if let first = points.first {
             let lo = points.reduce(first) { simd_min($0, $1) }, hi = points.reduce(first) { simd_max($0, $1) }
@@ -413,25 +420,34 @@ struct PropertiesPanel: View {
 
     private func edgeRows(_ edge: EdgeRef) -> (title: String, rows: [PropertySnapshot.Row]) {
         let unit = LengthUnit.current
-        var rows: [PropertySnapshot.Row] = []
-        let length = model.length(of: edge)
-        let points = model.edgePolylines(edge).max { $0.count < $1.count } ?? []
-        rows.append(.init(label: "Länge", value: unit.format(length)))
-        guard let start = points.first, let end = points.last else { return ("Kante", rows) }
-        let closed = points.count > 2 && simd_distance(start, end) < 1e-3
-        if let circle = FaceExtent.circle(through: points) {
-            rows.insert(.init(label: "Art", value: closed ? "Kreis" : "Kreisbogen"), at: 0)
-            rows.append(.init(label: "Radius", value: unit.format(circle.radius)))
-            rows.append(.init(label: "Ø", value: unit.format(circle.radius * 2)))
-            rows.append(.init(label: "Mitte", value: point(circle.center)))
-        } else if abs(simd_distance(start, end) - length) < max(1e-3, length * 1e-4) {
-            rows.insert(.init(label: "Art", value: "Gerade"), at: 0)
-        } else {
-            rows.insert(.init(label: "Art", value: closed ? "Geschlossene Kurve" : "Kurve"), at: 0)
+        let total = model.length(of: edge)
+        guard let info = model.edgeMeasurement(edge) else {
+            return ("Kante", [.init(label: "Länge", value: unit.format(total))])
         }
-        if !closed {
-            rows.append(.init(label: "Anfang", value: point(start)))
-            rows.append(.init(label: "Ende", value: point(end)))
+        let length = info.length > 0 ? info.length : total
+        var rows: [PropertySnapshot.Row] = []
+        switch info.kind {
+        case .line:
+            rows.append(.init(label: "Art", value: "Gerade"))
+            rows.append(.init(label: "Länge", value: unit.format(length)))
+        case .circle:
+            rows.append(.init(label: "Art", value: info.isClosed ? "Kreis" : "Kreisbogen"))
+            rows.append(.init(label: info.isClosed ? "Umfang" : "Länge", value: unit.format(length)))
+            rows.append(.init(label: "Radius", value: unit.format(info.radius)))
+            rows.append(.init(label: "Ø", value: unit.format(info.radius * 2)))
+            if !info.isClosed { rows.append(.init(label: "Winkel", value: ModelMeasure.degrees(info.sweep))) }
+            rows.append(.init(label: "Mitte", value: point(info.center)))
+        case .ellipse:
+            rows.append(.init(label: "Art", value: "Ellipse"))
+            rows.append(.init(label: "Länge", value: unit.format(length)))
+            rows.append(.init(label: "Halbachsen", value: "\(unit.number(info.radius)) × \(unit.format(info.radius2))"))
+        case .curve:
+            rows.append(.init(label: "Art", value: info.isClosed ? "Geschlossene Kurve" : "Kurve"))
+            rows.append(.init(label: "Länge", value: unit.format(length)))
+        }
+        if !info.isClosed {
+            rows.append(.init(label: "Anfang", value: point(info.start)))
+            rows.append(.init(label: "Ende", value: point(info.end)))
         }
         return ("Kante", rows)
     }
@@ -444,69 +460,5 @@ struct PropertiesPanel: View {
     private func direction(_ d: SIMD3<Double>) -> String {
         let format = { (value: Double) in (abs(value) < 5e-4 ? 0 : value).formatted(.number.precision(.fractionLength(0...3))) }
         return "\(format(d.x)) / \(format(d.y)) / \(format(d.z))"
-    }
-}
-
-/// Hilfsrechnungen für Flächen- und Kantenmaße.
-enum FaceExtent {
-    /// Kleinstes umschließendes Rechteck (gedreht) einer Punktwolke in der Ebene: Länge ≥ Breite.
-    static func smallestRectangle(_ points: [SIMD2<Double>]) -> (length: Double, width: Double)? {
-        let hull = convexHull(points)
-        guard hull.count >= 2 else { return nil }
-        var best: (area: Double, a: Double, b: Double)?
-        for i in hull.indices {
-            let edge = hull[(i + 1) % hull.count] - hull[i]
-            let size = simd_length(edge)
-            guard size > 1e-9 else { continue }
-            let u = edge / size, v = SIMD2(-u.y, u.x)
-            let us = hull.map { simd_dot($0, u) }, vs = hull.map { simd_dot($0, v) }
-            guard let uMin = us.min(), let uMax = us.max(), let vMin = vs.min(), let vMax = vs.max() else { continue }
-            let a = uMax - uMin, b = vMax - vMin
-            if best == nil || a * b < best!.area - 1e-9 { best = (a * b, a, b) }
-        }
-        guard let best else { return nil }
-        return (max(best.a, best.b), min(best.a, best.b))
-    }
-
-    /// Konvexe Hülle (Andrew), gegen den Uhrzeigersinn.
-    static func convexHull(_ input: [SIMD2<Double>]) -> [SIMD2<Double>] {
-        let points = input.sorted { $0.x == $1.x ? $0.y < $1.y : $0.x < $1.x }
-        guard points.count >= 3 else { return points }
-        func cross(_ o: SIMD2<Double>, _ a: SIMD2<Double>, _ b: SIMD2<Double>) -> Double {
-            (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x)
-        }
-        var lower: [SIMD2<Double>] = []
-        for p in points {
-            while lower.count >= 2 && cross(lower[lower.count - 2], lower[lower.count - 1], p) <= 0 { lower.removeLast() }
-            lower.append(p)
-        }
-        var upper: [SIMD2<Double>] = []
-        for p in points.reversed() {
-            while upper.count >= 2 && cross(upper[upper.count - 2], upper[upper.count - 1], p) <= 0 { upper.removeLast() }
-            upper.append(p)
-        }
-        return Array(lower.dropLast() + upper.dropLast())
-    }
-
-    /// Kreis durch einen Linienzug, wenn alle Punkte (eben) auf ihm liegen; sonst nil.
-    static func circle(through points: [SIMD3<Double>]) -> (center: SIMD3<Double>, radius: Double)? {
-        guard points.count >= 4 else { return nil }
-        let a = points[0], b = points[points.count / 3], c = points[(points.count * 2) / 3]
-        let ab = b - a, ac = c - a
-        let normal = simd_cross(ab, ac)
-        let n2 = simd_length_squared(normal)
-        guard n2 > 1e-12 else { return nil }
-        let term1 = simd_cross(normal, ab) * simd_length_squared(ac)
-        let term2 = simd_cross(ac, normal) * simd_length_squared(ab)
-        let center = a + (term1 + term2) / (2 * n2)
-        let radius = simd_distance(center, a)
-        guard radius > 1e-6, radius < 1e6 else { return nil }
-        let unitNormal = normal / n2.squareRoot()
-        let tolerance = max(1e-3, radius * 2e-3)
-        for p in points {
-            if abs(simd_distance(p, center) - radius) > tolerance { return nil }
-            if abs(simd_dot(p - center, unitNormal)) > tolerance { return nil }
-        }
-        return (center, radius)
     }
 }
