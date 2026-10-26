@@ -227,6 +227,8 @@ struct HistoryEntry {
     var sketches: [StoredSketch] = []
     var constructions: [ConstructionItem] = []
     var canvases: [CanvasImage] = []
+    /// Parametrischer Verlauf (FeatureHistory.swift)
+    var features: [Feature] = []
 }
 
 /// Körper, Auswahl, Vorschau, Verlauf und Speichern eines Projekts.
@@ -358,6 +360,9 @@ final class ModelStore: ObservableObject {
     @Published private(set) var history: [HistoryEntry] = []
     @Published private(set) var future: [HistoryEntry] = []
     private var previewBodies: [SceneBody]?
+    /// Parametrischer Verlauf: Features in Reihenfolge, Zeitleiste unten (FeatureHistory.swift, TimelineBar.swift)
+    @Published var features: [Feature] = []
+    let featureRecorder = FeatureRecorder()
 
     /// Projektordner (model.step + bodies.json); nil = nichts speichern.
     let folder: URL?
@@ -611,6 +616,7 @@ final class ModelStore: ObservableObject {
             preview[body] = preview[body].with(result)
             previewHiddenSketch = bodies[body].sketchID
             showPreview(preview, name: "Variabel abrunden")
+            noteBlend(.fillet, value: value, end: end)
             return
         }
         if second != nil {
@@ -624,6 +630,7 @@ final class ModelStore: ObservableObject {
             preview[body] = preview[body].with(result)
             previewHiddenSketch = bodies[body].sketchID
             showPreview(preview, name: operation.rawValue)
+            noteBlend(operation, value: value, second: second)
             return
         }
         // Zu groß: nicht einfach nichts zeigen, sondern den größten möglichen Wert (einmal je Auswahl gesucht)
@@ -654,6 +661,7 @@ final class ModelStore: ObservableObject {
         preview[body] = preview[body].with(result)
         previewHiddenSketch = bodies[body].sketchID
         showPreview(preview, name: operation.rawValue)
+        noteBlend(operation, value: amount)
     }
 
     /// Wie in Fusion 360: Während Kanten zum Abrunden bzw. Fasen gewählt sind, übernimmt das Antippen einer
@@ -706,6 +714,7 @@ final class ModelStore: ObservableObject {
         }
         message = nil
         showPreview(preview, name: faces.count > 1 ? "Flächen extrudieren" : "Extrudieren")
+        noteFaceExtrude(distance: value)
     }
 
     private static let regionPreviewName = "Extrudieren"
@@ -793,6 +802,7 @@ final class ModelStore: ObservableObject {
             guard let result = extrusionResult(solid, sourceBody: sketch.plane.sourceBody, mode: mode, sketch: sketch.id) else { return }
             message = nil
             showPreview(result, name: Self.regionPreviewName)
+            noteExtrude(mode: mode, distance: distance)
             return
         }
         guard let solid = extrudeRegions(regions, plane: sketch.plane, distance: distance, mode: mode,
@@ -805,6 +815,7 @@ final class ModelStore: ObservableObject {
         guard let result = extrusionResult(solid, sourceBody: sketch.plane.sourceBody, mode: mode, sketch: sketch.id) else { return }
         message = nil
         showPreview(result, name: Self.regionPreviewName)
+        noteExtrude(mode: mode, distance: distance)
     }
 
     /// Gewählte Körper verschieben (Vorschau).
@@ -841,6 +852,7 @@ final class ModelStore: ObservableObject {
         }
         message = nil
         showPreview(preview, name: count > 1 ? "Reihe kopieren" : moveCopies ? "Kopieren" : "Verschieben")
+        noteMove(offset: offset, copies: moveCopies, count: count, divides: moveArrayDivides)
     }
 
     /// Gewählte Körper um ihre Mitte drehen (sofort übernommen).
@@ -859,6 +871,9 @@ final class ModelStore: ObservableObject {
             result[index] = result[index].with(rotated, moving: .rotation(origin: center, axis: axis,
                                                                           angle: degrees * .pi / 180))
         }
+        let valid = chosen.filter { bodies.indices.contains($0) }
+        noteRotate(valid, centers: valid.map { center(ofBody: $0) ?? .zero }, axis: axis, degrees: degrees, copies: false,
+                   direct: true)
         commit(result, name: "Drehen")
         selectedBodies = chosen.filter { bodies.indices.contains($0) }
         refreshHighlight()
@@ -891,6 +906,7 @@ final class ModelStore: ObservableObject {
         }
         message = nil
         showPreview(bodies + [newBody(shape, name: primitive.rawValue)], name: "\(primitive.rawValue) einfügen")
+        notePrimitive(primitive, size: size, base: base)
     }
 
     /// Gewählte Körper spiegeln (Vorschau): an fixed (Fläche bzw. Konstruktionsebene) oder an der Ebene plane
@@ -915,6 +931,7 @@ final class ModelStore: ObservableObject {
         }
         message = nil
         showPreview(preview, name: "Spiegeln")
+        noteMirror(plane, keepOriginal: keepOriginal, fixed: fixed)
     }
 
     /// Schale (Vorschau): alle gewählten Flächen des Körpers werden offen, Wandstärke thickness nach innen.
@@ -932,6 +949,7 @@ final class ModelStore: ObservableObject {
         var preview = bodies
         preview[face.body] = preview[face.body].with(result)
         showPreview(preview, name: "Schale")
+        noteShell(thickness: thickness, closed: closed)
     }
 
     /// Boolesche Operation: target bleibt, die anderen Körper werden verbraucht (keepTools: bleiben stehen).
@@ -959,6 +977,7 @@ final class ModelStore: ObservableObject {
                 result.remove(at: tool)
             }
         }
+        noteBoolean(kind, target: target, tools: tools, keepTools: keepTools)
         commit(result, name: kind.rawValue)
     }
 
@@ -982,6 +1001,7 @@ final class ModelStore: ObservableObject {
             newSketches = list
         }
         previewHiddenSketch = nil
+        takePreviewFeature()
         commit(preview, sketches: newSketches, name: name)
     }
 
@@ -1004,6 +1024,7 @@ final class ModelStore: ObservableObject {
         for index in chosen.sorted(by: >) where result.indices.contains(index) {
             result.remove(at: index)
         }
+        noteDelete(chosen.filter { bodies.indices.contains($0) })
         commit(result, name: chosen.count == 1 ? "Löschen" : "\(chosen.count) Körper löschen")
     }
 
@@ -1078,7 +1099,8 @@ final class ModelStore: ObservableObject {
             sketch.isHidden = result[index].isHidden
             sketch.id = result[index].id
             result[index] = sketch
-            commit(bodies, sketches: result, name: "Skizze bearbeiten")
+            // Parametrischer Verlauf: Körper aus dieser Skizze folgen (FeatureHistory.swift)
+            rebuildFeatures(sketches: result, changed: [sketch.id], name: "Skizze bearbeiten")
         } else {
             let number = (sketches.count) + 1
             result.append(StoredSketch(name: "Skizze \(number)", plane: plane, entities: entities,
@@ -1091,6 +1113,7 @@ final class ModelStore: ObservableObject {
         guard sketches.indices.contains(index) else { return }
         dropPreview()
         var result = sketches
+        embedSketchCopy(result[index])
         let name = result.remove(at: index).name
         commit(bodies, sketches: result, name: "\(name) löschen")
     }
@@ -1389,6 +1412,7 @@ final class ModelStore: ObservableObject {
     }
 
     func showPreview(_ preview: [SceneBody], name: String) {
+        featureRecorder.preview = nil
         previewBodies = preview
         previewName = name
         remesh()
@@ -1396,6 +1420,7 @@ final class ModelStore: ObservableObject {
     }
 
     func dropPreview() {
+        featureRecorder.preview = nil
         guard previewBodies != nil else { return }
         previewBodies = nil
         previewName = nil
@@ -1409,18 +1434,21 @@ final class ModelStore: ObservableObject {
                         canvases newCanvases: [CanvasImage]? = nil, name: String) {
         history.append(currentEntry(name: name))
         future.removeAll()
+        let previous = bodies
         // Komponenten: Änderung einer Instanz auf alle übertragen (ModelComponents.swift)
         let synced = syncedComponents(newBodies)
         bodies = synced.bodies
         if let newSketches { sketches = newSketches }
         if let newConstructions { constructions = newConstructions }
         if let newCanvases { canvases = newCanvases }
+        recordFeature(name: name, previous: previous)
         afterChange()
         if let note = synced.note { message = note }
     }
 
     private func currentEntry(name: String) -> HistoryEntry {
-        HistoryEntry(name: name, bodies: bodies, sketches: sketches, constructions: constructions, canvases: canvases)
+        HistoryEntry(name: name, bodies: bodies, sketches: sketches, constructions: constructions, canvases: canvases,
+                     features: features)
     }
 
     private func restore(_ entry: HistoryEntry) {
@@ -1428,6 +1456,8 @@ final class ModelStore: ObservableObject {
         sketches = entry.sketches
         constructions = entry.constructions
         canvases = entry.canvases
+        features = entry.features
+        featuresRestored()
         afterChange()
     }
 
@@ -1804,23 +1834,22 @@ final class ModelStore: ObservableObject {
     /// Werte aller Projektvariablen (Name → mm bzw. Grad).
     var variableValues: [String: Double] { Formula.resolve(variables) }
 
-    /// Variablen ersetzen; Skizzenmaße, die eine Variable verwenden, folgen sofort.
-    /// Körper folgen nicht: Ohne Verlauf der Konstruktion (wie Shapr3D „direkt“) bleiben sie, wie sie sind.
+    /// Variablen ersetzen; Skizzenmaße, die eine Variable verwenden, folgen sofort. Körper folgen über den
+    /// parametrischen Verlauf (Nachbau ab dem ersten betroffenen Feature, FeatureHistory.swift).
     func setVariables(_ list: [ProjectVariable]) {
+        commitPreview()
         variables = list
         let values = variableValues
         var result = sketches
-        var changed = false
+        var changedSketches: Set<UUID> = []
         for index in result.indices {
             if let updated = Self.reevaluated(result[index], values: values) {
                 result[index] = updated
-                changed = true
+                changedSketches.insert(updated.id)
             }
         }
-        if changed {
-            commitPreview()
-            commit(bodies, sketches: result, name: "Variablen ändern")
-        } else {
+        let newSketches: [StoredSketch]? = changedSketches.isEmpty ? nil : result
+        if !rebuildFeatures(sketches: newSketches, changed: changedSketches, name: "Variablen ändern") {
             save()
         }
     }
@@ -1830,8 +1859,10 @@ final class ModelStore: ObservableObject {
         var constraints = sketch.constraints
         var touched = false
         for index in constraints.indices {
+            // Projekteinheit und Winkel wie an der Ecke gezeigt (FeatureHistory.swift)
             guard let expression = constraints[index].expression, let old = constraints[index].dimensionValue,
-                  let value = try? Formula.evaluate(expression, variables: values), value > 0,
+                  let value = Self.formulaDimensionValue(expression, for: constraints[index].variant,
+                                                         entities: sketch.entities, values: values),
                   abs(value - old) > 1e-9 else { continue }
             constraints[index] = constraints[index].withDimensionValue(value)
             touched = true
@@ -1903,6 +1934,8 @@ final class ModelStore: ObservableObject {
     private var variablesURL: URL? { folder?.appending(path: "variables.json") }
 
     private func load() {
+        // Verlauf erst nach den Körpern lesen (FeatureHistory.swift)
+        defer { loadFeatures() }
         if let url = variablesURL, let data = try? Data(contentsOf: url),
            let stored = try? JSONDecoder().decode([ProjectVariable].self, from: data) {
             variables = stored
@@ -1936,6 +1969,8 @@ final class ModelStore: ObservableObject {
     }
 
     private func save() {
+        // features.json nach model.step schreiben (FeatureHistory.swift)
+        defer { saveFeatures() }
         if let sketchesURL, let data = try? JSONEncoder().encode(sketches) {
             try? data.write(to: sketchesURL)
         }
@@ -2326,6 +2361,8 @@ extension ModelStore {
         }
         message = nil
         showPreview(preview, name: "Muster linear")
+        noteLinearPattern(count: count, spacing: spacing, direction: direction, count2: rows, spacing2: spacing2,
+                          direction2: direction2)
     }
 
     /// Drehscheibe im Verschieben-Werkzeug: gewählte Körper um eine Achse durch center drehen (Vorschau,
@@ -2353,6 +2390,9 @@ extension ModelStore {
         }
         message = nil
         showPreview(preview, name: moveCopies ? "Gedreht kopieren" : "Drehen")
+        let rotated = selectedBodies.filter { bodies.indices.contains($0) }
+        noteRotate(rotated, centers: rotated.map { _ in center }, axis: axis, degrees: degrees, copies: moveCopies,
+                   direct: false)
     }
 
     /// Ergebnis der KI-Anbindung als Vorschau zeigen (Übernehmen mit commitPreview, Verwerfen mit cancelPreview).
@@ -2386,6 +2426,7 @@ extension ModelStore {
         }
         message = nil
         showPreview(preview, name: "Muster kreisförmig")
+        noteCircularPattern(count: count, angle: degrees, axisOrigin: axisOrigin, axis: axis)
     }
 
     /// Gewählte Körper um ihre Mitte skalieren.
@@ -2465,6 +2506,7 @@ extension ModelStore {
             shapes.append(shape)
         }
         showSolid(shapes, sourceBody: chosen[0].plane.sourceBody, mode: mode, name: "Drehen")
+        noteRevolve(axisOrigin: axisOrigin, axis: axis, degrees: degrees, mode: mode)
     }
 
     /// Offene Kurven einer Skizze als Pfad (Kernel-Kodierung), in Reihenfolge verkettet.
@@ -2704,7 +2746,7 @@ extension ModelStore {
         plane.sourceBody = nil
         result[index].plane = plane
         result[index].rebuild()
-        commit(bodies, sketches: result, name: "Skizze verschieben")
+        rebuildFeatures(sketches: result, changed: [result[index].id], name: "Skizze verschieben")
     }
 
     func rotateSketch(_ index: Int, axis: SIMD3<Double>, degrees: Double) {
@@ -2723,7 +2765,7 @@ extension ModelStore {
         plane.sourceBody = nil
         result[index].plane = plane
         result[index].rebuild()
-        commit(bodies, sketches: result, name: "Skizze drehen")
+        rebuildFeatures(sketches: result, changed: [result[index].id], name: "Skizze drehen")
         movingSketch = index
     }
 
@@ -2742,7 +2784,7 @@ extension ModelStore {
             return SketchConstraint(variant: .lock(ref, at: center + (at - center) * factor))
         }
         result[index].rebuild()
-        commit(bodies, sketches: result, name: "Skizze skalieren")
+        rebuildFeatures(sketches: result, changed: [result[index].id], name: "Skizze skalieren")
     }
 }
 
