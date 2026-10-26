@@ -2056,6 +2056,9 @@ struct CanvasImage: Codable, Identifiable {
     var offset: Point2 = .zero
     var opacity: Double = 0.85
     var isHidden = false
+    /// Nach dem Kalibrieren gesperrt (Kai): Größe, Lage und Ebene bleiben, bis man es wieder entsperrt.
+    /// Optional, damit ältere Projekte ohne dieses Feld lesbar bleiben.
+    var isLocked: Bool? = nil
 
     /// Ecken (links unten, rechts unten, rechts oben, links oben) in Weltkoordinaten.
     var corners: [SIMD3<Double>] {

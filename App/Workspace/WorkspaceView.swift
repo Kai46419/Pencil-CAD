@@ -367,6 +367,10 @@ private struct WorkspaceContent: View {
                 }
                 .buttonStyle(.plain)
             }
+            // Foto in der Skizze kalibrieren: Maß-Eingabe auch hier (sonst in der Bild-Karte)
+            if sketch.isActive, let calibration = workspace.canvasCalibration {
+                CanvasTraceCard(workspace: workspace, model: model, canvasID: calibration.canvas)
+            }
             ParameterCard(workspace: workspace, model: model, sketch: sketch)
             if workspace.showsDoneBar {
                 doneBar
@@ -460,7 +464,9 @@ private struct WorkspaceContent: View {
         guard let jpeg = normalized.jpegData(compressionQuality: 0.85) else { return }
         model.addCanvas(jpeg, aspect: Double(size.height / size.width))
         if let canvas = model.canvases.last {
-            workspace.activate(.canvas(canvas.id))
+            if !sketch.isActive { workspace.activate(.canvas(canvas.id)) }
+            // Gleich kalibrieren (Kai): bekannte Strecke antippen, echtes Maß eingeben
+            workspace.startCalibration(canvas.id)
         }
     }
 

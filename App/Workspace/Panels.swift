@@ -1526,10 +1526,20 @@ extension ParameterCard {
     @ViewBuilder
     func canvasCard(_ id: UUID) -> some View {
         if let canvas = model.canvases.first(where: { $0.id == id }) {
+            let locked = canvas.isLocked == true
             Card {
                 HStack(spacing: 14) {
                     Label(canvas.name, systemImage: "photo")
                         .font(.callout.weight(.semibold))
+                    // Gesperrt nach dem Kalibrieren: Größe und Lage bleiben (Kai)
+                    Button {
+                        var changed = canvas
+                        changed.isLocked = locked ? nil : true
+                        model.updateCanvas(changed)
+                    } label: {
+                        Image(systemName: locked ? "lock" : "lock.open")
+                    }
+                    .hoverTip(locked ? "Bild gesperrt" : "Bild sperren", "Gesperrt bleiben Größe, Lage und Ebene unverändert.")
                     Picker("Ebene", selection: Binding(get: { canvas.plane }, set: { plane in
                         var changed = canvas
                         changed.plane = plane
@@ -1538,22 +1548,26 @@ extension ParameterCard {
                         ForEach(BasePlane.allCases) { Text($0.rawValue).tag($0) }
                     }
                     .fixedSize()
+                    .disabled(locked)
                     NumberField(title: "Breite", value: canvas.width, width: 60) { value in
                         guard value > 0 else { return }
                         var changed = canvas
                         changed.width = value
                         model.updateCanvas(changed)
                     }
+                    .disabled(locked)
                     NumberField(title: "X", value: canvas.offset.x, width: 54) { value in
                         var changed = canvas
                         changed.offset.x = value
                         model.updateCanvas(changed)
                     }
+                    .disabled(locked)
                     NumberField(title: "Y", value: canvas.offset.y, width: 54) { value in
                         var changed = canvas
                         changed.offset.y = value
                         model.updateCanvas(changed)
                     }
+                    .disabled(locked)
                     Slider(value: Binding(get: { canvas.opacity }, set: { value in
                         var changed = canvas
                         changed.opacity = value
@@ -2122,7 +2136,8 @@ struct LayersPanel: View {
             Button("Bearbeiten", systemImage: "slider.horizontal.3") { workspace.activate(.canvas(canvas.id)) }
             // Foto nachzeichnen (siehe CanvasTracing.swift)
             Button("Maßstab kalibrieren", systemImage: "ruler") {
-                workspace.activate(.canvas(canvas.id))
+                // In der Skizze bleiben (Kai konstruiert direkt auf dem Foto)
+                if !workspace.sketch.isActive { workspace.activate(.canvas(canvas.id)) }
                 workspace.startCalibration(canvas.id)
             }
             Button("Kontur erkennen", systemImage: "wand.and.stars") { workspace.detectContours(canvas.id) }

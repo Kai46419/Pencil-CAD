@@ -90,6 +90,16 @@ final class ViewportView: MTKView {
     }
     private var planeLabels: [PaddedLabel] = []
     private var dimensionFields: [String: DimensionField] = [:]
+    /// Bild kalibrieren mit dem Stift: Zug mit Lupe, der Punkt sitzt beim Absetzen
+    private var calibrationTouch: UITouch?
+    private var lastCalibrationPlacement = Date.distantPast
+    private lazy var calibrationLoupe: CalibrationLoupe = {
+        let loupe = CalibrationLoupe(frame: CGRect(x: 0, y: 0, width: 128, height: 128))
+        loupe.isHidden = true
+        addSubview(loupe)
+        return loupe
+    }()
+    private var loupeImage: (file: String, image: UIImage)?
     /// Feste Maße, die als Schloss gezeigt werden und gerade aufgeklappt sind (bis die Eingabe endet)
     private var expandedDimensions: Set<String> = []
     /// Kleines Ziffernfeld am gerade bearbeiteten Maß (statt der Bildschirmtastatur, die die Maße verdeckt)
@@ -541,8 +551,8 @@ final class ViewportView: MTKView {
                                     dots: points, dotRadius: 5))
         }
         if !sketch.isActive { addToolOverlays(to: &groups, fills: &fills) }
-        // Bild kalibrieren: angetippte Punkte und ihre Verbindung
-        if !sketch.isActive, let calibration = workspace.calibrationWorldPoints {
+        // Bild kalibrieren: angetippte Punkte und ihre Verbindung (auch in der Skizze)
+        if let calibration = workspace.calibrationWorldPoints {
             let points = calibration.map { SIMD3<Float>($0) }
             groups.append(LineGroup(polylines: points.count == 2 ? [points] : [], color: Self.snapOrange, width: 2.4,
                                     dots: points, dotRadius: 6, onTop: true))
@@ -1131,6 +1141,51 @@ final class ViewportView: MTKView {
         }
     }
 
+    // MARK: Lupe beim Kalibrieren
+
+    /// Lupe über dem Stift: zeigt den Bildausschnitt unter der Spitze dreifach vergrößert mit Fadenkreuz, damit
+    /// Anfang und Ende der bekannten Strecke genau getroffen werden (Kai).
+    private func updateCalibrationLoupe(at location: CGPoint) {
+        guard let renderer, let workspace, let model, let canvas = workspace.calibrationCanvas,
+              let ray = renderer.camera.ray(through: location, viewSize: bounds.size),
+              let local = workspace.calibrationPoint(origin: SIMD3<Double>(ray.origin),
+                                                     direction: SIMD3<Double>(ray.direction)) else {
+            calibrationLoupe.isHidden = true
+            return
+        }
+        // Foto einmal laden und behalten
+        if loupeImage?.file != canvas.fileName {
+            if let url = model.canvasURL(canvas), let image = UIImage(contentsOfFile: url.path(percentEncoded: false)) {
+                loupeImage = (canvas.fileName, image)
+            } else {
+                loupeImage = nil
+            }
+        }
+        guard let image = loupeImage?.image, image.size.width > 0, canvas.width > 0 else {
+            calibrationLoupe.isHidden = true
+            return
+        }
+        // Lage im Bild (0…1, y nach unten wie in der Bilddatei)
+        let height: Double = canvas.width * canvas.aspect
+        let u: Double = (local.x - (canvas.offset.x - canvas.width / 2)) / canvas.width
+        let v: Double = 1 - (local.y - (canvas.offset.y - height / 2)) / height
+        let pixel = CGPoint(x: u * Double(image.size.width), y: v * Double(image.size.height))
+        // Bildpixel je Bildschirmpunkt, damit die Lupe dreifach vergrößert, egal wie weit gezoomt ist
+        let mmPerPoint = Double(renderer.camera.worldUnitsPerPoint(viewHeight: Float(bounds.height)))
+        let pixelsPerPoint: Double = mmPerPoint * Double(image.size.width) / canvas.width
+        let side = Double(calibrationLoupe.bounds.width)
+        let span = CGFloat(max(side / 3 * pixelsPerPoint, 4))
+        calibrationLoupe.show(image, around: pixel, span: span)
+        // Über dem Stift, im Bild halten
+        let half = calibrationLoupe.bounds.width / 2
+        var center = CGPoint(x: location.x, y: location.y - half - 40)
+        if center.y - half < safeAreaInsets.top + 8 { center.y = location.y + half + 40 }
+        center.x = min(max(center.x, half + 8), bounds.width - half - 8)
+        calibrationLoupe.center = center
+        calibrationLoupe.isHidden = false
+        bringSubviewToFront(calibrationLoupe)
+    }
+
     // MARK: Maße am Element
 
     /// Maße des Elements beim Aufziehen (nur Anzeige) und danach als Eingabefelder direkt am Element.
@@ -1699,6 +1754,13 @@ final class ViewportView: MTKView {
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         updateHeldFingers(began: touches)
+        // Bild kalibrieren: Stift aufsetzen zeigt die Lupe, gesetzt wird beim Absetzen
+        if calibrationTouch == nil, workspace?.canvasCalibration != nil,
+           let touch = touches.first(where: { $0.type == .pencil }) {
+            calibrationTouch = touch
+            updateCalibrationLoupe(at: touch.location(in: self))
+            return
+        }
         // Ziehpfeil und Rahmen nur mit der ersten Berührung (nicht der zweite Finger beim Zoomen)
         let alone = (event?.allTouches?.count ?? touches.count) == touches.count && touches.count == 1
         if handleDrag == nil, alone,
@@ -1780,6 +1842,10 @@ final class ViewportView: MTKView {
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if let touch = calibrationTouch, touches.contains(touch) {
+            updateCalibrationLoupe(at: touch.location(in: self))
+            return
+        }
         if let drag = planeDrag, touches.contains(drag.touch) {
             if let point = planePoint(at: drag.touch.location(in: self), normal: drag.normal, origin: drag.origin) {
                 var offset = drag.startOffset + (point - drag.start)
@@ -1850,6 +1916,17 @@ final class ViewportView: MTKView {
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         updateHeldFingers(ended: touches)
+        if let touch = calibrationTouch, touches.contains(touch) {
+            calibrationTouch = nil
+            calibrationLoupe.isHidden = true
+            if let renderer, let workspace,
+               let ray = renderer.camera.ray(through: touch.location(in: self), viewSize: bounds.size) {
+                workspace.calibrationTapped(origin: SIMD3<Double>(ray.origin), direction: SIMD3<Double>(ray.direction))
+                lastCalibrationPlacement = Date()
+            }
+            refresh()
+            return
+        }
         if let drag = planeDrag, touches.contains(drag.touch) {
             planeDrag = nil
             refresh()
@@ -1893,6 +1970,12 @@ final class ViewportView: MTKView {
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
         updateHeldFingers(ended: touches)
+        // Kurzes Tippen erkennt die Tipp-Geste (sie bricht die Berührung ab) und setzt den Punkt dort
+        if let touch = calibrationTouch, touches.contains(touch) {
+            calibrationTouch = nil
+            calibrationLoupe.isHidden = true
+            return
+        }
         if let drag = planeDrag, touches.contains(drag.touch) {
             planeDrag = nil
             refresh()
@@ -1944,6 +2027,15 @@ final class ViewportView: MTKView {
         guard handleHit(at: location) == nil,
               let renderer, let model, let sketch, let workspace,
               let ray = renderer.camera.ray(through: location, viewSize: bounds.size) else { return }
+        // Bild kalibrieren: Punkte auf der Bildebene antippen (auch in der Skizze). Ein Stiftzug mit Lupe setzt den
+        // Punkt schon in touchesEnded – dann hier nicht noch einmal.
+        if workspace.canvasCalibration != nil {
+            if Date().timeIntervalSince(lastCalibrationPlacement) > 0.3 {
+                workspace.calibrationTapped(origin: SIMD3<Double>(ray.origin), direction: SIMD3<Double>(ray.direction))
+            }
+            refresh()
+            return
+        }
         let hit = model.pick(origin: ray.origin, direction: ray.direction)
 
         if sketch.isActive {
@@ -2001,12 +2093,6 @@ final class ViewportView: MTKView {
             } else {
                 model.message = "Auf gekrümmten Flächen kann nicht skizziert werden."
             }
-            refresh()
-            return
-        }
-        // Bild kalibrieren: Punkte auf der Bildebene antippen
-        if workspace.canvasCalibration != nil {
-            workspace.calibrationTapped(origin: SIMD3<Double>(ray.origin), direction: SIMD3<Double>(ray.direction))
             refresh()
             return
         }
@@ -2755,3 +2841,64 @@ final class DimensionKeypad: UIView {
         return CGSize(width: width + Self.padding * 2, height: height + Self.padding * 2)
     }
 }
+
+/// Runde Lupe mit Fadenkreuz für das Kalibrieren eines Fotos.
+final class CalibrationLoupe: UIView {
+    private let imageView = UIImageView()
+    private let cross = CAShapeLayer()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        backgroundColor = .white
+        layer.cornerRadius = frame.width / 2
+        layer.borderWidth = 1
+        layer.borderColor = UIColor.systemGray3.cgColor
+        layer.shadowColor = UIColor.black.cgColor
+        layer.shadowOpacity = 0.25
+        layer.shadowRadius = 6
+        layer.shadowOffset = CGSize(width: 0, height: 2)
+        imageView.frame = bounds
+        imageView.layer.cornerRadius = frame.width / 2
+        imageView.clipsToBounds = true
+        imageView.contentMode = .scaleToFill
+        addSubview(imageView)
+        // Feines Fadenkreuz mit Lücke in der Mitte
+        let path = UIBezierPath()
+        let c = CGPoint(x: bounds.midX, y: bounds.midY)
+        let gap: CGFloat = 4, arm: CGFloat = 18
+        path.move(to: CGPoint(x: c.x - gap - arm, y: c.y))
+        path.addLine(to: CGPoint(x: c.x - gap, y: c.y))
+        path.move(to: CGPoint(x: c.x + gap, y: c.y))
+        path.addLine(to: CGPoint(x: c.x + gap + arm, y: c.y))
+        path.move(to: CGPoint(x: c.x, y: c.y - gap - arm))
+        path.addLine(to: CGPoint(x: c.x, y: c.y - gap))
+        path.move(to: CGPoint(x: c.x, y: c.y + gap))
+        path.addLine(to: CGPoint(x: c.x, y: c.y + gap + arm))
+        cross.path = path.cgPath
+        cross.strokeColor = UIColor.systemOrange.cgColor
+        cross.lineWidth = 1
+        layer.addSublayer(cross)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) wird nicht verwendet")
+    }
+
+    /// Ausschnitt von span × span Bildpixeln um pixel (Bildkoordinaten, y nach unten) zeigen.
+    func show(_ image: UIImage, around pixel: CGPoint, span: CGFloat) {
+        let size = bounds.size
+        let scale = size.width / span
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let rendered = UIGraphicsImageRenderer(size: size, format: format).image { context in
+            UIColor.white.setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+            let origin = CGPoint(x: size.width / 2 - pixel.x * scale, y: size.height / 2 - pixel.y * scale)
+            let drawn = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+            image.draw(in: CGRect(origin: origin, size: drawn))
+        }
+        imageView.image = rendered
+    }
+}
+

@@ -16,28 +16,40 @@ extension Workspace {
 
     func startCalibration(_ canvas: UUID) {
         canvasCalibration = CanvasCalibration(canvas: canvas)
-        model.message = "Zwei Punkte auf dem Bild antippen, deren echten Abstand du kennst."
+        model.message = "Zwei Punkte auf dem Bild antippen, deren echten Abstand du kennst – mit dem Stift ziehen "
+            + "zeigt eine Lupe, der Punkt sitzt beim Absetzen."
     }
 
     func cancelCalibration() {
         canvasCalibration = nil
     }
 
+    /// Bild, das gerade kalibriert wird.
+    var calibrationCanvas: CanvasImage? {
+        guard let calibration = canvasCalibration else { return nil }
+        return model.canvases.first { $0.id == calibration.canvas }
+    }
+
+    /// Schnitt des Sehstrahls mit der Bildebene (lokal, mm); nil, wenn die Ebene von der Seite zu sehen ist.
+    func calibrationPoint(origin: SIMD3<Double>, direction: SIMD3<Double>) -> Point2? {
+        guard let canvas = calibrationCanvas else { return nil }
+        let frame = SketchPlane.base(canvas.plane)
+        let denominator = simd_dot(direction, frame.normal)
+        guard abs(denominator) > 1e-9 else { return nil }
+        let t = simd_dot(frame.origin - origin, frame.normal) / denominator
+        return frame.local(origin + direction * t)
+    }
+
     /// Angetippter Punkt auf der Bildebene (Sehstrahl aus dem Viewport).
     func calibrationTapped(origin: SIMD3<Double>, direction: SIMD3<Double>) {
-        guard var calibration = canvasCalibration,
-              let canvas = model.canvases.first(where: { $0.id == calibration.canvas }) else {
+        guard var calibration = canvasCalibration, calibrationCanvas != nil else {
             canvasCalibration = nil
             return
         }
-        let frame = SketchPlane.base(canvas.plane)
-        let denominator = simd_dot(direction, frame.normal)
-        guard abs(denominator) > 1e-9 else {
+        guard let local = calibrationPoint(origin: origin, direction: direction) else {
             model.message = "Die Bildebene ist von der Seite zu sehen – Ansicht drehen."
             return
         }
-        let t = simd_dot(frame.origin - origin, frame.normal) / denominator
-        let local = frame.local(origin + direction * t)
         if calibration.points.count >= 2 { calibration.points = [] }
         calibration.points.append(local)
         canvasCalibration = calibration
@@ -68,9 +80,12 @@ extension Workspace {
         let anchor = calibration.points[0]
         canvas.width *= factor
         canvas.offset = anchor + (canvas.offset - anchor) * factor
+        // Danach sperren, damit das Foto beim Daraufkonstruieren nicht verrutscht
+        canvas.isLocked = true
         model.commitCanvas(canvas, name: "\(canvas.name) kalibrieren")
         canvasCalibration = nil
-        model.message = "\(canvas.name): Maßstab eingestellt, Breite jetzt \(LengthUnit.current.format(canvas.width))."
+        model.message = "\(canvas.name): Maßstab eingestellt und gesperrt, Breite jetzt "
+            + "\(LengthUnit.current.format(canvas.width)). Jetzt in Originalgröße daraufkonstruieren."
     }
 
     // MARK: Kontur erkennen
@@ -162,7 +177,7 @@ struct CanvasTraceCard: View {
                 if let calibration = workspace.canvasCalibration, calibration.canvas == canvasID {
                     calibrationControls(calibration)
                 } else {
-                    Button("Maßstab", systemImage: "ruler") { workspace.startCalibration(canvasID) }
+                    Button("Maßstab kalibrieren", systemImage: "ruler") { workspace.startCalibration(canvasID) }
                         .hoverTip("Maßstab kalibrieren", "Zwei Punkte auf dem Bild antippen und das echte Maß eingeben.")
                     Menu {
                         Button("Dunkle Formen auf hellem Grund", systemImage: "circle.fill") {
