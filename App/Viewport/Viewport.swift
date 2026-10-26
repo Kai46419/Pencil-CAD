@@ -131,6 +131,10 @@ final class ViewportView: MTKView {
         case point(SIMD3<Double>)
     }
     private var hoverPick: HoverPick?
+    /// Messen „Punkt zu Punkt“: Leitlinie zum schwebenden Stift, wenn der zweite Punkt einrastet
+    private var measureHoverGuide: MeasureGuide?
+    /// Ebene der zuletzt überfahrenen Fläche (der Kernel wird nicht bei jeder Stiftbewegung gefragt)
+    private var measurePlaneCache: (face: FaceRef, revision: Int, plane: SketchPlane?)?
     /// Aufgelegte Finger beim Skizzieren mit dem Stift (Finger auflegen = tangentialer Bogen)
     private var heldFingers = Set<UITouch>()
     /// Der aufgelegte Finger hat als Bogen-Taste gedient: sein Loslassen ist kein Antippen
@@ -545,10 +549,8 @@ final class ViewportView: MTKView {
             addPlaneHandles(to: &fills, groups: &groups)
         }
         if !sketch.isActive { addHoverHighlight(to: &groups, fills: &fills) }
-        if !sketch.isActive, workspace.tool == .measure, !workspace.measurePoints.isEmpty {
-            let points = workspace.measurePoints.map { SIMD3<Float>($0) }
-            groups.append(LineGroup(polylines: points.count == 2 ? [points] : [], color: Self.previewBlue, width: 2,
-                                    dots: points, dotRadius: 5))
+        if !sketch.isActive, workspace.tool == .measure {
+            addMeasureOverlay(to: &groups, perPoint: perPoint)
         }
         if !sketch.isActive { addToolOverlays(to: &groups, fills: &fills) }
         // Bild kalibrieren: angetippte Punkte und ihre Verbindung (auch in der Skizze)
@@ -704,6 +706,32 @@ final class ViewportView: MTKView {
         renderer.fills = fills
     }
 
+    // MARK: Messen
+
+    /// Messen: gemessene Kante bzw. Flächenumriss orange, Messpunkte mit Verbindung; eingerastete Verbindung
+    /// gestrichelt in Achsfarbe (wie die Leitlinien der Skizze), beim Schweben auch die Vorschau dorthin.
+    private func addMeasureOverlay(to groups: inout [LineGroup], perPoint: Double) {
+        guard let workspace else { return }
+        if !workspace.measureHighlight.isEmpty {
+            let lines: [[SIMD3<Float>]] = workspace.measureHighlight.map { line in line.map { SIMD3<Float>($0) } }
+            groups.append(LineGroup(polylines: lines, color: Self.selectionOrange, width: 4, onTop: true))
+        }
+        let points: [SIMD3<Float>] = workspace.measurePoints.map { SIMD3<Float>($0) }
+        let dash = Float(5 * perPoint)
+        if let guide = workspace.measureGuide, points.count == 2 {
+            let line: [SIMD3<Float>] = [SIMD3<Float>(guide.from), SIMD3<Float>(guide.to)]
+            groups.append(LineGroup(polylines: dashed(line, dash: dash), color: guide.color, width: 2.4,
+                                    dots: points, dotRadius: 5, onTop: true))
+        } else if !points.isEmpty {
+            groups.append(LineGroup(polylines: points.count == 2 ? [points] : [], color: Self.previewBlue, width: 2,
+                                    dots: points, dotRadius: 5, onTop: true))
+        }
+        if points.count == 1, let guide = measureHoverGuide {
+            let line: [SIMD3<Float>] = [SIMD3<Float>(guide.from), SIMD3<Float>(guide.to)]
+            groups.append(LineGroup(polylines: dashed(line, dash: dash), color: guide.color, width: 1.6, onTop: true))
+        }
+    }
+
     // MARK: Schweben im Modell
 
     private static let hoverBlue = SIMD3<Float>(0.2, 0.55, 1)
@@ -781,13 +809,17 @@ final class ViewportView: MTKView {
     /// Skizzenbereich vor der Fläche, auf der er liegt. Nur ebene Flächen (extrudierbar) werden gezeigt.
     private func updateHoverPick(at location: CGPoint?) {
         var pick: HoverPick?
+        var guide: MeasureGuide?
+        // Messen „Kante/Fläche“: Kanten und Flächen wie beim Auswählen vorab zeigen
+        let measuresElements = workspace.map { $0.tool == .measure && $0.measureMode == .element } ?? false
         if let location, let renderer, let model, let workspace, let sketch, !sketch.isActive, handleDrag == nil,
-           ringDrag == nil, Self.hoverTools(workspace.tool),
+           ringDrag == nil, Self.hoverTools(workspace.tool) || measuresElements,
            let ray = renderer.camera.ray(through: location, viewSize: bounds.size) {
             let hit = model.pick(origin: ray.origin, direction: ray.direction)
-            if let edge = pickEdge(at: location, ray: ray, faceHit: hit)?.edge, workspace.tool == .select {
+            if let edge = pickEdge(at: location, ray: ray, faceHit: hit)?.edge,
+               workspace.tool == .select || measuresElements {
                 if !model.selectedEdges.contains(edge) { pick = .edge(edge) }
-            } else if let regionHit = model.pickRegion(origin: ray.origin, direction: ray.direction),
+            } else if !measuresElements, let regionHit = model.pickRegion(origin: ray.origin, direction: ray.direction),
                       regionHit.t <= (hit.map { simd_dot($0.point - ray.origin, ray.direction) } ?? .infinity) + 0.05 {
                 if !model.selectedRegions.contains(regionHit.ref) { pick = .region(regionHit.ref) }
             } else if let face = hit?.face, !model.selectedFaces.contains(face),
@@ -798,12 +830,33 @@ final class ViewportView: MTKView {
                   workspace.picksModelPoints, let ray = renderer.camera.ray(through: location, viewSize: bounds.size),
                   let hit = model.pick(origin: ray.origin, direction: ray.direction) {
             // Übersetzen, Bohrung, Konstruktion aus Punkten: Fangpunkt unter dem Stift zeigen
-            pick = .point(model.snappedModelPoint(SIMD3<Double>(hit.point), tolerance: snapTolerance))
+            var point = model.snappedModelPoint(SIMD3<Double>(hit.point), tolerance: snapTolerance)
+            if workspace.tool == .measure, workspace.measurePoints.count == 1 {
+                // Messen: zweiter Punkt rastet wie beim Antippen auf der Leitlinie ein
+                let lock = ModelMeasure.locked(SIMD3<Double>(hit.point), from: workspace.measurePoints[0],
+                                               normal: workspace.measureFirstNormal, tolerance: snapTolerance,
+                                               surface: measurePlane(of: hit.face))
+                if let found = lock.guide {
+                    point = lock.point
+                    guide = found
+                }
+            }
+            pick = .point(point)
         }
-        if pick != hoverPick {
+        if pick != hoverPick || guide != measureHoverGuide {
             hoverPick = pick
+            measureHoverGuide = guide
             refresh()
         }
+    }
+
+    /// Ebene einer Fläche für die Messvorschau (zwischengespeichert, solange dieselbe Fläche überfahren wird).
+    private func measurePlane(of face: FaceRef) -> SketchPlane? {
+        guard let model else { return nil }
+        if let cached = measurePlaneCache, cached.face == face, cached.revision == model.revision { return cached.plane }
+        let plane = model.plane(of: face)
+        measurePlaneCache = (face, model.revision, plane)
+        return plane
     }
 
     /// Werkzeuge, in denen Antippen Flächen bzw. Kanten wählt.

@@ -84,6 +84,8 @@
 #include <gp_Elips.hxx>
 #include <gp_Trsf.hxx>
 #include <gp_Cylinder.hxx>
+#include <gp_Cone.hxx>
+#include <gp_Sphere.hxx>
 #include <gp_Lin.hxx>
 #include <gp_Pln.hxx>
 #include <gp_Torus.hxx>
@@ -463,6 +465,10 @@ static Handle(Geom_BSplineCurve) makeBSpline(const std::vector<gp_Pnt> &poles, b
 
 /// Baut eine Kontur aus der Segment-Kodierung (siehe PCKShape.h). Liefert einen leeren Draht bei Fehlern.
 static TopoDS_Wire wireFromCode(const std::vector<double> &code) {
+    // Ungültige Zahlen (NaN, unendlich) führen im Kernel zu Speicherfehlern, die kein catch abfängt
+    for (const double value : code) {
+        if (!std::isfinite(value)) return TopoDS_Wire();
+    }
     BRepBuilderAPI_MakeWire wire;
     size_t i = 0;
     auto point = [&]() {
@@ -494,7 +500,9 @@ static TopoDS_Wire wireFromCode(const std::vector<double> &code) {
         case 5:
         case 6: {
             if (!has(1)) return TopoDS_Wire();
-            const size_t n = size_t(code[i++]);
+            const double count = code[i++];
+            if (count < 2 || count > double(code.size())) return TopoDS_Wire();
+            const size_t n = size_t(count);
             if (!has(3 * n)) return TopoDS_Wire();
             std::vector<gp_Pnt> poles;
             for (size_t k = 0; k < n; ++k) poles.push_back(point());
@@ -511,6 +519,8 @@ static TopoDS_Wire wireFromCode(const std::vector<double> &code) {
             if (!has(7)) return TopoDS_Wire();
             const gp_Pnt c = point(), n = point();
             const double r = code[i++];
+            // gp_Dir aus dem Nullvektor wird im Release-Kernel nicht geprüft
+            if (r <= 1e-9 || gp_Vec(n.XYZ()).Magnitude() < 1e-12) return TopoDS_Wire();
             edge = BRepBuilderAPI_MakeEdge(gp_Circ(gp_Ax2(c, gp_Dir(n.X(), n.Y(), n.Z())), r)).Edge();
             break;
         }
@@ -518,6 +528,10 @@ static TopoDS_Wire wireFromCode(const std::vector<double> &code) {
             if (!has(11)) return TopoDS_Wire();
             const gp_Pnt c = point(), n = point(), x = point();
             double rx = code[i++], ry = code[i++];
+            if (rx <= 1e-9 || ry <= 1e-9 || gp_Vec(n.XYZ()).Magnitude() < 1e-12 ||
+                gp_Vec(x.XYZ()).Magnitude() < 1e-12 || gp_Vec(n.XYZ()).IsParallel(gp_Vec(x.XYZ()), 1e-9)) {
+                return TopoDS_Wire();
+            }
             gp_Dir normal(n.X(), n.Y(), n.Z());
             gp_Dir major(x.X(), x.Y(), x.Z());
             if (ry > rx) {
@@ -1568,6 +1582,123 @@ static TopoDS_Shape placedOnAxis(const TopoDS_Shape &shape, simd_double3 base, s
     }
 }
 
+// MARK: Messen
+
+- (nullable NSArray<NSNumber *> *)geometryOfEdge:(NSInteger)index {
+    if (index < 1 || index > _edges.Extent()) return nil;
+    try {
+        const TopoDS_Shape &shape = _edges(int(index));
+        if (shape.IsNull() || shape.ShapeType() != TopAbs_EDGE) return nil;
+        const TopoDS_Edge edge = TopoDS::Edge(shape);
+        if (BRep_Tool::Degenerated(edge) || !BRep_Tool::IsGeometric(edge)) return nil;
+        BRepAdaptor_Curve curve(edge);
+        const double first = curve.FirstParameter(), last = curve.LastParameter();
+        if (!std::isfinite(first) || !std::isfinite(last)) return nil;
+        const gp_Pnt a = curve.Value(first), b = curve.Value(last);
+        GProp_GProps props;
+        BRepGProp::LinearProperties(edge, props);
+        const double length = props.Mass();
+        double kind = 3, radius = 0, radius2 = 0, sweep = 0;
+        gp_Pnt center((a.X() + b.X()) / 2, (a.Y() + b.Y()) / 2, (a.Z() + b.Z()) / 2);
+        gp_Dir axis(0, 0, 1);
+        switch (curve.GetType()) {
+        case GeomAbs_Line:
+            kind = 0;
+            break;
+        case GeomAbs_Circle: {
+            const gp_Circ circle = curve.Circle();
+            kind = 1;
+            radius = circle.Radius();
+            center = circle.Location();
+            axis = circle.Axis().Direction();
+            sweep = std::abs(last - first);
+            break;
+        }
+        case GeomAbs_Ellipse: {
+            const gp_Elips ellipse = curve.Ellipse();
+            kind = 2;
+            radius = ellipse.MajorRadius();
+            radius2 = ellipse.MinorRadius();
+            center = ellipse.Location();
+            axis = ellipse.Axis().Direction();
+            sweep = std::abs(last - first);
+            break;
+        }
+        default:
+            break;
+        }
+        const double closed = a.Distance(b) < 1e-7 ? 1 : 0;
+        return @[@(kind), @(length), @(a.X()), @(a.Y()), @(a.Z()), @(b.X()), @(b.Y()), @(b.Z()),
+                 @(center.X()), @(center.Y()), @(center.Z()), @(axis.X()), @(axis.Y()), @(axis.Z()),
+                 @(radius), @(radius2), @(sweep), @(closed)];
+    } catch (...) {
+        return nil;
+    }
+}
+
+- (nullable NSArray<NSNumber *> *)surfaceOfFace:(NSInteger)index {
+    if (index < 1 || index > _faces.Extent()) return nil;
+    try {
+        const TopoDS_Shape &shape = _faces(int(index));
+        if (shape.IsNull() || shape.ShapeType() != TopAbs_FACE) return nil;
+        const TopoDS_Face face = TopoDS::Face(shape);
+        TopLoc_Location location;
+        if (BRep_Tool::Surface(face, location).IsNull()) return nil;
+        BRepAdaptor_Surface surface(face);
+        switch (surface.GetType()) {
+        case GeomAbs_Plane:
+            return @[@0, @0, @0];
+        case GeomAbs_Cylinder:
+            return @[@1, @(surface.Cylinder().Radius()), @0];
+        case GeomAbs_Cone: {
+            const gp_Cone cone = surface.Cone();
+            return @[@2, @(cone.SemiAngle()), @(cone.RefRadius())];
+        }
+        case GeomAbs_Sphere:
+            return @[@3, @(surface.Sphere().Radius()), @0];
+        case GeomAbs_Torus: {
+            const gp_Torus torus = surface.Torus();
+            return @[@4, @(torus.MajorRadius()), @(torus.MinorRadius())];
+        }
+        default:
+            return @[@5, @0, @0];
+        }
+    } catch (...) {
+        return nil;
+    }
+}
+
+- (nullable NSArray<NSNumber *> *)outlineOfFace:(NSInteger)index deflection:(double)deflection {
+    if (index < 1 || index > _faces.Extent()) return nil;
+    try {
+        const TopoDS_Shape &shape = _faces(int(index));
+        if (shape.IsNull() || shape.ShapeType() != TopAbs_FACE) return nil;
+        const double tolerance = std::max(deflection, 1e-4);
+        NSMutableArray<NSNumber *> *result = [NSMutableArray array];
+        for (TopExp_Explorer it(shape, TopAbs_EDGE); it.More(); it.Next()) {
+            const TopoDS_Edge edge = TopoDS::Edge(it.Current());
+            if (BRep_Tool::Degenerated(edge) || !BRep_Tool::IsGeometric(edge)) continue;
+            try {
+                BRepAdaptor_Curve curve(edge);
+                // Kleiner Winkelschritt: Kreise liefern ihre Ausdehnung auf wenige Tausendstel genau
+                GCPnts_TangentialDeflection points(curve, 0.01, tolerance);
+                for (int k = 1; k <= points.NbPoints(); ++k) {
+                    const gp_Pnt p = points.Value(k);
+                    [result addObject:@(p.X())];
+                    [result addObject:@(p.Y())];
+                    [result addObject:@(p.Z())];
+                }
+            } catch (...) {
+                continue;
+            }
+            if (result.count > 300000) break;
+        }
+        return result;
+    } catch (...) {
+        return nil;
+    }
+}
+
 /// Punkt bei Anteil t (0…1) des Parameterbereichs einer Kante.
 static gp_Pnt edgePoint(const TopoDS_Edge &edge, double t) {
     BRepAdaptor_Curve curve(edge);
@@ -1998,9 +2129,16 @@ static TopoDS_Shape variableFilletOnce(const TopoDS_Shape &shape, const std::vec
 - (nullable NSArray<NSNumber *> *)planeOfFace:(NSInteger)index {
     if (index < 1 || index > _faces.Extent()) return nil;
     const TopoDS_Face face = TopoDS::Face(_faces(int(index)));
-    BRepAdaptor_Surface surface(face);
-    if (surface.GetType() != GeomAbs_Plane) return nil;
-    const gp_Pln plane = surface.Plane();
+    TopLoc_Location surfaceLocation;
+    if (BRep_Tool::Surface(face, surfaceLocation).IsNull()) return nil;
+    gp_Pln plane;
+    try {
+        BRepAdaptor_Surface surface(face);
+        if (surface.GetType() != GeomAbs_Plane) return nil;
+        plane = surface.Plane();
+    } catch (...) {
+        return nil;
+    }
     gp_Dir normal = plane.Axis().Direction();
     if (face.Orientation() == TopAbs_REVERSED) normal.Reverse();
     // Nach Fase/Abrunden kann die gespeicherte Ausrichtung der Fläche umgedreht sein: prüfen, auf welcher
@@ -2045,9 +2183,11 @@ static TopoDS_Shape variableFilletOnce(const TopoDS_Shape &shape, const std::vec
         const bool reversed = face.Orientation() == TopAbs_REVERSED;
         const uint32_t base = static_cast<uint32_t>(buffers.vertices.size() / 6);
 
+        // Ohne Normalen liest Normal(i) außerhalb des Felds (im Release-Kernel ungeprüft): dann Flächennormale
+        const bool hasNormals = triangulation->HasNormals();
         for (int i = 1; i <= triangulation->NbNodes(); ++i) {
             const gp_Pnt p = triangulation->Node(i).Transformed(transform);
-            gp_Dir n = triangulation->Normal(i);
+            gp_Dir n = hasNormals ? triangulation->Normal(i) : gp_Dir(0, 0, 1);
             n.Transform(transform);
             if (reversed) n.Reverse();
             buffers.addVertex(simd_make_double3(p.X(), p.Y(), p.Z()), simd_make_double3(n.X(), n.Y(), n.Z()));
@@ -2076,14 +2216,18 @@ static TopoDS_Shape variableFilletOnce(const TopoDS_Shape &shape, const std::vec
         return [[PCKMesh alloc] initWithBuffers:buffers];
     }
     for (int i = 1; i <= edgeFaces.Extent(); ++i) {
-        const TopoDS_Edge edge = TopoDS::Edge(edgeFaces.FindKey(i));
-        if (BRep_Tool::Degenerated(edge)) continue;
-        bool seam = false;
-        for (TopTools_ListIteratorOfListOfShape it(edgeFaces(i)); it.More(); it.Next()) {
-            if (BRep_Tool::IsClosed(edge, TopoDS::Face(it.Value()))) seam = true;
-        }
-        if (seam) continue;
         try {
+            const TopoDS_Shape &key = edgeFaces.FindKey(i);
+            if (key.IsNull() || key.ShapeType() != TopAbs_EDGE) continue;
+            const TopoDS_Edge edge = TopoDS::Edge(key);
+            if (BRep_Tool::Degenerated(edge)) continue;
+            bool seam = false;
+            for (TopTools_ListIteratorOfListOfShape it(edgeFaces(i)); it.More(); it.Next()) {
+                if (it.Value().ShapeType() == TopAbs_FACE && BRep_Tool::IsClosed(edge, TopoDS::Face(it.Value()))) seam = true;
+            }
+            if (seam) continue;
+            // Kante ohne 3D-Kurve und ohne Kurve auf einer Fläche: BRepAdaptor_Curve griffe auf ein leeres Handle zu
+            if (!BRep_Tool::IsGeometric(edge)) continue;
             BRepAdaptor_Curve curve(edge);
             GCPnts_TangentialDeflection points(curve, 0.2, deflection);
             const uint32_t number = uint32_t(_edges.FindIndex(edge));
@@ -2348,6 +2492,18 @@ static TopoDS_Shape variableFilletOnce(const TopoDS_Shape &shape, const std::vec
 
 - (double)areaOfFace:(NSInteger)index {
     return 0;
+}
+
+- (nullable NSArray<NSNumber *> *)geometryOfEdge:(NSInteger)index {
+    return nil;
+}
+
+- (nullable NSArray<NSNumber *> *)surfaceOfFace:(NSInteger)index {
+    return nil;
+}
+
+- (nullable NSArray<NSNumber *> *)outlineOfFace:(NSInteger)index deflection:(double)deflection {
+    return nil;
 }
 
 - (NSArray<NSNumber *> *)edgeNumbersOfFace:(NSInteger)face {
