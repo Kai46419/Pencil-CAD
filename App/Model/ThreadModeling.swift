@@ -17,6 +17,28 @@ import simd
 /// als Berührung, so scheitert die Boolesche Operation seltener (Rückfall Werkzeug für Werkzeug im Kernel).
 let threadCutFuzzy: Double = 1e-5
 
+extension ThreadSpec {
+    /// Innengewinde mit geschlossenem Ende (Sackloch): dort ist ein Auslauf nach DIN 76 möglich.
+    func hasBlindEnd(_ target: ThreadTarget) -> Bool {
+        guard !target.external else { return false }
+        return startsAtHigh(target) ? !target.lowOpen : !target.highOpen
+    }
+
+    /// Gewindebereich als Abstand vom Gewindeanfang: Versatz, Länge bzw. volle Länge; im Sackloch mit DIN 76 endet
+    /// das Gewinde um den Auslauf e1 vor dem Grund (mindestens zwei Steigungen lang).
+    func threadRange(on target: ThreadTarget) -> (from: Double, to: Double) {
+        let from: Double = min(max(0, offset), target.length)
+        let wanted: Double = fullLength ? target.length : length
+        var to: Double = min(target.length, from + wanted)
+        if runoutDIN76, hasBlindEnd(target) {
+            let e1: Double = ThreadRunout.din76Length(pitch: pitch)
+            let shortest: Double = min(to, from + 2 * pitch)
+            to = max(shortest, min(to, target.length - e1))
+        }
+        return (from, to)
+    }
+}
+
 /// Zwei Richtungen senkrecht zu n.
 private func threadBasis(_ n: SIMD3<Double>) -> (u: SIMD3<Double>, v: SIMD3<Double>) {
     let reference: SIMD3<Double> = abs(n.z) < 0.9 ? [0, 0, 1] : [1, 0, 0]
@@ -86,22 +108,12 @@ extension ModelStore {
 
     /// Innengewinde mit geschlossenem Ende (Sackloch): dort ist ein Auslauf nach DIN 76 möglich.
     func threadHasBlindEnd(_ spec: ThreadSpec, target: ThreadTarget) -> Bool {
-        guard !target.external else { return false }
-        return spec.startsAtHigh(target) ? !target.lowOpen : !target.highOpen
+        spec.hasBlindEnd(target)
     }
 
-    /// Gewindebereich als Abstand vom Gewindeanfang: Versatz, Länge bzw. volle Länge; im Sackloch mit DIN 76 endet
-    /// das Gewinde um den Auslauf e1 vor dem Grund (mindestens zwei Steigungen lang).
+    /// Gewindebereich als Abstand vom Gewindeanfang (ThreadSpec.threadRange(on:)).
     func threadRange(_ spec: ThreadSpec, target: ThreadTarget) -> (from: Double, to: Double) {
-        let from = min(max(0, spec.offset), target.length)
-        let wanted = spec.fullLength ? target.length : spec.length
-        var to = min(target.length, from + wanted)
-        if spec.runoutDIN76, threadHasBlindEnd(spec, target: target) {
-            let e1: Double = ThreadRunout.din76Length(pitch: spec.pitch)
-            let shortest: Double = min(to, from + 2 * spec.pitch)
-            to = max(shortest, min(to, target.length - e1))
-        }
-        return (from, to)
+        spec.threadRange(on: target)
     }
 
     /// Kurzinfo: Bezeichnung, Art, Länge, Kern-Ø.

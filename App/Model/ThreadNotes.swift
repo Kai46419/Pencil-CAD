@@ -136,9 +136,10 @@ extension ThreadSpec {
         let fromHigh: Bool = startsAtHigh(target)
         let inward: SIMD3<Double> = fromHigh ? -target.axis : target.axis
         let start: SIMD3<Double> = fromHigh ? target.origin + target.axis * target.length : target.origin
-        let zFrom: Double = min(max(0, offset), target.length)
-        let wanted: Double = fullLength ? target.length : length
-        let zTo: Double = min(target.length, zFrom + wanted)
+        // Gewindebereich wie in threadedBody (im Sackloch ggf. mit Auslauf nach DIN 76)
+        let range = threadRange(on: target)
+        let zFrom: Double = range.from
+        let zTo: Double = range.to
         guard zTo - zFrom > 0.05 else { return nil }
         let label: String = family.noteLabel(size, pitch: pitch, starts: starts, leftHanded: leftHanded)
         return ThreadNote(designation: label, length: zTo - zFrom, external: target.external, cosmetic: cosmetic,
@@ -152,7 +153,8 @@ extension HoleSpec {
     /// durchgehenden Bohrung aus threadReach); nil ohne Gewinde.
     func threadNote(at point: SIMD3<Double>, outward n: SIMD3<Double>, reach: Double) -> ThreadNote? {
         guard let thread else { return nil }
-        let length: Double = through ? max(0.1, reach - 1) : depth
+        // Sackloch: Gewindelänge je nach Gewindeende (bis Grund, DIN 76, Maß)
+        let length: Double = through ? max(0.1, reach - 1) : thread.threadLength(depth: depth, through: false)
         let label: String = thread.family.noteLabel(thread.size, pitch: thread.pitch, starts: 1,
                                                     leftHanded: thread.leftHanded)
         return ThreadNote(designation: label, length: length, external: false, cosmetic: thread.cosmetic,
