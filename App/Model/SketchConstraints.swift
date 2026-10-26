@@ -413,8 +413,11 @@ extension SketchEntity {
 
 enum ConstraintSolver {
     /// Passt die Elemente so an, dass alle Einschränkungen gelten. locked: Elemente, die sich nicht bewegen.
+    /// weights: wie teuer es ist, ein Element zu bewegen (fehlend = 1); der Löser sucht die kleinste gewichtete
+    /// Änderung, teure Elemente bleiben also möglichst stehen (Kai: nur die geänderte Form soll sich bewegen).
     /// Liefert nil, wenn sich die Einschränkungen nicht erfüllen lassen.
-    static func solve(_ original: [SketchEntity], constraints all: [SketchConstraint], locked: Set<Int> = []) -> [SketchEntity]? {
+    static func solve(_ original: [SketchEntity], constraints all: [SketchConstraint], locked: Set<Int> = [],
+                      weights: [Int: Double] = [:]) -> [SketchEntity]? {
         // Gelöste Maße (rotes Schloss) gelten nicht
         let constraints = all.filter { !$0.isSuspended }
         guard !constraints.isEmpty else { return original }
@@ -428,9 +431,14 @@ enum ConstraintSolver {
             x += entities[index].parameters
         }
         var free: [Int] = []
+        // Spaltenfaktor 1/√Gewicht: kleinste Änderung im gewichteten Sinn
+        var scales: [Double] = []
         for index in involved where !locked.contains(index) {
             let start = offsets[index]!
-            free += Array(start..<(start + entities[index].parameters.count))
+            let count = entities[index].parameters.count
+            free += Array(start..<(start + count))
+            let weight: Double = max(weights[index] ?? 1, 1e-6)
+            scales += [Double](repeating: 1 / weight.squareRoot(), count: count)
         }
         func build(_ x: [Double]) -> [SketchEntity] {
             var result = entities
@@ -458,9 +466,10 @@ enum ConstraintSolver {
                 var shifted = x
                 shifted[variable] += h
                 let rs = residuals(shifted)
-                for row in 0..<m { jacobian[row * n + column] = (rs[row] - r[row]) / h }
+                let scale = scales[column]
+                for row in 0..<m { jacobian[row * n + column] = scale * (rs[row] - r[row]) / h }
             }
-            // Kleinste Änderung: dx = -Jᵀ (J Jᵀ + μ I)⁻¹ r
+            // Kleinste Änderung: dx = -S Jᵀ (J S² Jᵀ + μ I)⁻¹ r mit S = Spaltenfaktoren (Gewichte)
             var a = [Double](repeating: 0, count: m * m)
             for i in 0..<m {
                 for j in i..<m {
@@ -476,7 +485,7 @@ enum ConstraintSolver {
             for k in 0..<n {
                 var sum = 0.0
                 for i in 0..<m { sum += jacobian[i * n + k] * y[i] }
-                step[k] = -sum
+                step[k] = -sum * scales[k]
             }
             // Schrittweite halbieren, bis der Fehler sinkt
             var factor = 1.0

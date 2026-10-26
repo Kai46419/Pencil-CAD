@@ -47,6 +47,13 @@ extension SceneBody {
         return body
     }
 
+    /// Skaliert: Die Lage einer Instanz kennt nur Drehen und Verschieben (wie in Fusion 360, wo Skalieren
+    /// die Platzierung nicht skaliert). Damit nicht alle Instanzen mitwachsen, wird eine skalierte Instanz zum
+    /// eigenständigen Körper; die übrigen Instanzen bleiben unverändert verknüpft.
+    func scaledInstance(_ shape: PCKShape) -> SceneBody {
+        componentID == nil ? with(shape) : with(shape).unlinked()
+    }
+
     /// Lage als 16 Zahlen (spaltenweise) zum Speichern.
     var placementValues: [Double] {
         let c = placement.columns
@@ -90,6 +97,15 @@ extension ModelStore {
         }
         commit(result, name: "Als Komponente")
         message = "Komponente: Kopien (Verschieben mit Kopieren, Muster) bleiben verknüpft – änderst du eine, ändern sich alle."
+    }
+
+    /// Hinweis beim Skalieren, wenn Komponenten-Instanzen dabei sind (sie werden eigenständig).
+    func scaledComponentNote(_ indices: [Int]) -> String? {
+        let linked = indices.filter { bodies.indices.contains($0) && bodies[$0].componentID != nil }
+        guard !linked.isEmpty else { return nil }
+        return linked.count == 1
+            ? "Skalierte Instanz wird ein eigenständiger Körper – die übrigen Instanzen der Komponente bleiben, wie sie sind."
+            : "Skalierte Instanzen werden eigenständige Körper – die übrigen Instanzen der Komponente bleiben, wie sie sind."
     }
 
     /// Verknüpfung lösen: der Körper wird wieder eigenständig.

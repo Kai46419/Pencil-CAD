@@ -1965,7 +1965,7 @@ final class Workspace: ObservableObject {
             if !sketch.selection.isEmpty {
                 return "\(sketch.selection.count) gewählt · unten „Verankern“ hält sie fest · rechts Einschränkung wählen"
             }
-            return "Antippen wählt · ins Leere ziehen: \(LassoSelection.isOn ? "Lasso" : "Rahmen") · Ecke/Ende ziehen ändert die Größe · Stift 1 s über einem Punkt halten oder mit dem Finger doppeltippen merkt ihn (zwei → Mitte)"
+            return "Antippen wählt · ins Leere ziehen: \(LassoSelection.isOn ? "Lasso" : "Rahmen") · Ecke/Ende ziehen ändert die Größe · Stift 1 s über einem Punkt halten oder mit dem Finger doppeltippen merkt ihn (zwei → Mitte; antippen wählt sie, ziehen lässt sie sich nicht)"
         case .polyline where sketch.arcNext:
             return "Bogen: vom Linienende zum Ziel ziehen – tangential, sonst als Halbkreis"
         case .polyline where sketch.hasOpenChain:

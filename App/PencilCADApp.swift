@@ -24,6 +24,7 @@ struct RootView: View {
                 workspace.saveThumbnail()
                 projects.touch(workspace.project.id)
                 self.workspace = nil
+                Workspace.resetLengthUnit()
             }
             .id(workspace.project.id)
         } else {

@@ -1558,11 +1558,13 @@ final class ViewportView: MTKView {
     }
 
     /// Skizze, Werkzeug „Auswählen“: Stift (bzw. zeichnender Finger) setzt ins Leere – Rahmen bzw. Lasso
-    /// wählt Skizzenelemente (auf einem Element bleibt es beim Ziehen).
+    /// wählt Skizzenelemente (auf einem Element bleibt es beim Ziehen). Ein gemerkter Punkt bzw. seine
+    /// Mittellinie geht dem Lasso vor: Antippen wählt ihn (ziehen lässt er sich nicht, er ist eine Mitte).
     private func acceptsForSketchBox(_ touch: UITouch) -> Bool {
         guard acceptsForSketch(touch), let sketch, sketch.tool == .select, sketch.pendingAction == nil,
               let point = sketchPoint(for: touch) else { return false }
-        return sketch.pick(at: point, tolerance: snapTolerance) == nil
+        guard sketch.pick(at: point, tolerance: snapTolerance) == nil else { return false }
+        return sketch.markIndex(at: point, tolerance: snapTolerance, curveHit: false) == nil
     }
 
     /// Rahmen bzw. Lasso fertig: Skizzenelemente oder Körper wählen.
@@ -1976,15 +1978,29 @@ final class ViewportView: MTKView {
             refresh()
             return
         }
-        let edgeHit = pickEdge(at: location, ray: ray, faceHit: hit)
+        var edgeHit = pickEdge(at: location, ray: ray, faceHit: hit)
+        // Sweep: Bereich (Profil) und Kanten (Pfad) sind beide wählbar – der Bereich auch dicht neben einer
+        // Kante; die Kante gilt dort nur, wenn sie wirklich getroffen ist
+        let regionsBesideEdges = workspace.tool == .sweep
         // Skizzenbereich vor der Fläche, auf der er liegt
         var region: RegionRef?
         var regionPoint: SIMD3<Float>?
-        if edgeHit == nil, let regionHit = model.pickRegion(origin: ray.origin, direction: ray.direction) {
+        if edgeHit == nil || regionsBesideEdges,
+           let regionHit = model.pickRegion(origin: ray.origin, direction: ray.direction) {
             let faceT = hit.map { simd_dot($0.point - ray.origin, ray.direction) } ?? .infinity
             if regionHit.t <= faceT + max(faceT * 0.002, 0.05) {
                 region = regionHit.ref
                 regionPoint = ray.origin + ray.direction * regionHit.t
+            }
+        }
+        if regionsBesideEdges, region != nil, let found = edgeHit {
+            let onScreen = renderer.camera.project(found.point, viewSize: bounds.size)
+            let distance: CGFloat = onScreen.map { hypot($0.x - location.x, $0.y - location.y) } ?? .infinity
+            if distance > Self.sweepEdgeDirectHit {
+                edgeHit = nil
+            } else {
+                region = nil
+                regionPoint = nil
             }
         }
         workspace.tapped(face: hit?.face, edge: edgeHit?.edge, region: region,
@@ -2039,6 +2055,9 @@ final class ViewportView: MTKView {
     }
 
     /// Kante in Fingernähe, die nicht von einer Fläche verdeckt ist.
+    /// Sweep: So nah (Punkte) muss der Finger an einer Kante sein, damit sie statt des Bereichs darunter gilt.
+    private static let sweepEdgeDirectHit: CGFloat = 10
+
     private func pickEdge(at location: CGPoint, ray: (origin: SIMD3<Float>, direction: SIMD3<Float>),
                           faceHit: (face: FaceRef, point: SIMD3<Float>)?) -> (edge: EdgeRef, point: SIMD3<Float>)? {
         guard let renderer, let model else { return nil }
