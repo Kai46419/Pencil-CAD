@@ -2575,8 +2575,17 @@ final class SketchController: ObservableObject {
         var updated = constraints
         var touched = false
         for index in updated.indices {
-            guard let expression = updated[index].expression, let old = updated[index].dimensionValue,
-                  let shown = try? Formula.evaluate(expression, variables: values), shown > 0 else { continue }
+            guard let expression = updated[index].expression, let old = updated[index].dimensionValue else { continue }
+            // Längen in der Projekteinheit (bzw. wie geschrieben, z. B. „2 in“), Winkel in Grad
+            let isAngle: Bool
+            if case .angle = updated[index].variant { isAngle = true } else { isAngle = false }
+            let evaluated: Double?
+            if isAngle {
+                evaluated = try? Formula.evaluate(expression, variables: values)
+            } else {
+                evaluated = try? Formula.evaluateLength(expression, variables: values)
+            }
+            guard let shown = evaluated, shown > 0 else { continue }
             let value = storedValue(shown, for: updated[index].variant)
             guard abs(value - old) > 1e-9 else { continue }
             updated[index] = updated[index].withDimensionValue(value)

@@ -131,6 +131,8 @@ struct SnapshotBodyMeta: Codable, Hashable {
     var folder: String?
     var componentID: UUID?
     var placement: [Double]?
+    /// Material (Materials.swift); fehlt in älteren Ständen
+    var material: String? = nil
 }
 
 /// Fester Stand: full = alle Körper, sonst nur die geänderten (changed, in dieser Reihenfolge) und die neuen.
@@ -1273,7 +1275,7 @@ extension ModelStore {
     private static func snapshotMeta(_ body: SceneBody) -> SnapshotBodyMeta {
         SnapshotBodyMeta(name: body.name, color: [body.color.x, body.color.y, body.color.z], isHidden: body.isHidden,
                          sketchID: body.sketchID, folder: body.folder, componentID: body.componentID,
-                         placement: body.componentID == nil ? nil : body.placementValues)
+                         placement: body.componentID == nil ? nil : body.placementValues, material: body.material)
     }
 
     private static func snapshotBody(_ shape: PCKShape, meta: SnapshotBodyMeta, number: Int) -> SceneBody {
@@ -1282,8 +1284,9 @@ extension ModelStore {
             return SceneBody(shape: shape, name: meta.name, color: color)
         }
         let color = SIMD3<Float>(meta.color[0], meta.color[1], meta.color[2])
-        let body = SceneBody(shape: shape, name: meta.name, color: color, isHidden: meta.isHidden,
+        var body = SceneBody(shape: shape, name: meta.name, color: color, isHidden: meta.isHidden,
                              sketchID: meta.sketchID, folder: meta.folder)
+        body.material = meta.material
         return body.restoringComponent(meta.componentID, placement: meta.placement)
     }
 

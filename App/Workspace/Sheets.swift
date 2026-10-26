@@ -285,6 +285,10 @@ enum HelpTopic: String, CaseIterable, Identifiable {
                     + "direkte Änderungen bleiben als fester Stand stehen.",
                 "Formeln in Skizzenmaßen rechnen in der Projekteinheit („10“ im Zollprojekt = 10 in, „10 mm“ bleibt "
                     + "10 mm); Winkel an der Ecke kippen beim Nachrechnen nicht mehr.",
+                "Maß ändern bewegt nur die gewählte Form: Beim Radius gleiten die Bogenenden auf den angrenzenden "
+                    + "Linien, der Rest der Kontur bleibt stehen. Erst wenn das nicht reicht, gehen Nachbarn mit (Hinweis).",
+                "Gemerkte Mitten antippen statt Lasso, Sweep nimmt Bereich und Kante, skalierte Komponente wird "
+                    + "eigenständig, Zeichnungsansichten rechnen im Hintergrund.",
                 "Skizze: Bemaßte Formen bleiben starr – ist alles bemaßt, verschiebt Ziehen nur noch das ganze Teil. "
                     + "Bögen klappen nicht mehr um, und ein Maß, das die Form zusammenklappen würde, wird abgelehnt.",
                 "Winkel an der Ecke (z. B. 27° statt 153°) mit Schloss. Jedes änderbare Maß hat ein Schloss: rot antippen "
