@@ -1564,7 +1564,8 @@ final class ModelStore: ObservableObject {
 
     /// Gewählte Flächen (auch auf mehreren Körpern) um distance versetzen (Vorschau). Wie Shapr3D „Offset Face“:
     /// Nachbarflächen wachsen bzw. schrumpfen mit; Zylinderflächen werden dicker bzw. Bohrungen enger.
-    func previewOffsetFaces(distance: Double) {
+    /// explainsFailure: bei Fehler Grund und größten möglichen Wert suchen (nur bei Eingabe, nicht beim Ziehen).
+    func previewOffsetFaces(distance: Double, explainsFailure: Bool = false) {
         guard requireKernel() else { return }
         let faces = selectedFaces
         guard !faces.isEmpty else { return }
@@ -1574,9 +1575,10 @@ final class ModelStore: ObservableObject {
         }
         var preview = bodies
         for (body, group) in Dictionary(grouping: faces, by: \.body) where bodies.indices.contains(body) {
-            guard let result = bodies[body].shape.offsetting(faces: group.map { NSNumber(value: $0.face) },
-                                                             distance: distance) else {
-                message = "Versetzen um \(distance.formatted(.number.precision(.fractionLength(0...3)))) mm nicht möglich."
+            let numbers = group.map(\.face)
+            guard let result = offsetShape(bodies[body].shape, faces: numbers, distance: distance) else {
+                message = explainsFailure ? offsetFailureMessage(bodies[body].shape, faces: numbers, distance: distance)
+                    : "Versetzen um \(LengthUnit.current.format(abs(distance))) nicht möglich – Wert eingeben zeigt den Grund."
                 dropPreview()
                 return
             }

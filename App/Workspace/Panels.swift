@@ -742,27 +742,51 @@ struct ParameterCard: View {
 
     private var offsetFaceCard: some View {
         Card {
-            HStack(spacing: 16) {
-                Label("Fläche versetzen", systemImage: "arrow.up.and.down.square")
-                    .font(.callout.weight(.semibold))
-                Picker("Art", selection: Binding(get: { workspace.offsetFaceMode }, set: { mode in
-                    workspace.offsetFaceMode = mode
-                    workspace.offsetFaceValue = 0
-                    model.cancelPreview()
-                })) {
-                    ForEach(OffsetFaceMode.allCases) { Text($0.rawValue).tag($0) }
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 16) {
+                    Label("Fläche versetzen", systemImage: "arrow.up.and.down.square")
+                        .font(.callout.weight(.semibold))
+                    Picker("Art", selection: Binding(get: { workspace.offsetFaceMode }, set: { mode in
+                        workspace.offsetFaceMode = mode
+                        model.cancelPreview()
+                        workspace.offsetFaceValue = workspace.defaultOffsetFaceValue()
+                    })) {
+                        ForEach(OffsetFaceMode.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .fixedSize()
+                    NumberField(title: workspace.offsetFaceMode.rawValue, value: workspace.offsetFaceValue) { value in
+                        workspace.offsetFaceValue = value
+                        workspace.updateOffsetFacePreview(explainsFailure: true)
+                    }
+                    if model.selectedFaces.count > 1 {
+                        Text("\(model.selectedFaces.count) Flächen")
+                            .foregroundStyle(.secondary)
+                    }
                 }
-                .pickerStyle(.segmented)
-                .fixedSize()
-                NumberField(title: workspace.offsetFaceMode.rawValue, value: workspace.offsetFaceValue) { value in
-                    workspace.offsetFaceValue = value
-                    workspace.updateOffsetFacePreview()
-                }
-                if model.selectedFaces.count > 1 {
-                    Text("\(model.selectedFaces.count) Flächen")
-                        .foregroundStyle(.secondary)
-                }
+                Text(offsetFaceExplanation)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 520, alignment: .leading)
             }
+        }
+    }
+
+    /// Kurzerklärung je Art (Kai: was macht das Werkzeug überhaupt?).
+    private var offsetFaceExplanation: String {
+        if model.selection == nil {
+            return "Eine oder mehrere Flächen antippen. Sie werden senkrecht zu sich selbst verschoben, die Nachbarflächen "
+                + "wachsen bzw. schrumpfen mit – z. B. Körper dicker machen oder eine Bohrung weiten."
+        }
+        switch workspace.offsetFaceMode {
+        case .distance:
+            return "Plus = aus dem Material heraus (dicker, Bohrung enger), Minus = hinein. Ebene und runde Flächen "
+                + "gehen, auch gemischt. Pfeil ziehen oder Wert eingeben."
+        case .total:
+            return "Gesamtmaß des Körpers in Richtung der ebenen Fläche festlegen – vorgegeben ist das jetzige Maß."
+        case .diameter:
+            return "Durchmesser einer runden Fläche (Zapfen oder Bohrung) festlegen – vorgegeben ist der jetzige Ø."
         }
     }
 

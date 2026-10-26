@@ -225,6 +225,8 @@ NS_ASSUME_NONNULL_BEGIN
 
 /// Messwerte (mm, mm², mm³); 0 ohne Kernel.
 @property (nonatomic, readonly) double volume;
+/// Anzahl der Flächen (Flächennummern laufen von 1 bis faceCount).
+@property (nonatomic, readonly) NSInteger faceCount;
 /// Schwerpunkt [x, y, z] (gleichmäßige Dichte); nil ohne Kernel.
 @property (nonatomic, readonly, nullable) NSArray<NSNumber *> *centerOfMass;
 /// Kürzester Abstand zu einem anderen Körper: [Abstand, x1, y1, z1, x2, y2, z2]; nil bei Fehler.

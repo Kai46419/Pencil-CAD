@@ -1687,6 +1687,10 @@ static TopoDS_Wire threadSpine(double radius, double lead, double zStart, double
     }
 }
 
+- (NSInteger)faceCount {
+    return _faces.Extent();
+}
+
 - (double)volume {
     try {
         GProp_GProps props;
@@ -2659,6 +2663,10 @@ static TopoDS_Shape variableFilletOnce(const TopoDS_Shape &shape, const std::vec
 }
 
 - (double)volume {
+    return 0;
+}
+
+- (NSInteger)faceCount {
     return 0;
 }
 

@@ -710,6 +710,11 @@ final class Workspace: ObservableObject {
                 if newTool == .replaceFace { pickingReplaceTarget = true }
             }
             refreshOffsetFaceHandle()
+            if newTool == .offsetFace, model.selection != nil {
+                // Gleich mit einem sinnvollen Wert und Vorschau starten (Kai: nicht mit leerem Feld)
+                offsetFaceValue = defaultOffsetFaceValue()
+                updateOffsetFacePreview()
+            }
             return
         case .wrap, .imprint:
             model.resetSelection()
@@ -851,7 +856,22 @@ final class Workspace: ObservableObject {
     }
 
     /// Fläche versetzen: Wert je nach Art in einen Versatz umrechnen und als Vorschau zeigen.
-    func updateOffsetFacePreview() {
+    /// Vorgabe beim Wählen der ersten Fläche bzw. beim Wechsel der Art: 1 mm, das jetzige Gesamtmaß bzw. der jetzige Ø.
+    func defaultOffsetFaceValue() -> Double {
+        guard let face = model.selection else { return 0 }
+        switch offsetFaceMode {
+        case .distance:
+            return 1
+        case .total:
+            guard let plane = model.plane(of: face) else { return 0 }
+            return model.extent(ofBody: face.body, along: plane.normal) ?? 0
+        case .diameter:
+            return model.cylinder(of: face).map { $0.radius * 2 } ?? 0
+        }
+    }
+
+    /// explainsFailure: bei Fehler Grund und größten möglichen Wert nennen (bei Eingabe im Feld).
+    func updateOffsetFacePreview(explainsFailure: Bool = false) {
         guard tool == .offsetFace, let face = model.selection else { return }
         var distance = offsetFaceValue
         switch offsetFaceMode {
@@ -875,7 +895,7 @@ final class Workspace: ObservableObject {
             // Bohrung: Versatz ins Material macht sie weiter
             distance = cylinder.convex ? change : -change
         }
-        model.previewOffsetFaces(distance: distance)
+        model.previewOffsetFaces(distance: distance, explainsFailure: explainsFailure)
     }
 
     /// Pfeil für „Fläche versetzen“ an der zuerst gewählten Fläche: Normale bzw. bei Zylindern radial nach außen.
@@ -1183,8 +1203,10 @@ final class Workspace: ObservableObject {
             if let face { offsetFaceEdges(face) }
         case .offsetFace:
             guard let face else { return }
+            let first = model.selection == nil
             model.toggleFace(face, commitsPreview: false)
             refreshOffsetFaceHandle()
+            if first || offsetFaceValue == 0 { offsetFaceValue = defaultOffsetFaceValue() }
             updateOffsetFacePreview()
         case .replaceFace:
             guard let face else { return }
