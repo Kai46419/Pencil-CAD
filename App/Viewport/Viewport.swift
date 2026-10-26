@@ -1566,7 +1566,12 @@ final class ViewportView: MTKView {
             valueLabel.isHidden = true
             return
         }
-        valueLabel.text = LengthUnit.current.format(active.value)
+        if active.kind == .scale, let workspace {
+            // Skalieren: Faktor statt Länge
+            valueLabel.text = "× " + workspace.scaleFactors.x.formatted(.number.precision(.fractionLength(2)))
+        } else {
+            valueLabel.text = LengthUnit.current.format(active.value)
+        }
         valueLabel.sizeToFit()
         // Wie in Fusion 360: Wertfeld neben dem Pfeil (seitlich auf Höhe der Spitze), nicht auf der Spitze
         var dx = tip.x - foot.x, dy = tip.y - foot.y

@@ -183,6 +183,8 @@ enum HandleKind: Equatable {
     case offset
     /// Fläche versetzen: Pfeil entlang der Flächennormale
     case offsetFace
+    /// Skalieren (Kai): Pfeil von der Mitte zur Ecke der Auswahl, Wert = Faktor × Abstand Mitte–Ecke
+    case scale
 }
 
 /// Ziehpfeil: Achse (Ursprung + Richtung), aktueller Wert in mm entlang der Achse.
@@ -277,8 +279,11 @@ final class Workspace: ObservableObject {
     @Published var patternCount2 = 1
     @Published var patternSpacing2: Double = 20
     @Published var patternAxis2: ReferenceAxis = .world(1)
-    @Published var scaleFactors: SIMD3<Double> = [1.5, 1.5, 1.5]
+    @Published var scaleFactors: SIMD3<Double> = [1, 1, 1]
+    /// Immer gleichmäßig (Kai: „alles symmetrisch skalieren“)
     @Published var scaleUniform = true
+    /// Mitte, Richtung und Abstand Mitte–Ecke der Auswahl vor dem Skalieren (Bezug für den Ziehpfeil)
+    private var scaleReference: (bodies: [Int], center: SIMD3<Double>, direction: SIMD3<Double>, radius: Double)?
     @Published var alignModes: [AlignMode] = [.center, .center, .none]
     @Published var revolveAxis: ReferenceAxis = .world(2)
     @Published var revolveAngle: Double = 360
@@ -1752,9 +1757,44 @@ final class Workspace: ObservableObject {
                 return DragHandle(kind: .move(axis: index), axisOrigin: SIMD3<Float>(origin),
                                   direction: SIMD3<Float>(axis.0), value: value, color: axis.1)
             }
+        case .scale:
+            guard let reference = currentScaleReference() else { return [] }
+            let origin = SIMD3<Float>(reference.center)
+            return [DragHandle(kind: .scale, axisOrigin: origin, direction: SIMD3<Float>(reference.direction),
+                               value: scaleFactors.x * reference.radius, color: blue)]
         default:
             return []
         }
+    }
+
+    /// Bezug für den Skalieren-Pfeil: ohne Vorschau aus dem jetzigen Netz, während der Vorschau unverändert
+    /// (das Netz zeigt dann schon die skalierten Körper).
+    private func currentScaleReference() -> (center: SIMD3<Double>, direction: SIMD3<Double>, radius: Double)? {
+        let selected = model.selectedBodies
+        guard !selected.isEmpty else {
+            scaleReference = nil
+            return nil
+        }
+        // Während der Vorschau zeigt das Netz schon die skalierten Körper: dann den gemerkten Bezug nehmen
+        if let reference = scaleReference, reference.bodies == selected, model.hasPreview {
+            return (reference.center, reference.direction, reference.radius)
+        }
+        var low = SIMD3<Float>(repeating: .infinity), high = SIMD3<Float>(repeating: -.infinity)
+        for body in selected {
+            guard let box = model.mesh.bounds(ofBody: body) else { continue }
+            low = simd_min(low, box.min)
+            high = simd_max(high, box.max)
+        }
+        guard low.x <= high.x else { return nil }
+        let center = SIMD3<Double>((low + high) / 2)
+        let corner = SIMD3<Double>(high) - center
+        // Schon skaliert (Faktor eingetippt, bevor der Pfeil gezeigt wurde): auf die Ausgangsgröße zurückrechnen
+        let shownFactor: Double = model.hasPreview && scaleFactors.x > 0 ? scaleFactors.x : 1
+        let radius = simd_length(corner) / shownFactor
+        guard radius > 1e-6 else { return nil }
+        let reference = (bodies: selected, center: center, direction: corner / radius, radius: radius)
+        scaleReference = reference
+        return (reference.center, reference.direction, reference.radius)
     }
 
     func apply(_ kind: HandleKind, value: Double) {
@@ -1778,6 +1818,14 @@ final class Workspace: ObservableObject {
             guard offset[axis] != value else { return }
             offset[axis] = value
             model.setMoveOffset(offset)
+        case .scale:
+            // Faktor aus dem Abstand zur Mitte, auf 0,01 gerundet, gleichmäßig in alle Richtungen
+            guard let radius = scaleReference?.radius, radius > 1e-6 else { return }
+            let factor: Double = max(0.01, (value / radius * 100).rounded() / 100)
+            guard factor != scaleFactors.x else { return }
+            scaleFactors = SIMD3(repeating: factor)
+            scaleUniform = true
+            updatePreview()
         }
     }
 
@@ -1896,7 +1944,7 @@ final class Workspace: ObservableObject {
                 : "Weitere Flächen antippen oder Wandstärke eingeben"
         case .color: return model.selectedBodies.isEmpty ? "Körper antippen" : "Farbe wählen"
         case .pattern: return model.selectedBodies.isEmpty ? "Körper antippen" : "Anzahl und Abstand einstellen"
-        case .scale: return model.selectedBodies.isEmpty ? "Körper antippen" : "Faktor eingeben"
+        case .scale: return model.selectedBodies.isEmpty ? "Körper antippen" : "Am Pfeil ziehen oder Faktor eingeben – immer gleichmäßig"
         case .align:
             return model.selectedBodies.count < 2 ? "Bezugskörper, dann weitere Körper antippen" : "Achsen wählen"
         case .revolve:

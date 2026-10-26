@@ -1234,8 +1234,7 @@ extension ParameterCard {
             HStack(spacing: 14) {
                 Label("Skalieren", systemImage: "arrow.up.left.and.arrow.down.right")
                     .font(.callout.weight(.semibold))
-                Toggle("Gleichmäßig", isOn: preview(\.scaleUniform))
-                    .fixedSize()
+                // Immer gleichmäßig (Kai); Ziehpfeil am Körper oder Faktor eintippen
                 if workspace.scaleUniform {
                     NumberField(title: "Faktor", value: workspace.scaleFactors.x, unit: "×", width: 56) { value in
                         guard value > 0 else { return }
