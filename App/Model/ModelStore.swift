@@ -2718,7 +2718,9 @@ extension ModelStore {
             }
             // Normale zeigt aus dem Körper heraus; gebohrt wird entgegen
             let n = simd_normalize(plane.normal)
-            guard let tool = spec.tool(at: hole.point, outward: n, through: sceneExtent * 2 + 10),
+            // Gewindebohrung: nur so lang wie nötig (jede Umdrehung kostet Rechenzeit)
+            let reach = spec.thread == nil ? sceneExtent * 2 + 10 : threadReach(body: body, from: hole.point, direction: -n)
+            guard let tool = spec.tool(at: hole.point, outward: n, through: reach),
                   let cut = preview[body].shape.cutting(tool) else {
                 message = "Bohrung an dieser Stelle nicht möglich."
                 dropPreview()
@@ -2816,8 +2818,11 @@ struct HoleSpec: Equatable {
     /// Spitze am Grund einer Sackbohrung (118°)
     var drillPoint = false
     var clearance: Double = 0.2
+    /// Gewindebohrung: Kernloch nach Norm, Innengewinde modelliert (Threads.swift)
+    var thread: HoleThread? = nil
 
     var summary: String {
+        if let thread { return thread.summary(clearance: clearance, through: through, depth: depth) }
         let d = (diameter + clearance).formatted(.number.precision(.fractionLength(0...2)))
         let depthText = through ? "durch" : "\(depth.formatted()) mm tief"
         switch kind {
@@ -2836,6 +2841,9 @@ struct HoleSpec: Equatable {
         let r = (diameter + clearance) / 2
         guard r > 0 else { return nil }
         let length = (through ? reach : depth) + lift
+        if let thread {
+            return threadedTool(thread, top: top, axis: -n, length: length, lift: lift)
+        }
         guard var shape = PCKShape.cylinder(base: top, axis: -n, radius: r, height: length) else { return nil }
         if drillPoint, !through {
             let tipHeight = r / tan(59 * .pi / 180)
