@@ -2458,17 +2458,35 @@ extension ModelStore {
         noteCircularPattern(count: count, angle: degrees, axisOrigin: axisOrigin, axis: axis)
     }
 
-    /// Gewählte Körper um ihre Mitte skalieren.
+    /// Gewählte Körper um ihre Mitte skalieren. Schlägt es fehl, bleibt die bisherige Vorschau bzw. der
+    /// Körper sichtbar (Kai: „bei ca. 4× verschwindet er einfach“).
     func previewScale(factors: SIMD3<Double>) {
-        guard requireKernel(), !selectedBodies.isEmpty else { return }
+        guard requireKernel() else { return }
+        guard !selectedBodies.isEmpty else {
+            dropPreview()
+            return
+        }
         guard factors.x > 0, factors.y > 0, factors.z > 0, factors != SIMD3<Double>(1, 1, 1) else {
             dropPreview()
             return
         }
+        guard factors.x.isFinite, factors.y.isFinite, factors.z.isFinite else {
+            message = "Skalieren nicht möglich."
+            return
+        }
         var preview = bodies
         for index in selectedBodies where bodies.indices.contains(index) {
-            guard let center = center(ofBody: index),
-                  let scaled = bodies[index].shape.scaled(center: center, factors: factors) else {
+            // Mitte aus dem echten Körper, nicht aus dem angezeigten Netz: das zeigt während der Vorschau schon
+            // die skalierten Körper (und ist leer, wenn deren Vernetzung fehlschlug)
+            let shape = bodies[index].shape
+            guard let box = Mesh(shape.triangulate(deflection: 0.05), body: index).bounds else {
+                message = "Skalieren nicht möglich."
+                return
+            }
+            let center = SIMD3<Double>((box.min + box.max) / 2)
+            // Ohne Dreiecke wäre der Körper in der Vorschau unsichtbar: dann lieber nicht skalieren
+            guard let scaled = shape.scaled(center: center, factors: factors),
+                  !scaled.triangulate(deflection: 0.05).indexData.isEmpty else {
                 message = "Skalieren nicht möglich."
                 return
             }

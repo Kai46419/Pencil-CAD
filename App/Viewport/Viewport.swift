@@ -71,6 +71,8 @@ final class ViewportView: MTKView {
     private var redoGesture: UITapGestureRecognizer?
     private var sketchTouch: UITouch?
     private var handleDrag: HandleDragState?
+    /// Netzstand, für den zuletzt geprüft wurde, ob die skalierte Auswahl noch ins Bild passt
+    private var scaleViewRevision = -1
     /// Drehscheibe im Verschieben-Werkzeug
     private var ringDrag: RingDragState?
     private let ringLabel = PaddedLabel()
@@ -378,6 +380,7 @@ final class ViewportView: MTKView {
     /// Gleicht Renderer, Gesten, Linien, Ziehpfeile und Maße mit dem Zustand ab.
     private func sync() {
         guard let renderer, let sketch, let workspace else { return }
+        keepScaledSelectionInView()
         let choosing = sketch.isActive && sketch.isChoosingPlane
         let sketching = sketch.isActive && !choosing
         let fingerSketching = sketching && sketch.fingerDraws
@@ -1756,6 +1759,48 @@ final class ViewportView: MTKView {
         return (b * simd_dot(r, w) - simd_dot(d, w)) / denominator
     }
 
+    /// Skalieren: Die vergrößerte Auswahl (Kugel um die Mitte, Radius = Wert des Pfeils) darf die Kamera nicht
+    /// einschließen, sonst sieht man nur noch Innenseiten und der Körper scheint zu verschwinden (Kai bei etwa
+    /// 4×). Nie unter den Wert beim Ansetzen, damit der Pfeil nah herangezoomt nicht zurückspringt; nach dem
+    /// Loslassen passt keepScaledSelectionInView das Bild an, dann lässt sich weiterziehen.
+    private func limitedScaleValue(_ value: Double, handle: DragHandle) -> Double {
+        guard let renderer, !renderer.camera.isOrthographic else { return value }
+        let eyeDistance = Double(simd_distance(renderer.camera.position, handle.axisOrigin))
+        let limit: Double = max(eyeDistance * 0.9, handle.value)
+        return min(value, limit)
+    }
+
+    /// Skalieren: Steckt die Kamera in der vergrößerten Auswahl (bzw. überragt sie in der Parallelprojektion das
+    /// Bild weit), sieht man nur noch Innenseiten – der Körper scheint zu verschwinden. Dann nach dem Ziehen bzw.
+    /// nach dem Eintippen des Faktors auf die skalierte Auswahl einpassen. Nicht während des Ziehens, sonst
+    /// wanderte der Pfeil unter dem Stift weg und der Faktor liefe davon.
+    private func keepScaledSelectionInView() {
+        guard let renderer, let model, let workspace, workspace.tool == .scale, model.hasPreview,
+              handleDrag == nil, scaleViewRevision != model.revision else { return }
+        scaleViewRevision = model.revision
+        guard workspace.scaleFactors.max() > 1 else { return }
+        var low = SIMD3<Float>(repeating: .infinity), high = SIMD3<Float>(repeating: -.infinity)
+        for body in model.selectedBodies {
+            guard let box = model.mesh.bounds(ofBody: body) else { continue }
+            low = simd_min(low, box.min)
+            high = simd_max(high, box.max)
+        }
+        guard low.x <= high.x else { return }
+        let camera = renderer.camera
+        let radius: Float = simd_length(high - low) / 2
+        let center: SIMD3<Float> = (low + high) / 2
+        let tooBig: Bool
+        if camera.isOrthographic {
+            let halfHeight: Float = camera.distance * tan(camera.fieldOfView / 2)
+            tooBig = radius > halfHeight * 1.5
+        } else {
+            tooBig = radius > simd_distance(camera.position, center) * 0.8
+        }
+        guard tooBig else { return }
+        renderer.camera.frame(min: low, max: high)
+        cameraMoved()
+    }
+
     /// Rastweite beim Ziehen, passend zum Zoom.
     private func dragStep(at point: SIMD3<Float>) -> Double {
         guard let renderer else { return 0.5 }
@@ -2033,6 +2078,7 @@ final class ViewportView: MTKView {
                 if drag.handle.kind == .offset, let sketch, let hit = sketch.snapOffset(raw, tolerance: snapTolerance) {
                     snapped = hit
                 }
+                if drag.handle.kind == .scale { snapped = limitedScaleValue(snapped, handle: drag.handle) }
                 workspace?.apply(drag.handle.kind, value: snapped)
                 refresh()
             }
