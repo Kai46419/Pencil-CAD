@@ -274,6 +274,12 @@ enum HelpTopic: String, CaseIterable, Identifiable {
                     + "Steigung, Länge, Versatz, Links/Rechts und 1–4 Gänge wählbar. Das Gewinde wird echt modelliert "
                     + "(druckbar), mit Druckspiel (Standard 0,2 mm) und Anschnitt am freien Ende. Auch im Werkzeug "
                     + "Bohrung gibt es jetzt die Option „Gewinde“ (Kernloch nach Norm plus Innengewinde).",
+                "STL und 3MF importieren (Import-Knopf bzw. Einfügen › STL / 3MF): das Netz wird repariert und ein "
+                    + "echter Körper – bohren, schneiden, vereinigen und ebene Flächen extrudieren gehen.",
+                "Beim Import: doppelte Punkte verschweißt, kaputte Dreiecke entfernt, kleine Löcher geschlossen. "
+                    + "Über 60.000 Dreiecke wird vorher reduziert; die Meldung sagt, was passiert ist.",
+                "Ändern › Netz bearbeiten: mit dem Stift anheben, absenken, glätten, abflachen. Fester drücken "
+                    + "verstärkt; unten Radius, Stärke, Verfeinern, Reduzieren und Löcher schließen.",
                 "Messen (Prüfen › Messen): Kante antippen zeigt die ganze Länge, bei Kreisen und Bögen auch Radius und "
                     + "Durchmesser. Fläche antippen zeigt den Inhalt in mm² und Länge × Breite (Zylinder: Durchmesser "
                     + "und Höhe). „Punkt zu Punkt“: der zweite Punkt rastet parallel zu X, Y, Z bzw. senkrecht zur "

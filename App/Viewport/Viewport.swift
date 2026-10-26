@@ -763,6 +763,8 @@ final class ViewportView: MTKView {
     private func addToolOverlays(to groups: inout [LineGroup], fills: inout [FillGroup]) {
         guard let workspace, let model else { return }
         switch workspace.tool {
+        case .meshSculpt:
+            addSculptOverlay(to: &groups)
         case .hole where !workspace.holePoints.isEmpty:
             groups.append(LineGroup(polylines: [], color: Self.snapOrange, width: 0,
                                     dots: workspace.holePoints.map { SIMD3<Float>($0.point) }, dotRadius: 5, onTop: true))
@@ -1853,6 +1855,10 @@ final class ViewportView: MTKView {
             refresh()
             return
         }
+        // Netz bearbeiten: Stift auf einem Körper malt (MeshSculpt.swift)
+        if alone, let touch = touches.first(where: { $0.type == .pencil }), sculptBegan(touch) {
+            return
+        }
         if boxTouch == nil, alone, let touch = touches.first(where: acceptsForBox) {
             boxTouch = touch
             boxStart = touch.location(in: self)
@@ -1903,6 +1909,7 @@ final class ViewportView: MTKView {
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if sculptMoved(touches, event: event) { return }
         if let touch = calibrationTouch, touches.contains(touch) {
             updateCalibrationLoupe(at: touch.location(in: self))
             return
@@ -1977,6 +1984,7 @@ final class ViewportView: MTKView {
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         updateHeldFingers(ended: touches)
+        if sculptEnded(touches) { return }
         if let touch = calibrationTouch, touches.contains(touch) {
             calibrationTouch = nil
             calibrationLoupe.isHidden = true
@@ -2031,6 +2039,8 @@ final class ViewportView: MTKView {
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
         updateHeldFingers(ended: touches)
+        // Pinsel: ein abgebrochener Strich wird wie ein beendeter übernommen (ohne Bewegung ändert er nichts)
+        if sculptEnded(touches) { return }
         // Kurzes Tippen erkennt die Tipp-Geste (sie bricht die Berührung ab) und setzt den Punkt dort
         if let touch = calibrationTouch, touches.contains(touch) {
             calibrationTouch = nil
@@ -2259,6 +2269,8 @@ final class ViewportView: MTKView {
 
     @objc private func handleHover(_ gesture: UIHoverGestureRecognizer) {
         guard let sketch else { return }
+        let hovering = gesture.state == .began || gesture.state == .changed
+        sculptHover(at: hovering ? gesture.location(in: self) : nil)
         switch gesture.state {
         case .began, .changed:
             lastHoverLocation = gesture.location(in: self)

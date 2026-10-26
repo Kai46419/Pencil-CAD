@@ -80,6 +80,8 @@ enum ToolExplainer {
             return "Ebene Fläche antippen: Bohrung für Schraube, Gewindeeinsatz oder mit Gewinde, Senkung wählbar."
         case .printCheck:
             return "Zeigt Überhänge, zu dünne Wände und eine gute Druckausrichtung für den 3D-Druck."
+        case .meshSculpt:
+            return "Körper antippen und mit dem Stift darüberstreichen: anheben, absenken, glätten oder abflachen (Netze aus STL/3MF)."
         }
     }
 
@@ -108,6 +110,7 @@ enum ToolExplainer {
         case .pattern(.circular): ("circle", "circle.grid.cross")
         case .split: ("cube", "square.split.diagonal")
         case .part(.thread): ("cylinder", "barcode")
+        case .meshSculpt: ("triangle", "paintbrush.pointed")
         default: nil
         }
     }

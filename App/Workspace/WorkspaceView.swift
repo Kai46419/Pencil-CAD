@@ -147,10 +147,14 @@ private struct WorkspaceContent: View {
         }
         .fileExporter(isPresented: $isExporting, document: exportFile, contentType: exportType,
                       defaultFilename: exportName ?? projectName) { _ in }
-        .fileImporter(isPresented: $isImporting, allowedContentTypes: [.stepFile, .stpFile, .svg, .dxfFile]) { result in
+        .fileImporter(isPresented: $isImporting,
+                      allowedContentTypes: [.stepFile, .stpFile, .stl, .threeMF, .svg, .dxfFile]) { result in
             guard case .success(let url) = result else { return }
             if ["svg", "dxf"].contains(url.pathExtension.lowercased()) {
                 workspace.importVectorFile(url)
+            } else if MeshFileReader.extensions.contains(url.pathExtension.lowercased()) {
+                // STL/3MF: Umwandeln läuft im Hintergrund (MeshImport.swift)
+                model.importMesh(from: url) { workspace.send(.fitAll) }
             } else {
                 model.importSTEP(from: url)
                 workspace.send(.fitAll)
@@ -278,7 +282,7 @@ private struct WorkspaceContent: View {
             Divider()
                 .frame(height: 20)
             Menu {
-                Button("Importieren (STEP, SVG, DXF) …", systemImage: "square.and.arrow.down") { isImporting = true }
+                Button("Importieren (STEP, STL, 3MF, SVG, DXF) …", systemImage: "square.and.arrow.down") { isImporting = true }
                 Menu {
                     ForEach(ExportFormat.allCases) { format in
                         Button {

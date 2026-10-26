@@ -46,7 +46,7 @@ struct HomeView: View {
             .padding(.vertical, 28)
         }
         .background(Theme.homeBackground.ignoresSafeArea())
-        .fileImporter(isPresented: $isImporting, allowedContentTypes: [.stepFile, .stpFile]) { result in
+        .fileImporter(isPresented: $isImporting, allowedContentTypes: [.stepFile, .stpFile, .stl, .threeMF]) { result in
             guard case .success(let url) = result else { return }
             open(projects.create(name: url.deletingPathExtension().lastPathComponent), url)
         }

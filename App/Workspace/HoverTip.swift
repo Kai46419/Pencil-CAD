@@ -139,7 +139,7 @@ enum ToolTips {
     private static let texts: [String: String] = [
         // Werkzeuggruppen (3D)
         "Skizze": "Neue Skizze beginnen: Ebene oder ebene Körperfläche antippen, dann mit dem Stift zeichnen.",
-        "Einfügen": "STEP-Datei, Bild als Vorlage, Körper eines anderen Projekts oder eine Variable einfügen.",
+        "Einfügen": "STEP-, STL- und 3MF-Datei, Bild als Vorlage, Körper eines anderen Projekts oder eine Variable einfügen.",
         "Konstruieren": "Hilfsebenen, -achsen und -punkte, z. B. eine versetzte Ebene zum Skizzieren.",
         "Transformation": "Körper oder Skizzen verschieben, drehen, spiegeln, skalieren, ausrichten oder als Muster vervielfältigen.",
         "Tools": "Kanten abrunden/fasen, Schale, boolesche Verknüpfung, Drehen, Sweep, Loft, Körper teilen.",

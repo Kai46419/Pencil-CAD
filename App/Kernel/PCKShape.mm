@@ -125,6 +125,15 @@
 #else
 #define PCK_HAS_HLR 0
 #endif
+
+// Netze (STL/3MF) als Körper (MeshImport.swift)
+#if PCK_HAS_OCCT
+#include <BRepBuilderAPI_MakeSolid.hxx>
+#include <BRepBuilderAPI_Sewing.hxx>
+#include <Geom_Plane.hxx>
+#include <Precision.hxx>
+#include <TopoDS_Shell.hxx>
+#endif
 #pragma clang diagnostic pop
 
 namespace {
@@ -292,6 +301,9 @@ std::vector<simd_double3> circlePoints(simd_double3 base, simd_double3 axis, dou
     TopoDS_Shape _shape;
     TopTools_IndexedMapOfShape _faces;
     TopTools_IndexedMapOfShape _edges;
+    /// Zuletzt berechnetes Netz (der Körper ändert sich nie): große Netzkörper nicht bei jeder Änderung neu zerlegen
+    PCKMesh *_cachedMesh;
+    double _cachedDeflection;
 #else
     FallbackBody _fallback;
 #endif
@@ -2325,6 +2337,40 @@ static TopoDS_Shape variableFilletOnce(const TopoDS_Shape &shape, const std::vec
 }
 
 - (PCKMesh *)triangulateWithDeflection:(double)deflection {
+    @synchronized (self) {
+        if (_cachedMesh != nil && _cachedDeflection == deflection) return _cachedMesh;
+    }
+    PCKMesh *mesh = [self computeMeshWithDeflection:deflection];
+    @synchronized (self) {
+        _cachedMesh = mesh;
+        _cachedDeflection = deflection;
+    }
+    return mesh;
+}
+
+/// Kante zwischen zwei fast gleich geneigten ebenen Flächen, von denen mindestens eine ein Dreieck ist (Facetten
+/// eines Netzkörpers aus STL/3MF): wird nicht als Linie gezeichnet, sonst erscheint das Netz als Drahtgitter.
+static bool isSoftMeshEdge(const TopTools_ListOfShape &faces) {
+    if (faces.Extent() != 2) return false;
+    if (faces.First().ShapeType() != TopAbs_FACE || faces.Last().ShapeType() != TopAbs_FACE) return false;
+    const TopoDS_Face both[2] = {TopoDS::Face(faces.First()), TopoDS::Face(faces.Last())};
+    if (both[0].IsSame(both[1])) return false;
+    gp_Dir normals[2];
+    int triangles = 0;
+    for (int k = 0; k < 2; ++k) {
+        BRepAdaptor_Surface surface(both[k], Standard_False);
+        if (surface.GetType() != GeomAbs_Plane) return false;
+        gp_Dir normal = surface.Plane().Axis().Direction();
+        if (both[k].Orientation() == TopAbs_REVERSED) normal.Reverse();
+        normals[k] = normal;
+        TopTools_IndexedMapOfShape edges;
+        TopExp::MapShapes(both[k], TopAbs_EDGE, edges);
+        if (edges.Extent() <= 3) ++triangles;
+    }
+    return triangles > 0 && normals[0].Angle(normals[1]) < 25.0 * M_PI / 180.0;
+}
+
+- (PCKMesh *)computeMeshWithDeflection:(double)deflection {
     MeshBuffers buffers;
     // Fehler im Vernetzer dürfen die App nicht beenden: dann eben ohne bzw. mit weniger Dreiecken
     try {
@@ -2391,6 +2437,7 @@ static TopoDS_Shape variableFilletOnce(const TopoDS_Shape &shape, const std::vec
                 if (it.Value().ShapeType() == TopAbs_FACE && BRep_Tool::IsClosed(edge, TopoDS::Face(it.Value()))) seam = true;
             }
             if (seam) continue;
+            if (isSoftMeshEdge(edgeFaces(i))) continue;
             // Kante ohne 3D-Kurve und ohne Kurve auf einer Fläche: BRepAdaptor_Curve griffe auf ein leeres Handle zu
             if (!BRep_Tool::IsGeometric(edge)) continue;
             BRepAdaptor_Curve curve(edge);
@@ -2406,6 +2453,133 @@ static TopoDS_Shape variableFilletOnce(const TopoDS_Shape &shape, const std::vec
         }
     }
     return [[PCKMesh alloc] initWithBuffers:buffers];
+}
+
+// MARK: Netze (STL/3MF) als Körper
+
+- (BOOL)isClosedSolid {
+    try {
+        bool any = false;
+        for (TopExp_Explorer solids(_shape, TopAbs_SOLID); solids.More(); solids.Next()) {
+            for (TopExp_Explorer shells(solids.Current(), TopAbs_SHELL); shells.More(); shells.Next()) {
+                if (!BRep_Tool::IsClosed(shells.Current())) return NO;
+                any = true;
+            }
+        }
+        return any;
+    } catch (...) {
+        return NO;
+    }
+}
+
++ (nullable PCKShape *)solidFromMeshPoints:(NSData *)points triangles:(NSData *)triangles tolerance:(double)tolerance {
+    const size_t pointCount = points.length / (3 * sizeof(double));
+    const size_t triangleCount = triangles.length / (3 * sizeof(uint32_t));
+    if (pointCount < 3 || triangleCount < 1) return nil;
+    const double *xyz = static_cast<const double *>(points.bytes);
+    const uint32_t *corners = static_cast<const uint32_t *>(triangles.bytes);
+    const double tol = std::max(tolerance, Precision::Confusion());
+    try {
+        BRep_Builder builder;
+        // Gemeinsame Punkte und Kanten: jede Netzkante wird genau eine Kante, die sich beide Dreiecke teilen.
+        // So entsteht die Schale ohne langsames Vernähen (Sewing).
+        std::vector<TopoDS_Vertex> vertices(pointCount);
+        std::vector<std::vector<std::pair<uint32_t, size_t>>> edgesFrom(pointCount);
+        std::vector<TopoDS_Edge> edges;
+        auto point = [&](uint32_t i) { return gp_Pnt(xyz[3 * i], xyz[3 * i + 1], xyz[3 * i + 2]); };
+        auto vertexAt = [&](uint32_t i) -> TopoDS_Vertex {
+            if (vertices[i].IsNull()) builder.MakeVertex(vertices[i], point(i), tol);
+            return vertices[i];
+        };
+        auto edgeBetween = [&](uint32_t a, uint32_t b) -> TopoDS_Edge {
+            const uint32_t low = std::min(a, b), high = std::max(a, b);
+            for (const auto &entry : edgesFrom[low]) {
+                if (entry.first == high) {
+                    const TopoDS_Edge &edge = edges[entry.second];
+                    return a == low ? edge : TopoDS::Edge(edge.Reversed());
+                }
+            }
+            const TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(vertexAt(low), vertexAt(high)).Edge();
+            edgesFrom[low].push_back(std::make_pair(high, edges.size()));
+            edges.push_back(edge);
+            return a == low ? edge : TopoDS::Edge(edge.Reversed());
+        };
+
+        TopoDS_Shell shell;
+        builder.MakeShell(shell);
+        size_t faceCount = 0;
+        for (size_t t = 0; t < triangleCount; ++t) {
+            const uint32_t a = corners[3 * t], b = corners[3 * t + 1], c = corners[3 * t + 2];
+            if (a >= pointCount || b >= pointCount || c >= pointCount || a == b || b == c || a == c) continue;
+            try {
+                const gp_Pnt pa = point(a), pb = point(b), pc = point(c);
+                const gp_Vec normal = gp_Vec(pa, pb).Crossed(gp_Vec(pa, pc));
+                if (normal.Magnitude() < 1e-14) continue;
+                TopoDS_Wire wire;
+                builder.MakeWire(wire);
+                builder.Add(wire, edgeBetween(a, b));
+                builder.Add(wire, edgeBetween(b, c));
+                builder.Add(wire, edgeBetween(c, a));
+                wire.Closed(Standard_True);
+                // Ebene mit der Dreiecksnormale: der Linienzug a → b → c läuft um sie gegen den Uhrzeigersinn
+                Handle(Geom_Plane) plane = new Geom_Plane(gp_Pln(pa, gp_Dir(normal)));
+                TopoDS_Face face;
+                builder.MakeFace(face, plane, tol);
+                builder.Add(face, wire);
+                builder.Add(shell, face);
+                ++faceCount;
+            } catch (...) {
+                continue;
+            }
+        }
+        if (faceCount == 0) return nil;
+        bool closed = BRep_Tool::IsClosed(shell);
+        // Kleine Spalte (nicht verschweißte Punkte): bei kleineren Netzen doch noch vernähen
+        if (!closed && faceCount <= 20000) {
+            try {
+                BRepBuilderAPI_Sewing sewing(std::max(tol * 10, 1e-3));
+                sewing.Add(shell);
+                sewing.Perform();
+                const TopoDS_Shape sewed = sewing.SewedShape();
+                int shells = 0;
+                TopoDS_Shell candidate;
+                for (TopExp_Explorer it(sewed, TopAbs_SHELL); it.More(); it.Next()) {
+                    candidate = TopoDS::Shell(it.Current());
+                    ++shells;
+                }
+                if (shells == 1 && BRep_Tool::IsClosed(candidate)) {
+                    shell = candidate;
+                    closed = true;
+                }
+            } catch (...) {
+            }
+        }
+        shell.Closed(closed ? Standard_True : Standard_False);
+        TopoDS_Shape result = shell;
+        if (closed) {
+            BRepBuilderAPI_MakeSolid makeSolid(shell);
+            if (makeSolid.IsDone()) {
+                TopoDS_Solid solid = makeSolid.Solid();
+                // Normalen nach außen (falls das Netz innen-außen vertauscht war)
+                BRepLib::OrientClosedSolid(solid);
+                result = solid;
+            }
+        }
+        // Gleich liegende Dreiecke zu großen ebenen Flächen verschmelzen: eine Würfelseite wird wieder EINE
+        // Fläche, die sich antippen und extrudieren lässt; Kanten auf einer Geraden werden eine Kante
+        try {
+            ShapeUpgrade_UnifySameDomain unify(result, Standard_True, Standard_True, Standard_False);
+            unify.SetLinearTolerance(std::max(tol, 1e-4));
+            unify.SetAngularTolerance(1e-3);
+            unify.Build();
+            const TopoDS_Shape merged = unify.Shape();
+            if (!merged.IsNull()) result = merged;
+        } catch (...) {
+        }
+        return [[PCKShape alloc] initWithShape:result];
+    } catch (...) {
+        return nil;
+    }
 }
 
 + (nullable NSArray<PCKShape *> *)shapesFromSTEPFile:(NSString *)path {
@@ -2843,6 +3017,14 @@ static TopoDS_Shape variableFilletOnce(const TopoDS_Shape &shape, const std::vec
 
 - (PCKMesh *)triangulateWithDeflection:(double)deflection {
     return [[PCKMesh alloc] initWithBuffers:_fallback.mesh];
+}
+
+- (BOOL)isClosedSolid {
+    return YES;
+}
+
++ (nullable PCKShape *)solidFromMeshPoints:(NSData *)points triangles:(NSData *)triangles tolerance:(double)tolerance {
+    return nil;
 }
 
 + (nullable NSArray<PCKShape *> *)shapesFromSTEPFile:(NSString *)path {

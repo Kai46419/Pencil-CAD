@@ -1433,6 +1433,18 @@ final class ModelStore: ObservableObject {
         refreshHighlight()
     }
 
+    /// Netz bearbeiten (MeshSculpt.swift): angezeigtes Netz während eines Pinselstrichs, ohne Kernel.
+    func showSculptMesh(_ sculpted: Mesh) {
+        mesh = sculpted
+        revision += 1
+    }
+
+    /// Wieder die echten Körper zeigen (Pinselstriche verworfen).
+    func endSculptMesh() {
+        remesh()
+        refreshHighlight()
+    }
+
     func commit(_ newBodies: [SceneBody], sketches newSketches: [StoredSketch]? = nil,
                         constructions newConstructions: [ConstructionItem]? = nil,
                         canvases newCanvases: [CanvasImage]? = nil, name: String) {
