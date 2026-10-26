@@ -29,8 +29,9 @@ extension ConstraintSolver {
     /// Einschränkungen lösen und dabei möglichst nur die Elemente in focus und ihre direkten Nachbarn bewegen.
     /// locked: Elemente, die fest stehen (z. B. eine bereits auf das neue Maß gebrachte Form).
     /// accept: prüft eine Lösung (z. B. kein Zusammenklappen); abgelehnte Lösungen führen zur nächsten Stufe.
+    /// allowGlobal: false = ohne den letzten Ausweg über die ganze Skizze (der Aufrufer hat einen eigenen).
     static func solveLocally(_ entities: [SketchEntity], constraints all: [SketchConstraint], focus: Set<Int>,
-                             locked: Set<Int> = [],
+                             locked: Set<Int> = [], allowGlobal: Bool = true,
                              accept: ([SketchEntity]) -> Bool = { _ in true }) -> LocalSolution? {
         let constraints = all.filter { !$0.isSuspended }
         guard !constraints.isEmpty else {
@@ -53,6 +54,7 @@ extension ConstraintSolver {
                                        locked: locked) else { continue }
             if accept(solved) { return LocalSolution(entities: solved, stage: stage, isGlobal: false) }
         }
+        guard allowGlobal else { return nil }
         // Letzter Ausweg: ganze Skizze, entfernte Elemente teuer
         var weights: [Int: Double] = [:]
         for index in entities.indices {

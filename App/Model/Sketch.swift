@@ -1627,7 +1627,15 @@ final class SketchController: ObservableObject {
         result[drag.entity] = Self.dragged(drag.original[drag.entity], kind: drag.kind, grab: drag.grab, to: target)
         // Verbundene Elemente folgen über die Einschränkungen (gemeinsame Ecken, Mittelpunkte …)
         if !constraints.isEmpty {
-            guard let solved = solveKeepingLines(result, moving: drag.entity)?.entities else {
+            // Kai: Bogen bzw. Kreis ziehen ändert nur diese Form, Nachbarlinien gleiten (SketchArcResize.swift)
+            var local: [SketchEntity]?
+            switch drag.kind {
+            case .bulge: local = arcBulgeSolution(result, arc: drag.entity)
+            case .handle(let k) where k < 2: local = arcEndSolution(result, arc: drag.entity)
+            case .radius: local = circleRadiusSolution(result, circle: drag.entity)
+            default: local = nil
+            }
+            guard let solved = local ?? solveKeepingLines(result, moving: drag.entity)?.entities else {
                 selectDrag = drag
                 notice = "Die Einschränkungen lassen diese Änderung nicht zu (z. B. „Verankern“)."
                 changed(publish: false)
@@ -2706,11 +2714,13 @@ final class SketchController: ObservableObject {
     }
 
     /// Ein Lösungsversuch für ein Maß: Skizze mit (vorläufig) geänderter Form, die betroffenen Elemente (focus)
-    /// und die davon, die dabei fest stehen (pinned).
+    /// und die davon, die dabei fest stehen (pinned). extra: Einschränkungen nur für diesen Versuch (z. B. der
+    /// neue Radius, solange er nicht als festes Maß vorliegt).
     private struct DimensionTrial {
         var entities: [SketchEntity]
         var focus: Set<Int>
         var pinned: Set<Int>
+        var extra: [SketchConstraint] = []
     }
 
     /// Lösungsversuche für ein Maß am Element, in Stufen (die erste Stufe mit einer Lösung gilt):
@@ -2745,8 +2755,10 @@ final class SketchController: ObservableObject {
         case (.arc(let a, let m, let b), .radius):
             var pinnedShapes: [SketchEntity] = []
             var guess = entity
+            var hasGuess = false
             if let mid = Self.arc(a, m, b, radius: value) {
                 guess = .arc(start: a, mid: mid, end: b)
+                hasGuess = true
                 pinnedShapes.append(guess)
             }
             if let circle = circleThrough(a, m, b), circle.radius > 1e-9 {
@@ -2758,14 +2770,22 @@ final class SketchController: ObservableObject {
                     let end: Point2 = pivot + (b - pivot) * k
                     pinnedShapes.append(.arc(start: start, mid: through, end: end))
                 }
+                // Radius kleiner als die halbe Sehne: Startform um die Mitte verkleinert
+                if !hasGuess, let scaled = pinnedShapes.last { guess = scaled }
             }
             let pinnedTier = pinnedShapes.map { trial($0, pinned: true) }
-            guard held else { return [pinnedTier] }
-            return [[trial(guess, pinned: false)], pinnedTier]
+            // Kai (Parallelogramm mit Bogen): Zuerst ist der Bogen frei und hält den neuen Radius, seine Enden
+            // gleiten auf den Nachbarlinien – sonst kippten die Linien und die ganze Form verzog sich. Ohne
+            // festes Maß hält eine vorläufige Radius-Bedingung den Wert nur für diesen Versuch.
+            var free = trial(guess, pinned: false)
+            if !held { free.extra = [Self.resizeConstraint(of: index, value: value, diameter: false)] }
+            return [[free], pinnedTier]
         case (.circle(let center, _), .diameter):
             let resized = SketchEntity.circle(center: center, radius: value / 2)
-            guard held else { return [[trial(resized, pinned: true)]] }
-            return [[trial(resized, pinned: false)], [trial(resized, pinned: true)]]
+            // Wie beim Bogen: erst darf der Kreis selbst nachgeben (z. B. Mitte weg von einer Tangente)
+            var free = trial(resized, pinned: false)
+            if !held { free.extra = [Self.resizeConstraint(of: index, value: value, diameter: true)] }
+            return [[free], [trial(resized, pinned: true)]]
         default:
             break
         }
@@ -2806,10 +2826,13 @@ final class SketchController: ObservableObject {
         }
         let current = constraints
         var result: ConstraintSolver.LocalSolution?
+        // Lösung über die ganze Skizze erst, wenn auch keine spätere Stufe örtlich lösbar ist
+        var globalFallback: ConstraintSolver.LocalSolution?
         for tier in tiers {
             var best: (solution: ConstraintSolver.LocalSolution, cost: Double)?
             for trial in tier {
-                guard let found = ConstraintSolver.solveLocally(trial.entities, constraints: current,
+                let trialConstraints: [SketchConstraint] = current + trial.extra
+                guard let found = ConstraintSolver.solveLocally(trial.entities, constraints: trialConstraints,
                                                                 focus: trial.focus, locked: trial.pinned,
                                                                 accept: accept) else { continue }
                 let cost = Self.movement(from: before, to: found.entities, ignoring: trial.focus)
@@ -2821,10 +2844,15 @@ final class SketchController: ObservableObject {
                 best = (found, cost)
             }
             if let best {
+                if best.solution.isGlobal {
+                    if globalFallback == nil { globalFallback = best.solution }
+                    continue
+                }
                 result = best.solution
                 break
             }
         }
+        if result == nil { result = globalFallback }
         lastSolveFolded = result == nil && folded
         return result
     }
