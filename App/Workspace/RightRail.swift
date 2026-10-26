@@ -4,6 +4,7 @@ import simd
 /// Seitenleisten-Fenster rechts.
 enum SidePanel: String, Identifiable {
     case history = "Verlauf"
+    case properties = "Eigenschaften"
 
     var id: Self { self }
 }
@@ -170,6 +171,16 @@ struct RightRail: View {
 
     @State private var showsConstraints = true
 
+    /// Eigenschaften öffnen bzw. schließen; beim Öffnen gilt das Auswahlwerkzeug.
+    private func toggleProperties() {
+        if panel == .properties {
+            panel = nil
+            return
+        }
+        panel = .properties
+        if workspace.tool != .select { workspace.activate(.select) }
+    }
+
     var body: some View {
         if sketch.isActive {
             ViewThatFits(in: .vertical) {
@@ -241,6 +252,9 @@ struct RightRail: View {
             labeledButton("Screenshot", systemImage: "camera", action: screenshot)
             labeledButton("Verlauf", systemImage: "clock.arrow.circlepath", isActive: panel == .history) {
                 panel = panel == .history ? nil : .history
+            }
+            labeledButton("Eigenschaften", systemImage: "info.circle", isActive: panel == .properties) {
+                toggleProperties()
             }
             Menu {
                 visibilityItems
@@ -419,6 +433,9 @@ struct RightRail: View {
             RailButton(systemImage: "camera", label: "Screenshot", action: screenshot)
             RailButton(systemImage: "clock.arrow.circlepath", label: "Verlauf", isActive: panel == .history) {
                 panel = panel == .history ? nil : .history
+            }
+            RailButton(systemImage: "info.circle", label: "Eigenschaften", isActive: panel == .properties) {
+                toggleProperties()
             }
             Menu {
                 visibilityItems

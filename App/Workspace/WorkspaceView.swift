@@ -90,6 +90,8 @@ private struct WorkspaceContent: View {
                         switch panel {
                         case .history:
                             HistoryPanel(model: model) { panel = nil }
+                        case .properties:
+                            PropertiesPanel(workspace: workspace, model: model) { panel = nil }
                         case nil:
                             EmptyView()
                         }
