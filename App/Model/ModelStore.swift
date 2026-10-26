@@ -2405,13 +2405,6 @@ extension ModelStore {
                    direct: false)
     }
 
-    /// Ergebnis der KI-Anbindung als Vorschau zeigen (Übernehmen mit commitPreview, Verwerfen mit cancelPreview).
-    func showPlanPreview(_ result: [SceneBody], name: String) {
-        dropPreview()
-        clearSelectionState()
-        showPreview(result, name: name)
-    }
-
     func previewCircularPattern(count: Int, angle degrees: Double, axisOrigin: SIMD3<Double>, axis: SIMD3<Double>) {
         guard requireKernel(), !selectedBodies.isEmpty, count >= 2 else {
             dropPreview()

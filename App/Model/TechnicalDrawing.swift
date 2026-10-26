@@ -107,6 +107,13 @@ struct DrawingOptions: Equatable {
     var showsHidden = true
     /// Nur die gewählten Körper (sonst alle sichtbaren)
     var onlySelection = true
+    /// Ersteller im Schriftfeld („Created by …“, Kai); bleibt für alle Zeichnungen gespeichert
+    var author = DrawingOptions.savedAuthor
+
+    static var savedAuthor: String {
+        get { UserDefaults.standard.string(forKey: "drawingAuthor") ?? "Kai Rosenfeld" }
+        set { UserDefaults.standard.set(newValue, forKey: "drawingAuthor") }
+    }
 }
 
 /// Fertig angeordnetes Blatt.
@@ -254,8 +261,8 @@ enum TechnicalDrawing {
 
         guard let front = projections[.front]?.bounds, let top = projections[.top]?.bounds,
               let side = projections[sideView]?.bounds else {
-            titleBlock(title: title, subtitle: subtitle, scale: "–", method: options.method, date: date,
-                       into: &out.elements)
+            titleBlock(title: title, subtitle: subtitle, author: options.author, scale: "–", method: options.method,
+                       date: date, into: &out.elements)
             out.elements.append(.text("Keine Körper für die Zeichnung", at: Point2(153.5, 120), height: 5, centered: true))
             return out
         }
@@ -341,8 +348,8 @@ enum TechnicalDrawing {
             }
         }
 
-        titleBlock(title: title, subtitle: subtitle, scale: out.scaleText, method: options.method, date: date,
-                   into: &out.elements)
+        titleBlock(title: title, subtitle: subtitle, author: options.author, scale: out.scaleText,
+                   method: options.method, date: date, into: &out.elements)
         return out
     }
 
@@ -389,8 +396,8 @@ enum TechnicalDrawing {
     }
 
     /// Schriftfeld (vereinfacht nach DIN EN ISO 7200): Benennung, Maßstab, Datum, Blatt, Projektionsmethode.
-    private static func titleBlock(title: String, subtitle: String?, scale: String, method: ProjectionMethod,
-                                   date: Date, into elements: inout [DrawingElement]) {
+    private static func titleBlock(title: String, subtitle: String?, author: String, scale: String,
+                                   method: ProjectionMethod, date: Date, into elements: inout [DrawingElement]) {
         let a = titleMin, b = titleMax
         rectangle(a, b, pen: .frame, into: &elements)
         let row1 = a.y + 10, row2 = a.y + 20
@@ -410,7 +417,15 @@ enum TechnicalDrawing {
         // Benennung über die ganze Breite (lange Namen kürzen)
         let name = title.count > 34 ? String(title.prefix(33)) + "…" : title
         elements.append(.text("Benennung", at: Point2(a.x + 1.5, b.y - 3), height: 1.8))
-        elements.append(.text(name, at: Point2(a.x + 1.5, row2 + 2.2), height: 5, bold: true))
+        let creator = author.trimmingCharacters(in: .whitespacesAndNewlines)
+        if creator.isEmpty {
+            elements.append(.text(name, at: Point2(a.x + 1.5, row2 + 2.2), height: 5, bold: true))
+        } else {
+            // Benennung etwas höher, darunter der Ersteller (Kai: „Created by“ und Name)
+            elements.append(.text(name, at: Point2(a.x + 1.5, row2 + 4), height: 4.2, bold: true))
+            let line = "Created by " + (creator.count > 40 ? String(creator.prefix(39)) + "…" : creator)
+            elements.append(.text(line, at: Point2(a.x + 1.5, row2 + 1), height: 2.2))
+        }
         if let subtitle, !subtitle.isEmpty {
             let text = subtitle.count > 40 ? String(subtitle.prefix(39)) + "…" : subtitle
             elements.append(.text(text, at: Point2(b.x - 1.5 - Double(min(text.count, 40)) * 1.6, b.y - 3), height: 1.8))
@@ -426,11 +441,13 @@ enum TechnicalDrawing {
     // MARK: PDF und Vorschau
 
     /// PDF, eine Seite A4 quer.
-    static func pdfData(_ layout: DrawingLayout, title: String) -> Data {
+    static func pdfData(_ layout: DrawingLayout, title: String, author: String = "") -> Data {
         let k = 72 / 25.4
         let bounds = CGRect(x: 0, y: 0, width: sheetWidth * k, height: sheetHeight * k)
         let format = UIGraphicsPDFRendererFormat()
-        format.documentInfo = [kCGPDFContextTitle as String: title, kCGPDFContextCreator as String: "PencilCAD"]
+        var info: [String: Any] = [kCGPDFContextTitle as String: title, kCGPDFContextCreator as String: "PencilCAD"]
+        if !author.isEmpty { info[kCGPDFContextAuthor as String] = author }
+        format.documentInfo = info
         return UIGraphicsPDFRenderer(bounds: bounds, format: format).pdfData { context in
             context.beginPage()
             draw(layout, in: context.cgContext, pointsPerMM: k)

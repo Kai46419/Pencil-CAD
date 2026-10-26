@@ -240,8 +240,6 @@ final class Workspace: ObservableObject {
     let project: Project
     let model: ModelStore
     let sketch = SketchController()
-    /// KI-Anbindung: Befehl in Worten → Plan → Vorschau
-    let assistant: AIAssistant
     /// Kamerawinkel für den ViewCube (eigenes Objekt, damit Drehen nicht die ganze Oberfläche neu aufbaut).
     let camera = CameraState()
     /// Einstellungen von Normteilen, Vorlagen, Helix, dünnen Linien, Verjüngung, Sweep entlang Kanten
@@ -390,8 +388,6 @@ final class Workspace: ObservableObject {
     init(project: Project) {
         self.project = project
         model = ModelStore(folder: project.folder)
-        assistant = AIAssistant(model: model)
-        assistant.onPreview = { [weak self] in self?.send(.fitAll) }
         if let data = UserDefaults.standard.data(forKey: savedViewsKey),
            let views = try? JSONDecoder().decode([SavedView].self, from: data) {
             savedViews = views

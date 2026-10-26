@@ -152,7 +152,7 @@ struct FeatureEditor: View {
                     .foregroundStyle(.red)
             }
             if feature.kind == .snapshot {
-                Text("Fester Stand: Dieser Schritt (z. B. Import, KI, Fläche versetzen) lässt sich nicht nachrechnen. "
+                Text("Fester Stand: Dieser Schritt (z. B. Import, Fläche versetzen) lässt sich nicht nachrechnen. "
                      + "Beim Nachbau gelten ab hier die gespeicherten Körper.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)

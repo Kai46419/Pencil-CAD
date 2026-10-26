@@ -121,6 +121,11 @@ struct DrawingSheet: View {
                 .fixedSize()
             Toggle("Isometrie", isOn: $options.showsIso)
                 .fixedSize()
+            // Ersteller im Schriftfeld („Created by …“), wird für alle Zeichnungen gemerkt
+            TextField("Erstellt von", text: $options.author)
+                .textFieldStyle(.roundedBorder)
+                .frame(maxWidth: 170)
+                .onChange(of: options.author) { _, name in DrawingOptions.savedAuthor = name }
         }
         .font(.callout)
     }
@@ -185,7 +190,7 @@ struct DrawingSheet: View {
         let safeName = fileName.replacingOccurrences(of: "/", with: "-")
         let url = FileManager.default.temporaryDirectory.appending(path: "\(safeName).pdf")
         do {
-            try TechnicalDrawing.pdfData(layout, title: projectName).write(to: url)
+            try TechnicalDrawing.pdfData(layout, title: projectName, author: options.author).write(to: url)
             return url
         } catch {
             return nil
@@ -195,7 +200,7 @@ struct DrawingSheet: View {
     @MainActor
     private func save(pdf: Bool) {
         guard let layout else { return }
-        exportFile = ExportFile(data: pdf ? TechnicalDrawing.pdfData(layout, title: projectName)
+        exportFile = ExportFile(data: pdf ? TechnicalDrawing.pdfData(layout, title: projectName, author: options.author)
                                           : TechnicalDrawing.dxfData(layout))
         exportType = pdf ? .pdf : .dxfFile
         isExporting = true

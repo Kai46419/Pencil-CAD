@@ -188,7 +188,7 @@ enum ToolTips {
         "Übersetzen": "Körper antippen, dann Start- und Zielpunkt (rastet an Ecken und Kantenmitten): der Körper wandert genau so weit. Mit „Kopieren“ bleibt das Original stehen.",
         "Projekt": "Körper eines anderen Projekts als Kopie einfügen (landen in einem eigenen Ordner).",
         "Variable": "Benannte Werte (z. B. wand = 2 mm), die in jedem Zahlenfeld und in Skizzenmaßen verwendet werden können.",
-        "Hilfe": "Kurzanleitungen zu Gesten, Skizzieren, Modellieren, Formeln und KI-Assistent.",
+        "Hilfe": "Kurzanleitungen zu Gesten, Skizzieren, Modellieren, Formeln und Variablen.",
         "Mehr": "Projizieren, Spiegeln, Rechteck- und Kreismuster, Punkt und Text. Antippen startet das zuletzt gewählte.",
         "Alle Werkzeuge": "Zeigt wieder alle Werkzeuggruppen (Erstellen, Ändern, Transformieren …).",
         "Punkt": "Einzelnen Punkt setzen, z. B. als Bezug für Einschränkungen.",

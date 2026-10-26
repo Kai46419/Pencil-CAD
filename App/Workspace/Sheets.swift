@@ -201,7 +201,6 @@ enum HelpTopic: String, CaseIterable, Identifiable {
     case sketch = "Skizzieren"
     case model = "Modellieren"
     case formulas = "Formeln und Variablen"
-    case assistant = "KI-Assistent"
     case news = "Neu in diesem Build"
 
     var id: Self { self }
@@ -212,7 +211,6 @@ enum HelpTopic: String, CaseIterable, Identifiable {
         case .sketch: "pencil.and.outline"
         case .model: "cube"
         case .formulas: "x.squareroot"
-        case .assistant: "sparkles"
         case .news: "star"
         }
     }
@@ -268,14 +266,6 @@ enum HelpTopic: String, CaseIterable, Identifiable {
                     + "Formeln mit Variablen sein.",
                 "Funktionen: " + Formula.functionNames.joined(separator: ", ") + ". Winkelfunktionen rechnen in Grad.",
             ]
-        case .assistant:
-            [
-                "Sparkles-Symbol oben: Auftrag in Worten eintippen, mit dem Stift schreiben oder über das Mikrofon "
-                    + "sprechen (nach dem Satz Mikrofon erneut antippen – der Auftrag geht dann gleich los).",
-                "Einfache Aufträge plant Apple Intelligence auf dem iPad, umfangreichere Claude (eigener API-Schlüssel "
-                    + "unter dem Zahnrad).",
-                "Das Ergebnis erscheint als Vorschau: Übernehmen oder Verwerfen.",
-            ]
         case .news:
             [
                 "Schlanke Maße: kleinere Schilder mit dünnem Schloss. Feste (grüne) Maße erscheinen nur als kleines "
@@ -283,7 +273,7 @@ enum HelpTopic: String, CaseIterable, Identifiable {
                 "Parametrischer Verlauf: Zeitleiste unten (Menü … › Zeitleiste ein-/ausblenden). Schritt antippen ändert "
                     + "Abstand, Radius, Winkel … (auch als Formel mit Variablen), unterdrückt oder löscht ihn – die "
                     + "folgenden Schritte werden neu berechnet. Ebenso nach dem Bearbeiten einer Skizze und beim Ändern "
-                    + "von Variablen. Rot = beim Nachbau fehlgeschlagen und übersprungen. Import, KI und ähnliche "
+                    + "von Variablen. Rot = beim Nachbau fehlgeschlagen und übersprungen. Import und ähnliche "
                     + "direkte Änderungen bleiben als fester Stand stehen.",
                 "Formeln in Skizzenmaßen rechnen in der Projekteinheit („10“ im Zollprojekt = 10 in, „10 mm“ bleibt "
                     + "10 mm); Winkel an der Ecke kippen beim Nachrechnen nicht mehr.",

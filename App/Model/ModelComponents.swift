@@ -162,7 +162,7 @@ extension ModelStore {
                 case .geometry:
                     real.append(edit.index)
                 case .moved:
-                    // Bewegt, ohne dass die Lage bekannt ist (z. B. KI-Assistent, Druckausrichtung)
+                    // Bewegt, ohne dass die Lage bekannt ist (z. B. Druckausrichtung)
                     result[edit.index] = result[edit.index].unlinked()
                     note = "\(result[edit.index].name) wurde bewegt und ist jetzt nicht mehr verknüpft."
                 }
