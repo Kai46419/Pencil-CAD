@@ -278,6 +278,8 @@ enum HelpTopic: String, CaseIterable, Identifiable {
             ]
         case .news:
             [
+                "Schlanke Maße: kleinere Schilder mit dünnem Schloss. Feste (grüne) Maße erscheinen nur als kleines "
+                    + "Schloss – antippen öffnet das Maß. Abschalten in der Skizzenpalette („Feste Maße als Schloss“).",
                 "Parametrischer Verlauf: Zeitleiste unten (Menü … › Zeitleiste ein-/ausblenden). Schritt antippen ändert "
                     + "Abstand, Radius, Winkel … (auch als Formel mit Variablen), unterdrückt oder löscht ihn – die "
                     + "folgenden Schritte werden neu berechnet. Ebenso nach dem Bearbeiten einer Skizze und beim Ändern "

@@ -90,6 +90,8 @@ final class ViewportView: MTKView {
     }
     private var planeLabels: [PaddedLabel] = []
     private var dimensionFields: [String: DimensionField] = [:]
+    /// Feste Maße, die als Schloss gezeigt werden und gerade aufgeklappt sind (bis die Eingabe endet)
+    private var expandedDimensions: Set<String> = []
     /// Kleines Ziffernfeld am gerade bearbeiteten Maß (statt der Bildschirmtastatur, die die Maße verdeckt)
     private lazy var keypad: DimensionKeypad = {
         let keypad = DimensionKeypad()
@@ -1168,9 +1170,25 @@ final class ViewportView: MTKView {
             }
             field.lockState = dimension.lockState
             let id = dimension.id
-            field.onLockTap = { [weak self] in
-                self?.sketch?.toggleDimensionLock(id: id)
-                self?.refresh()
+            // Kai: feste Maße schlank als kleines Schloss; antippen klappt das Maß auf und öffnet die Eingabe
+            let collapses = sketch.collapsesLockedDimensions && dimension.lockState == true
+                && !field.isFirstResponder && !expandedDimensions.contains(id)
+            field.isCollapsed = collapses
+            if collapses {
+                field.onLockTap = { [weak self, weak field] in
+                    guard let self else { return }
+                    self.expandedDimensions.insert(id)
+                    self.refresh()
+                    guard let field else { return }
+                    field.isCollapsed = false
+                    field.sizeToFit()
+                    if field.allowsEditing { field.becomeFirstResponder() }
+                }
+            } else {
+                field.onLockTap = { [weak self] in
+                    self?.sketch?.toggleDimensionLock(id: id)
+                    self?.refresh()
+                }
             }
             field.sizeToFit()
             var dx = tip.x - anchor.x, dy = tip.y - anchor.y
@@ -1448,13 +1466,15 @@ final class ViewportView: MTKView {
         guard let renderer, let sketch else { return }
         let badges = sketch.isActive && !sketch.isChoosingPlane && sketch.showsConstraintBadges ? sketch.constraintBadges : []
         while badgeLabels.count < badges.count {
+            // Schlank (Kai): kleine Schrift, feiner Rand
             let label = PaddedLabel()
-            label.font = .systemFont(ofSize: 11, weight: .bold)
-            label.textColor = UIColor(white: 0.25, alpha: 1)
-            label.backgroundColor = UIColor(white: 1, alpha: 0.9)
-            label.layer.cornerRadius = 7
-            label.layer.borderWidth = 1
-            label.layer.borderColor = UIColor(white: 0.7, alpha: 1).cgColor
+            label.insets = UIEdgeInsets(top: 1, left: 4, bottom: 1, right: 4)
+            label.font = .systemFont(ofSize: 9, weight: .medium)
+            label.textColor = UIColor(white: 0.35, alpha: 1)
+            label.backgroundColor = UIColor(white: 1, alpha: 0.8)
+            label.layer.cornerRadius = 4
+            label.layer.borderWidth = 0.5
+            label.layer.borderColor = UIColor(white: 0.75, alpha: 1).cgColor
             label.layer.masksToBounds = true
             label.isUserInteractionEnabled = false
             addSubview(label)
@@ -1470,7 +1490,7 @@ final class ViewportView: MTKView {
             }
             label.text = badges[index].text
             label.sizeToFit()
-            label.center = CGPoint(x: point.x + 14, y: point.y - 14)
+            label.center = CGPoint(x: point.x + 10, y: point.y - 10)
             label.isHidden = false
         }
     }
@@ -2302,7 +2322,12 @@ extension ViewportView: UITextFieldDelegate {
 
     func textFieldDidEndEditing(_ textField: UITextField) {
         keypad.isHidden = true
-        guard let field = textField as? DimensionField, field.appliesOnEnd else { return }
+        guard let field = textField as? DimensionField else { return }
+        // Aufgeklapptes festes Maß wieder zum Schloss machen
+        expandedDimensions.remove(field.dimensionID)
+        // Erst nach diesem Aufruf neu anordnen (refresh kann selbst Felder schließen)
+        DispatchQueue.main.async { [weak self] in self?.refresh() }
+        guard field.appliesOnEnd else { return }
         apply(field)
     }
 }
@@ -2384,7 +2409,7 @@ private extension CGPoint {
 
 /// Etikett mit Innenabstand für das Maß am Ziehpfeil.
 final class PaddedLabel: UILabel {
-    private let insets = UIEdgeInsets(top: 4, left: 9, bottom: 4, right: 9)
+    var insets = UIEdgeInsets(top: 4, left: 9, bottom: 4, right: 9)
 
     override func drawText(in rect: CGRect) {
         super.drawText(in: rect.inset(by: insets))
@@ -2414,8 +2439,17 @@ final class DimensionField: UITextField {
     var isFine = false {
         didSet {
             guard isFine != oldValue else { return }
-            font = .monospacedDigitSystemFont(ofSize: isFine ? 13 : 15, weight: isFine ? .light : .semibold)
+            font = .monospacedDigitSystemFont(ofSize: isFine ? 12 : 13, weight: isFine ? .light : .medium)
             updateStyle()
+        }
+    }
+    /// Festes Maß nur als kleines, dünnes Schloss (Kai); antippen ruft onLockTap (Viewport klappt es auf)
+    var isCollapsed = false {
+        didSet {
+            guard isCollapsed != oldValue else { return }
+            leftViewMode = isCollapsed ? .never : .always
+            updateLock()
+            setNeedsDisplay()
         }
     }
     private let prefixLabel = UILabel()
@@ -2429,7 +2463,7 @@ final class DimensionField: UITextField {
     var onLockTap: (() -> Void)?
     private lazy var lockButton: UIButton = {
         let button = UIButton(type: .system)
-        button.frame = CGRect(x: 0, y: 0, width: 26, height: 30)
+        button.frame = CGRect(x: 0, y: 0, width: 16, height: 22)
         button.addAction(UIAction { [weak self] _ in self?.onLockTap?() }, for: .touchUpInside)
         return button
     }()
@@ -2437,7 +2471,8 @@ final class DimensionField: UITextField {
     init(dimensionID: String) {
         self.dimensionID = dimensionID
         super.init(frame: .zero)
-        font = .monospacedDigitSystemFont(ofSize: 15, weight: .semibold)
+        // Schlank (Kai): kleine Schrift, feiner Rand, kleiner Radius
+        font = .monospacedDigitSystemFont(ofSize: 13, weight: .medium)
         textAlignment = .center
         keyboardType = .decimalPad
         returnKeyType = .done
@@ -2448,10 +2483,10 @@ final class DimensionField: UITextField {
         inputAssistantItem.trailingBarButtonGroups = []
         backgroundColor = .white
         textColor = .black
-        layer.cornerRadius = 8
-        layer.borderWidth = 1.5
-        prefixLabel.font = .systemFont(ofSize: 13, weight: .semibold)
-        prefixLabel.textColor = .darkGray
+        layer.cornerRadius = 5
+        layer.borderWidth = 0.75
+        prefixLabel.font = .systemFont(ofSize: 11, weight: .regular)
+        prefixLabel.textColor = .gray
         leftView = prefixLabel
         leftViewMode = .always
         updateStyle()
@@ -2461,15 +2496,17 @@ final class DimensionField: UITextField {
         fatalError("init(coder:) wird nicht verwendet")
     }
 
-    /// Grünes geschlossenes bzw. rotes offenes Schloss rechts im Feld; antippen schaltet um.
+    /// Grünes geschlossenes bzw. rotes offenes Schloss rechts im Feld; antippen schaltet um. Klein, schmal und
+    /// dünnlinig (Kai), ohne Füllung.
     private func updateLock() {
         guard let lockState else {
             rightView = nil
             rightViewMode = .never
+            updateStyle()
             return
         }
-        let configuration = UIImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
-        lockButton.setImage(UIImage(systemName: lockState ? "lock.fill" : "lock.open.fill", withConfiguration: configuration),
+        let configuration = UIImage.SymbolConfiguration(pointSize: isCollapsed ? 11 : 9, weight: .light)
+        lockButton.setImage(UIImage(systemName: lockState ? "lock" : "lock.open", withConfiguration: configuration),
                             for: .normal)
         lockButton.tintColor = lockState ? .systemGreen : .systemRed
         lockButton.accessibilityLabel = lockState ? "Maß fest – antippen löst es" : "Maß gelöst – antippen macht es fest"
@@ -2479,19 +2516,40 @@ final class DimensionField: UITextField {
     }
 
     private func updateStyle() {
-        layer.borderWidth = isFine ? 0.75 : 1.5
-        backgroundColor = isFine ? UIColor.white.withAlphaComponent(0.85) : .white
-        layer.borderColor = (lockState == false ? UIColor.systemRed
-            : allowsEditing ? UIColor.systemBlue : UIColor.systemGray3).cgColor
+        if isCollapsed {
+            // Nur das Schloss: kein Rahmen, leicht hinterlegt, damit es auf Linien lesbar bleibt
+            layer.borderWidth = 0
+            layer.cornerRadius = 9
+            backgroundColor = UIColor.white.withAlphaComponent(0.75)
+            isUserInteractionEnabled = true
+            return
+        }
+        layer.cornerRadius = 5
+        layer.borderWidth = isFine ? 0.5 : 0.75
+        backgroundColor = UIColor.white.withAlphaComponent(isFine ? 0.8 : 0.92)
+        layer.borderColor = (lockState == false ? UIColor.systemRed.withAlphaComponent(0.7)
+            : allowsEditing ? UIColor.systemBlue.withAlphaComponent(0.55) : UIColor.systemGray4).cgColor
         isUserInteractionEnabled = allowsEditing || lockState != nil
     }
 
     override func sizeThatFits(_ size: CGSize) -> CGSize {
+        if isCollapsed { return CGSize(width: 18, height: 18) }
         let text = (self.text ?? "") as NSString
-        let width = text.size(withAttributes: [.font: font ?? UIFont.systemFont(ofSize: 15)]).width
+        let width = text.size(withAttributes: [.font: font ?? UIFont.systemFont(ofSize: 13)]).width
         let prefixWidth = prefix.isEmpty ? 0 : prefixLabel.intrinsicContentSize.width + 2
-        let lockWidth: CGFloat = lockState == nil ? 0 : 24
-        return CGSize(width: max(width + prefixWidth + lockWidth + 22, 46), height: 30)
+        let lockWidth: CGFloat = lockState == nil ? 0 : 13
+        return CGSize(width: max(width + prefixWidth + lockWidth + 12, 30), height: 22)
+    }
+
+    /// Eingeklappt: kein Wert, nur das Schloss
+    override func drawText(in rect: CGRect) {
+        guard !isCollapsed else { return }
+        super.drawText(in: rect)
+    }
+
+    override func rightViewRect(forBounds bounds: CGRect) -> CGRect {
+        if isCollapsed { return bounds }
+        return CGRect(x: bounds.maxX - 16, y: 0, width: 14, height: bounds.height)
     }
 
     override func sizeToFit() {
@@ -2499,14 +2557,15 @@ final class DimensionField: UITextField {
     }
 
     override func leftViewRect(forBounds bounds: CGRect) -> CGRect {
-        guard !prefix.isEmpty else { return .zero }
+        guard !prefix.isEmpty, !isCollapsed else { return .zero }
         let width = prefixLabel.intrinsicContentSize.width
-        return CGRect(x: 9, y: 0, width: width, height: bounds.height)
+        return CGRect(x: 5, y: 0, width: width, height: bounds.height)
     }
 
     override func textRect(forBounds bounds: CGRect) -> CGRect {
-        let left: CGFloat = prefix.isEmpty ? 8 : 9 + prefixLabel.intrinsicContentSize.width + 2
-        return bounds.inset(by: UIEdgeInsets(top: 0, left: left, bottom: 0, right: 8))
+        let left: CGFloat = prefix.isEmpty ? 5 : 5 + prefixLabel.intrinsicContentSize.width + 2
+        let right: CGFloat = lockState == nil ? 5 : 16
+        return bounds.inset(by: UIEdgeInsets(top: 0, left: left, bottom: 0, right: right))
     }
 
     override func editingRect(forBounds bounds: CGRect) -> CGRect {

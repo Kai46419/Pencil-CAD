@@ -348,6 +348,7 @@ struct RightRail: View {
         Toggle("Profil (Bereiche)", systemImage: "square.fill.on.square", isOn: $sketch.showsProfiles)
         Toggle("Punkte", systemImage: "circle.grid.cross", isOn: $sketch.showsPoints)
         Toggle("Bemaßungen", systemImage: "ruler", isOn: $sketch.showsDimensions)
+        Toggle("Feste Maße als Schloss", systemImage: "lock", isOn: $sketch.collapsesLockedDimensions)
         Toggle("Abhängigkeiten", systemImage: "link", isOn: $sketch.showsConstraintBadges)
         Toggle("Bestimmtheit (grün = fest)", systemImage: "checkmark.seal", isOn: $sketch.showsDefinition)
         Toggle("Automatisch einschränken", systemImage: "wand.and.rays", isOn: $sketch.autoConstrain)

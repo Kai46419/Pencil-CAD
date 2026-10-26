@@ -411,6 +411,10 @@ final class SketchController: ObservableObject {
     @Published var showsProfiles = true
     @Published var showsPoints = true
     @Published var showsDimensions = true
+    /// Kai: feste (grüne) Maße nur als kleines, dünnes Schloss zeigen; antippen öffnet das Maß
+    @Published var collapsesLockedDimensions = UserDefaults.standard.object(forKey: "collapsesLockedDimensions") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(collapsesLockedDimensions, forKey: "collapsesLockedDimensions") }
+    }
     @Published var showsConstraintBadges = true
     @Published var showsConstruction = true
     /// Hinweis für die Oberfläche (z. B. Einschränkung nicht möglich).
