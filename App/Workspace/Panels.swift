@@ -1424,17 +1424,33 @@ extension ParameterCard {
     var measureCard: some View {
         Card {
             HStack(alignment: .top, spacing: 14) {
-                Label("Messen", systemImage: "ruler")
-                    .font(.callout.weight(.semibold))
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Messen", systemImage: "ruler")
+                        .font(.callout.weight(.semibold))
+                    Picker("Art", selection: $workspace.measureMode) {
+                        ForEach(MeasureMode.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .fixedSize()
+                    .hoverTip("Messen", "Kante/Fläche: ein Tipp misst die ganze Kante (Länge, bei Bögen Radius) bzw. die ganze Fläche (mm², Länge × Breite). Punkt zu Punkt: der zweite Punkt rastet parallel zu X, Y, Z bzw. senkrecht zur Fläche ein.")
+                }
                 VStack(alignment: .leading, spacing: 3) {
                     if workspace.measureLines.isEmpty {
-                        Text("Kante, Fläche oder zwei Punkte antippen")
+                        Text(workspace.measureMode == .element ? "Kante oder Fläche antippen"
+                             : "Ersten Punkt antippen, dann den zweiten")
                             .foregroundStyle(.secondary)
                     }
                     ForEach(workspace.measureLines, id: \.self) { line in
                         Text(line)
                             .monospacedDigit()
+                            .textSelection(.enabled)
                     }
+                }
+                if !workspace.measureLines.isEmpty {
+                    Button("Neu", systemImage: "arrow.counterclockwise") {
+                        workspace.clearMeasurement()
+                    }
+                    .labelStyle(.iconOnly)
                 }
             }
         }

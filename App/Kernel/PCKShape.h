@@ -211,6 +211,17 @@ NS_ASSUME_NONNULL_BEGIN
 - (nullable NSArray<NSNumber *> *)minimumDistanceTo:(PCKShape *)other NS_SWIFT_NAME(minimumDistance(to:));
 - (double)lengthOfEdge:(NSInteger)edge NS_SWIFT_NAME(length(ofEdge:));
 - (double)areaOfFace:(NSInteger)face NS_SWIFT_NAME(area(ofFace:));
+/// Messen: Geometrie einer Kante als [Art, Länge, Start x, y, z, Ende x, y, z, Mitte x, y, z, Achse x, y, z,
+/// Radius, zweiter Radius, Öffnungswinkel (Bogenmaß), geschlossen (0/1)]. Art: 0 Strecke, 1 Kreis bzw. Kreisbogen,
+/// 2 Ellipse (Radius = große, zweiter Radius = kleine Halbachse), 3 sonstige Kurve. nil ohne Kernel bzw. bei Fehler.
+- (nullable NSArray<NSNumber *> *)geometryOfEdge:(NSInteger)edge NS_SWIFT_NAME(geometry(ofEdge:));
+/// Messen: Art der Fläche als [Art, a, b]. Art: 0 eben, 1 Zylinder (a = Radius), 2 Kegel (a = halber
+/// Öffnungswinkel im Bogenmaß, b = Bezugsradius), 3 Kugel (a = Radius), 4 Torus (a, b = Radien), 5 sonstige.
+- (nullable NSArray<NSNumber *> *)surfaceOfFace:(NSInteger)face NS_SWIFT_NAME(surface(ofFace:));
+/// Messen: Punkte entlang aller Randkanten einer Fläche (x, y, z hintereinander), fein abgetastet
+/// (Sehnenfehler höchstens deflection mm). Für Länge × Breite ebener Flächen und die Höhe von Zylindern.
+- (nullable NSArray<NSNumber *> *)outlineOfFace:(NSInteger)face deflection:(double)deflection
+    NS_SWIFT_NAME(outline(ofFace:deflection:));
 /// Kantennummern einer Fläche (ohne Nahtkanten).
 - (NSArray<NSNumber *> *)edgeNumbersOfFace:(NSInteger)face NS_SWIFT_NAME(edgeNumbers(ofFace:));
 

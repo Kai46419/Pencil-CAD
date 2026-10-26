@@ -33,6 +33,8 @@ enum SketchArrangement {
         var lower: Point2
         var upper: Point2
         var cuts: [Double] = []
+        /// Alle Koordinaten endlich (ein entgleister Löser kann NaN liefern; Int(NaN) beendet die App)
+        var isFinite = true
 
         init(shape: Shape, segment: SketchSegment? = nil, loop: SketchLoop? = nil) {
             self.shape = shape
@@ -47,6 +49,8 @@ enum SketchArrangement {
             }
             lower = points.reduce(Point2(.infinity, .infinity)) { simd_min($0, $1) }
             upper = points.reduce(Point2(-.infinity, -.infinity)) { simd_max($0, $1) }
+            isFinite = !points.isEmpty && points.allSatisfy { $0.x.isFinite && $0.y.isFinite }
+            if case .circle(_, let r) = shape, !r.isFinite { isFinite = false }
         }
 
         var isClosed: Bool {
@@ -103,9 +107,11 @@ enum SketchArrangement {
             case .circle(let c, let r): return c + r * Point2(cos(s), sin(s))
             case .sampled(let points, let closed):
                 let n = points.count
-                let s = closed ? SketchArrangement.positiveAngleMod(s, Double(n)) : s
-                let k = min(Int(s.rounded(.down)), n - 1)
-                let t = s - Double(k)
+                guard n > 0 else { return .zero }
+                guard s.isFinite else { return points[0] }
+                let u = closed ? SketchArrangement.positiveAngleMod(s, Double(n)) : min(max(s, 0), Double(n - 1))
+                let k = max(0, min(Int(u.rounded(.down)), n - 1))
+                let t = u - Double(k)
                 guard t > 0 else { return points[(k + n) % n] }
                 return points[k % n] + (points[(k + 1) % n] - points[k % n]) * t
             }
@@ -138,7 +144,7 @@ enum SketchArrangement {
             switch shape {
             case .line(let a, let b): return [a, b]
             case .arc(let arc): return [arc.point(0), arc.point(1)]
-            case .sampled(let points, false): return [points[0], points[points.count - 1]]
+            case .sampled(let points, false): return points.isEmpty ? [] : [points[0], points[points.count - 1]]
             default: return []
             }
         }
@@ -213,9 +219,12 @@ enum SketchArrangement {
                 let pi = curves[i].primitives, pj = curves[j].primitives
                 for (k, p) in pi.enumerated() {
                     for (l, q) in pj.enumerated() {
-                        for x in SketchTrim.intersections(p, q) {
-                            curves[i].cuts.append(curves[i].parameter(of: x, primitive: k))
-                            curves[j].cuts.append(curves[j].parameter(of: x, primitive: l))
+                        for x in SketchTrim.intersections(p, q) where x.x.isFinite && x.y.isFinite {
+                            let si = curves[i].parameter(of: x, primitive: k)
+                            let sj = curves[j].parameter(of: x, primitive: l)
+                            guard si.isFinite, sj.isFinite else { continue }
+                            curves[i].cuts.append(si)
+                            curves[j].cuts.append(sj)
                         }
                     }
                 }
@@ -228,7 +237,7 @@ enum SketchArrangement {
                     guard end.x >= curves[j].lower.x - tolerance, end.x <= curves[j].upper.x + tolerance,
                           end.y >= curves[j].lower.y - tolerance, end.y <= curves[j].upper.y + tolerance else { continue }
                     let hit = curves[j].closest(to: end)
-                    if hit.distance < tolerance * 10 { curves[j].cuts.append(hit.parameter) }
+                    if hit.distance < tolerance * 10, hit.parameter.isFinite { curves[j].cuts.append(hit.parameter) }
                 }
             }
         }
@@ -355,8 +364,11 @@ enum SketchArrangement {
             return .arc(curve.point(s0), curve.point((s0 + s1) / 2), curve.point(s1))
         case .sampled(let points, let closed):
             let n = points.count
+            guard n >= 2, s0.isFinite, s1.isFinite, s1 - s0 <= Double(2 * n) else {
+                return .line(curve.point(s0), curve.point(s1))
+            }
             var sub = [curve.point(closed ? positiveAngleMod(s0, Double(n)) : s0)]
-            var k = Int(s0.rounded(.down)) + 1
+            var k = max(0, Int(s0.rounded(.down)) + 1)
             while Double(k) < s1 - 1e-9 {
                 sub.append(points[closed ? k % n : min(k, n - 1)])
                 k += 1
@@ -375,7 +387,8 @@ enum SketchArrangement {
 
     /// Teilflächen der Skizze als Bereiche; nil, wenn die Skizze keine Kurven hat.
     static func regions(_ entities: [SketchEntity]) -> [SketchRegion]? {
-        var all = curves(entities)
+        // Kurven mit ungültigen Koordinaten (NaN, unendlich) auslassen, statt beim Teilen abzustürzen
+        var all = curves(entities).filter(\.isFinite)
         guard !all.isEmpty else { return nil }
         addCuts(&all)
         let graph = Graph()

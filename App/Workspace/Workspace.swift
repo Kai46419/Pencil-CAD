@@ -301,6 +301,18 @@ final class Workspace: ObservableObject {
     @Published var sketchSection = false
     @Published private(set) var measureLines: [String] = []
     @Published private(set) var measurePoints: [SIMD3<Double>] = []
+    /// Messen: ganze Kante bzw. Fläche antippen oder Punkt zu Punkt (ModelMeasure.swift)
+    @Published var measureMode: MeasureMode = .element {
+        didSet {
+            if measureMode != oldValue { clearMeasurement() }
+        }
+    }
+    /// Gemessene Kante bzw. Umriss der gemessenen Fläche (hervorgehoben)
+    @Published private(set) var measureHighlight: [[SIMD3<Double>]] = []
+    /// Eingerastete Leitlinie zwischen den beiden Messpunkten (parallel zu X, Y, Z bzw. senkrecht zur Fläche)
+    @Published private(set) var measureGuide: MeasureGuide?
+    /// Normale der ebenen Fläche unter dem ersten Messpunkt (nil = gekrümmt bzw. Kante)
+    private(set) var measureFirstNormal: SIMD3<Double>?
     /// Zuletzt gemessene Körper (für den kürzesten Abstand zwischen zwei Körpern)
     private var measureBodies: [Int] = []
     /// Zuletzt gemessene Flächen (Winkel bzw. Abstand zweier ebener Flächen)
@@ -614,6 +626,9 @@ final class Workspace: ObservableObject {
         measurePoints = []
         measureBodies = []
         measureFaces = []
+        measureHighlight = []
+        measureGuide = nil
+        measureFirstNormal = nil
         switch newTool {
         case .move where previousBody == nil && !previousRegions.isEmpty:
             // Skizze verschieben/drehen
@@ -824,6 +839,9 @@ final class Workspace: ObservableObject {
         measurePoints = []
         measureBodies = []
         measureFaces = []
+        measureHighlight = []
+        measureGuide = nil
+        measureFirstNormal = nil
     }
 
     /// Fläche versetzen: Wert je nach Art in einen Versatz umrechnen und als Vorschau zeigen.
@@ -1001,6 +1019,7 @@ final class Workspace: ObservableObject {
         case .hole: return true
         case .construct(.plane): return planeMethod == .threePoints
         case .construct(.axis): return axisMethod == .twoPoints
+        case .measure: return measureMode == .points
         default: return false
         }
     }
@@ -1627,70 +1646,101 @@ final class Workspace: ObservableObject {
         }
     }
 
-    /// Messen: Kantenlänge, Flächeninhalt und Volumen, Abstand zweier angetippter Punkte.
+    /// Messung verwerfen (Moduswechsel, „Neu“).
+    func clearMeasurement() {
+        measureLines = []
+        measurePoints = []
+        measureBodies = []
+        measureFaces = []
+        measureHighlight = []
+        measureGuide = nil
+        measureFirstNormal = nil
+        if tool == .measure { model.resetSelection() }
+    }
+
+    /// Messen (Kai): Kante antippen = ganze Kantenlänge, Fläche antippen = Flächeninhalt mit Länge × Breite;
+    /// im Modus „Punkt zu Punkt“ rastet der zweite Punkt parallel zu X, Y, Z bzw. senkrecht zur Fläche ein.
     private func measure(face: FaceRef?, edge: EdgeRef?, point: SIMD3<Float>?) {
-        var lines: [String] = []
-        func mm(_ value: Double, _ unit: String = "mm") -> String {
-            // Längen und Flächen in der Projekteinheit
-            if unit == "mm" { return LengthUnit.current.format(value) }
-            if unit == "mm²" { return LengthUnit.current.formatArea(value) }
-            return "\(value.formatted(.number.precision(.fractionLength(0...3)))) \(unit)"
+        if measureMode == .points {
+            measurePoint(face: face, point: point)
+            return
         }
+        measurePoints = []
+        measureGuide = nil
         if let edge {
             model.resetSelection()
             model.toggleEdge(edge)
-            lines.append("Kantenlänge: \(mm(model.length(of: edge)))")
-        } else if let face {
-            model.select(face: face)
-            lines.append("Fläche: \(mm(model.area(of: face), "mm²"))")
-            if let cylinder = model.cylinder(of: face) {
-                lines.append("\(cylinder.convex ? "Zapfen" : "Bohrung"): Radius \(mm(cylinder.radius)) · Ø \(mm(cylinder.radius * 2))")
-            }
-            if measureFaces.last != face { measureFaces = Array((measureFaces + [face]).suffix(2)) }
-            if measureFaces.count == 2, let a = model.plane(of: measureFaces[0]), let b = model.plane(of: measureFaces[1]) {
-                let cosine = abs(simd_dot(simd_normalize(a.normal), simd_normalize(b.normal)))
-                let degrees = acos(min(1, cosine)) * 180 / .pi
-                if degrees < 0.01 {
-                    lines.append("Parallel · Abstand der Flächen: \(mm(abs(simd_dot(b.anchor - a.anchor, simd_normalize(a.normal)))))")
-                } else {
-                    lines.append("Winkel zur vorigen Fläche: \(mm(degrees, "°")) (Ergänzung \(mm(180 - degrees, "°")))")
-                }
-            }
-            let volume = model.volume(ofBody: face.body)
-            if volume > 0, model.bodies.indices.contains(face.body) {
-                lines.append("Volumen \(model.bodies[face.body].name): \(mm(volume / 1000, "cm³"))")
-                // Gewicht im Material des Körpers (ohne Material PLA 1,24 g/cm³, voll gefüllt; Materials.swift)
-                let material = model.weighingMaterial(ofBody: face.body)
-                let fill = material.isPrintable ? " (100 % Füllung)" : ""
-                lines.append("Gewicht in \(material.name): \(mm(volume / 1000 * material.density, "g"))" + fill)
-            }
-            if let c = model.centerOfMass(ofBody: face.body) {
-                lines.append("Schwerpunkt: X \(mm(c.x))  Y \(mm(c.y))  Z \(mm(c.z))")
-            }
-            if measureBodies.last != face.body { measureBodies = Array((measureBodies + [face.body]).suffix(2)) }
-            if measureBodies.count == 2, let gap = model.minimumDistance(between: measureBodies[0], and: measureBodies[1]) {
-                let names = measureBodies.map { model.bodies.indices.contains($0) ? model.bodies[$0].name : "?" }
-                lines.append("Kleinster Abstand \(names[0]) – \(names[1]): \(mm(gap.distance))")
-                measurePoints = [gap.a, gap.b]
-                measureLines = lines
-                return
-            }
-        } else {
+            measureHighlight = model.edgePolylines(edge)
+            measureLines = ModelMeasure.edgeLines(model: model, edge: edge)
+            return
+        }
+        guard let face else {
             model.resetSelection()
+            measureHighlight = []
+            measureLines = []
+            return
         }
-        if let point {
-            measurePoints = measurePoints.count >= 2 ? [SIMD3<Double>(point)] : measurePoints + [SIMD3<Double>(point)]
-        } else {
-            measurePoints = []
+        model.select(face: face)
+        measureHighlight = model.edgePolylines(ofFace: face)
+        var lines = ModelMeasure.faceLines(model: model, face: face)
+        func mm(_ value: Double, _ unit: String) -> String {
+            "\(value.formatted(.number.precision(.fractionLength(0...3)))) \(unit)"
         }
-        if measurePoints.count == 2 {
-            let d = measurePoints[1] - measurePoints[0]
-            lines.append("Abstand: \(mm(simd_length(d)))")
-            lines.append("ΔX \(mm(abs(d.x)))  ΔY \(mm(abs(d.y)))  ΔZ \(mm(abs(d.z)))")
-        } else if measurePoints.count == 1 {
-            lines.append("Zweiten Punkt antippen für den Abstand")
+        if measureFaces.last != face { measureFaces = Array((measureFaces + [face]).suffix(2)) }
+        if measureFaces.count == 2, let a = model.plane(of: measureFaces[0]), let b = model.plane(of: measureFaces[1]) {
+            let cosine = abs(simd_dot(simd_normalize(a.normal), simd_normalize(b.normal)))
+            let degrees = acos(min(1, cosine)) * 180 / .pi
+            if degrees < 0.01 {
+                let gap = abs(simd_dot(b.anchor - a.anchor, simd_normalize(a.normal)))
+                lines.append("Parallel zur vorigen Fläche · Abstand: \(ModelMeasure.length(gap))")
+            } else {
+                lines.append("Winkel zur vorigen Fläche: \(mm(degrees, "°")) (Ergänzung \(mm(180 - degrees, "°")))")
+            }
+        }
+        let volume = model.volume(ofBody: face.body)
+        if volume > 0, model.bodies.indices.contains(face.body) {
+            lines.append("Volumen \(model.bodies[face.body].name): \(mm(volume / 1000, "cm³"))")
+            // Gewicht im Material des Körpers (ohne Material PLA 1,24 g/cm³, voll gefüllt; Materials.swift)
+            let material = model.weighingMaterial(ofBody: face.body)
+            let fill = material.isPrintable ? " (100 % Füllung)" : ""
+            lines.append("Gewicht in \(material.name): \(mm(volume / 1000 * material.density, "g"))" + fill)
+        }
+        if let c = model.centerOfMass(ofBody: face.body) {
+            lines.append("Schwerpunkt: X \(ModelMeasure.length(c.x))  Y \(ModelMeasure.length(c.y))  Z \(ModelMeasure.length(c.z))")
+        }
+        if measureBodies.last != face.body { measureBodies = Array((measureBodies + [face.body]).suffix(2)) }
+        if measureBodies.count == 2, let gap = model.minimumDistance(between: measureBodies[0], and: measureBodies[1]) {
+            let names = measureBodies.map { model.bodies.indices.contains($0) ? model.bodies[$0].name : "?" }
+            lines.append("Kleinster Abstand \(names[0]) – \(names[1]): \(ModelMeasure.length(gap.distance))")
+            measurePoints = [gap.a, gap.b]
         }
         measureLines = lines
+    }
+
+    /// Punkt zu Punkt: erster Punkt fängt Ecken, Kantenmitten und Kreismitten; der zweite rastet auf der
+    /// Leitlinie ein (gleiche Regel wie die Vorschau beim Schweben, Viewport.swift).
+    private func measurePoint(face: FaceRef?, point: SIMD3<Float>?) {
+        guard let point else { return }
+        let raw = SIMD3<Double>(point)
+        let snapped = model.snappedModelPoint(raw, tolerance: pickTolerance)
+        if measurePoints.count != 1 {
+            model.resetSelection()
+            measureHighlight = []
+            measureGuide = nil
+            measurePoints = [snapped]
+            measureFirstNormal = face.flatMap { model.plane(of: $0)?.normal }
+            measureLines = ["Erster Punkt gesetzt – zweiten Punkt antippen",
+                            "Rastet parallel zu X, Y, Z bzw. senkrecht zur Fläche ein"]
+            return
+        }
+        let first = measurePoints[0]
+        let surface = face.flatMap { model.plane(of: $0) }
+        let lock = ModelMeasure.locked(raw, from: first, normal: measureFirstNormal, tolerance: pickTolerance,
+                                       surface: surface)
+        let second = lock.guide == nil ? snapped : lock.point
+        measurePoints = [first, second]
+        measureGuide = lock.guide
+        measureLines = ModelMeasure.distanceLines(first, second, guide: lock.guide)
     }
 
     /// Isolieren: nur den gewählten Körper zeigen bzw. alles wieder einblenden.
@@ -1924,7 +1974,10 @@ final class Workspace: ObservableObject {
         case .printCheck:
             return printBody == nil ? "Körper antippen, der gedruckt werden soll" : "Rot = Überhang, Orange = zu dünne Wand"
         case .section: return "Ebene wählen oder ebene Fläche antippen"
-        case .measure: return "Kante, Fläche oder zwei Punkte antippen"
+        case .measure:
+            if measureMode == .element { return "Kante antippen = ganze Länge · Fläche antippen = Inhalt und Länge × Breite" }
+            return measurePoints.count == 1 ? "Zweiten Punkt antippen – rastet parallel zu X, Y, Z bzw. senkrecht zur Fläche ein"
+                : "Ersten Punkt antippen (Ecken, Kantenmitten und Kreismitten fangen)"
         case .construct(.plane):
             switch planeMethod {
             case .offset: return "Bezug wählen oder ebene Fläche antippen, Abstand eingeben"

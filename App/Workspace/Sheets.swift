@@ -278,6 +278,12 @@ enum HelpTopic: String, CaseIterable, Identifiable {
             ]
         case .news:
             [
+                "Messen (Prüfen › Messen): Kante antippen zeigt die ganze Länge, bei Kreisen und Bögen auch Radius und "
+                    + "Durchmesser. Fläche antippen zeigt den Inhalt in mm² und Länge × Breite (Zylinder: Durchmesser "
+                    + "und Höhe). „Punkt zu Punkt“: der zweite Punkt rastet parallel zu X, Y, Z bzw. senkrecht zur "
+                    + "Fläche ein (gestrichelte Leitlinie in Achsfarbe), dazu ΔX/ΔY/ΔZ.",
+                "Viele angrenzende Skizzenbereiche (z. B. Zähne einer Gewindestange) werden vor dem Extrudieren zu "
+                    + "einem Profil zusammengefasst – schneller und ohne Absturz.",
                 "Schlanke Maße: kleinere Schilder mit dünnem Schloss. Feste (grüne) Maße erscheinen nur als kleines "
                     + "Schloss – antippen öffnet das Maß. Abschalten in der Skizzenpalette („Feste Maße als Schloss“).",
                 "Parametrischer Verlauf: Zeitleiste unten (Menü … › Zeitleiste ein-/ausblenden). Schritt antippen ändert "
