@@ -662,6 +662,12 @@ final class Workspace: ObservableObject {
         case .pattern, .scale, .align, .split:
             model.resetSelection()
             splitToolBody = nil
+            if newTool == .scale {
+                // Wie Fusion 360 jedes Mal bei 1× beginnen; der gemerkte Pfeil-Bezug gehört zum vorigen
+                // Skalieren (Körper inzwischen übernommen) und würde Pfeil und Faktor verfälschen
+                scaleFactors = [1, 1, 1]
+                scaleReference = nil
+            }
             splitRegions = []
             if previousBodies.count > 1, newTool != .split {
                 model.selectBodies(previousBodies)
@@ -1354,7 +1360,11 @@ final class Workspace: ObservableObject {
             model.previewCircularPattern(count: patternCount, angle: patternAngle, axisOrigin: axis.origin,
                                          axis: axis.direction)
         case .scale:
-            let factors = scaleUniform ? SIMD3(repeating: scaleFactors.x) : scaleFactors
+            // Sinnvoll begrenzen (0,01–100): riesige Faktoren lassen den Körper die Kamera verschlucken
+            let wanted: SIMD3<Double> = scaleUniform ? SIMD3(repeating: scaleFactors.x) : scaleFactors
+            let factors: SIMD3<Double> = wanted.clamped(lowerBound: SIMD3(repeating: Self.scaleRange.lowerBound),
+                                                        upperBound: SIMD3(repeating: Self.scaleRange.upperBound))
+            if factors != wanted { scaleFactors = factors }
             model.previewScale(factors: factors)
         case .align:
             model.previewAlign(alignModes)
@@ -1926,8 +1936,9 @@ final class Workspace: ObservableObject {
             model.setMoveOffset(offset)
         case .scale:
             // Faktor aus dem Abstand zur Mitte, auf 0,01 gerundet, gleichmäßig in alle Richtungen
-            guard let radius = scaleReference?.radius, radius > 1e-6 else { return }
-            let factor: Double = max(0.01, (value / radius * 100).rounded() / 100)
+            guard let radius = scaleReference?.radius, radius > 1e-6, value.isFinite else { return }
+            let rounded: Double = (value / radius * 100).rounded() / 100
+            let factor: Double = min(max(rounded, Self.scaleRange.lowerBound), Self.scaleRange.upperBound)
             guard factor != scaleFactors.x else { return }
             scaleFactors = SIMD3(repeating: factor)
             scaleUniform = true
@@ -1936,6 +1947,9 @@ final class Workspace: ObservableObject {
             setRadiusOffset(value)
         }
     }
+
+    /// Erlaubte Skalierfaktoren (Ziehpfeil und Eingabe)
+    static let scaleRange: ClosedRange<Double> = 0.01...100
 
     /// Blau der Ziehpfeile (linear, ergibt etwa sRGB 51/140/242 wie in Fusion 360)
     static let handleBlue = SIMD3<Float>(0.03, 0.27, 0.88)
