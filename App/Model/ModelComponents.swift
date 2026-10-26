@@ -36,6 +36,8 @@ extension SceneBody {
     func with(_ shape: PCKShape, moving motion: simd_double4x4) -> SceneBody {
         var body = with(shape)
         if componentID != nil { body.placement = motion * placement }
+        // Gewinde (ThreadNotes.swift) bewegen sich mit
+        if let threads { body.threads = threads.map { $0.moved(by: motion) } }
         return body
     }
 

@@ -48,13 +48,17 @@ extension Workspace {
         updatePartPreview()
     }
 
-    /// Gewindebohrung ein/aus bzw. geändert: Kernloch-Ø übernehmen, Vorschau neu.
+    /// Gewindebohrung ein/aus bzw. geändert: Kernlochbohrer übernehmen, Vorschau neu. Beim Einschalten gilt die
+    /// zuletzt gewählte Toleranz-Vorlage als Zugabe.
     func setHoleThread(_ thread: HoleThread?) {
         var spec = holeSpec
+        if spec.thread == nil, thread != nil, let preset = ThreadTolerancePreset.remembered {
+            spec.clearance = preset.clearance
+        }
         spec.thread = thread
         if let thread {
             spec.kind = .simple
-            spec.diameter = (thread.coreDiameter * 100).rounded() / 100
+            spec.diameter = (thread.tapDrill * 100).rounded() / 100
         }
         holeSpec = spec
         updateHolePreview()
@@ -108,6 +112,11 @@ struct ThreadCard: View {
             text += " · \(lead) mm je Umdrehung"
         }
         if spec.family.isTapered { text += " · Kegel 1:16, Spitzen zylindrisch" }
+        if let target = spec.target, !target.external, !spec.family.isTapered {
+            let drill: String = LengthUnit.current.format(spec.tapDrill)
+            let source: String = spec.family.tapDrillIsTabulated(spec.size, pitch: spec.pitch) ? "Bohrer" : "gerechnet"
+            text += " · Kernloch Ø \(drill) (\(source))"
+        }
         return text
     }
 
@@ -137,6 +146,10 @@ struct ThreadCard: View {
                     .fixedSize()
             }
             HStack(spacing: 12) {
+                ThreadModePicker(cosmetic: parts.thread.cosmetic) { value in
+                    parts.thread.cosmetic = value
+                    workspace.updatePartPreview()
+                }
                 Toggle("Volle Länge", isOn: binding(\.fullLength))
                     .fixedSize()
                 if !parts.thread.fullLength {
@@ -161,6 +174,10 @@ struct ThreadCard: View {
             HStack(spacing: 12) {
                 field("Druckspiel", \.clearance, width: 48, minimum: 0, maximum: 0.6)
                     .hoverTip("Druckspiel", "Für den 3D-Druck: Außengewinde werden radial um die Hälfte kleiner, Innengewinde um die Hälfte größer. 0,2 mm ist ein guter Anfang, 0 für exakte Normmaße.")
+                ThreadTolerancePresetMenu(value: parts.thread.clearance) { value in
+                    parts.thread.clearance = value
+                    workspace.updatePartPreview()
+                }
                 Toggle("Anschnitt", isOn: binding(\.chamfer))
                     .fixedSize()
                     .hoverTip("Anschnitt", "Fase am freien Ende des Bolzens bzw. Senkung am Eingang der Bohrung, damit Schraube und Mutter gut ansetzen.")
@@ -224,8 +241,11 @@ struct HoleThreadRow: View {
                 workspace.setHoleThread(on ? (workspace.holeSpec.thread ?? HoleThread()) : nil)
             }))
             .fixedSize()
-            .hoverTip("Gewindebohrung", "Bohrt das Kernloch nach Norm und modelliert das Innengewinde (druckbar). Die Zugabe gilt als Druckspiel.")
+            .hoverTip("Gewindebohrung", "Bohrt das Kernloch nach Bohrertabelle (ISO 2306) und modelliert das Innengewinde (druckbar) – oder nur kosmetisch. Die Zugabe gilt als Druckspiel.")
             if let thread = workspace.holeSpec.thread {
+                ThreadModePicker(cosmetic: thread.cosmetic) { value in
+                    update { $0.cosmetic = value }
+                }
                 Picker("Art", selection: Binding(get: { thread.family }, set: { family in
                     update { value in
                         value.family = family
@@ -272,7 +292,13 @@ struct HoleThreadRow: View {
                     update { $0.leftHanded = left }
                 }))
                 .fixedSize()
-                Text("Kernloch Ø \(LengthUnit.current.format(thread.coreDiameter + workspace.holeSpec.clearance))")
+                ThreadTolerancePresetMenu(value: workspace.holeSpec.clearance) { value in
+                    var spec = workspace.holeSpec
+                    spec.clearance = value
+                    workspace.holeSpec = spec
+                    workspace.updateHolePreview()
+                }
+                Text(thread.tapDrillText(clearance: workspace.holeSpec.clearance))
                     .foregroundStyle(.secondary)
                     .fixedSize()
             }
