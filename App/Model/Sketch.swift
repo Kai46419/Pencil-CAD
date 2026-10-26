@@ -513,7 +513,11 @@ final class SketchController: ObservableObject {
     /// Hilfslinien zu gemerkten Punktpaaren: Verbindung und Mittelsenkrechte („Mittellinie“), nur Anzeige
     @Published private(set) var guideLines: [(mark: Point2, lines: [[Point2]])] = []
     private var chainStart: Point2?
-    private var chainEnd: Point2?
+    private var chainEnd: Point2? {
+        didSet { if chainEnd == nil { chainTapped = false } }
+    }
+    /// Linienzug per Antippen begonnen (Punkt für Punkt); nach einem Strich false: kein Gummiband zum Stift
+    private var chainTapped = false
     private var arcChord: (start: Point2, end: Point2)?
     /// Zweistufige Werkzeuge (Kreis 3 Punkte, Bogen um Mittelpunkt, Langloch): erster Zug steht, der zweite folgt
     private var stepBase: (start: Point2, end: Point2)?
@@ -594,13 +598,15 @@ final class SketchController: ObservableObject {
     var isEmpty: Bool { entities.isEmpty && !isInProgress }
     var canUndo: Bool { !undoStack.isEmpty || isInProgress || offsetTarget != nil }
     var isInProgress: Bool {
-        dragStart != nil || chainEnd != nil || arcChord != nil || !splinePoints.isEmpty || rectangleBase != nil
+        dragStart != nil || hasOpenChain || arcChord != nil || !splinePoints.isEmpty || rectangleBase != nil
             || stepBase != nil
     }
     /// Zweiter Schritt eines zweistufigen Werkzeugs steht aus
     var isWaitingForSecondStep: Bool { stepBase != nil }
     var isWaitingForRectangleHeight: Bool { rectangleBase != nil }
-    var hasOpenChain: Bool { chainEnd != nil }
+    /// Offener Linienzug per Antippen. Das gemerkte Linienende nach einem Strich (Anschluss für Bögen) zählt
+    /// nicht – die Linie ist fertig.
+    var hasOpenChain: Bool { chainEnd != nil && chainTapped }
     var hasOpenSpline: Bool { !splinePoints.isEmpty }
     var isWaitingForArcBulge: Bool { arcChord != nil }
     var hasOffsetTarget: Bool { offsetTarget != nil }
@@ -1310,6 +1316,15 @@ final class SketchController: ObservableObject {
             notice = "Kreis erkannt – Durchmesser lässt sich eintippen, Rückgängig nimmt ihn zurück."
         case .arc(let mid):
             let from = chainEnd ?? start
+            // Kai: Bogen zwischen zwei Linien- bzw. Bogenenden schließt tangential an (bei parallelen Linien ein
+            // Halbkreis) – egal, wie weit der Stift ausholt. Den Radius ändert man danach am Maß.
+            if simd_distance(from, end) > 1e-6, let tangent = outwardTangent(at: from, tolerance: 1e-6),
+               outwardTangent(at: end, tolerance: 1e-6) != nil,
+               let arc = Self.tangentArcShape(start: from, direction: tangent.direction, end: end) {
+                commitTangentArc((arc, tangent.entity))
+                notice = "Bogen tangential angeschlossen – der Radius lässt sich eintippen."
+                return true
+            }
             // Der Bogen muss am Anfang des Strichs ansetzen
             guard let first = samples.first, simd_distance(first, from) <= tolerance * 1.5 || previewed != nil,
                   simd_distance(from, end) > 1e-6, circleThrough(from, mid, end) != nil else { return false }
@@ -1530,6 +1545,8 @@ final class SketchController: ObservableObject {
         /// Fang ohne das gezogene Element (sonst rastet es an seiner alten Lage ein)
         var snapIndex: SnapIndex
         var hasMoved = false
+        /// Vollständig bemaßte Gruppe: wird als Ganzes verschoben, nie verzerrt (Kai: Langloch)
+        var rigid: Set<Int>? = nil
     }
 
     private func beginSelectDrag(at p: Point2, tolerance: Double) {
@@ -1552,9 +1569,13 @@ final class SketchController: ObservableObject {
             default: kind = .move
             }
         }
-        let others = entities.indices.filter { $0 != index }.map { entities[$0] }
-        selectDrag = SelectDrag(entity: index, kind: kind, start: p, grab: grab, original: entities,
-                                snapIndex: SnapIndex(entities: others, guides: modelGuides))
+        let rigid = ConstraintSolver.rigidGroup(containing: index, entities, constraints: constraints)
+        let moving = rigid ?? [index]
+        let others = entities.indices.filter { !moving.contains($0) }.map { entities[$0] }
+        var drag = SelectDrag(entity: index, kind: kind, start: p, grab: grab, original: entities,
+                              snapIndex: SnapIndex(entities: others, guides: modelGuides))
+        drag.rigid = rigid
+        selectDrag = drag
     }
 
     private func moveSelectDrag(to p: Point2, tolerance: Double) {
@@ -1574,6 +1595,18 @@ final class SketchController: ObservableObject {
             target = result.point
         }
         var result = drag.original
+        if let rigid = drag.rigid {
+            // Alles bemaßt: nur verschieben – die ganze Gruppe um denselben Versatz, Maße bleiben exakt
+            let delta = target - drag.grab
+            for member in rigid where result.indices.contains(member) {
+                result[member] = drag.original[member].translated(by: delta)
+            }
+            notice = nil
+            selectDrag = drag
+            entities = result
+            changed(publish: false)
+            return
+        }
         result[drag.entity] = Self.dragged(drag.original[drag.entity], kind: drag.kind, grab: drag.grab, to: target)
         // Verbundene Elemente folgen über die Einschränkungen (gemeinsame Ecken, Mittelpunkte …)
         if !constraints.isEmpty {
@@ -1685,26 +1718,42 @@ final class SketchController: ObservableObject {
             strokeRelation = nil
             directionLock = nil
         }
-        // Kai: eine Linie = ein Strich. Nach dem Abheben ist die Linie fertig, es läuft kein Linienzug weiter;
-        // die nächste Linie setzt neu an (der Fang auf das Linienende verbindet sie). Nur Antippen setzt einen
-        // Startpunkt, das zweite Antippen beendet die Linie.
-        guard let from = chainEnd else {
-            if simd_distance(start, end) > 1e-6 {
-                add(.line(start, end), editable: true)
+        // Antippen: Startpunkt setzen, das zweite Antippen beendet die Linie. Nach einem Strich beginnt ein Tipp
+        // neu (Kai: kein automatischer Linienzug).
+        if simd_distance(start, end) <= 1e-6 {
+            if let from = chainEnd, chainTapped {
+                guard simd_distance(from, end) > 1e-6 else { return }
+                add(.line(from, end), editable: true)
                 autoConstrainLine(entities.count - 1)
                 chainStart = nil
                 chainEnd = nil
+                chainTapped = false
             } else {
                 chainStart = start
                 chainEnd = end
+                chainTapped = true
             }
             return
         }
+        // Kai: eine Linie = ein Strich. Nach dem Abheben ist die Linie fertig; ihr Ende bleibt aber als Anschluss
+        // gemerkt – für den Bogen per Finger, den Knopf „Bogen“ und den Schlussbogen zum Anfang (Build 65 hatte
+        // den Anschluss mit gelöscht, dann zeichnete der Finger lose Striche). Keine Gummiband-Vorschau.
+        let from = chainTapped ? (chainEnd ?? start) : start
         guard simd_distance(from, end) > 1e-6 else { return }
         add(.line(from, end), editable: true)
         autoConstrainLine(entities.count - 1)
-        chainStart = nil
-        chainEnd = nil
+        if let last = chainEnd, simd_distance(last, from) <= max(strokeTolerance, 1e-6) {
+            chainStart = chainStart ?? from
+        } else {
+            chainStart = from
+        }
+        chainTapped = false
+        if let first = chainStart, simd_distance(first, end) < 1e-6 {
+            chainStart = nil
+            chainEnd = nil
+        } else {
+            chainEnd = end
+        }
     }
 
     /// Beziehung, die beim Abheben des Stifts galt (für die automatische Einschränkung)
@@ -1757,7 +1806,20 @@ final class SketchController: ObservableObject {
             finishSpline()
         } else {
             splinePoints.append(end)
+            // Kai: Spline von einer Linie zu einer anderen (Anfang und letzter Punkt auf vorhandener Geometrie)
+            // ist fertig – die geschlossene Fläche erscheint sofort, nicht erst mit „Fertig“
+            if splinePoints.count >= 3, let first = splinePoints.first, liesOnGeometry(first), liesOnGeometry(end) {
+                finishSpline()
+                notice = "Spline an die Linien angeschlossen und fertig."
+            }
         }
+    }
+
+    /// Punkt liegt auf einem vorhandenen Element (Ende, Mitte, Schnittpunkt oder auf der Kurve).
+    private func liesOnGeometry(_ p: Point2) -> Bool {
+        let reach = max(strokeTolerance * 0.05, 1e-6)
+        let kinds: Set<SnapKind> = [.endpoint, .midpoint, .intersection, .onCurve, .center]
+        return snapIndex.snap(p, tolerance: reach, kinds: kinds, extra: [], gridStep: 0).kind != nil
     }
 
     func finishSpline() {
@@ -2049,6 +2111,13 @@ final class SketchController: ObservableObject {
         rawDimensions.enumerated().map { pair -> SketchDimension in
             var copy = placedOutside(pair.element)
             if copy.id.isEmpty { copy.id = "live-\(pair.offset)" }
+            // Kai: jedes änderbare Maß hat ein Schloss – rot (frei), antippen legt den aktuellen Wert fest
+            if copy.lockState == nil, copy.isEditable {
+                switch copy.target {
+                case .entity, .create: copy.lockState = false
+                case .display, .constraint: break
+                }
+            }
             return copy
         }
     }
@@ -2152,7 +2221,7 @@ final class SketchController: ObservableObject {
             }
             return []
         }
-        if tool == .polyline, let from = chainEnd, let hover = hoverSnap?.point, simd_distance(from, hover) > 1e-6 {
+        if tool == .polyline, chainTapped, let from = chainEnd, let hover = hoverSnap?.point, simd_distance(from, hover) > 1e-6 {
             return Self.lineDimensions(from, hover, editable: false)
                 + Self.lineAngle(from, hover, reference: previousSegmentDirection(at: from))
         }
@@ -2163,11 +2232,65 @@ final class SketchController: ObservableObject {
             result = Self.dimensions(of: entities[index], editable: true)
                 .filter { !fixed.contains($0.kind) }
                 .map { $0.tagged("e\(index)-\($0.kind)", .entity(index)) }
+            if !isInProgress { result += neighborAngles(of: index) }
         } else if !isInProgress {
             result = selectionDimensions
         }
         if !isInProgress || chainEnd != nil {
             result += drivingDimensions
+        }
+        return result
+    }
+
+    /// Winkel zweier Linien so, wie man ihn an der gemeinsamen Ecke sieht (Kai: 27° statt 153°). Die Einschränkung
+    /// rechnet mit den Linienrichtungen; flip = gezeigter Winkel ist 180° minus dem gespeicherten.
+    private func cornerAngle(_ a: SketchCurveRef, _ b: SketchCurveRef)
+        -> (shown: Double, flip: Bool, label: Point2)? {
+        guard case .line(let p1, let p2) = ConstraintSolver.curve(a, entities),
+              case .line(let q1, let q2) = ConstraintSolver.curve(b, entities),
+              simd_distance(p1, p2) > 1e-9, simd_distance(q1, q2) > 1e-9 else { return nil }
+        let d1 = simd_normalize(p2 - p1), d2 = simd_normalize(q2 - q1)
+        let measured = atan2(abs(d1.x * d2.y - d1.y * d2.x), simd_dot(d1, d2)) * 180 / .pi
+        for (vertex, s1) in [(p1, 1.0), (p2, -1.0)] {
+            for (other, s2) in [(q1, 1.0), (q2, -1.0)] where simd_distance(vertex, other) < 1e-6 {
+                let u1 = d1 * s1, u2 = d2 * s2
+                let sum = u1 + u2
+                let bisector = simd_length(sum) > 1e-9 ? simd_normalize(sum) : Point2(-u1.y, u1.x)
+                let reach = min(simd_distance(p1, p2), simd_distance(q1, q2)) * 0.35
+                let flip = s1 * s2 < 0
+                return (flip ? 180 - measured : measured, flip, vertex + bisector * reach)
+            }
+        }
+        return (measured, false, ((p1 + p2) / 2 + (q1 + q2) / 2) / 2)
+    }
+
+    /// Eingegebener (gezeigter) Wert → gespeicherter Wert der Einschränkung.
+    private func storedValue(_ shown: Double, for variant: SketchConstraint.Variant) -> Double {
+        guard case .angle(let a, let b, _) = variant, let corner = cornerAngle(a, b), corner.flip else { return shown }
+        return 180 - shown
+    }
+
+    /// Kai: Winkel an den Ecken der gerade bearbeiteten Linie – mit Schloss festlegbar.
+    private func neighborAngles(of index: Int) -> [SketchDimension] {
+        guard entities.indices.contains(index), case .line(let a, let b) = entities[index] else { return [] }
+        var result: [SketchDimension] = []
+        for (k, corner) in [a, b].enumerated() {
+            guard let other = entities.indices.first(where: { candidate in
+                guard candidate != index, !construction.contains(candidate),
+                      case .line(let c, let d) = entities[candidate] else { return false }
+                return simd_distance(c, corner) < 1e-6 || simd_distance(d, corner) < 1e-6
+            }) else { continue }
+            // Schon als Maß vorhanden: das treibende zeigt es (mit Schloss)
+            let exists = constraints.contains { constraint in
+                if case .angle(let x, let y, _) = constraint.variant { return Set([x.entity, y.entity]) == Set([index, other]) }
+                return false
+            }
+            let mine = SketchCurveRef(entity: index, index: 0), theirs = SketchCurveRef(entity: other, index: 0)
+            guard !exists, let angle = cornerAngle(theirs, mine) else { continue }
+            let stored = angle.flip ? 180 - angle.shown : angle.shown
+            result.append(SketchDimension(kind: .angle, value: angle.shown, position: angle.label, direction: Point2(0, 1),
+                                          isEditable: true)
+                .tagged("e\(index)-angle\(k)", .create(.angle(theirs, mine, degrees: stored))))
         }
         return result
     }
@@ -2252,9 +2375,10 @@ final class SketchController: ObservableObject {
                 }
             }
             let degrees = atan2(crossing, simd_dot(d1, d2)) * 180 / .pi
-            let label = ((p1 + p2) / 2 + (q1 + q2) / 2) / 2
-            return [SketchDimension(kind: .angle, value: degrees, position: label, direction: Point2(0, 1),
-                                    isEditable: true)
+            let corner = cornerAngle(curves[0], curves[1])
+            return [SketchDimension(kind: .angle, value: corner?.shown ?? degrees,
+                                    position: corner?.label ?? ((p1 + p2) / 2 + (q1 + q2) / 2) / 2,
+                                    direction: Point2(0, 1), isEditable: true)
                 .tagged("s-angle", .create(.angle(curves[0], curves[1], degrees: degrees)))]
         default:
             return []
@@ -2307,13 +2431,15 @@ final class SketchController: ObservableObject {
                     return finish(copy, measured: dimension.value)
                 }
             case .angle(let a, let b, _):
-                guard case .line(let p1, let p2) = ConstraintSolver.curve(a, entities),
-                      case .line(let q1, let q2) = ConstraintSolver.curve(b, entities) else { return [] }
-                let d1 = simd_normalize(p2 - p1), d2 = simd_normalize(q2 - q1)
-                let measured = atan2(abs(d1.x * d2.y - d1.y * d2.x), simd_dot(d1, d2)) * 180 / .pi
-                let label = ((p1 + p2) / 2 + (q1 + q2) / 2) / 2
-                return [finish(SketchDimension(kind: .angle, value: measured, position: label, direction: Point2(0, 1),
-                                               isEditable: true), measured: measured)]
+                guard let corner = cornerAngle(a, b) else { return [] }
+                var dimension = finish(SketchDimension(kind: .angle, value: corner.shown, position: corner.label,
+                                                       direction: Point2(0, 1), isEditable: true),
+                                       measured: corner.shown)
+                // Gespeichert wird der Winkel der Linienrichtungen; gezeigt der Winkel an der Ecke
+                if !constraint.isSuspended, corner.flip, let stored = constraint.dimensionValue {
+                    dimension.value = 180 - stored
+                }
+                return [dimension]
             default:
                 return []
             }
@@ -2361,11 +2487,27 @@ final class SketchController: ObservableObject {
     /// Schloss am Maß antippen (Kai): grün = fest, rot = gelöst und frei verschiebbar; wieder antippen hält den
     /// aktuellen Wert fest.
     func toggleDimensionLock(id: String) {
-        guard let dimension = dimensions.first(where: { $0.id == id }),
-              case .constraint(let index) = dimension.target, constraints.indices.contains(index) else { return }
+        guard let dimension = dimensions.first(where: { $0.id == id }) else { return }
+        switch dimension.target {
+        case .create:
+            // Rotes Schloss an einem freien Maß (z. B. Winkel an der Ecke): aktuellen Wert festlegen
+            let before = constraints.count
+            setDimension(id: id, to: dimension.value)
+            if constraints.count > before {
+                notice = "Maß festgelegt: \(dimension.value.formatted(.number.precision(.fractionLength(0...2))))"
+            }
+            return
+        case .entity:
+            setDimension(id: id, to: dimension.value)
+            return
+        case .display, .constraint:
+            break
+        }
+        guard case .constraint(let index) = dimension.target, constraints.indices.contains(index) else { return }
         remember()
         if constraints[index].isSuspended {
-            constraints[index] = constraints[index].withDimensionValue(dimension.value)
+            constraints[index] = constraints[index].withDimensionValue(storedValue(dimension.value,
+                                                                                   for: constraints[index].variant))
             notice = "Maß festgelegt: \(dimension.value.formatted(.number.precision(.fractionLength(0...2))))"
         } else {
             constraints[index].isSuspended = true
@@ -2391,13 +2533,13 @@ final class SketchController: ObservableObject {
         case .constraint(let index):
             guard constraints.indices.contains(index) else { return }
             var updated = constraints
-            updated[index] = updated[index].withDimensionValue(value)
+            updated[index] = updated[index].withDimensionValue(storedValue(value, for: updated[index].variant))
             updated[index].expression = expression
             applyDimension(updated, anchor: constraints[index].entities.first)
         case .create(let variant):
-            var constraint = SketchConstraint(variant: variant).withDimensionValue(value)
+            var constraint = SketchConstraint(variant: variant).withDimensionValue(storedValue(value, for: variant))
             constraint.expression = expression
-            applyDimension(constraints + [constraint], anchor: selection.first?.entity)
+            applyDimension(constraints + [constraint], anchor: selection.first?.entity ?? editableIndex)
         }
     }
 
@@ -2421,8 +2563,9 @@ final class SketchController: ObservableObject {
         var touched = false
         for index in updated.indices {
             guard let expression = updated[index].expression, let old = updated[index].dimensionValue,
-                  let value = try? Formula.evaluate(expression, variables: values), value > 0,
-                  abs(value - old) > 1e-9 else { continue }
+                  let shown = try? Formula.evaluate(expression, variables: values), shown > 0 else { continue }
+            let value = storedValue(shown, for: updated[index].variant)
+            guard abs(value - old) > 1e-9 else { continue }
             updated[index] = updated[index].withDimensionValue(value)
             touched = true
         }
@@ -2436,8 +2579,13 @@ final class SketchController: ObservableObject {
         let before = entities, beforeConstraints = constraints
         constraints = updated
         let locked: Set<Int> = anchor.map { [$0] } ?? []
-        if let solved = ConstraintSolver.solve(entities, constraints: constraints, locked: locked)
-            ?? ConstraintSolver.solve(entities, constraints: constraints) {
+        lastSolveFolded = false
+        let candidates = [ConstraintSolver.solve(entities, constraints: constraints, locked: locked),
+                          ConstraintSolver.solve(entities, constraints: constraints)].compactMap { $0 }
+        // Kai (Parallelogramm): Lösungen, die die Form zusammenklappen, gelten nicht
+        let usable = candidates.first { !ConstraintSolver.folds(from: before, to: $0) }
+        if usable == nil, !candidates.isEmpty { lastSolveFolded = true }
+        if let solved = usable {
             entities = solved
             selection = []
             selectedMarks = []
@@ -2446,7 +2594,7 @@ final class SketchController: ObservableObject {
             entities = before
             constraints = beforeConstraints
             undoStack.removeLast()
-            notice = "Maß widerspricht den Einschränkungen."
+            notice = dimensionConflictNotice
         }
         editableIndex = nil
         entitiesChanged()
@@ -2523,7 +2671,7 @@ final class SketchController: ObservableObject {
             } else {
                 entities = before
                 undoStack.removeLast()
-                notice = "Maß widerspricht den Einschränkungen."
+                notice = dimensionConflictNotice
             }
         }
         entitiesChanged()
@@ -2542,11 +2690,29 @@ final class SketchController: ObservableObject {
             default: return false
             }
         })
+        lastSolveFolded = false
         if !straight.isEmpty,
            let solved = ConstraintSolver.solve(trial, constraints: constraints, locked: straight.union([index])) {
-            return (solved, false)
+            if !ConstraintSolver.folds(from: trial, to: solved) { return (solved, false) }
+            lastSolveFolded = true
         }
-        return ConstraintSolver.solve(trial, constraints: constraints, locked: [index]).map { ($0, !straight.isEmpty) }
+        guard let solved = ConstraintSolver.solve(trial, constraints: constraints, locked: [index]) else { return nil }
+        // Kai (Parallelogramm): Zusammenklappen auf eine Gerade ist keine Lösung
+        if ConstraintSolver.folds(from: trial, to: solved) {
+            lastSolveFolded = true
+            return nil
+        }
+        return (solved, !straight.isEmpty)
+    }
+
+    /// Der letzte Lösungsversuch hätte die Form zusammengeklappt (für eine verständliche Meldung)
+    private var lastSolveFolded = false
+
+    /// Meldung, wenn ein Maß nicht geht.
+    private var dimensionConflictNotice: String {
+        lastSolveFolded
+            ? "Maß nicht möglich: Die Form würde zusammenklappen – eine Einschränkung (z. B. Parallel oder Verankern) lässt es nicht zu."
+            : "Maß widerspricht den Einschränkungen."
     }
 
     /// Linienlänge bzw. Bogenradius: Mehrere Arten, das Element zu ändern (Anfang, Ende, Mitte bzw. Enden
@@ -2591,7 +2757,8 @@ final class SketchController: ObservableObject {
             if cost < (best?.cost ?? .infinity) - 1e-12 { best = (cost, solved) }
         }
         guard let best else {
-            notice = "Maß widerspricht den Einschränkungen (z. B. verankerten Punkten)."
+            notice = lastSolveFolded ? dimensionConflictNotice
+                : "Maß widerspricht den Einschränkungen (z. B. verankerten Punkten)."
             return
         }
         remember()
@@ -3396,6 +3563,8 @@ final class SketchController: ObservableObject {
             switch constraint.variant {
             case .horizontal, .horizontalPoints: return (position, "H")
             case .vertical, .verticalPoints: return (position, "V")
+            // Kai: Schilder an den Ecken („•“ zusammenfallend, Schloss verankert) irritieren nur – weg
+            case .coincident, .pointOnCurve, .lock: return nil
             default: return (position, constraint.kind.badge)
             }
         }
@@ -3479,7 +3648,8 @@ final class SketchController: ObservableObject {
                 polylines += arc.entity.drawing
             } else if let shape = strokeShape, dragStart != nil {
                 polylines += shape.drawing
-            } else if let from = chainEnd ?? dragStart, let current {
+            } else if let from = dragStart != nil ? (chainTapped ? chainEnd ?? dragStart : dragStart)
+                        : (chainTapped ? chainEnd : nil), let current {
                 polylines.append([from, current])
             }
         case .arc:

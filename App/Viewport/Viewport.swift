@@ -632,7 +632,7 @@ final class ViewportView: MTKView {
             // Schwebender Stift: Fadenkreuz am (gefangenen) Punkt, damit man sieht, wo der Strich ansetzt
             if let hoverSnap = sketch.hoverSnap {
                 let hover = hoverSnap.point
-                // Kai: deutlicher – längere, kräftigere Arme; orange, sobald ein Fangpunkt greift
+                // Kai: Größe wie gehabt, Strich so fein wie die rote/grüne Skizzenachse; orange, sobald ein Fangpunkt greift
                 let arm = 15 * perPoint, gap = 3.5 * perPoint
                 let cross: [[Point2]] = [
                     [hover + Point2(gap, 0), hover + Point2(arm, 0)], [hover - Point2(gap, 0), hover - Point2(arm, 0)],
@@ -640,20 +640,7 @@ final class ViewportView: MTKView {
                 ]
                 let snapped = hoverSnap.kind != nil && hoverSnap.kind != .grid
                 groups.append(LineGroup(polylines: cross.map { $0.map(world) }, color: snapped ? Self.snapOrange : Self.sketchInk,
-                                        width: 2.2, dots: [world(hover)], dotRadius: 2.2))
-                // Rasterpunkte rund um den Stift (nur, wenn das Rastermaß auf dem Bildschirm erkennbar ist)
-                let step = sketch.gridStep
-                if sketch.snapEnabled, sketch.snapKinds.contains(.grid), step > 0, step / perPoint >= 7 {
-                    let base = (hover / step).rounded(.toNearestOrAwayFromZero) * step
-                    var dots: [Point2] = []
-                    for i in -3...3 {
-                        for j in -3...3 where i * i + j * j <= 10 && (i != 0 || j != 0) {
-                            dots.append(base + Point2(Double(i), Double(j)) * step)
-                        }
-                    }
-                    groups.append(LineGroup(polylines: [], color: Self.constructionGray, width: 0, dots: dots.map(world),
-                                            dotRadius: 1.3))
-                }
+                                        width: 1, dots: [world(hover)], dotRadius: 1.2))
             }
             // Vorschläge für die Mitte (Rechteck-, Kreis- und Linienmitten), dezent
             let suggestions = sketch.suggestionNodes

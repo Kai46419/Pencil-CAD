@@ -414,10 +414,11 @@ extension SketchEntity {
 enum ConstraintSolver {
     /// Passt die Elemente so an, dass alle Einschränkungen gelten. locked: Elemente, die sich nicht bewegen.
     /// Liefert nil, wenn sich die Einschränkungen nicht erfüllen lassen.
-    static func solve(_ entities: [SketchEntity], constraints all: [SketchConstraint], locked: Set<Int> = []) -> [SketchEntity]? {
+    static func solve(_ original: [SketchEntity], constraints all: [SketchConstraint], locked: Set<Int> = []) -> [SketchEntity]? {
         // Gelöste Maße (rotes Schloss) gelten nicht
         let constraints = all.filter { !$0.isSuspended }
-        guard !constraints.isEmpty else { return entities }
+        guard !constraints.isEmpty else { return original }
+        let entities = original.map(balancedArc)
         // Nur Elemente, die in Einschränkungen vorkommen, sind Unbekannte
         let involved = Set(constraints.flatMap(\.entities)).filter { entities.indices.contains($0) }.sorted()
         var offsets: [Int: Int] = [:]
@@ -442,7 +443,7 @@ enum ConstraintSolver {
         }
         func residuals(_ x: [Double]) -> [Double] {
             let current = build(x)
-            return constraints.flatMap { residual($0, current) }
+            return constraints.flatMap { residual($0, current) } + arcGauge(current, involved)
         }
 
         var r = residuals(x)
@@ -500,9 +501,10 @@ enum ConstraintSolver {
     /// Shapr3D „Sketch states“: Elemente, deren Parameter alle durch Einschränkungen festgelegt sind
     /// (Freiheitsgrade 0). Ein Parameter ist fest, wenn er senkrecht zum Nullraum der Jacobi-Matrix liegt:
     /// Zeilenraum per Gram-Schmidt orthonormieren, dann Σ q[i]² ≈ 1.
-    static func determined(_ entities: [SketchEntity], constraints all: [SketchConstraint]) -> Set<Int> {
+    static func determined(_ original: [SketchEntity], constraints all: [SketchConstraint]) -> Set<Int> {
         let constraints = all.filter { !$0.isSuspended }
         guard !constraints.isEmpty else { return [] }
+        let entities = original.map(balancedArc)
         let involved = Set(constraints.flatMap(\.entities)).filter { entities.indices.contains($0) }.sorted()
         var offsets: [Int: Int] = [:]
         var x: [Double] = []
@@ -524,7 +526,7 @@ enum ConstraintSolver {
         }
         func residuals(_ x: [Double]) -> [Double] {
             let current = build(x)
-            return constraints.flatMap { residual($0, current) }
+            return constraints.flatMap { residual($0, current) } + arcGauge(current, involved)
         }
         let r = residuals(x)
         let m = r.count
@@ -564,6 +566,114 @@ enum ConstraintSolver {
             if count > 0, (start..<(start + count)).allSatisfy({ fixed[$0] }) { result.insert(index) }
         }
         return result
+    }
+
+    /// Bogen mit der Mitte genau zwischen Anfang und Ende (gleiche Form). Kai (Langloch): Der freie
+    /// Mittelpunkt rutschte im Löser über ein Bogenende hinaus – der Bogen klappte zum großen Gegenbogen um.
+    static func balancedArc(_ entity: SketchEntity) -> SketchEntity {
+        guard case .arc(let a, let m, let b) = entity, let circle = circleThrough(a, m, b) else { return entity }
+        let c = circle.center
+        func ccw(_ from: Double, _ to: Double) -> Double {
+            var d = (to - from).truncatingRemainder(dividingBy: 2 * .pi)
+            if d < 0 { d += 2 * .pi }
+            return d
+        }
+        let a0 = atan2(a.y - c.y, a.x - c.x)
+        let sweepCCW = ccw(a0, atan2(b.y - c.y, b.x - c.x))
+        let midCCW = ccw(a0, atan2(m.y - c.y, m.x - c.x))
+        // Drehsinn, in dem m zwischen a und b liegt
+        let sweep = midCCW <= sweepCCW ? sweepCCW : sweepCCW - 2 * .pi
+        let half = a0 + sweep / 2
+        return .arc(start: a, mid: c + Point2(cos(half), sin(half)) * circle.radius, end: b)
+    }
+
+    /// Bögen: Mitte bleibt gleich weit von beiden Enden (sonst ein freier Parameter ohne Wirkung auf die Form).
+    private static func arcGauge(_ entities: [SketchEntity], _ indices: [Int]) -> [Double] {
+        indices.compactMap { index -> Double? in
+            guard entities.indices.contains(index), case .arc(let a, let m, let b) = entities[index] else { return nil }
+            return simd_distance(m, a) - simd_distance(m, b)
+        }
+    }
+
+    /// Kai (Parallelogramm): Eine Lösung, bei der zwei verbundene Linien plötzlich auf einer Geraden liegen
+    /// (Ecke klappt auf 0° bzw. 180°) oder eine Linie auf Länge 0 schrumpft, ist ein Zusammenklappen – die
+    /// Einschränkungen lassen das Maß nur so zu. Dann lieber ablehnen.
+    static func folds(from before: [SketchEntity], to after: [SketchEntity]) -> Bool {
+        var segments: [(before: [Point2], after: [Point2], moved: Bool)] = []
+        for index in before.indices where after.indices.contains(index) {
+            guard case .line(let a, let b) = before[index], case .line(let c, let d) = after[index] else { continue }
+            let moved = simd_distance(a, c) > 1e-9 || simd_distance(b, d) > 1e-9
+            if moved, simd_distance(a, b) > 1e-4, simd_distance(c, d) < 1e-6 { return true }
+            segments.append(([a, b], [c, d], moved))
+        }
+        guard segments.count <= 400 else { return false }
+        func angle(_ v: Point2, _ w: Point2) -> Double {
+            atan2(abs(v.x * w.y - v.y * w.x), simd_dot(v, w)) * 180 / .pi
+        }
+        for i in segments.indices {
+            for j in segments.indices where j > i && (segments[i].moved || segments[j].moved) {
+                let s = segments[i], t = segments[j]
+                for k in 0..<2 {
+                    for l in 0..<2 where simd_distance(s.before[k], t.before[l]) < 1e-6 {
+                        let v0 = s.before[1 - k] - s.before[k], w0 = t.before[1 - l] - t.before[l]
+                        let v1 = s.after[1 - k] - s.after[k], w1 = t.after[1 - l] - t.after[l]
+                        guard simd_length(v0) > 1e-9, simd_length(w0) > 1e-9,
+                              simd_length(v1) > 1e-9, simd_length(w1) > 1e-9 else { continue }
+                        let old = angle(v0, w0), new = angle(v1, w1)
+                        if old > 2, old < 178, new < 0.3 || new > 179.7 { return true }
+                    }
+                }
+            }
+        }
+        return false
+    }
+
+    /// Kai (Langloch): Ist eine zusammenhängende Gruppe vollständig bemaßt, bleibt beim Ziehen nur Verschieben.
+    /// Prüfung: einen Punkt festhalten und die Drehung sperren – sind dann alle Elemente bestimmt, ist die Form
+    /// starr. Liefert die Gruppe (mindestens zwei Elemente, nichts verankert), sonst nil.
+    static func rigidGroup(containing index: Int, _ entities: [SketchEntity],
+                           constraints all: [SketchConstraint]) -> Set<Int>? {
+        let constraints = all.filter { !$0.isSuspended }
+        guard entities.indices.contains(index), !constraints.isEmpty else { return nil }
+        var group: Set<Int> = [index]
+        var grew = true
+        while grew {
+            grew = false
+            for constraint in constraints {
+                let linked = Set(constraint.entities)
+                if !linked.isDisjoint(with: group), !linked.isSubset(of: group) {
+                    group.formUnion(linked)
+                    grew = true
+                }
+            }
+        }
+        group = group.filter { entities.indices.contains($0) }
+        guard group.count >= 2, group.count <= 200 else { return nil }
+        let local = constraints.filter { !Set($0.entities).isDisjoint(with: group) }
+        let anchored = local.contains { constraint in
+            if case .lock = constraint.variant { return true }
+            return false
+        }
+        guard !anchored, let anchor = entities[index].handlePoints.first else { return nil }
+        var extended = entities
+        var extra = [SketchConstraint(variant: .lock(SketchPointRef(entity: index, index: 0), at: anchor))]
+        // Weitester Griffpunkt der Gruppe sperrt die Drehung (liegt auf einer festen Hilfslinie)
+        var far: (ref: SketchPointRef, point: Point2, distance: Double)?
+        for member in group {
+            for (k, point) in entities[member].handlePoints.enumerated() {
+                let distance = simd_distance(point, anchor)
+                if distance > (far?.distance ?? 1e-6) { far = (SketchPointRef(entity: member, index: k), point, distance) }
+            }
+        }
+        if let far {
+            let helper = extended.count
+            extended.append(.line(anchor, far.point))
+            extra += [SketchConstraint(variant: .lock(SketchPointRef(entity: helper, index: 0), at: anchor)),
+                      SketchConstraint(variant: .lock(SketchPointRef(entity: helper, index: 1), at: far.point)),
+                      SketchConstraint(variant: .pointOnCurve(far.ref, SketchCurveRef(entity: helper, index: 0)))]
+        }
+        let fixed = determined(extended, constraints: local + extra)
+        return group.isSubset(of: fixed) ? group : nil
     }
 
     private static func norm(_ v: [Double]) -> Double {
