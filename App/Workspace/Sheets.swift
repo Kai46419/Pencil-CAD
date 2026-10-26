@@ -277,23 +277,28 @@ enum HelpTopic: String, CaseIterable, Identifiable {
             ]
         case .news:
             [
-                "Linie = ein Strich: nach dem Absetzen ist die Linie fertig, für die nächste neu ansetzen (das "
-                    + "Linienende rastet ein). Zweimal antippen zeichnet ebenfalls genau eine Linie.",
-                "Winkelfang: 15°, 30°, 45° … wird nur rot angezeigt. Erst wenn der Stift dort kurz ruhig bleibt "
-                    + "(ca. 0,4 s), rastet der Winkel ein – jeder ganze Grad dazwischen ist erreichbar.",
-                "Stift drücken während des Zeichnens schaltet den Fang nur für diesen Strich aus und wieder an. "
-                    + "Ohne laufenden Strich öffnet Drücken wie gewohnt das Werkzeugrad.",
-                "Fang-Menü: „Haptik beim Zeichnen“ schaltet das Maßband-Ticken beim Ziehen ab; das Klicken beim "
-                    + "Einrasten bleibt immer an. Raster gilt ab dem ersten Punkt, auch 0,001 mm.",
-                "Neuer Fangpunkt: Schnitt einer Richtung (parallel, rechtwinklig, waagerecht, senkrecht) mit der "
-                    + "Leitlinie eines gemerkten Punkts oder der Verlängerung einer Linie.",
-                "Skizze: X-Achse (rot) und Y-Achse (grün) dezent eingeblendet, deutlicheres Fadenkreuz am Stift "
-                    + "mit Rasterpunkten beim Hineinzoomen. Schilder „H“ und „V“ statt „H/V“.",
-                "Werkzeugleiste in der Skizze: „Ändern“ und „Prüfen“ sind aufklappbare Gruppen.",
-                "Mehrere Körper aus einer Skizze sind jetzt einzelne Körper. Im Ebenen-Browser stehen alle im Ordner "
-                    + "„Volumenkörper“; ältere zusammenhängende Körper trennt „In Einzelkörper trennen“ (lange drücken).",
-                "Startseite: „Löschen“ wählt mehrere Projekte mit Häkchen und löscht sie nach Rückfrage.",
-                "Menü …: im Skizzenmodus „Skizze leeren“, sonst löscht „Alles löschen“ Körper und Skizzen.",
+                "Skizze: Bemaßte Formen bleiben starr – ist alles bemaßt, verschiebt Ziehen nur noch das ganze Teil. "
+                    + "Bögen klappen nicht mehr um, und ein Maß, das die Form zusammenklappen würde, wird abgelehnt.",
+                "Winkel an der Ecke (z. B. 27° statt 153°) mit Schloss. Jedes änderbare Maß hat ein Schloss: rot antippen "
+                    + "legt den aktuellen Wert fest. Die Schilder „•“ und Schloss an den Ecken sind weg.",
+                "Bogen per Finger und Knopf „Bogen“ setzen wieder am Linienende an. Ein Bogenstrich zwischen zwei "
+                    + "Linienenden schließt tangential (bei parallelen Linien als Halbkreis) – Radius danach am Maß ändern.",
+                "Spline von einer Linie zur anderen ist sofort fertig, die geschlossene Fläche erscheint gleich. "
+                    + "Spline › Freihand glättet einen Stiftstrich, Spline › Punkt einfügen setzt einen neuen Punkt.",
+                "Auswählen: Rahmen oder Lasso (lange drücken auf „Auswählen“ bzw. „Rahmenauswahl“), jetzt auch in der Skizze.",
+                "Einheiten mm, cm oder Zoll in Ebenen › Dokumenteinstellungen. Das Raster wird beim Herauszoomen gröber, "
+                    + "der Fang bleibt beim gewählten Wert.",
+                "Bild › Maßstab (zwei Punkte, echtes Maß) und Bild › Kontur erkennen (Umrisse werden zur Skizze).",
+                "Einfügen › Normteile (Schrauben, Muttern, Scheiben M2–M10, Kugellager) und Vorlagen (Gehäuse mit Deckel, "
+                    + "Stirnrad).",
+                "Dünn extrudieren (Wand innen, mittig, außen), variable Rundung (Anfangs- und Endradius), Verjüngung "
+                    + "(Entformungsschräge), Helix für Federn und Gewinde, Sweep entlang Körperkanten.",
+                "Anzeigemodi „Verdeckte Kanten“ (gestrichelt) und „Zebra“ (Lichtstreifen für glatte Übergänge).",
+                "Zeichnung erstellen (Menü …): Vorder-, Drauf-, Seitenansicht und Isometrie mit Gesamtmaßen und "
+                    + "Schriftfeld, als PDF oder DXF.",
+                "Komponenten: „Als Komponente“ im Ebenen-Browser – Kopien bleiben verknüpft, ändert man eine, ändern "
+                    + "sich alle. „Verknüpfung lösen“ macht eine Kopie eigenständig.",
+                "Frischere Oberfläche: feine Ränder, weichere Schatten, Knöpfe geben beim Drücken nach.",
             ]
         }
     }

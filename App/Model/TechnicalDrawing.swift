@@ -64,7 +64,7 @@ struct DrawingProjection {
     var bounds: (min: Point2, max: Point2)? {
         let points = Array(visible.joined()) + Array(hidden.joined())
         guard let first = points.first else { return nil }
-        return points.reduce((first, first)) { (simd_min($0.0, $1), simd_max($0.1, $1)) }
+        return points.reduce((min: first, max: first)) { (min: simd_min($0.min, $1), max: simd_max($0.max, $1)) }
     }
 }
 

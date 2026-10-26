@@ -258,9 +258,9 @@ struct ToolRail: View {
 
     private func toolEntry(_ tool: SketchTool, category: ToolCategory, subtitle: String? = nil) -> RailEntry {
         RailEntry(id: "sketch.\(tool.rawValue)", title: tool.rawValue, subtitle: subtitle,
-                  systemImage: tool.systemImage, category: category, isActive: sketch.tool == tool) {
+                  systemImage: tool.systemImage, category: category, isActive: sketch.tool == tool, action: {
             sketch.tool = tool
-        }
+        })
     }
 
     private func toolItem(_ tool: SketchTool, title: String? = nil, subtitle: String? = nil,
@@ -361,9 +361,9 @@ struct ToolRail: View {
         }
         let splineItems = splineKindItems + splineInputItems
         return [
-            RailEntry(id: "sketch.finish", title: "Skizzieren beenden", systemImage: "checkmark", category: .finish) {
+            RailEntry(id: "sketch.finish", title: "Skizzieren beenden", systemImage: "checkmark", category: .finish, action: {
                 workspace.finishSketch()
-            },
+            }),
             // Pfeil: zeichnet nicht, sondern wählt, verschiebt und zieht Eck- und Endpunkte
             // Ins Leere ziehen wählt mit Rahmen bzw. Lasso (lange drücken: Variante wählen)
             RailEntry(id: "sketch.select", title: SketchTool.select.rawValue,
@@ -421,9 +421,9 @@ struct ToolRail: View {
                       flyout: moreTools.map { tool in toolItem(tool) { moreTool = tool } },
                       primary: { sketch.tool = moreTool }),
             RailEntry(id: "sketch.construction", title: "Konstruktion", subtitle: sketch.constructionMode ? "Ein" : "Aus",
-                      systemImage: "line.diagonal.arrow", category: .create, isActive: sketch.constructionMode) {
+                      systemImage: "line.diagonal.arrow", category: .create, isActive: sketch.constructionMode, action: {
                 sketch.constructionMode.toggle()
-            },
+            }),
             // ÄNDERN
             toolEntry(.trim, category: .modify),
             toolEntry(.offset, category: .modify),
@@ -433,15 +433,15 @@ struct ToolRail: View {
                       flyout: modifyTools.map { tool in toolItem(tool) { modifyTool = tool } },
                       primary: { sketch.tool = modifyTool }),
             RailEntry(id: "sketch.delete", title: "Löschen", subtitle: sketch.selection.isEmpty ? nil : "Auswahl",
-                      systemImage: "trash", category: .modify, isEnabled: !sketch.selection.isEmpty) {
+                      systemImage: "trash", category: .modify, isEnabled: !sketch.selection.isEmpty, action: {
                 sketch.deleteSelection()
-            },
+            }),
             // PRÜFEN
             toolEntry(.measure, category: .inspect),
             RailEntry(id: "sketch.section", title: "Schnittansicht", subtitle: workspace.sketchSection ? "Ein" : "Aus",
-                      systemImage: "square.split.diagonal.2x2", category: .inspect, isActive: workspace.sketchSection) {
+                      systemImage: "square.split.diagonal.2x2", category: .inspect, isActive: workspace.sketchSection, action: {
                 workspace.sketchSection.toggle()
-            },
+            }),
         ]
     }
 
@@ -476,52 +476,52 @@ struct ToolRail: View {
         let planarFace = face != nil && model.faceHandle != nil
         var entries = [
             RailEntry(id: "context.clear", title: "Alle abwählen", subtitle: "(\(selectionSummary))",
-                      systemImage: "xmark.circle") {
+                      systemImage: "xmark.circle", action: {
                 model.resetSelection()
-            },
+            }),
         ]
         if hasRegions, let sketchIndex = model.selectedRegions.first?.sketch, model.sketches.indices.contains(sketchIndex) {
             entries.append(RailEntry(id: "context.editSketch", title: "Skizze bearbeiten",
-                                     subtitle: model.sketches[sketchIndex].name, systemImage: "pencil.line") {
+                                     subtitle: model.sketches[sketchIndex].name, systemImage: "pencil.line", action: {
                 workspace.editSketch(sketchIndex)
-            })
+            }))
         }
 
         // ERSTELLEN
         if hasRegions || planarFace {
             entries.append(RailEntry(id: "context.extrude", title: "Extrudieren", subtitle: "Pfeil ziehen",
-                                     systemImage: ToolGroup.extrude.systemImage, category: .create, isActive: true) {
+                                     systemImage: ToolGroup.extrude.systemImage, category: .create, isActive: true, action: {
                 model.message = "Am blauen Pfeil ziehen oder den Abstand unten eingeben."
-            })
+            }))
         }
         if hasRegions {
             entries.append(RailEntry(id: "context.revolve", title: "Achsendrehung",
-                                     systemImage: "arrow.triangle.2.circlepath", category: .create) {
+                                     systemImage: "arrow.triangle.2.circlepath", category: .create, action: {
                 workspace.activate(.revolve)
-            })
+            }))
             // Wie Shapr3D nach beendeter Skizze: Profil weiterverarbeiten oder die Skizze öffnen
             entries.append(RailEntry(id: "context.sweep", title: "Sweep",
-                                     systemImage: "point.3.connected.trianglepath.dotted", category: .create) {
+                                     systemImage: "point.3.connected.trianglepath.dotted", category: .create, action: {
                 workspace.activate(.sweep)
-            })
+            }))
             entries.append(RailEntry(id: "context.loft", title: "Loft", systemImage: "square.3.layers.3d",
-                                     category: .create) {
+                                     category: .create, action: {
                 workspace.activate(.loft)
-            })
+            }))
         }
         entries.append(RailEntry(id: "context.sketch", title: "Skizze", systemImage: ToolGroup.sketch.systemImage,
-                                 category: .create) {
+                                 category: .create, action: {
             workspace.startSketch()
-        })
+        }))
         if hasRegions || planarFace {
-            entries.append(RailEntry(id: "context.text", title: "Text", systemImage: "textformat", category: .create) {
+            entries.append(RailEntry(id: "context.text", title: "Text", systemImage: "textformat", category: .create, action: {
                 if let region = model.selectedRegions.first, model.sketches.indices.contains(region.sketch) {
                     workspace.startSketch(on: model.sketches[region.sketch].plane)
                 } else {
                     workspace.startSketch()
                 }
                 sketch.tool = .text
-            })
+            }))
         }
 
         // ÄNDERN
@@ -529,113 +529,113 @@ struct ToolRail: View {
             entries += BooleanKind.allCases.map { kind in
                 RailEntry(id: "context.\(kind.rawValue)", title: kind.rawValue,
                           subtitle: kind == .union ? "\(model.selectedBodies.count) → 1" : nil,
-                          systemImage: kind.systemImage, category: .modify) {
+                          systemImage: kind.systemImage, category: .modify, action: {
                     workspace.combineSelectedBodies(kind)
-                }
+                })
             }
         }
         if face != nil {
             entries.append(RailEntry(id: "context.offsetFace", title: "Fläche versetzen",
                                      subtitle: model.selectedFaces.count > 1 ? "\(model.selectedFaces.count) Flächen" : nil,
-                                     systemImage: "arrow.up.and.down.square", category: .modify) {
+                                     systemImage: "arrow.up.and.down.square", category: .modify, action: {
                 workspace.activate(.offsetFace)
-            })
+            }))
         }
         if planarFace {
             entries.append(RailEntry(id: "context.replaceFace", title: "Fläche ersetzen",
-                                     systemImage: "rectangle.portrait.and.arrow.forward", category: .modify) {
+                                     systemImage: "rectangle.portrait.and.arrow.forward", category: .modify, action: {
                 workspace.activate(.replaceFace)
-            })
+            }))
             entries.append(RailEntry(id: "context.offsetEdges", title: "Kante versetzen",
-                                     systemImage: SketchTool.offset.systemImage, category: .modify) {
+                                     systemImage: SketchTool.offset.systemImage, category: .modify, action: {
                 workspace.activate(.offsetEdges)
-            })
+            }))
         }
         if hasRegions {
             entries.append(RailEntry(id: "context.wrap", title: "Umhüllen und Prägen",
-                                     systemImage: "cylinder.split.1x2", category: .modify) {
+                                     systemImage: "cylinder.split.1x2", category: .modify, action: {
                 workspace.activate(.wrap)
-            })
+            }))
             entries.append(RailEntry(id: "context.imprint", title: "Kante abdrücken",
-                                     systemImage: "square.on.square.dashed", category: .modify) {
+                                     systemImage: "square.on.square.dashed", category: .modify, action: {
                 workspace.activate(.imprint)
-            })
+            }))
         }
 
         // TRANSFORMIEREN
         entries.append(RailEntry(id: "context.move", title: "Verschieben/Rotieren", systemImage: "move.3d",
-                                 category: .arrange) {
+                                 category: .arrange, action: {
             workspace.activate(.move)
-        })
+        }))
         if !model.selectedBodies.isEmpty || face != nil || !model.selectedEdges.isEmpty {
             entries.append(RailEntry(id: "context.translate", title: "Übersetzen", subtitle: "Punkt zu Punkt",
                                      systemImage: "point.topleft.down.to.point.bottomright.curvepath",
-                                     category: .arrange) {
+                                     category: .arrange, action: {
                 workspace.activate(.translate)
-            })
+            }))
         }
         if hasRegions {
             entries.append(RailEntry(id: "context.scaleSketch", title: "Skizze skalieren",
-                                     systemImage: "arrow.up.left.and.arrow.down.right", category: .arrange) {
+                                     systemImage: "arrow.up.left.and.arrow.down.right", category: .arrange, action: {
                 workspace.activate(.scaleSketch)
-            })
+            }))
         } else {
             entries.append(RailEntry(id: "context.scale", title: "Skalieren",
-                                     systemImage: "arrow.up.left.and.arrow.down.right", category: .arrange) {
+                                     systemImage: "arrow.up.left.and.arrow.down.right", category: .arrange, action: {
                 workspace.activate(.scale)
-            })
+            }))
         }
         entries += PatternKind.allCases.map { kind in
             RailEntry(id: "context.\(kind.rawValue)", title: kind.rawValue, systemImage: kind.systemImage,
-                      category: .arrange) {
+                      category: .arrange, action: {
                 workspace.activate(.pattern(kind))
-            }
+            })
         }
 
         // KONSTRUIEREN
         if planarFace {
             entries.append(RailEntry(id: "context.axis", title: "Achse senkrecht", systemImage: "line.diagonal.arrow",
-                                     category: .construct) {
+                                     category: .construct, action: {
                 workspace.createNormalAxis()
-            })
+            }))
             entries.append(RailEntry(id: "context.plane", title: "Ebene Versatz", systemImage: "square.dashed",
-                                     category: .construct) {
+                                     category: .construct, action: {
                 workspace.activate(.construct(.plane))
-            })
+            }))
         }
 
         // PRÜFEN
         entries += [
-            RailEntry(id: "context.measure", title: "Messen", systemImage: "ruler", category: .inspect) {
+            RailEntry(id: "context.measure", title: "Messen", systemImage: "ruler", category: .inspect, action: {
                 workspace.activate(.measure)
-            },
+            }),
             RailEntry(id: "context.section", title: "Schnittansicht", subtitle: workspace.section == nil ? "Aus" : "Ein",
-                      systemImage: "square.split.diagonal.2x2", category: .inspect, isActive: workspace.section != nil) {
+                      systemImage: "square.split.diagonal.2x2", category: .inspect, isActive: workspace.section != nil, action: {
                 workspace.activate(.section)
-            },
+            }),
             RailEntry(id: "context.isolate", title: "Isolieren", subtitle: model.isIsolated ? "Ein" : "Aus",
-                      systemImage: "scope", category: .inspect, isActive: model.isIsolated) {
+                      systemImage: "scope", category: .inspect, isActive: model.isIsolated, action: {
                 workspace.toggleIsolate()
-            },
+            }),
         ]
 
         if hasRegions, let sketchIndex = model.selectedRegions.first?.sketch, model.sketches.indices.contains(sketchIndex) {
-            entries.append(RailEntry(id: "context.hideSketch", title: "Ausblenden", systemImage: "eye.slash") {
+            entries.append(RailEntry(id: "context.hideSketch", title: "Ausblenden", systemImage: "eye.slash", action: {
                 model.resetSelection()
                 model.setSketchHidden(true, sketch: sketchIndex)
-            })
+            }))
         }
         entries += [
-            RailEntry(id: "context.more", title: "Alle Werkzeuge", systemImage: "square.grid.2x2") {
+            RailEntry(id: "context.more", title: "Alle Werkzeuge", systemImage: "square.grid.2x2", action: {
                 workspace.showsAllTools = true
-            },
-            RailEntry(id: "context.delete", title: "Löschen", systemImage: "trash") {
+            }),
+            RailEntry(id: "context.delete", title: "Löschen", systemImage: "trash", action: {
                 if let region = model.selectedRegions.first {
                     model.deleteSketch(region.sketch)
                 } else {
                     model.deleteSelected()
                 }
-            },
+            }),
         ]
         return entries
     }

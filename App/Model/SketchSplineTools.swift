@@ -279,7 +279,11 @@ enum SplineFit {
         let i = span * 3
         guard i + 3 < poles.count else { return poles.last ?? .zero }
         let u = 1 - t
-        return u * u * u * poles[i] + 3 * u * u * t * poles[i + 1] + 3 * u * t * t * poles[i + 2] + t * t * t * poles[i + 3]
+        // In Teilen, sonst braucht der Typprüfer zu lange
+        let b0: Double = u * u * u, b1: Double = 3 * u * u * t, b2: Double = 3 * u * t * t, b3: Double = t * t * t
+        let head: Point2 = b0 * poles[i] + b1 * poles[i + 1]
+        let tail: Point2 = b2 * poles[i + 2] + b3 * poles[i + 3]
+        return head + tail
     }
 
     static func closestPoint(_ p: Point2, _ a: Point2, _ b: Point2) -> Point2 {
