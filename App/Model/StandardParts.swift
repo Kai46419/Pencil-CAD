@@ -385,12 +385,17 @@ enum PartBuilder {
         let start = max(rb, rf)
         let tipHalf = half(ra)
         let rootHalf = half(start)
-        guard tipHalf > 0.002, 2 * .pi / Double(z) - 2 * rootHalf > 0.002 else { return nil }
+        let toothPitch: Double = 2 * Double.pi / Double(z)
+        guard tipHalf > 0.002, toothPitch - 2 * rootHalf > 0.002 else { return nil }
         func p(_ r: Double, _ phi: Double) -> [NSNumber] {
             [NSNumber(value: r * cos(phi)), NSNumber(value: r * sin(phi)), NSNumber(value: 0)]
         }
         let samples = 8
-        let flankRadii: [Double] = (rf < rb ? [rf] : []) + (0...samples).map { start + (ra - start) * Double($0) / Double(samples) }
+        var flankRadii: [Double] = rf < rb ? [rf] : []
+        for k in 0...samples {
+            let fraction: Double = Double(k) / Double(samples)
+            flankRadii.append(start + (ra - start) * fraction)
+        }
         func flankAngle(_ r: Double) -> Double { r < rb ? rootHalf : half(r) }
         var code: [NSNumber] = []
         for i in 0..<z {
