@@ -107,6 +107,8 @@ struct SceneBody {
     var componentID: UUID? = nil
     /// Lage dieser Instanz, nur starre Bewegungen: Welt = placement · gemeinsame Geometrie
     var placement: simd_double4x4 = matrix_identity_double4x4
+    /// Material (Kurzname aus BodyMaterial.all, Materials.swift); nil = keins
+    var material: String? = nil
 
     func with(_ shape: PCKShape) -> SceneBody {
         var body = self
@@ -1472,7 +1474,7 @@ final class ModelStore: ObservableObject {
     private func remesh() {
         var combined = Mesh()
         for (index, body) in (previewBodies ?? bodies).enumerated() where !body.isHidden {
-            combined.append(Mesh(body.shape.triangulate(deflection: 0.05), body: index, color: body.color))
+            combined.append(Mesh(body.shape.triangulate(deflection: 0.05), body: index, color: body.renderColor))
         }
         mesh = combined
         revision += 1
@@ -1791,6 +1793,7 @@ final class ModelStore: ObservableObject {
             if index < metas.count, metas[index].color.count == 3 {
                 body.name = metas[index].name
                 body.color = SIMD3(metas[index].color[0], metas[index].color[1], metas[index].color[2])
+                body.material = metas[index].material
             }
             body.folder = name
             return body
@@ -1893,6 +1896,8 @@ final class ModelStore: ObservableObject {
         /// Komponente und Lage der Instanz (16 Werte, spaltenweise); fehlen in älteren Projekten
         var componentID: UUID?
         var placement: [Double]?
+        /// Material (Materials.swift); fehlt in älteren Projekten
+        var material: String?
     }
 
     private var modelURL: URL? { folder?.appending(path: "model.step") }
@@ -1927,9 +1932,11 @@ final class ModelStore: ObservableObject {
         bodies = shapes.enumerated().map { index, shape in
             if index < metas.count, metas[index].color.count == 3 {
                 let meta = metas[index]
-                return SceneBody(shape: shape, name: meta.name, color: SIMD3(meta.color[0], meta.color[1], meta.color[2]),
-                                 isHidden: meta.isHidden, sketchID: meta.sketchID, folder: meta.folder)
+                var body = SceneBody(shape: shape, name: meta.name, color: SIMD3(meta.color[0], meta.color[1], meta.color[2]),
+                                     isHidden: meta.isHidden, sketchID: meta.sketchID, folder: meta.folder)
                     .restoringComponent(meta.componentID, placement: meta.placement)
+                body.material = meta.material
+                return body
             }
             return SceneBody(shape: shape, name: "Körper \(index + 1)", color: SceneBody.palette[index % SceneBody.palette.count])
         }
@@ -1958,7 +1965,7 @@ final class ModelStore: ObservableObject {
         let metas = bodies.map {
             BodyMeta(name: $0.name, color: [$0.color.x, $0.color.y, $0.color.z], isHidden: $0.isHidden, sketchID: $0.sketchID,
                      folder: $0.folder, componentID: $0.componentID,
-                     placement: $0.componentID == nil ? nil : $0.placementValues)
+                     placement: $0.componentID == nil ? nil : $0.placementValues, material: $0.material)
         }
         if let data = try? JSONEncoder().encode(metas) {
             try? data.write(to: metaURL)

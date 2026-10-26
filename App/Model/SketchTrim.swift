@@ -105,7 +105,9 @@ extension SketchEntity {
         case .regularPolygon(let c, let r, let n, let a):
             return .regularPolygon(center: s(c), radius: r * abs(factor), sides: n, angle: a)
         case .arc(let a, let m, let b): return .arc(start: s(a), mid: s(m), end: s(b))
-        case .spline(let points, let kind, let closed): return .spline(points: points.map(s), kind: kind, closed: closed)
+        case .spline(let points, let kind, let closed, let tangents):
+            return .spline(points: points.map(s), kind: kind, closed: closed,
+                           tangents: SketchEntity.mappedTangents(tangents, points: points, s))
         case .polyline(let points, let closed): return .polyline(points.map(s), closed: closed)
         case .point(let p): return .point(s(p))
         case .text(let t):

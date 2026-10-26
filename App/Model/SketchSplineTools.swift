@@ -60,12 +60,13 @@ extension SketchController {
     func insertSplinePoint(at p: Point2, tolerance: Double) {
         var best: (distance: Double, entity: Int, hit: SplineFit.Hit)?
         for (index, entity) in entities.enumerated() {
-            guard case .spline(let points, let kind, let closed) = entity,
-                  let hit = SplineFit.nearest(to: p, points: points, kind: kind, closed: closed) else { continue }
+            guard case .spline(let points, let kind, let closed, let tangents) = entity,
+                  let hit = SplineFit.nearest(to: p, points: points, kind: kind, closed: closed, tangents: tangents)
+            else { continue }
             let distance = simd_distance(hit.point, p)
             if distance <= tolerance * 1.6, distance < (best?.distance ?? .infinity) { best = (distance, index, hit) }
         }
-        guard let best, case .spline(var points, let kind, let closed) = entities[best.entity] else {
+        guard let best, case .spline(var points, let kind, let closed, var tangents) = entities[best.entity] else {
             notice = "Keine Spline getroffen – direkt auf eine Spline tippen."
             return
         }
@@ -76,6 +77,11 @@ extension SketchController {
             return
         }
         points.insert(point, at: inserted)
+        // Eigene Tangenten bleiben an ihren Punkten, der neue Punkt bekommt die automatische
+        if var list = tangents {
+            if inserted <= list.count { list.insert(nil, at: inserted) }
+            tangents = list
+        }
         let entityIndex = best.entity
         // Punktverweise hinter dem neuen Punkt rücken eins weiter
         let shifted = constraints.map { constraint in
@@ -83,7 +89,8 @@ extension SketchController {
                 ref.entity == entityIndex && ref.index >= inserted ? SketchPointRef(entity: ref.entity, index: ref.index + 1) : ref
             }
         }
-        replaceElement(at: entityIndex, with: .spline(points: points, kind: kind, closed: closed), constraints: shifted)
+        replaceElement(at: entityIndex, with: .spline(points: points, kind: kind, closed: closed, tangents: tangents),
+                       constraints: shifted)
         notice = kind == .fit ? "Punkt eingefügt (\(points.count) Punkte)."
             : "Kontrollpunkt eingefügt – die Kurve passt sich dort leicht an."
     }
@@ -231,11 +238,12 @@ enum SplineFit {
     }
 
     /// Nächste Stelle der Spline zum Punkt p.
-    static func nearest(to p: Point2, points: [Point2], kind: SplineKind, closed: Bool) -> Hit? {
+    static func nearest(to p: Point2, points: [Point2], kind: SplineKind, closed: Bool,
+                        tangents: [Point2?]? = nil) -> Hit? {
         guard points.count >= 2 else { return nil }
         switch kind {
         case .fit:
-            let poles = fitBezierPoles(points, closed: closed)
+            let poles = fitBezierPoles(points, closed: closed, tangents: tangents)
             let spans = (poles.count - 1) / 3
             var best: (distance: Double, span: Int, t: Double)?
             for span in 0..<spans {

@@ -28,25 +28,35 @@ func circleThrough(_ a: Point2, _ b: Point2, _ c: Point2) -> (center: Point2, ra
     return (center, simd_distance(center, a))
 }
 
-/// Pole einer Kette kubischer Bézierkurven durch die Punkte (Catmull-Rom, wie ein Fit-Spline).
-func fitBezierPoles(_ points: [Point2], closed: Bool) -> [Point2] {
+/// Tangente (Hermite-Form, in mm) am Fit-Punkt i: eigene Vorgabe (Tangentengriff), sonst Catmull-Rom.
+/// Dieselbe Rechnung gilt für Anzeige und Kernel, beide nutzen die Pole aus fitBezierPoles.
+func fitSplineTangent(_ points: [Point2], closed: Bool, index i: Int, tangents: [Point2?]? = nil) -> Point2 {
+    let n = points.count
+    guard n >= 2, i >= 0, i < n else { return .zero }
+    if let tangents, tangents.indices.contains(i), let custom = tangents[i] { return custom }
+    if closed {
+        let prev = points[(i - 1 + n) % n], next = points[(i + 1) % n]
+        return (next - prev) / 2
+    }
+    if i == 0 { return points[1] - points[0] }
+    if i == n - 1 { return points[n - 1] - points[n - 2] }
+    return (points[i + 1] - points[i - 1]) / 2
+}
+
+/// Pole einer Kette kubischer Bézierkurven durch die Punkte (Catmull-Rom, wie ein Fit-Spline). tangents: je
+/// Fit-Punkt optional eine eigene Tangente (nil = automatisch).
+func fitBezierPoles(_ points: [Point2], closed: Bool, tangents: [Point2?]? = nil) -> [Point2] {
     let n = points.count
     guard n >= 2 else { return points }
     let count = closed ? n + 1 : n
     let p = closed ? points + [points[0]] : points
-    func tangent(_ i: Int) -> Point2 {
-        if closed {
-            let prev = points[(i - 1 + n) % n], next = points[(i + 1) % n]
-            return (next - prev) / 2
-        }
-        if i == 0 { return p[1] - p[0] }
-        if i == count - 1 { return p[count - 1] - p[count - 2] }
-        return (p[i + 1] - p[i - 1]) / 2
-    }
     var poles = [p[0]]
     for i in 0..<(count - 1) {
-        let t0 = tangent(i % n), t1 = tangent((i + 1) % (closed ? n : count))
-        poles += [p[i] + t0 / 3, p[i + 1] - t1 / 3, p[i + 1]]
+        let t0: Point2 = fitSplineTangent(points, closed: closed, index: i % n, tangents: tangents)
+        let t1: Point2 = fitSplineTangent(points, closed: closed, index: (i + 1) % n, tangents: tangents)
+        let out: Point2 = p[i] + t0 / 3
+        let into: Point2 = p[i + 1] - t1 / 3
+        poles += [out, into, p[i + 1]]
     }
     return poles
 }
@@ -478,7 +488,8 @@ enum SketchEntity: Codable {
     case ellipse(center: Point2, radii: Point2)
     case regularPolygon(center: Point2, radius: Double, sides: Int, angle: Double)
     case arc(start: Point2, mid: Point2, end: Point2)
-    case spline(points: [Point2], kind: SplineKind, closed: Bool)
+    /// tangents: nur Fit-Splines, je Fit-Punkt optional eine eigene Tangente (Richtung und Stärke, Tangentengriffe)
+    case spline(points: [Point2], kind: SplineKind, closed: Bool, tangents: [Point2?]? = nil)
     case polyline([Point2], closed: Bool)
     case point(Point2)
     case text(SketchText)
@@ -512,9 +523,9 @@ enum SketchEntity: Codable {
         case .regularPolygon(let center, let radius, let sides, let angle):
             return [.chain(Self.lines(Self.polygonCorners(center: center, radius: radius, sides: sides, angle: angle),
                                       closed: true))]
-        case .spline(let points, let kind, true):
+        case .spline(let points, let kind, true, let tangents):
             switch kind {
-            case .fit: return [.chain([.bezier(fitBezierPoles(points, closed: true))])]
+            case .fit: return [.chain([.bezier(fitBezierPoles(points, closed: true, tangents: tangents))])]
             case .control: return [.periodic(points)]
             }
         case .polyline(let points, true):
@@ -533,9 +544,9 @@ enum SketchEntity: Codable {
             return samePoint(a, b) ? [] : [.line(a, b)]
         case .arc(let a, let m, let b):
             return [.arc(a, m, b)]
-        case .spline(let points, let kind, false):
+        case .spline(let points, let kind, false, let tangents):
             guard points.count >= 2 else { return [] }
-            return [kind == .fit ? .bezier(fitBezierPoles(points, closed: false)) : .bspline(points)]
+            return [kind == .fit ? .bezier(fitBezierPoles(points, closed: false, tangents: tangents)) : .bspline(points)]
         case .polyline(let points, false):
             return Self.lines(points, closed: false)
         default:
@@ -552,7 +563,7 @@ enum SketchEntity: Codable {
         case .regularPolygon(let center, let radius, let sides, let angle):
             return [center] + Self.polygonCorners(center: center, radius: radius, sides: sides, angle: angle)
         case .arc(let a, _, let b): return [a, b]
-        case .spline(let points, _, _), .polyline(let points, _): return points
+        case .spline(let points, _, _, _), .polyline(let points, _): return points
         case .point(let p): return [p]
         case .text: return []
         }
@@ -565,6 +576,126 @@ enum SketchEntity: Codable {
             return [[p - Point2(s, s), p + Point2(s, s)], [p - Point2(s, -s), p + Point2(s, -s)]]
         }
         return loops.map { $0.polygon + [$0.polygon.first ?? .zero] } + openSegments.map(\.samples)
+    }
+}
+
+// MARK: Speichern
+
+/// Gleiches JSON wie die früher automatisch erzeugte Codable-Umsetzung (Fallname → Werte, unbenannte Werte als
+/// „_0“, „_1“), damit vorhandene Projekte lesbar bleiben. Neue Felder (Spline-Tangenten) sind optional.
+extension SketchEntity {
+    private enum CaseKey: String, CodingKey {
+        case line, rectangle, circle, ellipse, regularPolygon, arc, spline, polyline, point, text
+    }
+
+    private enum ValueKey: String, CodingKey {
+        case _0, _1, corner, size, center, radius, radii, sides, angle, start, mid, end, points, kind, closed, tangents
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CaseKey.self)
+        guard container.allKeys.count == 1, let key = container.allKeys.first else {
+            let context = DecodingError.Context(codingPath: decoder.codingPath,
+                                                debugDescription: "Skizzenelement ohne eindeutige Art")
+            throw DecodingError.dataCorrupted(context)
+        }
+        let v = try container.nestedContainer(keyedBy: ValueKey.self, forKey: key)
+        switch key {
+        case .line:
+            let a = try v.decode(Point2.self, forKey: ._0)
+            let b = try v.decode(Point2.self, forKey: ._1)
+            self = .line(a, b)
+        case .rectangle:
+            let corner = try v.decode(Point2.self, forKey: .corner)
+            let size = try v.decode(Point2.self, forKey: .size)
+            self = .rectangle(corner: corner, size: size)
+        case .circle:
+            let center = try v.decode(Point2.self, forKey: .center)
+            let radius = try v.decode(Double.self, forKey: .radius)
+            self = .circle(center: center, radius: radius)
+        case .ellipse:
+            let center = try v.decode(Point2.self, forKey: .center)
+            let radii = try v.decode(Point2.self, forKey: .radii)
+            self = .ellipse(center: center, radii: radii)
+        case .regularPolygon:
+            let center = try v.decode(Point2.self, forKey: .center)
+            let radius = try v.decode(Double.self, forKey: .radius)
+            let sides = try v.decode(Int.self, forKey: .sides)
+            let angle = try v.decode(Double.self, forKey: .angle)
+            self = .regularPolygon(center: center, radius: radius, sides: sides, angle: angle)
+        case .arc:
+            let start = try v.decode(Point2.self, forKey: .start)
+            let mid = try v.decode(Point2.self, forKey: .mid)
+            let end = try v.decode(Point2.self, forKey: .end)
+            self = .arc(start: start, mid: mid, end: end)
+        case .spline:
+            let points = try v.decode([Point2].self, forKey: .points)
+            let kind = try v.decode(SplineKind.self, forKey: .kind)
+            let closed = try v.decode(Bool.self, forKey: .closed)
+            // Fehlt in älteren Projekten
+            let tangents: [Point2?]? = try? v.decodeIfPresent([Point2?].self, forKey: .tangents)
+            self = .spline(points: points, kind: kind, closed: closed, tangents: tangents)
+        case .polyline:
+            let points = try v.decode([Point2].self, forKey: ._0)
+            let closed = try v.decode(Bool.self, forKey: .closed)
+            self = .polyline(points, closed: closed)
+        case .point:
+            self = .point(try v.decode(Point2.self, forKey: ._0))
+        case .text:
+            self = .text(try v.decode(SketchText.self, forKey: ._0))
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CaseKey.self)
+        switch self {
+        case .line(let a, let b):
+            var v = container.nestedContainer(keyedBy: ValueKey.self, forKey: .line)
+            try v.encode(a, forKey: ._0)
+            try v.encode(b, forKey: ._1)
+        case .rectangle(let corner, let size):
+            var v = container.nestedContainer(keyedBy: ValueKey.self, forKey: .rectangle)
+            try v.encode(corner, forKey: .corner)
+            try v.encode(size, forKey: .size)
+        case .circle(let center, let radius):
+            var v = container.nestedContainer(keyedBy: ValueKey.self, forKey: .circle)
+            try v.encode(center, forKey: .center)
+            try v.encode(radius, forKey: .radius)
+        case .ellipse(let center, let radii):
+            var v = container.nestedContainer(keyedBy: ValueKey.self, forKey: .ellipse)
+            try v.encode(center, forKey: .center)
+            try v.encode(radii, forKey: .radii)
+        case .regularPolygon(let center, let radius, let sides, let angle):
+            var v = container.nestedContainer(keyedBy: ValueKey.self, forKey: .regularPolygon)
+            try v.encode(center, forKey: .center)
+            try v.encode(radius, forKey: .radius)
+            try v.encode(sides, forKey: .sides)
+            try v.encode(angle, forKey: .angle)
+        case .arc(let start, let mid, let end):
+            var v = container.nestedContainer(keyedBy: ValueKey.self, forKey: .arc)
+            try v.encode(start, forKey: .start)
+            try v.encode(mid, forKey: .mid)
+            try v.encode(end, forKey: .end)
+        case .spline(let points, let kind, let closed, let tangents):
+            var v = container.nestedContainer(keyedBy: ValueKey.self, forKey: .spline)
+            try v.encode(points, forKey: .points)
+            try v.encode(kind, forKey: .kind)
+            try v.encode(closed, forKey: .closed)
+            // Nur mit eigenen Tangenten speichern (sonst bleibt die Datei wie bisher)
+            if let tangents, tangents.contains(where: { $0 != nil }) {
+                try v.encode(tangents, forKey: .tangents)
+            }
+        case .polyline(let points, let closed):
+            var v = container.nestedContainer(keyedBy: ValueKey.self, forKey: .polyline)
+            try v.encode(points, forKey: ._0)
+            try v.encode(closed, forKey: .closed)
+        case .point(let p):
+            var v = container.nestedContainer(keyedBy: ValueKey.self, forKey: .point)
+            try v.encode(p, forKey: ._0)
+        case .text(let text):
+            var v = container.nestedContainer(keyedBy: ValueKey.self, forKey: .text)
+            try v.encode(text, forKey: ._0)
+        }
     }
 }
 

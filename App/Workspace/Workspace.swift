@@ -287,6 +287,8 @@ final class Workspace: ObservableObject {
     /// Ergebnis von Drehen, Sweep und Loft
     @Published var solidMode: ExtrudeMode = .newBody
     @Published var sweepPath: Int?
+    /// Loft: Führungskurven und Tangentenbedingung (LoftGuides.swift)
+    @Published var loft = LoftSettings()
     @Published var splitPlane: ReferencePlane = .world(2)
     @Published var splitOffset: Double = 0
     @Published var splitMode: SplitMode = .plane
@@ -640,6 +642,8 @@ final class Workspace: ObservableObject {
                 parts.sweepEdges = []
                 parts.sweepEdgeLines = []
             }
+            // Führungen gelten nur für einen Loft (Skizzennummern können sich inzwischen verschoben haben)
+            if newTool == .loft { loft.guides = [] }
             if newTool == .sweep, sweepPath == nil {
                 sweepPath = model.pathSketches.first { $0 != previousRegions.first?.sketch }
             }
@@ -1294,7 +1298,7 @@ final class Workspace: ObservableObject {
                 model.previewSweep(pathSketch: sweepPath, mode: solidMode)
             }
         case .loft:
-            model.previewLoft(mode: solidMode)
+            model.previewLoft(mode: solidMode, settings: loft)
         case .split:
             guard let body = model.selectedBodies.first else { return }
             switch splitMode {
@@ -1655,8 +1659,10 @@ final class Workspace: ObservableObject {
             let volume = model.volume(ofBody: face.body)
             if volume > 0, model.bodies.indices.contains(face.body) {
                 lines.append("Volumen \(model.bodies[face.body].name): \(mm(volume / 1000, "cm³"))")
-                // Eigene Idee: Gewicht für den 3D-Druck (PLA 1,24 g/cm³, voll gefüllt)
-                lines.append("Gewicht in PLA: \(mm(volume / 1000 * 1.24, "g")) (100 % Füllung)")
+                // Gewicht im Material des Körpers (ohne Material PLA 1,24 g/cm³, voll gefüllt; Materials.swift)
+                let material = model.weighingMaterial(ofBody: face.body)
+                let fill = material.isPrintable ? " (100 % Füllung)" : ""
+                lines.append("Gewicht in \(material.name): \(mm(volume / 1000 * material.density, "g"))" + fill)
             }
             if let c = model.centerOfMass(ofBody: face.body) {
                 lines.append("Schwerpunkt: X \(mm(c.x))  Y \(mm(c.y))  Z \(mm(c.z))")

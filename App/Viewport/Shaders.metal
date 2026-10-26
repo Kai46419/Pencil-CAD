@@ -66,10 +66,30 @@ vertex VertexOut vertex_overlay(const device Vertex *vertices [[buffer(0)]],
     return out;
 }
 
+/// Körperfarbe ohne Glanzkodierung: Materialien (Materials.swift) legen die Glanzstufe als +2 je Stufe auf die
+/// Vertexfarbe (0 = matt, 1 = leicht glänzend, 2 = metallisch).
+static float3 bodyColor(float3 c, thread float &gloss) {
+    gloss = floor(max(c.r, 0.0f) * 0.5f);
+    return c - float3(2.0f * gloss);
+}
+
 static float3 shade(VertexOut in, constant Uniforms &uniforms) {
+    float gloss;
+    float3 color = bodyColor(in.color, gloss);
     float3 n = normalize(in.normal);
-    float diffuse = abs(dot(n, normalize(uniforms.lightDirection)));
-    return in.color * (0.35 + 0.65 * diffuse);
+    float3 l = normalize(uniforms.lightDirection);
+    float diffuse = abs(dot(n, l));
+    if (gloss < 0.5f) return color * (0.35 + 0.65 * diffuse);
+    // Glanzlicht (Blinn-Phong), beidseitig wie das diffuse Licht; Metall dunkler im Grundton, schärfer im Glanz
+    float3 v = normalize(uniforms.eye.xyz - in.world);
+    float3 h = normalize(l + v);
+    float metal = gloss > 1.5f ? 1.0f : 0.0f;
+    float exponent = mix(24.0f, 60.0f, metal);
+    float strength = mix(0.25f, 0.6f, metal);
+    float specular = pow(abs(dot(n, h)), exponent) * strength;
+    float3 base = color * mix(0.35f + 0.65f * diffuse, 0.22f + 0.7f * diffuse, metal);
+    float3 highlight = mix(float3(1.0f), color * 0.6f + float3(0.4f), metal);
+    return base + highlight * specular;
 }
 
 /// Schattierte Körper in Vertexfarbe.
@@ -79,7 +99,9 @@ fragment float4 fragment_main(VertexOut in [[stage_in]],
     if (clipped(in, uniforms)) discard_fragment();
     // Schnittansicht: Innenseiten wirken als Schnittfläche (flach, abgedunkelt)
     float3 n = uniforms.clipPlane.xyz;
-    if (dot(n, n) > 0.0 && !frontFacing) return float4(in.color * 0.55 + float3(0.25, 0.12, 0.02), 1.0);
+    float gloss;
+    float3 plain = bodyColor(in.color, gloss);
+    if (dot(n, n) > 0.0 && !frontFacing) return float4(plain * 0.55 + float3(0.25, 0.12, 0.02), 1.0);
     return float4(shade(in, uniforms), 1.0);
 }
 

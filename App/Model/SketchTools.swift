@@ -157,8 +157,9 @@ extension SketchEntity {
             return .circle(center: f(c), radius: r)
         case .point(let p):
             return .point(f(p))
-        case .spline(let points, let kind, let closed):
-            return .spline(points: points.map(f), kind: kind, closed: closed)
+        case .spline(let points, let kind, let closed, let tangents):
+            return .spline(points: points.map(f), kind: kind, closed: closed,
+                           tangents: SketchEntity.mappedTangents(tangents, points: points, f))
         case .polyline(let points, let closed):
             return .polyline(points.map(f), closed: closed)
         case .rectangle(let corner, let size):

@@ -97,6 +97,21 @@ NS_ASSUME_NONNULL_BEGIN
 /// Übergangskörper durch mehrere geschlossene Konturen (in Reihenfolge).
 + (nullable PCKShape *)loftThroughWires:(NSArray<NSArray<NSNumber *> *> *)sections NS_SWIFT_NAME(loft(sections:));
 
+/// Loft mit Tangentenbedingung (näherungsweise): startOffset bzw. endOffset ≠ 0 fügt hinter dem ersten bzw. vor
+/// dem letzten Querschnitt eine um diesen Vektor verschobene Kopie ein, sodass die Fläche dort in dieser Richtung
+/// ausläuft (z. B. senkrecht zur Skizzenebene). Nullvektor = frei.
++ (nullable PCKShape *)loftThroughWires:(NSArray<NSArray<NSNumber *> *> *)sections
+                            startOffset:(simd_double3)startOffset endOffset:(simd_double3)endOffset
+    NS_SWIFT_NAME(loft(sections:startOffset:endOffset:));
+
+/// Loft entlang von Führungskurven (offene Pfade, kodiert wie eine Kontur). Die erste Führung ist die Leitkurve:
+/// die Querschnitte werden an ihr entlanggeführt und ineinander übergeblendet (BRepOffsetAPI_MakePipeShell mit
+/// mehreren Profilen). Eine zweite Führung steuert die Verdrehung (Hilfsleitkurve). Die Führungen sollten am
+/// ersten Querschnitt beginnen und durch alle Querschnitte laufen. nil bei Fehlschlag oder ohne Kernel.
++ (nullable PCKShape *)loftThroughWires:(NSArray<NSArray<NSNumber *> *> *)sections
+                                 guides:(NSArray<NSArray<NSNumber *> *> *)guides
+    NS_SWIFT_NAME(loft(sections:guides:));
+
 /// Dünn extrudieren (Fusion 360 „Dünn“): jede Kontur wird zu einer Wand der Stärke thickness und um direction
 /// verschoben. wires wie prismWithProfileWires: (wires[0] Außenkontur, weitere Löcher); offene Konturen sind
 /// erlaubt (Linienzug). side: 0 = mittig, 1 = innen (ins Profil; bei offenen Konturen Seite 1),
