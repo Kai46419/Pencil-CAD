@@ -151,7 +151,7 @@ struct SketchMeasurement {
     // MARK: Hilfen
 
     private static func mm(_ value: Double) -> String {
-        "\(value.formatted(.number.precision(.fractionLength(0...3)))) mm"
+        LengthUnit.current.format(value)
     }
 
     private static func degrees(_ value: Double) -> String {

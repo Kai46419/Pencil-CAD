@@ -88,6 +88,8 @@ enum ModelTool: Equatable {
     /// Antippen wählt Flächen und Kanten; Ziehpfeile erscheinen automatisch.
     case select
     case insert(Primitive)
+    /// Normteile, Vorlagen, Helix, dünne Linien, Verjüngung (PartTools.swift)
+    case part(PartTool)
     case boolean(BooleanKind)
     case move
     case mirror
@@ -126,6 +128,7 @@ enum ModelTool: Equatable {
         switch self {
         case .select: "Auswahl"
         case .insert(let primitive): "\(primitive.rawValue) einfügen"
+        case .part(let kind): kind.title
         case .boolean(let kind): kind.rawValue
         case .move: "Verschieben/Rotieren"
         case .mirror: "Spiegeln"
@@ -241,6 +244,8 @@ final class Workspace: ObservableObject {
     let assistant: AIAssistant
     /// Kamerawinkel für den ViewCube (eigenes Objekt, damit Drehen nicht die ganze Oberfläche neu aufbaut).
     let camera = CameraState()
+    /// Einstellungen von Normteilen, Vorlagen, Helix, dünnen Linien, Verjüngung, Sweep entlang Kanten
+    let parts = PartSettings()
 
     @Published var tool: ModelTool = .select
     @Published var displayMode: DisplayMode = .shaded
@@ -353,6 +358,8 @@ final class Workspace: ObservableObject {
     @Published var showsCommandSearch = false
     /// Wird von der Oberfläche als Datei gesichert und dann geleert
     @Published var pendingExport: PendingExport?
+    /// „Zeichnung erstellen“ (technische Zeichnung als PDF/DXF)
+    @Published var showsDrawing = false
     /// Hilfe-Menü: gewählte Hilfeseite
     @Published var helpTopic: HelpTopic?
     /// Fotoauswahl für „Bild einfügen“
@@ -368,6 +375,8 @@ final class Workspace: ObservableObject {
     @Published var boxSelects = false
     /// Körper wählen: Antippen wählt ganze Körper (mehrere) statt Flächen und Kanten.
     @Published var selectsBodies = false
+    /// Bild kalibrieren: angetippte Punkte (siehe CanvasTracing.swift)
+    @Published var canvasCalibration: CanvasCalibration?
 
     /// Liefert ein Bild der Ansicht (vom Viewport gesetzt).
     var snapshot: ((CGSize) -> UIImage?)?
@@ -385,6 +394,7 @@ final class Workspace: ObservableObject {
            let views = try? JSONDecoder().decode([SavedView].self, from: data) {
             savedViews = views
         }
+        loadLengthUnit()
     }
 
     // MARK: SVG und DXF
@@ -619,9 +629,17 @@ final class Workspace: ObservableObject {
             }
             updatePreview()
             return
+        case .part(let kind):
+            model.resetSelection()
+            startPart(kind, faces: previousFaces)
+            return
         case .revolve, .sweep, .loft, .scaleSketch:
             model.resetSelection()
             if !previousRegions.isEmpty { model.selectRegions(previousRegions) }
+            if newTool == .sweep {
+                parts.sweepEdges = []
+                parts.sweepEdgeLines = []
+            }
             if newTool == .sweep, sweepPath == nil {
                 sweepPath = model.pathSketches.first { $0 != previousRegions.first?.sketch }
             }
@@ -1003,7 +1021,7 @@ final class Workspace: ObservableObject {
         } else {
             return
         }
-        model.message = "Letzte Höhe wiederholt: \(NumberField.format(value)) mm"
+        model.message = "Letzte Höhe wiederholt: \(LengthUnit.current.format(value))"
     }
 
     /// Gefundene Ausrichtung übernehmen: Körper drehen und aufs Druckbett (Z = 0) stellen.
@@ -1103,6 +1121,11 @@ final class Workspace: ObservableObject {
         case .split:
             splitTapped(face: face, edge: edge, region: region)
         case .revolve, .sweep, .scaleSketch:
+            // Sweep: Körperkanten antippen bilden den Pfad (wie SketchUp „Folge mir“)
+            if tool == .sweep, region == nil, let edge {
+                sweepEdgeTapped(edge)
+                return
+            }
             guard let region else { return }
             if tool == .scaleSketch || model.selectedRegions.first?.sketch != region.sketch {
                 model.selectRegions([region])
@@ -1233,6 +1256,8 @@ final class Workspace: ObservableObject {
             updateShellPreview()
         case .insert:
             break
+        case .part(let kind):
+            partTapped(kind, face: tappedFace, point: point)
         }
     }
 
@@ -1263,7 +1288,11 @@ final class Workspace: ObservableObject {
             }
             model.previewRevolve(axisOrigin: axis.origin, axis: axis.direction, degrees: revolveAngle, mode: solidMode)
         case .sweep:
-            model.previewSweep(pathSketch: sweepPath, mode: solidMode)
+            if !parts.sweepEdges.isEmpty {
+                model.previewSweep(alongEdges: parts.sweepEdges, mode: solidMode)
+            } else {
+                model.previewSweep(pathSketch: sweepPath, mode: solidMode)
+            }
         case .loft:
             model.previewLoft(mode: solidMode)
         case .split:
@@ -1369,7 +1398,7 @@ final class Workspace: ObservableObject {
             return abs(rounded) > 1e-4 ? rounded : nil
         }
         func report(_ value: Double) {
-            model.message = "Bis zur angetippten Stelle: \(value.formatted(.number.precision(.fractionLength(0...3)))) mm"
+            model.message = "Bis zur angetippten Stelle: \(LengthUnit.current.format(value))"
         }
         if !model.selectedRegions.isEmpty, let handle = model.regionHandle, model.regionExtent == .toObject {
             // Fusion 360 „Bis Objekt“: jede angetippte Fläche, Kante oder Skizze gibt die Höhe vor (plus Versatz)
@@ -1598,7 +1627,10 @@ final class Workspace: ObservableObject {
     private func measure(face: FaceRef?, edge: EdgeRef?, point: SIMD3<Float>?) {
         var lines: [String] = []
         func mm(_ value: Double, _ unit: String = "mm") -> String {
-            "\(value.formatted(.number.precision(.fractionLength(0...3)))) \(unit)"
+            // Längen und Flächen in der Projekteinheit
+            if unit == "mm" { return LengthUnit.current.format(value) }
+            if unit == "mm²" { return LengthUnit.current.formatArea(value) }
+            return "\(value.formatted(.number.precision(.fractionLength(0...3)))) \(unit)"
         }
         if let edge {
             model.resetSelection()
@@ -1843,6 +1875,7 @@ final class Workspace: ObservableObject {
             if selectsBodies { return "Körper antippen – mehrere möglich, dann Vereinigen, Abziehen oder Schneiden" }
             return nil
         case .insert: return "Maße eingeben, dann „Fertig“"
+        case .part(let kind): return partHint(kind)
         case .boolean(let kind):
             switch model.selectedBodies.count {
             case 0: return "Zielkörper antippen"
@@ -1867,7 +1900,8 @@ final class Workspace: ObservableObject {
         case .revolve:
             return model.selectedRegions.isEmpty ? "Skizzenbereich antippen" : "Achse und Winkel wählen"
         case .sweep:
-            return model.selectedRegions.isEmpty ? "Profil (Skizzenbereich) antippen" : "Pfad-Skizze wählen"
+            return model.selectedRegions.isEmpty ? "Profil (Skizzenbereich) antippen"
+                : "Pfad-Skizze wählen oder Körperkanten antippen"
         case .loft:
             return model.selectedRegions.count < 2 ? "Querschnitte nacheinander antippen (je Skizze einen)"
                 : "Weitere Querschnitte antippen oder „Fertig“"
@@ -1931,7 +1965,7 @@ final class Workspace: ObservableObject {
             if !sketch.selection.isEmpty {
                 return "\(sketch.selection.count) gewählt · unten „Verankern“ hält sie fest · rechts Einschränkung wählen"
             }
-            return "Antippen wählt · Ecke/Ende ziehen ändert die Größe · Stift 1 s über einem Punkt halten oder mit dem Finger doppeltippen merkt ihn (zwei → Mitte)"
+            return "Antippen wählt · ins Leere ziehen: \(LassoSelection.isOn ? "Lasso" : "Rahmen") · Ecke/Ende ziehen ändert die Größe · Stift 1 s über einem Punkt halten oder mit dem Finger doppeltippen merkt ihn (zwei → Mitte)"
         case .polyline where sketch.arcNext:
             return "Bogen: vom Linienende zum Ziel ziehen – tangential, sonst als Halbkreis"
         case .polyline where sketch.hasOpenChain:
@@ -1966,6 +2000,10 @@ final class Workspace: ObservableObject {
                 : "Zweites Element antippen für Abstand und Winkel · erneut antippen nimmt es heraus"
         case .mirror, .rectPattern, .circPattern:
             return sketch.transformStatus
+        case .spline where sketch.splineInput == .freehand:
+            return "Kurve frei zeichnen – sie wird zur glatten Spline · zurück zum Anfang schließt sie"
+        case .spline where sketch.splineInput == .insert:
+            return "Spline antippen – an der Stelle entsteht ein neuer Punkt"
         case .spline where sketch.hasOpenSpline:
             return "Punkte setzen · auf dem Start schließen · letzten Punkt erneut antippen beendet"
         case .spline:

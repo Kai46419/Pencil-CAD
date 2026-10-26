@@ -97,6 +97,31 @@ NS_ASSUME_NONNULL_BEGIN
 /// Übergangskörper durch mehrere geschlossene Konturen (in Reihenfolge).
 + (nullable PCKShape *)loftThroughWires:(NSArray<NSArray<NSNumber *> *> *)sections NS_SWIFT_NAME(loft(sections:));
 
+/// Dünn extrudieren (Fusion 360 „Dünn“): jede Kontur wird zu einer Wand der Stärke thickness und um direction
+/// verschoben. wires wie prismWithProfileWires: (wires[0] Außenkontur, weitere Löcher); offene Konturen sind
+/// erlaubt (Linienzug). side: 0 = mittig, 1 = innen (ins Profil; bei offenen Konturen Seite 1),
+/// 2 = außen (Seite 2). planeOrigin/planeNormal: Skizzenebene (für offene, gerade Konturen nötig).
++ (nullable PCKShape *)thinPrismWithProfileWires:(NSArray<NSArray<NSNumber *> *> *)wires
+                                     planeOrigin:(simd_double3)origin planeNormal:(simd_double3)normal
+                                       thickness:(double)thickness side:(NSInteger)side
+                                       direction:(simd_double3)direction
+    NS_SWIFT_NAME(thinPrism(profileWires:planeOrigin:planeNormal:thickness:side:direction:));
+
+/// Feder: Kreisquerschnitt (wireDiameter) entlang einer Schraubenlinie um die Achse base/axis mit radius
+/// (Mitte des Drahts), Steigung pitch je Umdrehung und Gesamthöhe height. nil bei Fehler oder ohne Kernel.
++ (nullable PCKShape *)springWithBase:(simd_double3)base axis:(simd_double3)axis radius:(double)radius
+                                pitch:(double)pitch height:(double)height leftHanded:(BOOL)leftHanded
+                         wireDiameter:(double)wireDiameter
+    NS_SWIFT_NAME(spring(base:axis:radius:pitch:height:leftHanded:wireDiameter:));
+
+/// Schraubenkörper mit beliebigem Querschnitt (Gewinde, Vierkantfeder): profileRZ ist ein geschlossenes
+/// Polygon in der Achsebene als Paare (r, z) – r = Abstand von der Achse, z = Höhe ab base. Die Schraubenlinie
+/// hat den Radius radius (Bezug für die Führung), Steigung pitch und Höhe height.
++ (nullable PCKShape *)helixSweepWithBase:(simd_double3)base axis:(simd_double3)axis radius:(double)radius
+                                    pitch:(double)pitch height:(double)height leftHanded:(BOOL)leftHanded
+                                profileRZ:(NSArray<NSNumber *> *)profileRZ
+    NS_SWIFT_NAME(helixSweep(base:axis:radius:pitch:height:leftHanded:profileRZ:));
+
 /// Fasst mehrere Körper zu einem Verbund zusammen (ohne Kernel: nur der erste).
 + (nullable PCKShape *)compoundOfShapes:(NSArray<PCKShape *> *)shapes NS_SWIFT_NAME(compound(_:));
 
@@ -189,6 +214,23 @@ NS_ASSUME_NONNULL_BEGIN
 - (nullable PCKShape *)chamferingEdges:(NSArray<NSNumber *> *)edges distance:(double)distance
                              distance2:(double)distance2 NS_SWIFT_NAME(chamfering(edges:distance:distance2:));
 
+/// Variable Rundung (Fusion 360 „Variabler Radius“): Radius radius am Anfang, endRadius am Ende jeder Kante
+/// bzw. tangentialen Kantenkette. nil bei Fehler.
+- (nullable PCKShape *)filletingEdges:(NSArray<NSNumber *> *)edges radius:(double)radius endRadius:(double)endRadius
+    NS_SWIFT_NAME(filleting(edges:radius:endRadius:));
+
+/// Sweep entlang Körperkanten (SketchUp „Folge mir“): Profil (Kodierung wie prismWithProfileWires:) entlang der
+/// zusammenhängenden Kanten (Nummern aus edgeIndexData) dieses Körpers ziehen; Ecken werden auf Gehrung
+/// gesetzt. Liefert nur den neuen Körper.
+- (nullable PCKShape *)sweepProfileWires:(NSArray<NSArray<NSNumber *> *> *)wires alongEdges:(NSArray<NSNumber *> *)edges
+    NS_SWIFT_NAME(sweep(profileWires:alongEdges:));
+
+/// Entformungsschräge (Fusion 360 „Verjüngung“): Flächen um degrees gegen die Zugrichtung neigen; die
+/// Neutralebene geht durch neutralOrigin senkrecht zu pull. nil bei Fehler.
+- (nullable PCKShape *)draftingFaces:(NSArray<NSNumber *> *)faces pull:(simd_double3)pull
+                       neutralOrigin:(simd_double3)neutralOrigin angle:(double)degrees
+    NS_SWIFT_NAME(drafting(faces:pull:neutralOrigin:angle:));
+
 /// Größter Radius bzw. größte Fasenbreite bis limit, die für diese Kanten noch geht (Halbierungssuche,
 /// auf 1 % genau). 0, wenn gar nichts geht.
 - (double)maximumBlendForEdges:(NSArray<NSNumber *> *)edges upTo:(double)limit chamfer:(BOOL)chamfer
@@ -214,6 +256,14 @@ NS_ASSUME_NONNULL_BEGIN
 + (nullable NSArray<PCKShape *> *)shapesFromSTEPFile:(NSString *)path NS_SWIFT_NAME(readSTEP(path:));
 + (BOOL)writeShapes:(NSArray<PCKShape *> *)shapes toSTEPFile:(NSString *)path
     NS_SWIFT_NAME(writeSTEP(_:path:));
+
+/// Ansicht für technische Zeichnungen mit Verdeckung (OpenCASCADE Hidden Line Removal, exakt): Blick aus
+/// Richtung toEye (vom Modell zum Betrachter), xAxis = Rechtsrichtung der Ansicht (senkrecht zu toEye).
+/// Liefert [sichtbar, verdeckt], je Float64-Daten mit 2D-Punktpaaren (x1, y1, x2, y2, …) in mm in der
+/// Ansichtsebene (y = toEye × xAxis). nil ohne Kernel bzw. ohne HLR-Toolkit oder bei Fehler.
++ (nullable NSArray<NSData *> *)hiddenLineViewOfShapes:(NSArray<PCKShape *> *)shapes toEye:(simd_double3)toEye
+                                                 xAxis:(simd_double3)xAxis deflection:(double)deflection
+    NS_SWIFT_NAME(hiddenLineView(_:toEye:xAxis:deflection:));
 
 @end
 

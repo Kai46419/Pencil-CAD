@@ -53,8 +53,8 @@ struct MagnetRailIcon: View {
         }
         .frame(width: 20, height: 22)
         .frame(width: 44, height: 44)
-        .background(isActive ? Color.accentColor : Color(.systemBackground), in: Circle())
-        .shadow(color: .black.opacity(shadowed ? 0.12 : 0), radius: 4, y: 1)
+        .floatingSurface(isActive ? Color.accentColor : Theme.surface, in: Circle(), elevation: shadowed ? .raised : .inset)
+        .animation(Theme.snappy, value: isActive)
     }
 }
 
@@ -102,7 +102,7 @@ struct SnapMenu: View {
                 .disabled(!sketch.snapEnabled)
                 Picker("Raster", selection: $sketch.gridStep) {
                     ForEach(gridSteps, id: \.self) { step in
-                        Text("\(step.formatted()) mm").tag(step)
+                        Text(LengthUnit.current.gridNumber(step)).tag(step)
                     }
                 }
                 .pickerStyle(.segmented)
@@ -162,9 +162,11 @@ struct RightRail: View {
     @Binding var panel: SidePanel?
     let screenshot: () -> Void
 
-    /// Rastermaß bis zum Tausendstel Millimeter
-    private static let gridSteps: [Double] = [0.001, 0.01, 0.1, 0.5, 1, 5, 10]
+    /// Rastermaß bis zum Tausendstel Millimeter (bzw. passend zur Projekteinheit, z. B. 1/16 Zoll)
+    private static var gridSteps: [Double] { LengthUnit.current.gridSteps }
     @State private var isSnapMenuShown = false
+    /// Rahmenauswahl als Lasso (lange drücken auf „Rahmenauswahl“)
+    @AppStorage(LassoSelection.key) private var lassoSelects = false
 
     @State private var showsConstraints = true
 
@@ -293,25 +295,24 @@ struct RightRail: View {
         Menu {
             Picker("Raster", selection: $sketch.gridStep) {
                 ForEach(Self.gridSteps, id: \.self) { step in
-                    Text("\(step.formatted()) mm").tag(step)
+                    Text(LengthUnit.current.gridLabel(step)).tag(step)
                 }
             }
         } label: {
             Group {
                 if stacked {
                     VStack(spacing: -1) {
-                        Text(sketch.gridStep.formatted())
+                        Text(LengthUnit.current.gridNumber(sketch.gridStep))
                             .font(.system(size: 12, weight: .semibold).monospacedDigit())
-                        Text("mm")
+                        Text(LengthUnit.current.symbol)
                             .font(.system(size: 10, weight: .semibold))
                     }
                     .frame(width: 44, height: 44)
                 } else {
-                    Text(sketch.gridStep.formatted())
+                    Text(LengthUnit.current.gridNumber(sketch.gridStep))
                         .font(.system(size: 13, weight: .semibold).monospacedDigit())
                         .frame(width: 44, height: 44)
-                        .background(Color(.systemBackground), in: Circle())
-                        .shadow(color: .black.opacity(0.12), radius: 4, y: 1)
+                        .floatingSurface(in: Circle())
                 }
             }
             .foregroundStyle(.primary)
@@ -432,9 +433,17 @@ struct RightRail: View {
                 workspace.selectsBodies.toggle()
                 if workspace.selectsBodies, workspace.tool != .select { workspace.activate(.select) }
             }
-            RailButton(systemImage: "rectangle.dashed", label: "Rahmenauswahl", isActive: workspace.boxSelects) {
+            RailButton(systemImage: lassoSelects ? "lasso" : "rectangle.dashed",
+                       label: lassoSelects ? "Lassoauswahl" : "Rahmenauswahl", isActive: workspace.boxSelects) {
                 workspace.boxSelects.toggle()
                 if workspace.boxSelects, !workspace.acceptsBoxSelection { workspace.activate(.select) }
+            }
+            // Lange drücken: Rahmen oder Lasso (gilt auch für den Stift und in der Skizze)
+            .contextMenu {
+                Picker("Auswahlform", selection: $lassoSelects) {
+                    Label("Rahmen", systemImage: "rectangle.dashed").tag(false)
+                    Label("Lasso", systemImage: "lasso").tag(true)
+                }
             }
         }
     }
@@ -499,10 +508,9 @@ struct ConstraintColumn: View {
                 }
                 .padding(.vertical, 2)
                 .background(alignment: .trailing) {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(Color(.systemBackground))
+                    FloatingShape(shape: RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous),
+                                  fill: Theme.surface)
                         .frame(width: 44)
-                        .shadow(color: .black.opacity(0.12), radius: 4, y: 1)
                 }
             }
         }
@@ -524,7 +532,7 @@ struct ConstraintColumn: View {
                                      : active ? Color.accentColor : Color.primary.opacity(isEnabled ? 0.75 : 0.35))
                     .frame(width: 38, height: 34)
                     .background(pending ? Color.accentColor : Color.clear,
-                                in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                                in: RoundedRectangle(cornerRadius: Theme.Radius.label, style: .continuous))
                     .frame(width: 44, height: 38)
             }
             .contentShape(Rectangle())
@@ -543,8 +551,7 @@ struct RailGroup<Content: View>: View {
         VStack(spacing: 0) {
             content
         }
-        .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .shadow(color: .black.opacity(0.12), radius: 4, y: 1)
+        .floatingSurface(in: RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
     }
 }
 
@@ -557,7 +564,7 @@ struct RailLabel: View {
     var body: some View {
         VStack(alignment: .trailing, spacing: 0) {
             Text(title)
-                .font(.caption.weight(.semibold))
+                .font(Theme.labelFont)
                 .foregroundStyle(dimmed ? Color.secondary : Color.primary)
             if let subtitle {
                 Text(subtitle)
@@ -567,7 +574,8 @@ struct RailLabel: View {
         }
         .padding(.horizontal, 9)
         .padding(.vertical, 4)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .floatingSurface(.regularMaterial, in: RoundedRectangle(cornerRadius: Theme.Radius.label, style: .continuous),
+                         elevation: .flat)
     }
 }
 
@@ -582,7 +590,7 @@ struct RailButton: View {
         Button(action: action) {
             RailIcon(systemImage: systemImage, isActive: isActive)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.pressable)
         .accessibilityLabel(label)
         .hoverTip(label)
     }
@@ -598,8 +606,8 @@ struct RailIcon: View {
             .font(.system(size: 17, weight: .medium))
             .frame(width: 44, height: 44)
             .foregroundStyle(isActive ? Color.white : Color.primary)
-            .background(isActive ? Color.accentColor : Color(.systemBackground), in: Circle())
-            .shadow(color: .black.opacity(shadowed ? 0.12 : 0), radius: 4, y: 1)
+            .floatingSurface(isActive ? Color.accentColor : Theme.surface, in: Circle(), elevation: shadowed ? .raised : .inset)
+            .animation(Theme.snappy, value: isActive)
     }
 }
 

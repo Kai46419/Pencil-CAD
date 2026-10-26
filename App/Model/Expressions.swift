@@ -19,7 +19,12 @@ struct ExpressionError: LocalizedError {
 enum Formula {
     /// Wert eines Ausdrucks. variables: Name → Wert (mm bzw. Grad).
     static func evaluate(_ text: String, variables: [String: Double] = [:]) throws -> Double {
-        var parser = Parser(tokens: try tokenize(text), variables: variables)
+        try evaluate(text, variables: variables, lengthScale: 1)
+    }
+
+    /// Wie oben, Längeneinheiten aber geteilt durch lengthScale (mm je Projekteinheit, siehe evaluateLength).
+    static func evaluate(_ text: String, variables: [String: Double], lengthScale: Double) throws -> Double {
+        var parser = Parser(tokens: try tokenize(text), variables: variables, lengthScale: lengthScale)
         let value = try parser.parseSum()
         guard parser.isAtEnd else { throw ExpressionError("Unerwartetes Zeichen „\(parser.current.text)“.") }
         guard value.isFinite else { throw ExpressionError("Ergebnis ist keine Zahl.") }
@@ -155,6 +160,8 @@ enum Formula {
     private struct Parser {
         let tokens: [Token]
         let variables: [String: Double]
+        /// mm je Projekteinheit: „10 mm“ im Zollprojekt ergibt 10 / 25,4
+        let lengthScale: Double
         var index = 0
 
         var current: Token { tokens[min(index, tokens.count - 1)] }
@@ -216,12 +223,13 @@ enum Formula {
         /// Einheit direkt nach einem Wert: „10 cm“, „30°“, „2 in“, „5"“; „%“ = Hundertstel.
         mutating func parseUnit(_ value: Double) throws -> Double {
             if accept("°") { return value }
-            if accept("\"") { return value * 25.4 }
-            if accept("'") { return value * 304.8 }
+            if accept("\"") { return value * 25.4 / lengthScale }
+            if accept("'") { return value * 304.8 / lengthScale }
             if accept("%") { return value / 100 }
             if case .name(let name) = current.kind, let factor = Formula.units[name], variables[name] == nil {
                 advance()
-                return value * factor
+                let isAngle = name == "deg" || name == "rad"
+                return value * (isAngle ? factor : factor / lengthScale)
             }
             return value
         }

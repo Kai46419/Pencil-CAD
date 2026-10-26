@@ -47,6 +47,11 @@ private struct WorkspaceContent: View {
         ZStack {
             Viewport(workspace: workspace, model: model, sketch: sketch)
                 .overlay {
+                    LinearGradient(colors: [Color.white.opacity(0.12), Color.white.opacity(0), Color.black.opacity(0.025)],
+                                   startPoint: .top, endPoint: .bottom)
+                        .allowsHitTesting(false)
+                }
+                .overlay {
                     if let location = workspace.quickToolsLocation {
                         QuickToolsPalette(workspace: workspace, sketch: sketch, location: location)
                     }
@@ -78,7 +83,7 @@ private struct WorkspaceContent: View {
                     }
                     .padding(.leading, 16)
                     .padding(.top, 12)
-                    .animation(.easeOut(duration: 0.15), value: workspace.showsLayers)
+                    .animation(Theme.spring, value: workspace.showsLayers)
                 }
                 .overlay(alignment: .topTrailing) {
                     HStack(alignment: .top, spacing: 12) {
@@ -155,6 +160,7 @@ private struct WorkspaceContent: View {
         .sheet(isPresented: $workspace.showsCommandSearch) { CommandSearchSheet(workspace: workspace) }
         .sheet(item: $screenshot) { ScreenshotSheet(screenshot: $0) }
         .sheet(isPresented: $workspace.showsVariables) { VariablesSheet(model: model) }
+        .sheet(isPresented: $workspace.showsDrawing) { DrawingSheet(model: model, projectName: projectName) }
         .sheet(isPresented: $workspace.showsProjectPicker) {
             ProjectPickerSheet(current: workspace.project.id) { project in
                 model.insertProject(from: project.folder, name: project.name)
@@ -179,7 +185,7 @@ private struct WorkspaceContent: View {
             HStack(spacing: 6) {
                 Image(systemName: "square.3.layers.3d")
                 Text("Ebenen")
-                    .font(.callout.weight(.semibold))
+                    .font(Theme.barFont)
                 Image(systemName: "chevron.down")
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(.secondary)
@@ -187,11 +193,11 @@ private struct WorkspaceContent: View {
             }
             .foregroundStyle(workspace.showsLayers ? Color.white : Color.primary)
             .padding(.horizontal, 14)
-            .frame(height: 36)
-            .background(workspace.showsLayers ? Color.accentColor : Color(.systemBackground), in: Capsule())
-            .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
+            .frame(height: Theme.barHeight)
+            .floatingSurface(workspace.showsLayers ? Color.accentColor : Theme.surface, in: Capsule(), elevation: .floating)
+            .animation(Theme.snappy, value: workspace.showsLayers)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.pressable)
         .hoverTip("Ebenen")
     }
 
@@ -207,13 +213,13 @@ private struct WorkspaceContent: View {
                     .font(.footnote.weight(.medium))
                     .padding(.horizontal, 14)
                     .padding(.vertical, 7)
-                    .background(.regularMaterial, in: Capsule())
+                    .floatingSurface(.regularMaterial, in: Capsule())
                     .transition(.opacity)
             }
         }
         .padding(.top, 12)
-        .animation(.easeOut(duration: 0.15), value: workspace.hint)
-        .animation(.easeOut(duration: 0.15), value: assistant.isOpen)
+        .animation(Theme.snappy, value: workspace.hint)
+        .animation(Theme.spring, value: assistant.isOpen)
     }
 
     /// Schwebende Titelleiste: Startseite, Projektname, Menü.
@@ -221,7 +227,7 @@ private struct WorkspaceContent: View {
         HStack(spacing: 4) {
             Button(action: close) {
                 Image(systemName: "house")
-                    .frame(width: 40, height: 36)
+                    .frame(width: 44, height: Theme.barHeight)
             }
             .accessibilityLabel("Startseite")
             Divider()
@@ -232,14 +238,14 @@ private struct WorkspaceContent: View {
             } label: {
                 HStack(spacing: 6) {
                     Text(projectName)
-                        .font(.callout.weight(.semibold))
+                        .font(Theme.barFont)
                         .lineLimit(1)
                     Image(systemName: "chevron.down")
                         .font(.caption2.weight(.bold))
                         .foregroundStyle(.secondary)
                 }
                 .padding(.horizontal, 10)
-                .frame(height: 36)
+                .frame(height: Theme.barHeight)
             }
             Menu {
                 ForEach(HelpTopic.allCases) { topic in
@@ -254,7 +260,7 @@ private struct WorkspaceContent: View {
                         .foregroundStyle(.secondary)
                 }
                 .padding(.horizontal, 8)
-                .frame(height: 36)
+                .frame(height: Theme.barHeight)
             }
             .accessibilityLabel("Hilfe")
             .hoverTip("Hilfe")
@@ -264,7 +270,7 @@ private struct WorkspaceContent: View {
                 workspace.showsCommandSearch = true
             } label: {
                 Image(systemName: "magnifyingglass")
-                    .frame(width: 40, height: 36)
+                    .frame(width: 44, height: Theme.barHeight)
             }
             .keyboardShortcut("k", modifiers: .command)
             .accessibilityLabel("Befehl suchen")
@@ -276,7 +282,7 @@ private struct WorkspaceContent: View {
             } label: {
                 Image(systemName: "sparkles")
                     .foregroundStyle(assistant.isOpen ? Color.accentColor : Color.primary)
-                    .frame(width: 40, height: 36)
+                    .frame(width: 44, height: Theme.barHeight)
             }
             .accessibilityLabel("KI-Assistent")
             .hoverTip("KI-Assistent: in Worten modellieren")
@@ -295,6 +301,9 @@ private struct WorkspaceContent: View {
                 } label: {
                     Label("Alle Körper exportieren", systemImage: "square.and.arrow.up")
                 }
+                Button("Zeichnung erstellen (PDF, DXF) …", systemImage: "doc.richtext") {
+                    workspace.showsDrawing = true
+                }
                 Button("In AR ansehen", systemImage: "arkit") {
                     arPreview = model.usdzFile()
                 }
@@ -312,14 +321,13 @@ private struct WorkspaceContent: View {
                 Text(PCKShape.kernelAvailable ? "Kernel: OpenCASCADE" : "Ohne OpenCASCADE (siehe README)")
             } label: {
                 Image(systemName: "ellipsis")
-                    .frame(width: 40, height: 36)
+                    .frame(width: 44, height: Theme.barHeight)
             }
             .accessibilityLabel("Menü")
         }
         .foregroundStyle(.primary)
         .padding(.horizontal, 6)
-        .background(Color(.systemBackground), in: Capsule())
-        .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
+        .floatingSurface(in: Capsule(), elevation: .floating)
         .buttonStyle(.plain)
     }
 
@@ -343,8 +351,7 @@ private struct WorkspaceContent: View {
                     .font(.footnote)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
-                    .background(Color(.systemBackground), in: Capsule())
-                    .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
+                    .floatingSurface(in: Capsule(), elevation: .floating)
                 }
                 .buttonStyle(.plain)
             }
@@ -364,8 +371,7 @@ private struct WorkspaceContent: View {
                     .font(.footnote)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
-                    .background(Color(.systemBackground), in: Capsule())
-                    .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
+                    .floatingSurface(in: Capsule(), elevation: .floating)
                 }
                 .buttonStyle(.plain)
             }
@@ -386,20 +392,18 @@ private struct WorkspaceContent: View {
                     .font(.callout.weight(.semibold))
                     .frame(minWidth: 110, minHeight: 44)
                     .foregroundStyle(.primary)
-                    .background(Color(.systemBackground), in: Capsule())
-                    .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
+                    .floatingSurface(in: Capsule(), elevation: .floating)
             }
             Button(action: workspace.done) {
                 Text("Fertig")
                     .font(.callout.weight(.semibold))
                     .frame(minWidth: 110, minHeight: 44)
                     .foregroundStyle(.white)
-                    .background(workspace.canFinish ? Color.accentColor : Color.gray, in: Capsule())
-                    .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
+                    .floatingSurface(workspace.canFinish ? Color.accentColor : Color.gray, in: Capsule(), elevation: .floating)
             }
             .disabled(!workspace.canFinish)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.pressable)
     }
 
     private var undoRedo: some View {

@@ -359,6 +359,10 @@ final class SketchController: ObservableObject {
     @Published var splineKind: SplineKind = .fit {
         didSet { changed() }
     }
+    /// Spline: Punkte setzen, Freihand oder Punkt einfügen (Varianten der Kachel, siehe SketchSplineTools.swift)
+    @Published var splineInput: SplineInput = .points {
+        didSet { if oldValue != splineInput { finishSpline() } }
+    }
     @Published var rectangleMode: RectangleMode = .diagonal {
         didSet {
             rectangleBase = nil
@@ -849,6 +853,10 @@ final class SketchController: ObservableObject {
             } else if simd_distance(start, end) > 1e-6 {
                 arcChord = (start, end)
             }
+        case .spline where splineInput == .freehand:
+            endFreehandSpline(samples, start: start, end: end, raw: point, tolerance: tolerance)
+        case .spline where splineInput == .insert:
+            insertSplinePoint(at: point, tolerance: tolerance)
         case .spline:
             endSplineStroke(start: start, end: end)
         case .point:
@@ -3662,6 +3670,9 @@ final class SketchController: ObservableObject {
             } else if let start = dragStart, let current = dragCurrent {
                 polylines.append([start, current])
             }
+        case .spline where splineInput != .points:
+            // Freihand: der Strich selbst als Vorschau
+            if splineInput == .freehand, dragStart != nil, strokeSamples.count >= 2 { polylines.append(strokeSamples) }
         case .spline:
             var points = splinePoints
             if dragCurrent != nil, points.isEmpty, let start = dragStart { points = [start] }
@@ -4080,14 +4091,14 @@ final class SketchController: ObservableObject {
             case .polygon:
                 return "\(polygonSides) Seiten"
             case .spline:
-                return "\(splinePoints.count + 1) Punkte"
+                return splineInput == .points ? "\(splinePoints.count + 1) Punkte" : nil
             default:
                 if let circleInference { return circleInference.label }
                 return activeSnap?.kind.map { "Fang: \($0.rawValue)" }
             }
         }
         if tool == .offset, offsetTarget != nil {
-            return "Versatz \(offsetDistance.formatted(.number.precision(.fractionLength(0...3)))) mm"
+            return "Versatz \(LengthUnit.current.format(offsetDistance))"
         } else if !splinePoints.isEmpty {
             return "Spline, \(splinePoints.count) Punkte"
         } else if !regions.isEmpty {
@@ -4095,6 +4106,34 @@ final class SketchController: ObservableObject {
         } else {
             return nil
         }
+    }
+}
+
+// MARK: Zugang für Erweiterungen in anderen Dateien (Spline-Werkzeuge, Rahmen- und Lassoauswahl)
+
+extension SketchController {
+    /// Neues Element wie beim Zeichnen anlegen (Rückgängig, Konstruktionsmodus, Verbinden mit Nachbarn).
+    func appendEntity(_ entity: SketchEntity, editable: Bool = false) {
+        add(entity, editable: editable)
+    }
+
+    /// Element ersetzen und die Einschränkungen übernehmen, als ein Schritt zum Rückgängigmachen.
+    func replaceElement(at index: Int, with entity: SketchEntity, constraints updated: [SketchConstraint]) {
+        guard entities.indices.contains(index) else { return }
+        remember()
+        entities[index] = entity
+        constraints = updated
+        editableIndex = nil
+        selection = []
+        entitiesChanged()
+    }
+
+    /// Rahmen- bzw. Lassoauswahl: Elemente zur Auswahl hinzufügen (wie mehrmals Antippen).
+    func addToSelection(_ refs: [SketchRef]) {
+        for ref in refs where !selection.contains(ref) { selection.append(ref) }
+        editableIndex = selection.count == 1 ? selection[0].entity : nil
+        notice = nil
+        changed()
     }
 }
 

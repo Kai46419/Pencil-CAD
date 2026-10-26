@@ -53,15 +53,22 @@ struct NumberField: View {
                     if !focused { commit() }
                 }
                 .onChange(of: value) { _, newValue in
-                    if !isFocused { text = Self.format(newValue) }
+                    if !isFocused { text = shown(newValue) }
                 }
-                .onAppear { text = Self.format(value) }
+                .onAppear { text = shown(value) }
             if !unit.isEmpty {
-                Text(unit)
+                Text(isLength ? LengthUnit.current.symbol : unit)
                     .foregroundStyle(.secondary)
                     .fixedSize()
             }
         }
+    }
+
+    /// Längenfeld („mm“): zeigt und liest Werte in der Projekteinheit, gespeichert wird in mm.
+    private var isLength: Bool { unit == "mm" }
+
+    private func shown(_ value: Double) -> String {
+        isLength ? LengthUnit.current.number(value) : Self.format(value)
     }
 
     private func commit() {
@@ -72,10 +79,11 @@ struct NumberField: View {
             return
         }
         do {
-            let result = try Formula.evaluate(trimmed, variables: variables)
+            let result = try isLength ? Formula.evaluateLength(trimmed, variables: variables)
+                : Formula.evaluate(trimmed, variables: variables)
             error = nil
             set(result)
-            text = Self.format(result)
+            text = shown(result)
         } catch {
             self.error = error.localizedDescription
         }
@@ -94,8 +102,7 @@ struct Card<Content: View>: View {
         content
             .font(.callout)
             .padding(14)
-            .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .shadow(color: .black.opacity(0.12), radius: 8, y: 2)
+            .floatingPanel()
     }
 }
 
@@ -130,6 +137,8 @@ struct ParameterCard: View {
                 }
             case .insert(let primitive):
                 insertCard(primitive)
+            case .part(let kind):
+                PartCard(workspace: workspace, model: model, parts: workspace.parts, kind: kind)
             case .boolean(let kind):
                 booleanCard(kind)
             case .move:
@@ -162,6 +171,7 @@ struct ParameterCard: View {
                 constructCard(kind)
             case .canvas(let id):
                 canvasCard(id)
+                CanvasTraceCard(workspace: workspace, model: model, canvasID: id)
             case .scaleSketch:
                 sketchScaleCard
             case .offsetEdges:
@@ -403,11 +413,17 @@ struct ParameterCard: View {
             }
         case .spline:
             HStack(spacing: 14) {
+                Picker("Eingabe", selection: $sketch.splineInput) {
+                    ForEach(SplineInput.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
                 Picker("Art", selection: $sketch.splineKind) {
                     ForEach(SplineKind.allCases) { Text($0.rawValue).tag($0) }
                 }
                 .pickerStyle(.segmented)
                 .fixedSize()
+                .disabled(sketch.splineInput != .points)
                 if sketch.hasOpenSpline {
                     Button("Spline beenden", systemImage: "checkmark", action: sketch.finishSpline)
                 }
@@ -458,6 +474,26 @@ struct ParameterCard: View {
                 NumberField(title: model.edgeOperation == .fillet ? "Radius"
                             : model.edgeSecondValue == nil ? "Breite" : "Abstand 1", value: model.edgeValue) {
                     model.setEdgeValue($0)
+                }
+                if model.edgeOperation == .fillet {
+                    // Variable Rundung (Fusion 360): Radius wächst bzw. schrumpft entlang der Kante
+                    Toggle("Variabel", isOn: Binding(get: { model.edgeEndValue != nil }, set: { on in
+                        model.setEdgeEndValue(on ? max(model.edgeValue * 2, 1) : nil)
+                    }))
+                    .fixedSize()
+                    .hoverTip("Variabel", "Wie Fusion 360: Radius am Kantenanfang (Radius) und am Kantenende (Ende) verschieden, z. B. 1 → 5 mm.")
+                    if let end = model.edgeEndValue {
+                        NumberField(title: "Ende", value: end) { model.setEdgeEndValue($0) }
+                        Button("Tauschen", systemImage: "arrow.left.arrow.right") {
+                            let start = model.edgeValue
+                            model.setEdgeEndValue(max(start, 0.01))
+                            model.setEdgeValue(end)
+                        }
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .hoverTip("Tauschen", "Anfangs- und Endradius tauschen.")
+                    }
                 }
                 if model.edgeOperation == .chamfer {
                     Toggle("Zwei Abstände", isOn: Binding(get: { model.edgeSecondValue != nil }, set: { on in
@@ -536,6 +572,22 @@ struct ParameterCard: View {
                     NumberField(title: "Verjüngung", value: model.regionTaper, unit: "°", width: 52) { model.regionTaper = $0 }
                         .hoverTip("Verjüngung", "Neigt die Seitenwände um diesen Winkel (Entformungsschräge). Positiv und negativ ausprobieren: eine Richtung wird schmaler, die andere breiter.")
                 }
+                // Dünn extrudieren (Fusion 360 „Dünn“): nur Wände entlang der Konturen
+                HStack(spacing: 12) {
+                    Toggle("Dünn", isOn: $model.regionThin)
+                        .fixedSize()
+                        .hoverTip("Dünn", "Wie Fusion 360: statt eines vollen Körpers nur eine Wand entlang der Kontur, z. B. für Rahmen und Gehäusewände.")
+                    if model.regionThin {
+                        Picker("Seite", selection: $model.regionThinSide) {
+                            ForEach(ThinSide.allCases) { Text($0.rawValue).tag($0) }
+                        }
+                        .pickerStyle(.segmented)
+                        .fixedSize()
+                        NumberField(title: "Wand", value: model.regionThinThickness, width: 52) { value in
+                            if value > 0 { model.regionThinThickness = value }
+                        }
+                    }
+                }
             }
             .fixedSize()
         }
@@ -556,7 +608,7 @@ struct ParameterCard: View {
     @ViewBuilder
     private func lastValueButton(_ apply: @escaping (Double) -> Void) -> some View {
         if let last = model.lastExtrudeValue {
-            Button("\(NumberField.format(last)) mm", systemImage: "arrow.uturn.backward") { apply(last) }
+            Button(LengthUnit.current.format(last), systemImage: "arrow.uturn.backward") { apply(last) }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .fixedSize()
@@ -777,7 +829,7 @@ struct ParameterCard: View {
                 }
                 if let start = workspace.translateStart, let end = workspace.translateEnd {
                     let d = end - start
-                    Text("Δ \(NumberField.format(simd_length(d))) mm")
+                    Text("Δ \(LengthUnit.current.format(simd_length(d)))")
                         .monospacedDigit()
                 }
                 Button("Neu", systemImage: "arrow.counterclockwise", action: workspace.resetTranslate)
@@ -1268,6 +1320,14 @@ extension ParameterCard {
                     }
                 }
                 .fixedSize()
+                if !workspace.parts.sweepEdges.isEmpty {
+                    // Pfad aus Körperkanten (Folge mir) statt aus einer Skizze
+                    Text(workspace.parts.sweepEdges.count == 1 ? "Pfad: 1 Kante" : "Pfad: \(workspace.parts.sweepEdges.count) Kanten")
+                        .fixedSize()
+                    Button("Kanten lösen", systemImage: "xmark.circle") { workspace.clearSweepEdges() }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                }
                 solidModePicker
                 regionCount
             }
@@ -1568,8 +1628,8 @@ struct HistoryPanel: View {
             .padding(.vertical, 6)
             .padding(.horizontal, 8)
             .foregroundStyle(isUndone ? Color.secondary : Color.primary)
-            .background(isCurrent ? Color.accentColor.opacity(0.15) : Color.clear,
-                        in: RoundedRectangle(cornerRadius: 8))
+            .background(isCurrent ? Theme.rowHighlight : Color.clear,
+                        in: RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -1630,7 +1690,7 @@ struct LayersPanel: View {
             folder("root", title: projectName, systemImage: "cube.transparent", visible: nil) {
                 if filter == .all {
                     folder("settings", title: "Dokumenteinstellungen", systemImage: "gearshape", visible: nil) {
-                        infoRow("Einheiten: mm", systemImage: "ruler")
+                        unitsRow
                     }
                     folder("origin", title: "Ursprung", systemImage: "move.3d", visible: workspace.showsOrigin,
                            toggle: { workspace.showsOrigin.toggle() }, hasChildren: false) {
@@ -1898,7 +1958,8 @@ struct LayersPanel: View {
         let isSelected = model.selectedBodies.contains(index) || model.selectedBody == index
         return HStack(spacing: 6) {
             eye(!item.isHidden) { model.setHidden(!item.isHidden, body: index) }
-            Image(systemName: "cube.fill")
+            // Komponente (verknüpfte Kopien) mit eigenem Symbol
+            Image(systemName: item.componentID == nil ? "cube.fill" : "shippingbox.fill")
                 .foregroundStyle(Color(item.color))
                 .frame(width: 20)
             Text(item.name)
@@ -1953,6 +2014,7 @@ struct LayersPanel: View {
                 Label("In Ordner", systemImage: "folder")
             }
             Button("In Einzelkörper trennen", systemImage: "square.split.2x1") { model.separateBody(index) }
+            ComponentMenuItems(model: model, index: index)
             Button("Löschen", systemImage: "trash", role: .destructive) {
                 model.toggleBody(index, exclusive: true)
                 model.deleteSelected()
@@ -2051,6 +2113,12 @@ struct LayersPanel: View {
         .onTapGesture { workspace.activate(.canvas(canvas.id)) }
         .contextMenu {
             Button("Bearbeiten", systemImage: "slider.horizontal.3") { workspace.activate(.canvas(canvas.id)) }
+            // Foto nachzeichnen (siehe CanvasTracing.swift)
+            Button("Maßstab kalibrieren", systemImage: "ruler") {
+                workspace.activate(.canvas(canvas.id))
+                workspace.startCalibration(canvas.id)
+            }
+            Button("Kontur erkennen", systemImage: "wand.and.stars") { workspace.detectContours(canvas.id) }
             Button("Löschen", systemImage: "trash", role: .destructive) { model.deleteCanvas(canvas.id) }
         }
     }
@@ -2113,8 +2181,7 @@ struct SidePanelFrame<Content: View>: View {
         .font(.callout)
         .padding(14)
         .frame(width: 280)
-        .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .shadow(color: .black.opacity(0.15), radius: 10, y: 3)
+        .floatingPanel()
     }
 }
 

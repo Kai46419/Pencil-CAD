@@ -58,6 +58,12 @@ extension Workspace {
             toolItem(.revolve, "Bereich um Achse drehen", "arrow.triangle.2.circlepath", "revolve drehen"),
             toolItem(.sweep, "Bereich entlang Pfad", "point.3.connected.trianglepath.dotted", "sweep"),
             toolItem(.loft, "Durch Querschnitte", "square.3.layers.3d", "loft"),
+            toolItem(.part(.helix), "Feder, Gewinde", PartTool.helix.systemImage, "helix spirale feder gewinde thread spring"),
+            toolItem(.part(.thinLines), "Linien einer Skizze als Wand", PartTool.thinLines.systemImage, "thin dünn wand linie"),
+            toolItem(.part(.draft), "Flächen neigen, Entformungsschräge", PartTool.draft.systemImage, "draft verjüngung schräge"),
+            toolItem(.part(.standard), "Schrauben, Muttern, Scheiben, Kugellager", PartTool.standard.systemImage,
+                     "normteil schraube mutter iso din lager bearing"),
+            toolItem(.part(.template), "Gehäuse, Stirnrad", PartTool.template.systemImage, "vorlage gehäuse box zahnrad gear"),
         ]
         items += Primitive.allCases.map { toolItem(.insert($0), "Grundkörper", $0.systemImage, "primitive insert") }
         items += ConstructionKind.allCases.map { toolItem(.construct($0), "Konstruktion", $0.systemImage, "construct plane axis point") }
@@ -79,6 +85,29 @@ extension Workspace {
                         systemImage: "folder.badge.plus", keywords: "insert") { [weak self] in self?.showsProjectPicker = true },
             CommandItem(id: "isolate", title: "Isolieren", subtitle: "Nur den gewählten Körper zeigen", systemImage: "scope",
                         keywords: "isolate") { [weak self] in self?.toggleIsolate() },
+            CommandItem(id: "drawing", title: "Zeichnung erstellen", subtitle: "Ansichten mit Maßen als PDF oder DXF",
+                        systemImage: "doc.richtext", keywords: "drawing zeichnung technische pdf dxf ansichten") { [weak self] in
+                self?.showsDrawing = true
+            },
+            CommandItem(id: "display.hiddenEdges", title: DisplayMode.hiddenEdges.rawValue, subtitle: "Anzeigemodus",
+                        systemImage: DisplayMode.hiddenEdges.systemImage, keywords: "hidden lines verdeckt gestrichelt") { [weak self] in
+                self?.displayMode = .hiddenEdges
+            },
+            CommandItem(id: "display.zebra", title: DisplayMode.zebra.rawValue, subtitle: "Flächenübergänge prüfen",
+                        systemImage: DisplayMode.zebra.systemImage, keywords: "zebra stripes streifen tangential") { [weak self] in
+                self?.displayMode = .zebra
+            },
+            CommandItem(id: "component", title: "Als Komponente", subtitle: "Kopien bleiben verknüpft",
+                        systemImage: "shippingbox", keywords: "component instance verknüpfen") { [weak self] in
+                guard let self else { return }
+                let chosen = self.model.selectedBodies.isEmpty ? (self.model.selectedBody.map { [$0] } ?? [])
+                    : self.model.selectedBodies
+                if chosen.isEmpty {
+                    self.model.message = "Erst einen Körper wählen, dann „Als Komponente“."
+                } else {
+                    self.model.makeComponent(chosen)
+                }
+            },
             CommandItem(id: "undo", title: "Rückgängig", subtitle: "Zwei Finger tippen", systemImage: "arrow.uturn.backward",
                         keywords: "undo") { [weak self] in self?.undo() },
             CommandItem(id: "redo", title: "Wiederholen", subtitle: "Drei Finger tippen", systemImage: "arrow.uturn.forward",
@@ -118,6 +147,8 @@ struct CommandSearchSheet: View {
                         }
                     } icon: {
                         Image(systemName: item.systemImage)
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(Color.accentColor)
                     }
                 }
                 .foregroundStyle(.primary)

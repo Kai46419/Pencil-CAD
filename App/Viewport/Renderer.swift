@@ -19,8 +19,15 @@ enum DisplayMode: String, CaseIterable, Identifiable {
     case shadedPlain = "Schattiert ohne Kanten"
     case wireframe = "Drahtgitter"
     case xray = "Röntgen"
+    /// Schattiert, Kanten hinter Flächen blass gestrichelt (wie in technischen Zeichnungen)
+    case hiddenEdges = "Verdeckte Kanten"
+    /// Streifen aus der Spiegelrichtung zur Prüfung von Flächenübergängen
+    case zebra = "Zebra"
 
     var id: Self { self }
+
+    /// Körper deckend gezeichnet (Auswahl wird dann von Flächen davor verdeckt)
+    var isSolid: Bool { self == .shaded || self == .shadedPlain || self == .hiddenEdges || self == .zebra }
 
     var systemImage: String {
         switch self {
@@ -28,6 +35,8 @@ enum DisplayMode: String, CaseIterable, Identifiable {
         case .shadedPlain: "cube"
         case .wireframe: "cube.transparent"
         case .xray: "eye"
+        case .hiddenEdges: "square.dashed"
+        case .zebra: "line.3.horizontal"
         }
     }
 }
@@ -86,6 +95,8 @@ final class Renderer: NSObject, MTKViewDelegate {
     var camera = OrbitCamera()
     /// Lage des Rasters (Skizzenebene); nil blendet es aus.
     var gridTransform: float4x4? = matrix_identity_float4x4
+    /// Fangraster der Skizze in mm (0 = keins): das angezeigte Raster folgt ihm bzw. einem Vielfachen davon
+    var gridBase: Float = 0
     var displayMode: DisplayMode = .shaded
     var handles: [HandleGraphic] = []
     var planes: [PlaneGraphic] = []
@@ -114,6 +125,10 @@ final class Renderer: NSObject, MTKViewDelegate {
     private let depthState: MTLDepthStencilState
     private let readOnlyDepthState: MTLDepthStencilState
     private let alwaysDepthState: MTLDepthStencilState
+    /// Verdeckte Kanten (Tiefe „größer“) und Zebra; optional, damit ein Fehler hier den Viewport nicht verhindert
+    private let hiddenEdgePipeline: MTLRenderPipelineState?
+    private let zebraPipeline: MTLRenderPipelineState?
+    private let behindDepthState: MTLDepthStencilState?
 
     private var vertexBuffer: MTLBuffer?
     private var indexBuffer: MTLBuffer?
@@ -191,6 +206,9 @@ final class Renderer: NSObject, MTKViewDelegate {
         self.depthState = depthState
         self.readOnlyDepthState = readOnlyDepthState
         self.alwaysDepthState = alwaysDepthState
+        hiddenEdgePipeline = pipeline(vertex: "vertex_overlay", fragment: "fragment_dashed_clip", blended: true)
+        zebraPipeline = pipeline(vertex: "vertex_main", fragment: "fragment_zebra")
+        behindDepthState = depth(.greater, write: false)
         super.init()
     }
 
@@ -246,8 +264,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         let u = SIMD3<Float>(transform.columns.0.x, transform.columns.0.y, transform.columns.0.z)
         let v = SIMD3<Float>(transform.columns.1.x, transform.columns.1.y, transform.columns.1.z)
         let perPoint = camera.worldUnitsPerPoint(viewHeight: viewHeight)
-        let steps: [Float] = [0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000]
-        let step = steps.first { $0 / perPoint >= 14 } ?? 2000
+        let (step, majorEvery) = displayGrid(perPoint: perPoint)
         // Mitte: Ziel der Kamera, auf die Ebene projiziert
         let d = camera.target - origin
         let center = SIMD2<Float>(simd_dot(d, u), simd_dot(d, v))
@@ -259,12 +276,12 @@ final class Renderer: NSObject, MTKViewDelegate {
         for i in stride(from: lo.x, through: hi.x, by: 1) {
             let line = [Vertex(position: SIMD3(i * step, lo.y * step, 0), normal: up),
                         Vertex(position: SIMD3(i * step, hi.y * step, 0), normal: up)]
-            if Int(i) % 5 == 0 { major += line } else { minor += line }
+            if Int(i) % majorEvery == 0 { major += line } else { minor += line }
         }
         for j in stride(from: lo.y, through: hi.y, by: 1) {
             let line = [Vertex(position: SIMD3(lo.x * step, j * step, 0), normal: up),
                         Vertex(position: SIMD3(hi.x * step, j * step, 0), normal: up)]
-            if Int(j) % 5 == 0 { major += line } else { minor += line }
+            if Int(j) % majorEvery == 0 { major += line } else { minor += line }
         }
         return (minor, major)
     }
@@ -512,6 +529,32 @@ final class Renderer: NSObject, MTKViewDelegate {
         // Körper
         if let vertexBuffer, let indexBuffer, indexCount > 0 {
             switch displayMode {
+            case .hiddenEdges, .zebra:
+                if displayMode == .zebra, let zebraPipeline {
+                    encoder.setRenderPipelineState(zebraPipeline)
+                    var view = SIMD4<Float>(camera.forward, camera.isOrthographic ? 1 : 0)
+                    encoder.setFragmentBytes(&view, length: MemoryLayout<SIMD4<Float>>.stride, index: 2)
+                } else {
+                    encoder.setRenderPipelineState(solidPipeline)
+                }
+                encoder.setDepthStencilState(depthState)
+                encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
+                setUniforms(&uniforms)
+                encoder.drawIndexedPrimitives(type: .triangle, indexCount: indexCount, indexType: .uint32,
+                                              indexBuffer: indexBuffer, indexBufferOffset: 0)
+                // Verdeckte Kanten zuerst (ohne Tiefe zu schreiben), die sichtbaren darüber
+                if displayMode == .hiddenEdges, let hiddenEdgePipeline, let behindDepthState {
+                    let dashed = hiddenEdgeTriangles(edgePolylines, color: SIMD3(0.30, 0.33, 0.40), width: 1,
+                                                     viewHeight: viewHeight)
+                    if let buffer = makeBuffer(dashed) {
+                        encoder.setRenderPipelineState(hiddenEdgePipeline)
+                        encoder.setDepthStencilState(behindDepthState)
+                        encoder.setVertexBuffer(buffer, offset: 0, index: 0)
+                        setUniforms(&uniforms)
+                        encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: dashed.count)
+                    }
+                }
+                drawEdges(depth: depthState)
             case .shaded, .shadedPlain:
                 encoder.setRenderPipelineState(solidPipeline)
                 encoder.setDepthStencilState(depthState)
@@ -537,8 +580,7 @@ final class Renderer: NSObject, MTKViewDelegate {
             // Ausgewählte Flächen bzw. Körper
             if let selectionBuffer, selectionCount > 0 {
                 encoder.setRenderPipelineState(overlayPipeline)
-                encoder.setDepthStencilState(displayMode == .shaded || displayMode == .shadedPlain
-                                             ? depthState : alwaysDepthState)
+                encoder.setDepthStencilState(displayMode.isSolid ? depthState : alwaysDepthState)
                 encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
                 setUniforms(&uniforms)
                 setColor(0.98, 0.62, 0.18, 1)

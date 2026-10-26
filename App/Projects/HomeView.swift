@@ -45,7 +45,7 @@ struct HomeView: View {
             .padding(.horizontal, 40)
             .padding(.vertical, 28)
         }
-        .background(Color(white: 0.95).ignoresSafeArea())
+        .background(Theme.homeBackground.ignoresSafeArea())
         .fileImporter(isPresented: $isImporting, allowedContentTypes: [.stepFile, .stpFile]) { result in
             guard case .success(let url) = result else { return }
             open(projects.create(name: url.deletingPathExtension().lastPathComponent), url)
@@ -102,7 +102,10 @@ struct HomeView: View {
                 .font(.system(size: 26, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(width: 48, height: 48)
-                .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 12))
+                .background(LinearGradient(colors: [Color.accentColor.opacity(0.82), Color.accentColor],
+                                           startPoint: .top, endPoint: .bottom),
+                            in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .shadow(color: Color.accentColor.opacity(0.3), radius: 6, y: 2)
             VStack(alignment: .leading, spacing: 2) {
                 Text("PencilCAD")
                     .font(.largeTitle.weight(.bold))
@@ -117,6 +120,7 @@ struct HomeView: View {
                 normalButtons
             }
         }
+        .buttonBorderShape(.capsule)
     }
 
     /// Im Auswahlmodus: alle wählen, abbrechen, gewählte löschen (mit Rückfrage).
@@ -175,14 +179,20 @@ struct HomeView: View {
             open(projects.create(), nil)
         } label: {
             VStack(alignment: .leading, spacing: 10) {
-                RoundedRectangle(cornerRadius: 14)
-                    .strokeBorder(style: StrokeStyle(lineWidth: 2, dash: [8, 6]))
-                    .foregroundStyle(.secondary)
+                RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous)
+                    .fill(Color.accentColor.opacity(0.06))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous)
+                            .strokeBorder(Color.accentColor.opacity(0.35), style: StrokeStyle(lineWidth: 1.5, dash: [7, 5]))
+                    }
                     .aspectRatio(4 / 3, contentMode: .fit)
                     .overlay {
                         Image(systemName: "plus")
-                            .font(.system(size: 36, weight: .light))
-                            .foregroundStyle(.secondary)
+                            .font(.system(size: 24, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 54, height: 54)
+                            .background(Color.accentColor, in: Circle())
+                            .shadow(color: Color.accentColor.opacity(0.35), radius: 8, y: 3)
                     }
                 Text("Neues Projekt")
                     .font(.headline)
@@ -190,7 +200,7 @@ struct HomeView: View {
                     .font(.subheadline)
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.pressable)
     }
 
     @ViewBuilder
@@ -213,15 +223,19 @@ private struct ProjectCard: View {
     let revision: Int
     /// Auswahlmodus: Häkchen gesetzt bzw. leer; nil = kein Auswahlmodus
     var isSelected: Bool? = nil
+    /// Stift oder Zeiger schwebt über der Kachel
+    @State private var isHovered = false
 
     var body: some View {
+        let shape = RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous)
         VStack(alignment: .leading, spacing: 10) {
             thumbnail
                 .aspectRatio(4 / 3, contentMode: .fit)
-                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .clipShape(shape)
+                .hairlineBorder(shape)
                 .overlay {
                     if isSelected == true {
-                        RoundedRectangle(cornerRadius: 14)
+                        shape
                             .strokeBorder(Color.red, lineWidth: 3)
                     }
                 }
@@ -235,7 +249,8 @@ private struct ProjectCard: View {
                             .padding(10)
                     }
                 }
-                .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
+                .shadow(color: .black.opacity(isHovered ? 0.16 : 0.09), radius: isHovered ? 14 : 8, y: isHovered ? 6 : 3)
+                .scaleEffect(isHovered ? 1.02 : 1)
             Text(project.name)
                 .font(.headline)
                 .lineLimit(1)
@@ -244,6 +259,9 @@ private struct ProjectCard: View {
                 .foregroundStyle(.secondary)
         }
         .contentShape(Rectangle())
+        .onHover { hovering in
+            withAnimation(Theme.snappy) { isHovered = hovering }
+        }
     }
 
     @ViewBuilder

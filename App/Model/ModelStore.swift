@@ -103,6 +103,10 @@ struct SceneBody {
     var sketchID: UUID? = nil
     /// Ordner im Browser „Ebenen“ (nil = oberste Ebene)
     var folder: String? = nil
+    /// Komponente (verknüpfte Kopien): Instanzen mit derselben ID teilen ihre Geometrie (ModelComponents.swift)
+    var componentID: UUID? = nil
+    /// Lage dieser Instanz, nur starre Bewegungen: Welt = placement · gemeinsame Geometrie
+    var placement: simd_double4x4 = matrix_identity_double4x4
 
     func with(_ shape: PCKShape) -> SceneBody {
         var body = self
@@ -264,6 +268,8 @@ final class ModelStore: ObservableObject {
     @Published private(set) var edgeValue: Double = 0
     /// Zweiter Fasenabstand (auf der anderen Nachbarfläche); nil = gleich breite Fase
     @Published private(set) var edgeSecondValue: Double?
+    /// Variable Rundung: Radius am Kantenende (edgeValue gilt am Anfang); nil = gleichbleibender Radius
+    @Published private(set) var edgeEndValue: Double?
     /// Kantenmitte und Richtung ins Material.
     @Published private(set) var edgeHandle: (origin: SIMD3<Double>, direction: SIMD3<Double>)?
     /// Flächenmitte und Normale der gewählten ebenen Fläche (Extrudieren per Pfeil).
@@ -325,6 +331,22 @@ final class ModelStore: ObservableObject {
     @Published var regionTaper: Double = 0 {
         didSet {
             if regionValue != 0 { setRegionValue(regionValue) }
+        }
+    }
+    /// Dünn extrudieren (Fusion 360 „Dünn“): nur eine Wand entlang der Konturen, Stärke und Seite
+    @Published var regionThin = false {
+        didSet {
+            if regionValue != 0 { setRegionValue(regionValue) }
+        }
+    }
+    @Published var regionThinThickness: Double = 2 {
+        didSet {
+            if regionValue != 0, regionThin { setRegionValue(regionValue) }
+        }
+    }
+    @Published var regionThinSide: ThinSide = .inside {
+        didSet {
+            if regionValue != 0, regionThin { setRegionValue(regionValue) }
         }
     }
 
@@ -551,6 +573,12 @@ final class ModelStore: ObservableObject {
         if edgeValue > 0 { setEdgeValue(edgeValue) }
     }
 
+    /// Variable Rundung ein- (Endradius) bzw. ausschalten (nil) und die Vorschau erneuern.
+    func setEdgeEndValue(_ value: Double?) {
+        edgeEndValue = value.map { max(0.01, $0) }
+        if edgeValue > 0 { setEdgeValue(edgeValue) }
+    }
+
     /// Radius bzw. Fasenbreite der gewählten Kanten setzen und als Vorschau zeigen.
     func setEdgeValue(_ newValue: Double) {
         let value = max(0, newValue)
@@ -570,6 +598,20 @@ final class ModelStore: ObservableObject {
             if operation == .fillet { return shape.filleting(edges: numbers, radius: amount) }
             if let second { return shape.chamfering(edges: numbers, distance: amount, distance2: second) }
             return shape.chamfering(edges: numbers, distance: amount)
+        }
+        // Variable Rundung (Fusion 360): Anfangsradius value, Endradius edgeEndValue
+        if operation == .fillet, let end = edgeEndValue {
+            guard let result = shape.filleting(edges: numbers, radius: value, endRadius: end) else {
+                message = "Rundung \(value.formatted()) → \(end.formatted()) mm an dieser Kante nicht möglich."
+                dropPreview()
+                return
+            }
+            message = nil
+            var preview = bodies
+            preview[body] = preview[body].with(result)
+            previewHiddenSketch = bodies[body].sketchID
+            showPreview(preview, name: "Variabel abrunden")
+            return
         }
         if second != nil {
             guard let result = blend(value) else {
@@ -743,6 +785,16 @@ final class ModelStore: ObservableObject {
             distance = -value
         }
         guard mode == .newBody || requireKernel() else { return }
+        if regionThin {
+            guard let solid = thinExtrudeRegions(regions, plane: sketch.plane, distance: distance, mode: mode) else {
+                message = "Dünne Wand mit \(regionThinThickness.formatted()) mm hier nicht möglich."
+                return
+            }
+            guard let result = extrusionResult(solid, sourceBody: sketch.plane.sourceBody, mode: mode, sketch: sketch.id) else { return }
+            message = nil
+            showPreview(result, name: Self.regionPreviewName)
+            return
+        }
         guard let solid = extrudeRegions(regions, plane: sketch.plane, distance: distance, mode: mode,
                                          direction: regionDirection, secondDistance: regionSecondValue,
                                          taper: regionTaper) else {
@@ -779,11 +831,11 @@ final class ModelStore: ObservableObject {
                     return
                 }
                 if moveCopies {
-                    var copy = bodies[index].with(moved)
+                    var copy = bodies[index].with(moved, moving: .translation(step * Double(k)))
                     copy.name += count > 1 ? " (Kopie \(k))" : " (Kopie)"
                     preview.append(copy)
                 } else {
-                    preview[index] = preview[index].with(moved)
+                    preview[index] = preview[index].with(moved, moving: .translation(step * Double(k)))
                 }
             }
         }
@@ -804,7 +856,8 @@ final class ModelStore: ObservableObject {
                 message = "Drehen nicht möglich."
                 return
             }
-            result[index] = result[index].with(rotated)
+            result[index] = result[index].with(rotated, moving: .rotation(origin: center, axis: axis,
+                                                                          angle: degrees * .pi / 180))
         }
         commit(result, name: "Drehen")
         selectedBodies = chosen.filter { bodies.indices.contains($0) }
@@ -853,11 +906,11 @@ final class ModelStore: ObservableObject {
                 return
             }
             if keepOriginal {
-                var copy = bodies[index].with(mirrored)
+                var copy = bodies[index].with(mirrored).unlinked()
                 copy.name += " (gespiegelt)"
                 preview.append(copy)
             } else {
-                preview[index] = preview[index].with(mirrored)
+                preview[index] = preview[index].with(mirrored).unlinked()
             }
         }
         message = nil
@@ -1154,7 +1207,7 @@ final class ModelStore: ObservableObject {
     }
 
     /// Ergebnis einer Extrusion je Modus: neuer Körper, mit dem Flächenkörper vereinigt oder von allen abgezogen.
-    private func extrusionResult(_ solid: PCKShape, sourceBody: Int?, mode: ExtrudeMode, sketch: UUID? = nil) -> [SceneBody]? {
+    func extrusionResult(_ solid: PCKShape, sourceBody: Int?, mode: ExtrudeMode, sketch: UUID? = nil) -> [SceneBody]? {
         switch mode {
         case .newBody:
             // Kai: getrennte Bereiche einer Skizze werden getrennte Körper (einzeln wählbar, z. B. zum Verschieben);
@@ -1322,27 +1375,27 @@ final class ModelStore: ObservableObject {
 
     // MARK: Intern
 
-    private func newBody(_ shape: PCKShape, name: String, sketch: UUID? = nil) -> SceneBody {
+    func newBody(_ shape: PCKShape, name: String, sketch: UUID? = nil) -> SceneBody {
         let number = bodies.count + 1
         return SceneBody(shape: shape, name: "\(name) \(number)",
                          color: SceneBody.palette[bodies.count % SceneBody.palette.count], sketchID: sketch)
     }
 
-    private func requireKernel() -> Bool {
+    func requireKernel() -> Bool {
         if !PCKShape.kernelAvailable {
             message = "Diese Funktion braucht OpenCASCADE (siehe README)."
         }
         return PCKShape.kernelAvailable
     }
 
-    private func showPreview(_ preview: [SceneBody], name: String) {
+    func showPreview(_ preview: [SceneBody], name: String) {
         previewBodies = preview
         previewName = name
         remesh()
         refreshHighlight()
     }
 
-    private func dropPreview() {
+    func dropPreview() {
         guard previewBodies != nil else { return }
         previewBodies = nil
         previewName = nil
@@ -1351,16 +1404,19 @@ final class ModelStore: ObservableObject {
         refreshHighlight()
     }
 
-    private func commit(_ newBodies: [SceneBody], sketches newSketches: [StoredSketch]? = nil,
+    func commit(_ newBodies: [SceneBody], sketches newSketches: [StoredSketch]? = nil,
                         constructions newConstructions: [ConstructionItem]? = nil,
                         canvases newCanvases: [CanvasImage]? = nil, name: String) {
         history.append(currentEntry(name: name))
         future.removeAll()
-        bodies = newBodies
+        // Komponenten: Änderung einer Instanz auf alle übertragen (ModelComponents.swift)
+        let synced = syncedComponents(newBodies)
+        bodies = synced.bodies
         if let newSketches { sketches = newSketches }
         if let newConstructions { constructions = newConstructions }
         if let newCanvases { canvases = newCanvases }
         afterChange()
+        if let note = synced.note { message = note }
     }
 
     private func currentEntry(name: String) -> HistoryEntry {
@@ -1834,6 +1890,9 @@ final class ModelStore: ObservableObject {
         var sketchID: UUID?
         /// Ordner im Browser „Ebenen“ (nil = oberste Ebene)
         var folder: String?
+        /// Komponente und Lage der Instanz (16 Werte, spaltenweise); fehlen in älteren Projekten
+        var componentID: UUID?
+        var placement: [Double]?
     }
 
     private var modelURL: URL? { folder?.appending(path: "model.step") }
@@ -1870,6 +1929,7 @@ final class ModelStore: ObservableObject {
                 let meta = metas[index]
                 return SceneBody(shape: shape, name: meta.name, color: SIMD3(meta.color[0], meta.color[1], meta.color[2]),
                                  isHidden: meta.isHidden, sketchID: meta.sketchID, folder: meta.folder)
+                    .restoringComponent(meta.componentID, placement: meta.placement)
             }
             return SceneBody(shape: shape, name: "Körper \(index + 1)", color: SceneBody.palette[index % SceneBody.palette.count])
         }
@@ -1897,7 +1957,8 @@ final class ModelStore: ObservableObject {
         }
         let metas = bodies.map {
             BodyMeta(name: $0.name, color: [$0.color.x, $0.color.y, $0.color.z], isHidden: $0.isHidden, sketchID: $0.sketchID,
-                     folder: $0.folder)
+                     folder: $0.folder, componentID: $0.componentID,
+                     placement: $0.componentID == nil ? nil : $0.placementValues)
         }
         if let data = try? JSONEncoder().encode(metas) {
             try? data.write(to: metaURL)
@@ -2095,6 +2156,15 @@ extension ModelStore {
         save()
     }
 
+    /// Bild ändern als eigener Schritt im Verlauf (rückgängig machbar), z. B. nach dem Kalibrieren des Maßstabs.
+    func commitCanvas(_ canvas: CanvasImage, name: String) {
+        guard let index = canvases.firstIndex(where: { $0.id == canvas.id }) else { return }
+        commitPreview()
+        var result = canvases
+        result[index] = canvas
+        commit(bodies, canvases: result, name: name)
+    }
+
     func deleteCanvas(_ id: UUID) {
         guard let index = canvases.firstIndex(where: { $0.id == id }) else { return }
         var result = canvases
@@ -2214,7 +2284,7 @@ extension ModelStore {
         refreshHighlight()
     }
 
-    private func regions(_ refs: [RegionRef]) -> [(region: SketchRegion, plane: SketchPlane, sketch: Int)] {
+    func regions(_ refs: [RegionRef]) -> [(region: SketchRegion, plane: SketchPlane, sketch: Int)] {
         refs.compactMap { ref in
             guard sketches.indices.contains(ref.sketch), sketches[ref.sketch].regions.indices.contains(ref.region) else {
                 return nil
@@ -2248,7 +2318,7 @@ extension ModelStore {
                         return
                     }
                     number += 1
-                    var body = bodies[index].with(copy)
+                    var body = bodies[index].with(copy, moving: .translation(offset))
                     body.name += " (\(number))"
                     preview.append(body)
                 }
@@ -2272,12 +2342,13 @@ extension ModelStore {
                 message = "Drehen nicht möglich."
                 return
             }
+            let motion = simd_double4x4.rotation(origin: center, axis: axis, angle: degrees * .pi / 180)
             if moveCopies {
-                var copy = bodies[index].with(rotated)
+                var copy = bodies[index].with(rotated, moving: motion)
                 copy.name += " (Kopie)"
                 preview.append(copy)
             } else {
-                preview[index] = preview[index].with(rotated)
+                preview[index] = preview[index].with(rotated, moving: motion)
             }
         }
         message = nil
@@ -2307,7 +2378,8 @@ extension ModelStore {
                     message = "Muster nicht möglich."
                     return
                 }
-                var body = bodies[index].with(copy)
+                var body = bodies[index].with(copy, moving: .rotation(origin: axisOrigin, axis: simd_normalize(axis),
+                                                                      angle: step * Double(k)))
                 body.name += " (\(k + 1))"
                 preview.append(body)
             }
@@ -2362,7 +2434,7 @@ extension ModelStore {
                 message = "Ausrichten nicht möglich."
                 return
             }
-            preview[index] = preview[index].with(shape)
+            preview[index] = preview[index].with(shape, moving: .translation(offset))
             moved = true
         }
         guard moved else {
@@ -2465,7 +2537,7 @@ extension ModelStore {
         showSolid([shape], sourceBody: chosen[0].plane.sourceBody, mode: mode, name: "Loft")
     }
 
-    private func showSolid(_ shapes: [PCKShape], sourceBody: Int?, mode: ExtrudeMode, name: String) {
+    func showSolid(_ shapes: [PCKShape], sourceBody: Int?, mode: ExtrudeMode, name: String) {
         let combined: PCKShape? = shapes.count == 1 ? shapes.first : PCKShape.compound(shapes)
         guard let solid = combined,
               let result = extrusionResult(solid, sourceBody: sourceBody, mode: mode,

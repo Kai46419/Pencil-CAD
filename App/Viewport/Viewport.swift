@@ -168,6 +168,10 @@ final class ViewportView: MTKView {
     private var boxTouch: UITouch?
     private var boxStart: CGPoint = .zero
     private let boxView = SelectionBoxView()
+    /// Lasso: gezogene Kurve (Bildschirmpunkte); boxInSketch: Rahmen bzw. Lasso wählt Skizzenelemente
+    private var lassoPath: [CGPoint] = []
+    private var boxInSketch = false
+    private let lassoView = SelectionLassoView()
 
     private struct HandleDragState {
         let touch: UITouch
@@ -286,6 +290,8 @@ final class ViewportView: MTKView {
         addSubview(ringLabel)
         boxView.isHidden = true
         addSubview(boxView)
+        lassoView.isHidden = true
+        addSubview(lassoView)
     }
 
     // MARK: Kamera
@@ -366,6 +372,8 @@ final class ViewportView: MTKView {
             ? float4x4(origin: SIMD3<Float>(plane.origin), u: SIMD3<Float>(plane.u),
                        v: SIMD3<Float>(plane.v), n: SIMD3<Float>(plane.normal))
             : matrix_identity_float4x4
+        // Angezeigtes Raster = Fangraster (bzw. gröberes Vielfaches, wenn es im Bild zu eng wird)
+        renderer.gridBase = sketching && sketch.snapEnabled && sketch.snapKinds.contains(.grid) ? Float(sketch.gridStep) : 0
         renderer.clipPlane = workspace.clipPlane.map {
             SIMD4<Float>(Float($0.normal.x), Float($0.normal.y), Float($0.normal.z), Float($0.distance))
         } ?? .zero
@@ -531,6 +539,12 @@ final class ViewportView: MTKView {
                                     dots: points, dotRadius: 5))
         }
         if !sketch.isActive { addToolOverlays(to: &groups, fills: &fills) }
+        // Bild kalibrieren: angetippte Punkte und ihre Verbindung
+        if !sketch.isActive, let calibration = workspace.calibrationWorldPoints {
+            let points = calibration.map { SIMD3<Float>($0) }
+            groups.append(LineGroup(polylines: points.count == 2 ? [points] : [], color: Self.snapOrange, width: 2.4,
+                                    dots: points, dotRadius: 6, onTop: true))
+        }
         // Übersetzen: Start- und Zielpunkt mit Verbindung
         if !sketch.isActive, workspace.tool == .translate, let start = workspace.translateStart {
             let points = ([start] + (workspace.translateEnd.map { [$0] } ?? [])).map { SIMD3<Float>($0) }
@@ -732,6 +746,10 @@ final class ViewportView: MTKView {
                 groups.append(LineGroup(polylines: [[center, tip]], color: Self.definedGreen, width: 3, dots: [tip],
                                         dotRadius: 6, onTop: true))
             }
+        case .sweep where !workspace.parts.sweepEdgeLines.isEmpty:
+            // Pfad aus Körperkanten (Sweep entlang Kanten)
+            groups.append(LineGroup(polylines: workspace.parts.sweepEdgeLines.map { $0.map { SIMD3<Float>($0) } },
+                                    color: Self.snapOrange, width: 4, onTop: true))
         default:
             break
         }
@@ -1129,7 +1147,8 @@ final class ViewportView: MTKView {
                     let degrees = Int(dimension.value.rounded())
                     field.text = dimension.isEditable ? "\(degrees)" : "\(degrees)°"
                 } else {
-                    field.text = dimension.value.formatted(.number.precision(.fractionLength(0...3)).grouping(.never))
+                    // Länge in der Projekteinheit (mm, cm oder Zoll)
+                    field.text = LengthUnit.current.number(dimension.value)
                 }
                 // Kai: 15°-Schritte (15, 30, 45 …) rot zeigen; einrasten erst nach kurzem Verweilen
                 let isStepAngle = dimension.id == "live-angle" && dimension.value.isFinite
@@ -1246,7 +1265,10 @@ final class ViewportView: MTKView {
         guard !text.isEmpty, let sketch else { return }
         let values = model?.variableValues ?? [:]
         do {
-            let value = try Formula.evaluate(text, variables: values)
+            // Winkel in Grad, Längen in der Projekteinheit
+            let isAngle = sketch.visibleDimensions.first { $0.id == field.dimensionID }?.kind == .angle
+            let value = try isAngle ? Formula.evaluate(text, variables: values)
+                : Formula.evaluateLength(text, variables: values)
             guard value > 0 else {
                 sketch.notice = "Das Maß muss größer als 0 sein."
                 return
@@ -1459,7 +1481,7 @@ final class ViewportView: MTKView {
             valueLabel.isHidden = true
             return
         }
-        valueLabel.text = "\(active.value.formatted(.number.precision(.fractionLength(0...3)))) mm"
+        valueLabel.text = LengthUnit.current.format(active.value)
         valueLabel.sizeToFit()
         // Wie in Fusion 360: Wertfeld neben dem Pfeil (seitlich auf Höhe der Spitze), nicht auf der Spitze
         var dx = tip.x - foot.x, dy = tip.y - foot.y
@@ -1533,6 +1555,48 @@ final class ViewportView: MTKView {
     private func acceptsForBox(_ touch: UITouch) -> Bool {
         guard let workspace, workspace.acceptsBoxSelection else { return false }
         return touch.type == .pencil || (workspace.boxSelects && touch.type == .direct)
+    }
+
+    /// Skizze, Werkzeug „Auswählen“: Stift (bzw. zeichnender Finger) setzt ins Leere – Rahmen bzw. Lasso
+    /// wählt Skizzenelemente (auf einem Element bleibt es beim Ziehen).
+    private func acceptsForSketchBox(_ touch: UITouch) -> Bool {
+        guard acceptsForSketch(touch), let sketch, sketch.tool == .select, sketch.pendingAction == nil,
+              let point = sketchPoint(for: touch) else { return false }
+        return sketch.pick(at: point, tolerance: snapTolerance) == nil
+    }
+
+    /// Rahmen bzw. Lasso fertig: Skizzenelemente oder Körper wählen.
+    private func finishBox(at end: CGPoint) {
+        let lasso = LassoSelection.isOn && lassoPath.count >= 3
+        let rect = lasso ? RegionSelection.bounds(lassoPath + [end]) : boxRect(to: end)
+        // Kurzer Zug bleibt ein Tippen (im Modell übernimmt das die Tipp-Geste)
+        guard max(rect.width, rect.height) >= Self.boxMinimum else {
+            if boxInSketch, let sketch, let point = sketchPoint(at: boxStart) {
+                sketch.began(at: point, tolerance: snapTolerance)
+                sketch.ended(at: point, tolerance: snapTolerance)
+            }
+            return
+        }
+        let crossing = !lasso && end.x < boxStart.x
+        if boxInSketch {
+            guard let renderer, let sketch else { return }
+            let area: RegionSelection.Area = lasso ? .lasso(lassoPath + [end]) : crossing ? .crossing(rect) : .window(rect)
+            let refs = RegionSelection.sketchRefs(in: area, sketch: sketch, camera: renderer.camera, viewSize: bounds.size)
+            sketch.addToSelection(refs)
+            if refs.isEmpty {
+                sketch.notice = lasso ? "Kein Element ganz im Lasso."
+                    : crossing ? "Kein Element berührt den Rahmen."
+                    : "Kein Element ganz im Rahmen. Von rechts nach links ziehen wählt auch angeschnittene."
+            }
+        } else if lasso {
+            guard let renderer, let model else { return }
+            let found = RegionSelection.bodies(inLasso: lassoPath + [end], mesh: model.mesh, camera: renderer.camera,
+                                               viewSize: bounds.size)
+            workspace?.boxSelected(found, crossing: false)
+            if found.isEmpty { model.message = "Kein Körper ganz im Lasso." }
+        } else {
+            workspace?.boxSelected(bodies(in: rect, crossing: crossing), crossing: crossing)
+        }
     }
 
     private func boxRect(to point: CGPoint) -> CGRect {
@@ -1635,6 +1699,16 @@ final class ViewportView: MTKView {
         if boxTouch == nil, alone, let touch = touches.first(where: acceptsForBox) {
             boxTouch = touch
             boxStart = touch.location(in: self)
+            boxInSketch = false
+            lassoPath = [boxStart]
+            return
+        }
+        if boxTouch == nil, sketchTouch == nil, alone, let touch = touches.first(where: acceptsForSketchBox) {
+            boxTouch = touch
+            boxStart = touch.location(in: self)
+            boxInSketch = true
+            lassoPath = [boxStart]
+            sketch?.endHover()
             return
         }
         guard sketchTouch == nil, let touch = touches.first(where: acceptsForSketch),
@@ -1716,9 +1790,16 @@ final class ViewportView: MTKView {
             return
         }
         if let touch = boxTouch, touches.contains(touch) {
-            let rect = boxRect(to: touch.location(in: self))
+            let location = touch.location(in: self)
+            if LassoSelection.isOn {
+                if lassoPath.count < 3000 { lassoPath.append(location) }
+                let extent = RegionSelection.bounds(lassoPath)
+                if max(extent.width, extent.height) >= Self.boxMinimum { lassoView.show(lassoPath, in: bounds) }
+                return
+            }
+            let rect = boxRect(to: location)
             if max(rect.width, rect.height) >= Self.boxMinimum {
-                boxView.show(rect, crossing: touch.location(in: self).x < boxStart.x)
+                boxView.show(rect, crossing: location.x < boxStart.x)
             }
             return
         }
@@ -1753,13 +1834,10 @@ final class ViewportView: MTKView {
         if let touch = boxTouch, touches.contains(touch) {
             boxTouch = nil
             boxView.isHidden = true
-            let end = touch.location(in: self)
-            let rect = boxRect(to: end)
-            // Kurzer Zug bleibt ein Tippen (das übernimmt die Tipp-Geste)
-            if max(rect.width, rect.height) >= Self.boxMinimum {
-                let crossing = end.x < boxStart.x
-                workspace?.boxSelected(bodies(in: rect, crossing: crossing), crossing: crossing)
-            }
+            lassoView.isHidden = true
+            finishBox(at: touch.location(in: self))
+            lassoPath = []
+            boxInSketch = false
             refresh()
             return
         }
@@ -1799,6 +1877,9 @@ final class ViewportView: MTKView {
         if let touch = boxTouch, touches.contains(touch) {
             boxTouch = nil
             boxView.isHidden = true
+            lassoView.isHidden = true
+            lassoPath = []
+            boxInSketch = false
             return
         }
         guard let touch = sketchTouch, touches.contains(touch) else {
@@ -1886,6 +1967,12 @@ final class ViewportView: MTKView {
             } else {
                 model.message = "Auf gekrümmten Flächen kann nicht skizziert werden."
             }
+            refresh()
+            return
+        }
+        // Bild kalibrieren: Punkte auf der Bildebene antippen
+        if workspace.canvasCalibration != nil {
+            workspace.calibrationTapped(origin: SIMD3<Double>(ray.origin), direction: SIMD3<Double>(ray.direction))
             refresh()
             return
         }
@@ -2427,10 +2514,10 @@ final class DimensionKeypad: UIView {
     private static let headerHeight: CGFloat = 32
     private static let columns = 5
 
-    /// Erste Zeile: Klammern und Einheiten (schmaler, sechs Tasten)
+    /// Erste Zeile: Klammern und Einheiten (schmaler, sieben Tasten)
     private static let unitRow: [(String, Key)] = [
         ("(", .text("(")), (")", .text(")")), ("mm", .text(" mm")), ("cm", .text(" cm")), ("m", .text(" m")),
-        ("°", .text("°")),
+        ("in", .text(" in")), ("°", .text("°")),
     ]
 
     /// Ziffernblock: Titel und Taste; „✓“ doppelt breit

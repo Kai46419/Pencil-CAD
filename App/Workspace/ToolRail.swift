@@ -50,7 +50,7 @@ enum ToolGroup: String, CaseIterable, Identifiable {
         case .transform: "Körper oder Skizzen verschieben, drehen, spiegeln, skalieren, ausrichten oder als Muster vervielfältigen."
         case .construct: "Hilfsebenen, -achsen und -punkte, z. B. eine versetzte Ebene zum Skizzieren."
         case .inspect: "Messen, Schnittansicht und Isolieren."
-        case .insert: "STEP-Datei, Bild als Vorlage, Körper eines anderen Projekts oder eine Variable einfügen."
+        case .insert: "Normteile (Schrauben, Muttern, Lager), Vorlagen (Gehäuse, Stirnrad), STEP-Datei, Bild als Vorlage, Körper eines anderen Projekts oder eine Variable einfügen."
         case .visualize: "Anzeigemodus, orthografische Projektion und Körperfarbe."
         }
     }
@@ -133,6 +133,8 @@ struct ToolRail: View {
     @State private var moreTool: SketchTool = .project
     /// Zugeklappte Abschnitte im Skizzenmodus (Kai: „Ändern“ und „Prüfen“ anfangs zu, „Erstellen“ immer offen)
     @State private var collapsedSections: Set<ToolCategory> = [.modify, .inspect]
+    /// Auswahl ins Leere gezogen: Lasso statt Rahmen (lange drücken auf „Auswählen“)
+    @AppStorage(LassoSelection.key) private var lassoSelects = false
 
     private let tileSize: CGFloat = 52
     private let spacing: CGFloat = 10
@@ -171,7 +173,7 @@ struct ToolRail: View {
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 4)
-                    .background(.regularMaterial, in: Capsule())
+                    .floatingSurface(.regularMaterial, in: Capsule(), elevation: .flat)
             }
             ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
                 if let section = sectionStart(entries, index) {
@@ -238,7 +240,7 @@ struct ToolRail: View {
                 .transition(.opacity.combined(with: .move(edge: .leading)))
             }
         }
-        .animation(.easeOut(duration: 0.15), value: openEntry)
+        .animation(Theme.spring, value: openEntry)
     }
 
     // MARK: Skizzenmodus
@@ -340,15 +342,45 @@ struct ToolRail: View {
         let roundTool: SketchTool = sketch.tool == .ellipse ? .ellipse : .circle
         let modifyTools: [SketchTool] = [.fillet, .chamfer, .extend, .breakCurve, .scale]
         let moreTools: [SketchTool] = [.project, .mirror, .rectPattern, .circPattern, .point, .text]
+        // Spline: Fit-/Kontrollpunkte setzen, Freihand, Punkt einfügen
+        let splineKindItems: [ToolItem] = SplineKind.allCases.map { kind in
+            toolItem(.spline, title: kind.rawValue, subtitle: "Spline",
+                     isActive: sketch.tool == .spline && sketch.splineInput == .points && sketch.splineKind == kind) {
+                sketch.splineInput = .points
+                sketch.splineKind = kind
+            }
+        }
+        let splineInputItems: [ToolItem] = [SplineInput.freehand, SplineInput.insert].map { input in
+            ToolItem(id: "spline.\(input.rawValue)", title: input.rawValue,
+                     subtitle: input == .freehand ? "Strich wird glatte Spline" : "Spline antippen",
+                     systemImage: input.systemImage,
+                     isActive: sketch.tool == .spline && sketch.splineInput == input) {
+                sketch.tool = .spline
+                sketch.splineInput = input
+            }
+        }
+        let splineItems = splineKindItems + splineInputItems
         return [
             RailEntry(id: "sketch.finish", title: "Skizzieren beenden", systemImage: "checkmark", category: .finish) {
                 workspace.finishSketch()
             },
             // Pfeil: zeichnet nicht, sondern wählt, verschiebt und zieht Eck- und Endpunkte
-            RailEntry(id: "sketch.select", title: SketchTool.select.rawValue, subtitle: SketchTool.select.subtitle,
-                      systemImage: SketchTool.select.systemImage, isActive: sketch.tool == .select) {
-                sketch.tool = .select
-            },
+            // Ins Leere ziehen wählt mit Rahmen bzw. Lasso (lange drücken: Variante wählen)
+            RailEntry(id: "sketch.select", title: SketchTool.select.rawValue,
+                      subtitle: lassoSelects ? "Lasso" : SketchTool.select.subtitle,
+                      systemImage: lassoSelects ? "lasso" : SketchTool.select.systemImage, isActive: sketch.tool == .select,
+                      flyout: [
+                          ToolItem(id: "select.box", title: "Rahmen", subtitle: "Nach rechts umschlossen, nach links berührt",
+                                   systemImage: "rectangle.dashed", isActive: sketch.tool == .select && !lassoSelects) {
+                              lassoSelects = false
+                              sketch.tool = .select
+                          },
+                          ToolItem(id: "select.lasso", title: "Lasso", subtitle: "Frei umfahren, Umschlossenes wählen",
+                                   systemImage: "lasso", isActive: sketch.tool == .select && lassoSelects) {
+                              lassoSelects = true
+                              sketch.tool = .select
+                          },
+                      ], primary: { sketch.tool = .select }),
             // ERSTELLEN
             RailEntry(id: "sketch.line", title: "Linie/Bogen", subtitle: lineSubtitle,
                       systemImage: lineTool.systemImage, category: .create,
@@ -378,14 +410,10 @@ struct ToolRail: View {
             RailEntry(id: "sketch.slot", title: "Langloch", subtitle: sketch.slotMode.rawValue,
                       systemImage: SketchTool.slot.systemImage, category: .create, isActive: sketch.tool == .slot,
                       flyout: slotItems, primary: { sketch.tool = .slot }),
-            RailEntry(id: "sketch.spline", title: "Spline", subtitle: sketch.splineKind.rawValue,
-                      systemImage: SketchTool.spline.systemImage, category: .create, isActive: sketch.tool == .spline,
-                      flyout: SplineKind.allCases.map { kind in
-                          toolItem(.spline, title: kind.rawValue, subtitle: "Spline",
-                                   isActive: sketch.tool == .spline && sketch.splineKind == kind) {
-                              sketch.splineKind = kind
-                          }
-                      }, primary: { sketch.tool = .spline }),
+            RailEntry(id: "sketch.spline", title: "Spline",
+                      subtitle: sketch.splineInput == .points ? sketch.splineKind.rawValue : sketch.splineInput.rawValue,
+                      systemImage: sketch.splineInput.systemImage, category: .create, isActive: sketch.tool == .spline,
+                      flyout: splineItems, primary: { sketch.tool = .spline }),
             // Projizieren, Spiegeln, Muster, Punkt, Text: Antippen startet das zuletzt gewählte
             RailEntry(id: "sketch.more", title: moreTools.contains(sketch.tool) ? sketch.tool.rawValue : "Mehr",
                       subtitle: moreTools.contains(sketch.tool) ? nil : moreTool.rawValue,
@@ -644,7 +672,7 @@ struct ToolRail: View {
                 .transition(.opacity.combined(with: .move(edge: .leading)))
             }
         }
-        .animation(.easeOut(duration: 0.15), value: openGroup)
+        .animation(Theme.spring, value: openGroup)
     }
 
     private func tapped(_ group: ToolGroup) {
@@ -664,6 +692,8 @@ struct ToolRail: View {
         switch workspace.tool {
         case .insert, .revolve, .sweep, .loft:
             return group == .create
+        case .part(let kind):
+            return group == kind.group
         case .canvas:
             return group == .insert
         case .construct:
@@ -719,6 +749,8 @@ struct ToolRail: View {
                 item(.revolve, "Achsendrehung", subtitle: "Bereich um Achse", "arrow.triangle.2.circlepath"),
                 item(.sweep, "Sweep", subtitle: "Bereich entlang Pfad", "point.3.connected.trianglepath.dotted"),
                 item(.loft, "Loft", subtitle: "Durch Querschnitte", "square.3.layers.3d"),
+                item(.part(.helix), "Helix", subtitle: "Feder, Gewinde", PartTool.helix.systemImage),
+                item(.part(.thinLines), "Dünn extrudieren", subtitle: "Linien als Wand", PartTool.thinLines.systemImage),
             ] + Primitive.allCases.map { primitive in
                 item(.insert(primitive), primitive.rawValue, subtitle: "Grundkörper", primitive.systemImage)
             }
@@ -734,6 +766,7 @@ struct ToolRail: View {
             items += [
                 item(.hole, "Bohrung", subtitle: "Schrauben, Einsätze", "circle.circle"),
                 item(.shell, "Schale", subtitle: "Fläche öffnen", "shippingbox"),
+                item(.part(.draft), "Verjüngung", subtitle: "Flächen neigen", PartTool.draft.systemImage),
                 item(.offsetFace, "Fläche versetzen", subtitle: "Auch Bohrungen", "arrow.up.and.down.square"),
                 item(.replaceFace, "Fläche ersetzen", subtitle: "Bis Zielfläche", "rectangle.portrait.and.arrow.forward"),
                 item(.offsetEdges, "Kante versetzen", subtitle: "Fläche antippen", "square.dashed.inset.filled"),
@@ -778,6 +811,8 @@ struct ToolRail: View {
             ]
         case .insert:
             return [
+                item(.part(.standard), "Normteile", subtitle: "Schrauben, Muttern, Lager", PartTool.standard.systemImage),
+                item(.part(.template), "Vorlagen", subtitle: "Gehäuse, Stirnrad", PartTool.template.systemImage),
                 ToolItem(id: "insert.step", title: "STEP-Datei", subtitle: ".step / .stp",
                          systemImage: "square.and.arrow.down", action: importSTEP),
                 ToolItem(id: "insert.vector", title: "SVG / DXF", subtitle: "Als Skizze (Laser, CNC, Logos)",
@@ -806,6 +841,10 @@ struct ToolRail: View {
                 workspace.isOrthographic.toggle()
             })
             items.append(item(.color, "Farbe", subtitle: "Körper", "paintpalette"))
+            items.append(ToolItem(id: "visualize.drawing", title: "Zeichnung", subtitle: "PDF, DXF",
+                                  systemImage: "doc.richtext") {
+                workspace.showsDrawing = true
+            })
             return items
         }
     }
@@ -835,7 +874,7 @@ private struct SectionHeader: View {
         }
         .padding(.horizontal, 7)
         .frame(maxHeight: .infinity)
-        .background(.regularMaterial, in: Capsule())
+        .floatingSurface(.regularMaterial, in: Capsule(), elevation: .flat)
     }
 }
 
@@ -888,12 +927,14 @@ struct RailTile: View {
                         shape.strokeBorder(category.fill, lineWidth: 2)
                     } else if !filled, category != .neutral {
                         shape.strokeBorder(category.color.opacity(0.18), lineWidth: 1)
+                    } else if !filled {
+                        shape.strokeBorder(Theme.hairline, lineWidth: Theme.hairlineWidth)
                     }
                 }
-                .shadow(color: (filled ? category.fill : .black).opacity(filled ? 0.3 : 0.12), radius: 4, y: 1)
+                .tileShadow(filled ? category.fill : nil)
             VStack(alignment: .leading, spacing: 0) {
                 Text(title)
-                    .font(.caption.weight(.semibold))
+                    .font(Theme.labelFont)
                     .foregroundStyle(.primary)
                 if let subtitle {
                     Text(subtitle)
@@ -903,9 +944,11 @@ struct RailTile: View {
             }
             .padding(.horizontal, 9)
             .padding(.vertical, 4)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .floatingSurface(.regularMaterial, in: RoundedRectangle(cornerRadius: Theme.Radius.label, style: .continuous),
+                             elevation: .flat)
         }
         .contentShape(Rectangle())
+        .animation(Theme.snappy, value: filled)
     }
 }
 
@@ -923,15 +966,16 @@ private struct Flyout: View {
             ScrollView { list }
         }
         .frame(width: 240)
-        .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.panel, style: .continuous))
         .overlay(alignment: .top) {
             // Farbstreifen der Kategorie oben
-            UnevenRoundedRectangle(topLeadingRadius: 16, topTrailingRadius: 16, style: .continuous)
+            UnevenRoundedRectangle(topLeadingRadius: Theme.Radius.panel, topTrailingRadius: Theme.Radius.panel, style: .continuous)
                 .fill(category.fill)
                 .frame(height: 4)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .shadow(color: .black.opacity(0.15), radius: 10, y: 3)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.panel, style: .continuous))
+        .hairlineBorder(RoundedRectangle(cornerRadius: Theme.Radius.panel, style: .continuous))
+        .elevationShadow(.floating)
     }
 
     private var list: some View {
@@ -955,7 +999,7 @@ private struct Flyout: View {
                             .frame(width: 36, height: 36)
                             .foregroundStyle(item.isActive ? Color.white : category.color)
                             .background(item.isActive ? category.fill : category.color.opacity(category == .neutral ? 0.06 : 0.1),
-                                        in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                                        in: RoundedRectangle(cornerRadius: Theme.Radius.label, style: .continuous))
                         VStack(alignment: .leading, spacing: 1) {
                             Text(item.title)
                                 .font(.subheadline.weight(.medium))
@@ -968,7 +1012,7 @@ private struct Flyout: View {
                         Spacer(minLength: 0)
                     }
                     .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
+                    .padding(.vertical, 4)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)

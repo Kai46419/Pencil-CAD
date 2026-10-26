@@ -805,7 +805,8 @@ extension VectorFiles {
 
 extension VectorFiles {
     /// Gruppenpaare einer DXF-Datei.
-    fileprivate struct DXFWriter {
+    /// Auch für technische Zeichnungen (TechnicalDrawing) genutzt.
+    struct DXFWriter {
         var lines: [String] = []
 
         mutating func pair(_ code: Int, _ value: String) {

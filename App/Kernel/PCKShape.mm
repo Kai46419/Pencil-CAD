@@ -88,6 +88,15 @@
 #include <gp_Pln.hxx>
 #include <gp_Torus.hxx>
 #include <gp_Pnt2d.hxx>
+// Dünn extrudieren, Schraubenlinien, Sweep entlang Kanten (TKOffset, TKTopAlgo, TKG2d/TKG3d)
+#include <BRepLib.hxx>
+#include <BRepOffsetAPI_MakeOffset.hxx>
+#include <BRepOffsetAPI_MakePipeShell.hxx>
+#include <Geom2d_Line.hxx>
+#include <Geom_CylindricalSurface.hxx>
+#include <gp.hxx>
+#include <gp_Ax3.hxx>
+#include <gp_Dir2d.hxx>
 #else
 #define PCK_HAS_OCCT 0
 #endif
@@ -100,6 +109,17 @@
 #include <STEPControl_Writer.hxx>
 #else
 #define PCK_HAS_STEP 0
+#endif
+
+// Verdeckte Kanten für technische Zeichnungen (TKHLR gehört zum Modul ModelingAlgorithms)
+#if PCK_HAS_OCCT && __has_include(<HLRBRep_Algo.hxx>)
+#define PCK_HAS_HLR 1
+#include <BRepLib.hxx>
+#include <HLRAlgo_Projector.hxx>
+#include <HLRBRep_Algo.hxx>
+#include <HLRBRep_HLRToShape.hxx>
+#else
+#define PCK_HAS_HLR 0
 #endif
 #pragma clang diagnostic pop
 
@@ -671,6 +691,301 @@ static TopoDS_Shape unified(const TopoDS_Shape &shape) {
         return result.IsNull() ? shape : result;
     } catch (...) {
         return shape;
+    }
+}
+
+// MARK: Dünn extrudieren
+
+/// Geschlossen: Anfangs- und Endpunkt fallen zusammen.
+static bool isClosedWire(const TopoDS_Wire &wire) {
+    if (wire.Closed()) return true;
+    TopoDS_Vertex first, last;
+    TopExp::Vertices(wire, first, last);
+    if (first.IsNull() || last.IsNull()) return true;
+    return first.IsSame(last) || BRep_Tool::Pnt(first).Distance(BRep_Tool::Pnt(last)) < 1e-6;
+}
+
+static double facesArea(const std::vector<TopoDS_Face> &faces) {
+    double area = 0;
+    for (const auto &face : faces) {
+        GProp_GProps props;
+        BRepGProp::SurfaceProperties(face, props);
+        area += std::abs(props.Mass());
+    }
+    return area;
+}
+
+/// Ebene Fläche(n) einer geschlossenen Kontur, um distance versetzt (> 0 nach außen, < 0 nach innen; nach innen
+/// kann die Kontur in mehrere Teile zerfallen). Bei 0 die Kontur selbst. Leer, wenn der Versatz verschwindet
+/// (Wand dicker als das Profil) oder scheitert.
+static std::vector<TopoDS_Face> offsetFaces(const TopoDS_Wire &wire, double distance) {
+    std::vector<TopoDS_Face> result;
+    BRepBuilderAPI_MakeFace base(wire, Standard_True);
+    if (!base.IsDone()) return result;
+    if (std::abs(distance) < 1e-9) {
+        result.push_back(base.Face());
+        return result;
+    }
+    const double baseArea = facesArea({base.Face()});
+    // Welche Seite „außen“ ist, hängt an der Umlaufrichtung: an der Fläche prüfen und sonst umgekehrt versuchen
+    for (double d : {distance, -distance}) {
+        for (GeomAbs_JoinType join : {GeomAbs_Intersection, GeomAbs_Arc}) {
+            std::vector<TopoDS_Face> faces;
+            try {
+                BRepOffsetAPI_MakeOffset offset(base.Face(), join, Standard_False);
+                offset.Perform(d);
+                if (!offset.IsDone() || offset.Shape().IsNull()) continue;
+                for (TopExp_Explorer it(offset.Shape(), TopAbs_WIRE); it.More(); it.Next()) {
+                    BRepBuilderAPI_MakeFace face(TopoDS::Wire(it.Current()), Standard_True);
+                    if (face.IsDone()) faces.push_back(face.Face());
+                }
+            } catch (...) {
+                continue;
+            }
+            if (faces.empty()) continue;
+            if ((distance > 0) == (facesArea(faces) > baseArea)) return faces;
+            break; // falsche Seite: anderes Vorzeichen
+        }
+    }
+    return result;
+}
+
+/// Prismen der Flächen entlang vector; overshoot verlängert sie an beiden Enden (Werkzeug zum Abziehen).
+static TopoDS_Shape prismsOf(const std::vector<TopoDS_Face> &faces, const gp_Vec &vector, double overshoot) {
+    if (faces.empty() || vector.Magnitude() < 1e-12) return TopoDS_Shape();
+    const gp_Vec unit = vector.Normalized();
+    BRep_Builder builder;
+    TopoDS_Compound compound;
+    builder.MakeCompound(compound);
+    TopoDS_Shape single;
+    for (const auto &face : faces) {
+        TopoDS_Shape base = face;
+        if (overshoot > 0) {
+            gp_Trsf shift;
+            shift.SetTranslation(unit * -overshoot);
+            base = face.Moved(TopLoc_Location(shift));
+        }
+        BRepPrimAPI_MakePrism prism(base, vector + unit * (2 * overshoot));
+        if (!prism.IsDone()) return TopoDS_Shape();
+        single = prism.Shape();
+        builder.Add(compound, single);
+    }
+    return faces.size() == 1 ? single : TopoDS_Shape(compound);
+}
+
+/// Wand entlang einer geschlossenen Kontur: Bereich zwischen den Versätzen big (außen) und small (innen).
+static TopoDS_Shape closedWall(const TopoDS_Wire &wire, double big, double small, const gp_Vec &vector) {
+    const std::vector<TopoDS_Face> outer = offsetFaces(wire, big);
+    if (outer.empty()) return TopoDS_Shape();
+    const TopoDS_Shape solid = prismsOf(outer, vector, 0);
+    if (solid.IsNull()) return solid;
+    const std::vector<TopoDS_Face> inner = offsetFaces(wire, small);
+    // Innen nichts mehr übrig (Wand dicker als das halbe Profil): voller Körper
+    if (inner.empty()) return solid;
+    const TopoDS_Shape tool = prismsOf(inner, vector, 0.5);
+    if (tool.IsNull()) return TopoDS_Shape();
+    BRepAlgoAPI_Cut cut(solid, tool);
+    if (!cut.IsDone()) return TopoDS_Shape();
+    return cut.Shape();
+}
+
+/// Offene Kontur um distance parallel versetzt (offenes Ergebnis). Die Seite ergibt sich aus Laufrichtung und
+/// Ebenennormale; für die andere Seite wird der Draht umgedreht. 0 = die Kontur selbst.
+static TopoDS_Wire openOffset(const TopoDS_Face &plane, const TopoDS_Wire &wire, double distance) {
+    if (std::abs(distance) < 1e-9) return wire;
+    const TopoDS_Wire spine = distance < 0 ? TopoDS::Wire(wire.Reversed()) : wire;
+    for (GeomAbs_JoinType join : {GeomAbs_Intersection, GeomAbs_Arc}) {
+        try {
+            // Ebene vorgeben: ein einzelnes gerades Stück legt selbst keine Ebene fest
+            BRepOffsetAPI_MakeOffset offset;
+            offset.Init(plane, join, Standard_True);
+            offset.AddWire(spine);
+            offset.Perform(std::abs(distance));
+            if (!offset.IsDone() || offset.Shape().IsNull()) continue;
+            for (TopExp_Explorer it(offset.Shape(), TopAbs_WIRE); it.More(); it.Next()) {
+                return TopoDS::Wire(it.Current());
+            }
+        } catch (...) {
+        }
+    }
+    return TopoDS_Wire();
+}
+
+/// Ebene Fläche zwischen zwei offenen, etwa parallelen Drähten (Enden mit Geraden verbunden).
+static TopoDS_Face bandBetween(const TopoDS_Wire &a, const TopoDS_Wire &b) {
+    TopoDS_Vertex a0, a1, b0, b1;
+    TopExp::Vertices(a, a0, a1);
+    TopExp::Vertices(b, b0, b1);
+    if (a0.IsNull() || a1.IsNull() || b0.IsNull() || b1.IsNull()) return TopoDS_Face();
+    const gp_Pnt pa0 = BRep_Tool::Pnt(a0), pa1 = BRep_Tool::Pnt(a1);
+    gp_Pnt pb0 = BRep_Tool::Pnt(b0), pb1 = BRep_Tool::Pnt(b1);
+    if (pa0.Distance(pb0) + pa1.Distance(pb1) > pa0.Distance(pb1) + pa1.Distance(pb0)) std::swap(pb0, pb1);
+    TopTools_ListOfShape edges;
+    for (TopExp_Explorer it(a, TopAbs_EDGE); it.More(); it.Next()) edges.Append(it.Current());
+    for (TopExp_Explorer it(b, TopAbs_EDGE); it.More(); it.Next()) edges.Append(it.Current());
+    if (pa0.Distance(pb0) > 1e-7) edges.Append(BRepBuilderAPI_MakeEdge(pa0, pb0).Edge());
+    if (pa1.Distance(pb1) > 1e-7) edges.Append(BRepBuilderAPI_MakeEdge(pa1, pb1).Edge());
+    BRepBuilderAPI_MakeWire wire;
+    wire.Add(edges);
+    if (!wire.IsDone()) return TopoDS_Face();
+    BRepBuilderAPI_MakeFace face(wire.Wire(), Standard_True);
+    if (!face.IsDone()) return TopoDS_Face();
+    ShapeFix_Face fix(face.Face());
+    fix.Perform();
+    return fix.Face();
+}
+
++ (nullable PCKShape *)thinPrismWithProfileWires:(NSArray<NSArray<NSNumber *> *> *)wires
+                                     planeOrigin:(simd_double3)origin planeNormal:(simd_double3)normal
+                                       thickness:(double)thickness side:(NSInteger)side
+                                       direction:(simd_double3)direction {
+    if (wires.count == 0 || thickness <= 0 || simd_length(direction) == 0 || simd_length(normal) == 0) return nil;
+    try {
+        const gp_Vec vector(direction.x, direction.y, direction.z);
+        const double t = thickness;
+        std::vector<TopoDS_Shape> walls;
+        TopoDS_Face plane;
+        for (NSUInteger k = 0; k < wires.count; ++k) {
+            const TopoDS_Wire wire = wireFromCode(toVector(wires[k]));
+            if (wire.IsNull()) return nil;
+            TopoDS_Shape wall;
+            if (isClosedWire(wire)) {
+                // Innen = ins Material des Bereichs: bei der Außenkontur nach innen, bei Löchern nach außen
+                const bool hole = k > 0;
+                double big = t / 2, small = -t / 2;
+                if (side == 1) {
+                    big = hole ? t : 0;
+                    small = hole ? 0 : -t;
+                } else if (side == 2) {
+                    big = hole ? 0 : t;
+                    small = hole ? -t : 0;
+                }
+                wall = closedWall(wire, big, small, vector);
+            } else {
+                if (plane.IsNull()) plane = BRepBuilderAPI_MakeFace(gp_Pln(toPnt(origin), toDir(normal))).Face();
+                double a = -t / 2, b = t / 2;
+                if (side == 1) {
+                    a = 0;
+                    b = t;
+                } else if (side == 2) {
+                    a = -t;
+                    b = 0;
+                }
+                const TopoDS_Wire first = openOffset(plane, wire, a);
+                const TopoDS_Wire second = openOffset(plane, wire, b);
+                if (first.IsNull() || second.IsNull()) return nil;
+                const TopoDS_Face band = bandBetween(first, second);
+                if (band.IsNull()) return nil;
+                BRepPrimAPI_MakePrism prism(band, vector);
+                if (!prism.IsDone()) return nil;
+                wall = prism.Shape();
+            }
+            if (wall.IsNull()) return nil;
+            walls.push_back(wall);
+        }
+        TopoDS_Shape result = walls[0];
+        for (size_t k = 1; k < walls.size(); ++k) {
+            BRepAlgoAPI_Fuse op(result, walls[k]);
+            if (!op.IsDone()) return nil;
+            result = op.Shape();
+        }
+        return [[PCKShape alloc] initWithShape:walls.size() > 1 ? unified(result) : result];
+    } catch (...) {
+        return nil;
+    }
+}
+
+// MARK: Schraubenlinie (Feder, Gewinde)
+
+/// Schraubenlinie um die Z-Achse ab z = 0: Gerade auf der abgewickelten Zylinderfläche, 3D-Kurve angenähert.
+static TopoDS_Wire helixWire(double radius, double pitch, double height, bool leftHanded) {
+    const Handle(Geom_CylindricalSurface) surface = new Geom_CylindricalSurface(gp_Ax3(gp::XOY()), radius);
+    const double turns = height / pitch;
+    const gp_Dir2d direction(leftHanded ? -2 * M_PI : 2 * M_PI, pitch);
+    const Handle(Geom2d_Line) line = new Geom2d_Line(gp_Pnt2d(0, 0), direction);
+    const double length = turns * std::sqrt(4 * M_PI * M_PI + pitch * pitch);
+    BRepBuilderAPI_MakeEdge edge(line, surface, 0, length);
+    if (!edge.IsDone()) return TopoDS_Wire();
+    const TopoDS_Edge result = edge.Edge();
+    BRepLib::BuildCurves3d(result, 1e-6, GeomAbs_C1, 14, std::max(32, int(std::ceil(turns * 12))));
+    BRepBuilderAPI_MakeWire wire(result);
+    return wire.IsDone() ? wire.Wire() : TopoDS_Wire();
+}
+
+/// Profil entlang der Schraubenlinie ziehen und als Körper schließen. Nacheinander: feste Binormale (Achse),
+/// Frenet, korrigiertes Frenet – je nach Profil klappt nicht jede Führung.
+static TopoDS_Shape helixPipe(const TopoDS_Wire &spine, const TopoDS_Wire &profile) {
+    for (int mode = 0; mode < 3; ++mode) {
+        try {
+            BRepOffsetAPI_MakePipeShell pipe(spine);
+            if (mode == 0) {
+                pipe.SetMode(gp_Dir(0, 0, 1));
+            } else {
+                pipe.SetMode(mode == 1 ? Standard_True : Standard_False);
+            }
+            pipe.Add(profile, Standard_False, Standard_False);
+            pipe.Build();
+            if (!pipe.IsDone()) continue;
+            if (!pipe.MakeSolid()) continue;
+            const TopoDS_Shape shape = pipe.Shape();
+            if (!shape.IsNull()) return shape;
+        } catch (...) {
+        }
+    }
+    return TopoDS_Shape();
+}
+
+/// Körper aus dem Achssystem (Z-Achse im Ursprung) an base/axis versetzen.
+static TopoDS_Shape placedOnAxis(const TopoDS_Shape &shape, simd_double3 base, simd_double3 axis) {
+    gp_Trsf transform;
+    transform.SetDisplacement(gp_Ax3(gp::XOY()), gp_Ax3(toPnt(base), toDir(axis)));
+    BRepBuilderAPI_Transform op(shape, transform, Standard_True);
+    return op.IsDone() ? op.Shape() : TopoDS_Shape();
+}
+
++ (nullable PCKShape *)springWithBase:(simd_double3)base axis:(simd_double3)axis radius:(double)radius
+                                pitch:(double)pitch height:(double)height leftHanded:(BOOL)leftHanded
+                         wireDiameter:(double)wireDiameter {
+    if (radius <= 0 || pitch <= 0 || height <= 0 || wireDiameter <= 0 || simd_length(axis) == 0) return nil;
+    if (wireDiameter >= 2 * radius || height / pitch > 400) return nil;
+    try {
+        const TopoDS_Wire spine = helixWire(radius, pitch, height, leftHanded);
+        if (spine.IsNull()) return nil;
+        // Drahtquerschnitt am Anfang der Schraubenlinie, senkrecht zu ihr
+        const gp_Dir tangent(0, leftHanded ? -radius : radius, pitch / (2 * M_PI));
+        const gp_Circ circle(gp_Ax2(gp_Pnt(radius, 0, 0), tangent), wireDiameter / 2);
+        BRepBuilderAPI_MakeWire profile(BRepBuilderAPI_MakeEdge(circle).Edge());
+        if (!profile.IsDone()) return nil;
+        const TopoDS_Shape solid = helixPipe(spine, profile.Wire());
+        if (solid.IsNull()) return nil;
+        const TopoDS_Shape placed = placedOnAxis(solid, base, axis);
+        return placed.IsNull() ? nil : [[PCKShape alloc] initWithShape:placed];
+    } catch (...) {
+        return nil;
+    }
+}
+
++ (nullable PCKShape *)helixSweepWithBase:(simd_double3)base axis:(simd_double3)axis radius:(double)radius
+                                    pitch:(double)pitch height:(double)height leftHanded:(BOOL)leftHanded
+                                profileRZ:(NSArray<NSNumber *> *)profileRZ {
+    if (radius <= 0 || pitch <= 0 || height <= 0 || profileRZ.count < 6 || simd_length(axis) == 0) return nil;
+    if (height / pitch > 400) return nil;
+    try {
+        const TopoDS_Wire spine = helixWire(radius, pitch, height, leftHanded);
+        if (spine.IsNull()) return nil;
+        // Querschnitt in der Achsebene (XZ) am Anfang der Schraubenlinie
+        BRepBuilderAPI_MakePolygon polygon;
+        for (NSUInteger i = 0; i + 1 < profileRZ.count; i += 2) {
+            polygon.Add(gp_Pnt(profileRZ[i].doubleValue, 0, profileRZ[i + 1].doubleValue));
+        }
+        polygon.Close();
+        if (!polygon.IsDone()) return nil;
+        const TopoDS_Shape solid = helixPipe(spine, polygon.Wire());
+        if (solid.IsNull()) return nil;
+        const TopoDS_Shape placed = placedOnAxis(solid, base, axis);
+        return placed.IsNull() ? nil : [[PCKShape alloc] initWithShape:placed];
+    } catch (...) {
+        return nil;
     }
 }
 
@@ -1343,6 +1658,127 @@ static std::vector<TopoDS_Edge> edgesFromNumbers(const TopTools_IndexedMapOfShap
     }
 }
 
+/// Ein Durchgang variable Rundung; leere Form bei Fehler.
+static TopoDS_Shape variableFilletOnce(const TopoDS_Shape &shape, const std::vector<TopoDS_Edge> &edges, double r1,
+                                       double r2) {
+    try {
+        BRepFilletAPI_MakeFillet maker(shape);
+        for (const auto &edge : edges) maker.Add(r1, r2, edge);
+        maker.Build();
+        if (maker.IsDone() && !maker.Shape().IsNull()) return maker.Shape();
+    } catch (...) {
+    }
+    return TopoDS_Shape();
+}
+
+- (nullable PCKShape *)filletingEdges:(NSArray<NSNumber *> *)numbers radius:(double)radius endRadius:(double)endRadius {
+    if (radius <= 0 || endRadius <= 0) return nil;
+    if (std::abs(radius - endRadius) < 1e-9) return [self filletingEdges:numbers radius:radius];
+    const std::vector<TopoDS_Edge> edges = edgesFromNumbers(_edges, numbers);
+    if (edges.empty()) return nil;
+    TopoDS_Shape result = variableFilletOnce(_shape, edges, radius, endRadius);
+    if (result.IsNull()) {
+        // Wie blendEdges: zerteilte Flächen und Kanten erst zusammenfassen
+        try {
+            const TopoDS_Shape merged = unified(_shape);
+            const std::vector<TopoDS_Edge> mergedEdges = matchEdges(edges, merged);
+            if (!mergedEdges.empty()) result = variableFilletOnce(merged, mergedEdges, radius, endRadius);
+        } catch (...) {
+        }
+    }
+    return result.IsNull() ? nil : [[PCKShape alloc] initWithShape:result];
+}
+
+- (nullable PCKShape *)sweepProfileWires:(NSArray<NSArray<NSNumber *> *> *)wires alongEdges:(NSArray<NSNumber *> *)numbers {
+    const std::vector<TopoDS_Edge> edges = edgesFromNumbers(_edges, numbers);
+    if (edges.empty() || wires.count == 0) return nil;
+    try {
+        // Kanten in beliebiger Reihenfolge zu einem Pfad verbinden (sie müssen zusammenhängen)
+        TopTools_ListOfShape list;
+        for (const auto &edge : edges) list.Append(edge);
+        BRepBuilderAPI_MakeWire spineMaker;
+        spineMaker.Add(list);
+        if (!spineMaker.IsDone()) return nil;
+        const TopoDS_Wire spine = spineMaker.Wire();
+        const TopoDS_Wire outer = wireFromCode(toVector(wires[0]));
+        if (outer.IsNull()) return nil;
+        // Profil an der Pfadecke ansetzen, die ihm am nächsten liegt (wie SketchUp „Folge mir“)
+        GProp_GProps props;
+        BRepGProp::LinearProperties(outer, props);
+        const gp_Pnt center = props.CentreOfMass();
+        TopoDS_Vertex nearest;
+        double best = 1e300;
+        for (TopExp_Explorer it(spine, TopAbs_VERTEX); it.More(); it.Next()) {
+            const TopoDS_Vertex vertex = TopoDS::Vertex(it.Current());
+            const double d = BRep_Tool::Pnt(vertex).Distance(center);
+            if (d < best) {
+                best = d;
+                nearest = vertex;
+            }
+        }
+        auto sweepWire = [&](const TopoDS_Wire &profile) -> TopoDS_Shape {
+            for (int attempt = 0; attempt < 2; ++attempt) {
+                try {
+                    BRepOffsetAPI_MakePipeShell pipe(spine);
+                    // Ecken auf Gehrung statt verdreht
+                    pipe.SetTransitionMode(BRepBuilderAPI_RightCorner);
+                    if (attempt == 0 && !nearest.IsNull()) {
+                        pipe.Add(profile, nearest, Standard_False, Standard_False);
+                    } else {
+                        pipe.Add(profile, Standard_False, Standard_False);
+                    }
+                    pipe.Build();
+                    if (pipe.IsDone() && pipe.MakeSolid() && !pipe.Shape().IsNull()) return pipe.Shape();
+                } catch (...) {
+                }
+            }
+            return TopoDS_Shape();
+        };
+        TopoDS_Shape result = sweepWire(outer);
+        if (result.IsNull()) {
+            // Rückfall wie der Skizzen-Sweep (ganze Fläche, ohne Gehrung)
+            const TopoDS_Face face = faceFromWires(wires);
+            if (face.IsNull()) return nil;
+            BRepOffsetAPI_MakePipe pipe(spine, face);
+            pipe.Build();
+            if (!pipe.IsDone()) return nil;
+            return [[PCKShape alloc] initWithShape:pipe.Shape()];
+        }
+        for (NSUInteger k = 1; k < wires.count; ++k) {
+            const TopoDS_Wire hole = wireFromCode(toVector(wires[k]));
+            if (hole.IsNull()) continue;
+            const TopoDS_Shape tool = sweepWire(hole);
+            if (tool.IsNull()) return nil;
+            BRepAlgoAPI_Cut cut(result, tool);
+            if (!cut.IsDone()) return nil;
+            result = cut.Shape();
+        }
+        return [[PCKShape alloc] initWithShape:result];
+    } catch (...) {
+        return nil;
+    }
+}
+
+- (nullable PCKShape *)draftingFaces:(NSArray<NSNumber *> *)faces pull:(simd_double3)pull
+                       neutralOrigin:(simd_double3)neutralOrigin angle:(double)degrees {
+    if (faces.count == 0 || simd_length(pull) == 0 || std::abs(degrees) < 1e-9 || std::abs(degrees) >= 89) return nil;
+    try {
+        const gp_Dir direction = toDir(pull);
+        const gp_Pln neutral(toPnt(neutralOrigin), direction);
+        BRepOffsetAPI_DraftAngle draft(_shape);
+        for (NSNumber *number in faces) {
+            if (number.integerValue < 1 || number.integerValue > _faces.Extent()) return nil;
+            draft.Add(TopoDS::Face(_faces(number.intValue)), direction, degrees * M_PI / 180.0, neutral);
+            if (!draft.AddDone()) return nil;
+        }
+        draft.Build();
+        if (!draft.IsDone() || draft.Shape().IsNull()) return nil;
+        return [[PCKShape alloc] initWithShape:draft.Shape()];
+    } catch (...) {
+        return nil;
+    }
+}
+
 - (double)maximumBlendForEdges:(NSArray<NSNumber *> *)numbers upTo:(double)limit chamfer:(BOOL)chamfer {
     const std::vector<TopoDS_Edge> edges = edgesFromNumbers(_edges, numbers);
     if (edges.empty() || limit <= 0) return 0;
@@ -1620,6 +2056,81 @@ static std::vector<TopoDS_Edge> edgesFromNumbers(const TopTools_IndexedMapOfShap
 #endif
 }
 
++ (nullable NSArray<NSData *> *)hiddenLineViewOfShapes:(NSArray<PCKShape *> *)shapes toEye:(simd_double3)toEye
+                                                 xAxis:(simd_double3)xAxis deflection:(double)deflection {
+#if PCK_HAS_HLR
+    if (shapes.count == 0 || simd_length(toEye) < 1e-12 || simd_length(xAxis) < 1e-12) return nil;
+    try {
+        Handle(HLRBRep_Algo) algo = new HLRBRep_Algo();
+        for (PCKShape *shape in shapes) {
+            if (!shape->_shape.IsNull()) algo->Add(shape->_shape);
+        }
+        // Hauptrichtung des Projektors zeigt zum Betrachter; die Ergebnisse liegen in dessen XY-Ebene
+        const gp_Ax2 axes(gp_Pnt(0, 0, 0), gp_Dir(toEye.x, toEye.y, toEye.z), gp_Dir(xAxis.x, xAxis.y, xAxis.z));
+        algo->Projector(HLRAlgo_Projector(axes));
+        algo->Update();
+        algo->Hide();
+        HLRBRep_HLRToShape extractor(algo);
+        // Punkte (x, y, z) je Linienstück; die Ergebnisse liegen im Koordinatensystem des Projektors (z = 0).
+        // Falls nicht (andere OCCT-Version), wird unten selbst auf die Ansichtsebene projiziert.
+        std::vector<double> visible, hidden;
+        const double tolerance = deflection > 0 ? deflection : 0.05;
+        double largestZ = 0;
+        auto collect = [&](const TopoDS_Shape &compound, std::vector<double> &out) {
+            if (compound.IsNull()) return;
+            try {
+                BRepLib::BuildCurves3d(compound);
+            } catch (...) {
+            }
+            for (TopExp_Explorer it(compound, TopAbs_EDGE); it.More(); it.Next()) {
+                try {
+                    const TopoDS_Edge edge = TopoDS::Edge(it.Current());
+                    if (BRep_Tool::Degenerated(edge)) continue;
+                    BRepAdaptor_Curve curve(edge);
+                    GCPnts_TangentialDeflection points(curve, 0.2, tolerance);
+                    for (int k = 1; k < points.NbPoints(); ++k) {
+                        const gp_Pnt a = points.Value(k), b = points.Value(k + 1);
+                        out.insert(out.end(), {a.X(), a.Y(), a.Z(), b.X(), b.Y(), b.Z()});
+                        largestZ = std::max(largestZ, std::max(std::fabs(a.Z()), std::fabs(b.Z())));
+                    }
+                } catch (...) {
+                    continue;
+                }
+            }
+        };
+        // Scharfe Kanten, Übergangskanten (tangential, nur sichtbar) und Umrisse gekrümmter Flächen
+        collect(extractor.VCompound(), visible);
+        collect(extractor.Rg1LineVCompound(), visible);
+        collect(extractor.OutLineVCompound(), visible);
+        collect(extractor.HCompound(), hidden);
+        collect(extractor.OutLineHCompound(), hidden);
+
+        const bool local = largestZ < 1e-6;
+        const gp_Dir xDir = axes.XDirection(), yDir = axes.YDirection();
+        auto flatten = [&](const std::vector<double> &points) {
+            std::vector<double> result;
+            result.reserve(points.size() / 3 * 2);
+            for (size_t i = 0; i + 2 < points.size(); i += 3) {
+                if (local) {
+                    result.insert(result.end(), {points[i], points[i + 1]});
+                } else {
+                    const gp_XYZ p(points[i], points[i + 1], points[i + 2]);
+                    result.insert(result.end(), {p.Dot(xDir.XYZ()), p.Dot(yDir.XYZ())});
+                }
+            }
+            return result;
+        };
+        const std::vector<double> visible2D = flatten(visible), hidden2D = flatten(hidden);
+        return @[[NSData dataWithBytes:visible2D.data() length:visible2D.size() * sizeof(double)],
+                 [NSData dataWithBytes:hidden2D.data() length:hidden2D.size() * sizeof(double)]];
+    } catch (...) {
+        return nil;
+    }
+#else
+    return nil;
+#endif
+}
+
 #else
 
 - (instancetype)initWithFallback:(FallbackBody)body {
@@ -1682,6 +2193,38 @@ static std::vector<TopoDS_Edge> edgesFromNumbers(const TopTools_IndexedMapOfShap
 }
 
 + (nullable PCKShape *)loftThroughWires:(NSArray<NSArray<NSNumber *> *> *)sections {
+    return nil;
+}
+
++ (nullable PCKShape *)thinPrismWithProfileWires:(NSArray<NSArray<NSNumber *> *> *)wires
+                                     planeOrigin:(simd_double3)origin planeNormal:(simd_double3)normal
+                                       thickness:(double)thickness side:(NSInteger)side
+                                       direction:(simd_double3)direction {
+    return nil;
+}
+
++ (nullable PCKShape *)springWithBase:(simd_double3)base axis:(simd_double3)axis radius:(double)radius
+                                pitch:(double)pitch height:(double)height leftHanded:(BOOL)leftHanded
+                         wireDiameter:(double)wireDiameter {
+    return nil;
+}
+
++ (nullable PCKShape *)helixSweepWithBase:(simd_double3)base axis:(simd_double3)axis radius:(double)radius
+                                    pitch:(double)pitch height:(double)height leftHanded:(BOOL)leftHanded
+                                profileRZ:(NSArray<NSNumber *> *)profileRZ {
+    return nil;
+}
+
+- (nullable PCKShape *)filletingEdges:(NSArray<NSNumber *> *)edges radius:(double)radius endRadius:(double)endRadius {
+    return nil;
+}
+
+- (nullable PCKShape *)sweepProfileWires:(NSArray<NSArray<NSNumber *> *> *)wires alongEdges:(NSArray<NSNumber *> *)edges {
+    return nil;
+}
+
+- (nullable PCKShape *)draftingFaces:(NSArray<NSNumber *> *)faces pull:(simd_double3)pull
+                       neutralOrigin:(simd_double3)neutralOrigin angle:(double)degrees {
     return nil;
 }
 
@@ -1874,6 +2417,11 @@ static std::vector<TopoDS_Edge> edgesFromNumbers(const TopTools_IndexedMapOfShap
 
 + (BOOL)writeShapes:(NSArray<PCKShape *> *)shapes toSTEPFile:(NSString *)path {
     return NO;
+}
+
++ (nullable NSArray<NSData *> *)hiddenLineViewOfShapes:(NSArray<PCKShape *> *)shapes toEye:(simd_double3)toEye
+                                                 xAxis:(simd_double3)xAxis deflection:(double)deflection {
+    return nil;
 }
 
 #endif

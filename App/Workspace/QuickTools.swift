@@ -22,10 +22,8 @@ struct QuickToolsPalette: View {
                 // Tippen daneben schließt das Rad
                 Color.black.opacity(0.001)
                     .onTapGesture(perform: close)
-                Circle()
-                    .fill(.regularMaterial)
+                FloatingShape(shape: Circle(), fill: Material.regularMaterial, elevation: .overlay)
                     .frame(width: radius * 2 + 64, height: radius * 2 + 64)
-                    .shadow(color: .black.opacity(0.2), radius: 12, y: 3)
                     .position(center)
                 ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                     let angle = Double(index) / Double(items.count) * 2 * .pi - .pi / 2
@@ -37,10 +35,9 @@ struct QuickToolsPalette: View {
                             .font(.system(size: 19, weight: .medium))
                             .frame(width: 50, height: 50)
                             .foregroundStyle(item.isActive ? Color.white : Color.primary)
-                            .background(item.isActive ? Color.accentColor : Color(.systemBackground), in: Circle())
-                            .shadow(color: .black.opacity(0.12), radius: 3, y: 1)
+                            .floatingSurface(item.isActive ? Color.accentColor : Theme.surface, in: Circle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.pressable)
                     .accessibilityLabel(item.id)
                     .position(x: center.x + radius * cos(angle), y: center.y + radius * sin(angle))
                 }
@@ -51,7 +48,7 @@ struct QuickToolsPalette: View {
                         .foregroundStyle(.secondary)
                         .background(Color(.secondarySystemBackground), in: Circle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.pressable)
                 .accessibilityLabel("Schließen")
                 .position(center)
             }

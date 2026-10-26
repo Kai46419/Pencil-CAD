@@ -123,3 +123,34 @@ fragment float4 fragment_color_clip(VertexOut in [[stage_in]],
     if (clipped(in, uniforms)) discard_fragment();
     return float4(in.color, 1.0);
 }
+
+// MARK: Darstellung „Verdeckte Kanten“ und „Zebra“
+
+/// Verdeckte Kanten: blass und gestrichelt. Die Bogenlänge in Bildschirmpunkten steckt in normal.x,
+/// so bleiben die Striche beim Zoomen gleich lang.
+fragment float4 fragment_dashed_clip(VertexOut in [[stage_in]],
+                                     constant Uniforms &uniforms [[buffer(1)]]) {
+    if (clipped(in, uniforms)) discard_fragment();
+    if (fmod(max(in.normal.x, 0.0f), 8.0f) > 4.5f) discard_fragment();
+    return float4(in.color, 0.6f);
+}
+
+/// Zebra-Streifen zur Prüfung von Flächenübergängen: Spiegelung einer Wand aus waagerechten Lichtbändern.
+/// Laufen die Streifen über eine Kante ohne Knick weiter, ist der Übergang tangential bzw. krümmungsstetig.
+/// view.xyz = Blickrichtung, view.w = 1 bei Parallelprojektion.
+fragment float4 fragment_zebra(VertexOut in [[stage_in]],
+                               constant Uniforms &uniforms [[buffer(1)]],
+                               constant float4 &view [[buffer(2)]]) {
+    if (clipped(in, uniforms)) discard_fragment();
+    float3 n = normalize(in.normal);
+    float3 d = view.w > 0.5f ? normalize(view.xyz) : normalize(in.world - uniforms.eye.xyz);
+    if (dot(n, d) > 0.0f) n = -n;
+    float3 r = reflect(d, n);
+    // Höhenwinkel der Spiegelrichtung, 16 Streifenpaare je Halbkreis
+    float band = asin(clamp(r.z, -1.0f, 1.0f)) * (16.0f / M_PI_F);
+    float s = sin(band * 2.0f * M_PI_F);
+    float stripe = clamp(s / max(fwidth(s) * 1.5f, 1e-4f) * 0.5f + 0.5f, 0.0f, 1.0f);
+    float3 color = mix(float3(0.07, 0.08, 0.10), float3(0.97, 0.97, 0.98), stripe);
+    float diffuse = abs(dot(n, normalize(uniforms.lightDirection)));
+    return float4(color * (0.8f + 0.2f * diffuse), 1.0f);
+}

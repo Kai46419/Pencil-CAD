@@ -64,7 +64,7 @@ struct AIPanel: View {
                 Text(assistant.hasKey ? "Claude: Schlüssel hinterlegt" : "Claude: kein Schlüssel")
             } label: {
                 Image(systemName: "gearshape")
-                    .frame(width: 32, height: 28)
+                    .frame(width: 36, height: 36)
             }
             .hoverTip("Modell und Schlüssel")
             Button {
@@ -74,6 +74,9 @@ struct AIPanel: View {
                 Image(systemName: "xmark")
                     .font(.caption.weight(.bold))
                     .frame(width: 28, height: 28)
+                    .background(Color(.secondarySystemBackground), in: Circle())
+                    .frame(width: 36, height: 36)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
@@ -99,7 +102,8 @@ struct AIPanel: View {
                     .font(.title3)
                     .symbolEffect(.pulse, isActive: speech.isRecording)
                     .foregroundStyle(speech.isRecording ? Color.red : Color.accentColor)
-                    .frame(width: 30, height: 30)
+                    .frame(width: 36, height: 36)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .disabled(assistant.isWorking)

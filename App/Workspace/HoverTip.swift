@@ -106,12 +106,7 @@ private struct HoverTipBubble: View {
         .fixedSize(horizontal: false, vertical: true)
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
-        .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .strokeBorder(Color.secondary.opacity(0.25), lineWidth: 0.5)
-        }
-        .shadow(color: .black.opacity(0.18), radius: 8, y: 2)
+        .floatingSurface(in: RoundedRectangle(cornerRadius: Theme.Radius.label, style: .continuous), elevation: .overlay)
         .fixedSize()
     }
 
@@ -210,7 +205,7 @@ enum ToolTips {
         "Raster": "Rastermaß für den Fang, bis 0,001 mm.",
         "Normal zu Skizze": "Senkrecht auf die Skizzenebene schauen.",
         "Finger zeichnet": "Für Geräte ohne Stift: ein Finger zeichnet statt zu drehen.",
-        "Anzeigemodi": "Schattiert, mit Kanten, Drahtgitter, durchsichtig; orthografisch oder perspektivisch.",
+        "Anzeigemodi": "Schattiert, mit Kanten, Drahtgitter, durchsichtig, verdeckte Kanten gestrichelt, Zebra-Streifen; orthografisch oder perspektivisch.",
         "Screenshot": "Bild des Arbeitsbereichs sichern oder teilen.",
         "Verlauf": "Alle Schritte; antippen springt zurück (Rückgängig/Wiederholen).",
         "Sichtbarkeit": "Alle Skizzen, Bilder oder Konstruktionsgeometrie gesammelt ein- und ausblenden.",
@@ -246,7 +241,8 @@ enum ToolTips {
         "Messen": "Kantenlänge, Fläche, Volumen oder Abstand zweier Punkte anzeigen. In der Skizze: Länge, Radius, Abstand und Winkel – zeigt auch, ob zwei Linien wirklich parallel sind.",
         "Körper wählen": "Antippen wählt ganze Körper statt Flächen – mehrere nacheinander antippen, dann Vereinigen, Abziehen oder Schneiden.",
         "Schneiden": "Behält nur den Bereich, in dem sich die gewählten Körper überlappen.",
-        "Rahmenauswahl": "Finger zieht einen Rahmen statt zu drehen. Nach rechts: nur ganz umschlossene Körper, nach links: auch angeschnittene. Mit dem Stift geht der Rahmen immer – einfach ins Leere ziehen.",
+        "Rahmenauswahl": "Finger zieht einen Rahmen statt zu drehen. Nach rechts: nur ganz umschlossene Körper, nach links: auch angeschnittene. Mit dem Stift geht der Rahmen immer – einfach ins Leere ziehen. Lange drücken: Lasso statt Rahmen.",
+        "Lassoauswahl": "Frei um Körper herumfahren: alles ganz Umschlossene wird gewählt. Lange drücken: zurück zum Rahmen.",
         "Abziehen": "Schneidet heraus: beim Extrudieren aus vorhandenen Körpern, in der Auswahl die übrigen Körper aus dem zuerst gewählten.",
     ]
 }
