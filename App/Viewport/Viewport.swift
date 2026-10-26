@@ -1147,7 +1147,7 @@ final class ViewportView: MTKView {
                 // Kai: 15°-Schritte (15, 30, 45 …) rot zeigen; einrasten erst nach kurzem Verweilen
                 let isStepAngle = dimension.id == "live-angle" && dimension.value.isFinite
                     && abs(dimension.value) < 1e6 && Int(dimension.value.rounded()) % 15 == 0
-                field.textColor = isStepAngle || (dimension.id == "live-angle" && sketch?.angleCandidate == true)
+                field.textColor = isStepAngle || (dimension.id == "live-angle" && sketch.angleCandidate)
                     ? .systemRed : .black
             }
             field.lockState = dimension.lockState
