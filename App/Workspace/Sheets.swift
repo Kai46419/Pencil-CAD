@@ -299,6 +299,8 @@ enum HelpTopic: String, CaseIterable, Identifiable {
                     + "größten möglichen Wert.",
                 "Jedes Werkzeug zeigt beim Öffnen unten kurz, was es macht (antippen schließt). Lange drücken auf "
                     + "eine Werkzeugkachel zeigt die Erklärung erneut.",
+                "Konstruieren › Ebene auf einer Körperfläche startet mit Abstand 0 – direkt auf der Fläche. Versatz "
+                    + "nur, wenn du ihn eingibst.",
                 "Schlanke Maße: kleinere Schilder mit dünnem Schloss. Feste (grüne) Maße erscheinen nur als kleines "
                     + "Schloss – antippen öffnet das Maß. Abschalten in der Skizzenpalette („Feste Maße als Schloss“).",
                 "Parametrischer Verlauf: Zeitleiste unten (Menü … › Zeitleiste ein-/ausblenden). Schritt antippen ändert "

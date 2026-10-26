@@ -463,7 +463,7 @@ enum ThreadProfile {
         let radius = form.round * p
         let crestCenter = major - radius
         let rootCenter = minor + radius
-        let sweep = .pi / 2 - alpha
+        let sweep = Double.pi / 2 - alpha
         let steps = 5
         var points: [SIMD2<Double>] = []
         // Grund links: von der Grundmitte bis zum Übergang in die Flanke

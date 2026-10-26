@@ -326,7 +326,8 @@ final class Workspace: ObservableObject {
     /// Zuletzt gemessene Flächen (Winkel bzw. Abstand zweier ebener Flächen)
     private var measureFaces: [FaceRef] = []
     @Published var constructReference: ReferencePlane = .world(2)
-    @Published var constructOffset: Double = 10
+    /// Abstand der Versatzebene; Kai: Standard 0, die Ebene liegt direkt auf der gewählten Fläche
+    @Published var constructOffset: Double = 0
     @Published var constructAxis: ReferenceAxis = .world(2)
     @Published var constructCustomAxis: AxisSpec?
     @Published var constructPoint: SIMD3<Double> = .zero
@@ -692,7 +693,9 @@ final class Workspace: ObservableObject {
             resetConstructPicks()
             if let previousFace {
                 switch kind {
-                case .plane: constructReference = .face(previousFace)
+                case .plane:
+                    constructReference = .face(previousFace)
+                    constructOffset = 0
                 case .axis: setCustomAxis(normalOf: previousFace)
                 case .point: break
                 }
@@ -1610,6 +1613,8 @@ final class Workspace: ObservableObject {
             switch planeMethod {
             case .offset:
                 if let face, model.plane(of: face) != nil {
+                    // Neue Bezugsfläche: direkt darauf (Abstand 0), Versatz nur auf Wunsch
+                    if constructReference != .face(face) { constructOffset = 0 }
                     constructReference = .face(face)
                 } else if face != nil {
                     model.message = "Für eine Ebene eine ebene Fläche antippen."
