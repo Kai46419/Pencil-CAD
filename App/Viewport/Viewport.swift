@@ -621,6 +621,12 @@ final class ViewportView: MTKView {
                 groups.append(LineGroup(polylines: tangentHandles.custom.map { $0.map(world) }, color: Self.helperOrange,
                                         width: 1.8, dots: tangentHandles.customKnobs.map(world), dotRadius: 4.5))
             }
+            // Radiusgriff an gewählten Bögen und Kreisen (SketchArcHandle.swift): Ring mit Doppelpfeil
+            let radiusHandles = sketch.radiusHandleGeometry(unit: perPoint)
+            if !radiusHandles.knobs.isEmpty {
+                groups.append(LineGroup(polylines: radiusHandles.lines.map { $0.map(world) }, color: Self.previewBlue,
+                                        width: 2, dots: radiusHandles.knobs.map(world), dotRadius: 3.5))
+            }
             let preview = sketch.previewPolylines
             if !preview.isEmpty {
                 groups.append(LineGroup(polylines: preview.map { $0.map(world) }, color: Self.previewBlue, width: 2.6))
@@ -1779,6 +1785,7 @@ final class ViewportView: MTKView {
         guard sketch.pick(at: point, tolerance: snapTolerance) == nil else { return false }
         // Spline-Tangentengriffe
         guard !sketch.hitsSplineHandle(at: point, tolerance: snapTolerance) else { return false }
+        guard !sketch.hitsRadiusHandle(at: point, tolerance: snapTolerance) else { return false }
         return sketch.markIndex(at: point, tolerance: snapTolerance, curveHit: false) == nil
     }
 
@@ -1863,6 +1870,13 @@ final class ViewportView: MTKView {
         sketchPoint(at: touch.location(in: self))
     }
 
+    /// Finger auf dem Radiusgriff eines gewählten Bogens bzw. Kreises (Werkzeug „Auswählen“): zieht wie der Stift.
+    private func acceptsForRadiusHandle(_ touch: UITouch) -> Bool {
+        guard touch.type == .direct, let sketch, sketch.isActive, !sketch.isChoosingPlane, sketch.tool == .select,
+              let point = sketchPoint(for: touch) else { return false }
+        return sketch.hitsRadiusHandle(at: point, tolerance: snapTolerance)
+    }
+
     /// Punkt der (unbegrenzten) Skizzenebene unter einem Bildschirmpunkt.
     private func sketchPoint(at location: CGPoint) -> SIMD2<Double>? {
         guard let renderer, let sketch else { return nil }
@@ -1939,7 +1953,9 @@ final class ViewportView: MTKView {
             sketch?.endHover()
             return
         }
-        guard sketchTouch == nil, let touch = touches.first(where: acceptsForSketch),
+        // Radiusgriff an Bogen bzw. Kreis lässt sich auch mit dem Finger ziehen (SketchArcHandle.swift)
+        let handleTouch: UITouch? = alone ? touches.first(where: acceptsForRadiusHandle) : nil
+        guard sketchTouch == nil, let touch = touches.first(where: acceptsForSketch) ?? handleTouch,
               let point = sketchPoint(for: touch) else {
             super.touchesBegan(touches, with: event)
             return
