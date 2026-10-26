@@ -2743,8 +2743,10 @@ extension ModelStore {
             let n = simd_normalize(plane.normal)
             // Gewindebohrung: nur so lang wie nötig (jede Umdrehung kostet Rechenzeit)
             let reach = spec.thread == nil ? sceneExtent * 2 + 10 : threadReach(body: body, from: hole.point, direction: -n)
+            // Gewindebohrung: Werkzeug ist ein Verbund (Gänge, Kernloch, Senkung) – in einem Schritt mit Fuzzy-Wert
+            let shape = preview[body].shape
             guard let tool = spec.tool(at: hole.point, outward: n, through: reach),
-                  let cut = preview[body].shape.cutting(tool) else {
+                  let cut = spec.thread == nil ? shape.cutting(tool) : shape.cutting(tool, fuzzy: threadCutFuzzy) else {
                 message = "Bohrung an dieser Stelle nicht möglich."
                 dropPreview()
                 return

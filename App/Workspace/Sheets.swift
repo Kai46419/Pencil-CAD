@@ -277,6 +277,9 @@ enum HelpTopic: String, CaseIterable, Identifiable {
                 "Gewinde „Kosmetisch“: keine Gewindegeometrie, Bohrung nur mit Kernloch, Bolzen bleibt – dünne Ringe "
                     + "zeigen das Gewinde. Jedes Gewinde steht jetzt als Eigenschaft am Körper (Eigenschaften-Fenster: "
                     + "„Gewinde: M6×1 · 12 mm · innen · modelliert“) und wird mit dem Projekt gespeichert.",
+                "Gewinde robuster und genauer: die Schraubenlinie wird je Umdrehung gebaut (lange Gewinde wie M3 × 60 mm "
+                    + "stimmen jetzt und rechnen etwa doppelt so schnell), Gänge und Kernloch werden in einem Schritt "
+                    + "abgezogen. Sackloch-Gewinde enden wahlweise bis Grund, mit Auslauf nach DIN 76 oder nach Maß.",
                 "Gewinde (Erstellen › Gewinde): Zylinderfläche antippen – Bolzen bekommen ein Außen-, Bohrungen ein "
                     + "Innengewinde, die passende Normgröße wird vorgeschlagen. Metrisch ISO (Regel- und Feingewinde "
                     + "M1–M64), UNC/UNF, Whitworth, Rohrgewinde G, R und NPT (kegelig), Trapez, Rund- und Sägengewinde; "
