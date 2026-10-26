@@ -61,6 +61,7 @@ extension Workspace {
             toolItem(.part(.helix), "Feder, Gewinde", PartTool.helix.systemImage, "helix spirale feder gewinde thread spring"),
             toolItem(.part(.thinLines), "Linien einer Skizze als Wand", PartTool.thinLines.systemImage, "thin dünn wand linie"),
             toolItem(.part(.draft), "Flächen neigen, Entformungsschräge", PartTool.draft.systemImage, "draft verjüngung schräge"),
+            toolItem(.meshSculpt, "Pinsel für Netze (STL, 3MF)", "paintbrush.pointed", "mesh netz sculpt pinsel stl 3mf glätten"),
             toolItem(.part(.standard), "Schrauben, Muttern, Scheiben, Kugellager", PartTool.standard.systemImage,
                      "normteil schraube mutter iso din lager bearing"),
             toolItem(.part(.template), "Gehäuse, Stirnrad", PartTool.template.systemImage, "vorlage gehäuse box zahnrad gear"),

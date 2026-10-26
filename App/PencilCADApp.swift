@@ -41,7 +41,9 @@ struct RootView: View {
         } else {
             HomeView { project, importURL in
                 let opened = Workspace(project: project)
-                if let importURL {
+                if let importURL, MeshFileReader.extensions.contains(importURL.pathExtension.lowercased()) {
+                    opened.model.importMesh(from: importURL) { opened.send(.fitAll) }
+                } else if let importURL {
                     opened.model.importSTEP(from: importURL)
                     opened.send(.fitAll)
                 }

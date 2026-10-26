@@ -196,6 +196,8 @@ struct ParameterCard: View {
                 holeCard
             case .printCheck:
                 printCheckCard
+            case .meshSculpt:
+                MeshSculptCard(workspace: workspace, model: model, sculpt: workspace.sculpt)
             }
         }
     }

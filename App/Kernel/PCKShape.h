@@ -278,6 +278,16 @@ NS_ASSUME_NONNULL_BEGIN
 /// Trianguliert den Körper. deflection = maximale Sehnenabweichung in mm.
 - (PCKMesh *)triangulateWithDeflection:(double)deflection NS_SWIFT_NAME(triangulate(deflection:));
 
+/// Netz (STL/3MF) als Körper: points = Float64 x, y, z je Punkt, triangles = UInt32, drei Punktnummern je Dreieck
+/// (von außen gesehen gegen den Uhrzeigersinn). Jedes Dreieck wird eine ebene Fläche, Nachbarn teilen sich ihre
+/// Kanten; ein geschlossenes Netz wird ein Volumenkörper. Gleich liegende Dreiecke werden zu einer Fläche
+/// verschmolzen (Würfelseite = eine Fläche). Offene Netze ergeben eine Schale (isClosedSolid = NO).
+/// nil bei Fehler oder ohne Kernel.
++ (nullable PCKShape *)solidFromMeshPoints:(NSData *)points triangles:(NSData *)triangles tolerance:(double)tolerance
+    NS_SWIFT_NAME(solid(meshPoints:triangles:tolerance:));
+/// YES, wenn der Körper nur aus geschlossenen Volumen besteht (z. B. nach einem Netzimport).
+@property (nonatomic, readonly) BOOL isClosedSolid;
+
 /// STEP (AP214, Einheit mm). nil bzw. NO bei Fehler oder ohne STEP-Unterstützung.
 + (nullable NSArray<PCKShape *> *)shapesFromSTEPFile:(NSString *)path NS_SWIFT_NAME(readSTEP(path:));
 + (BOOL)writeShapes:(NSArray<PCKShape *> *)shapes toSTEPFile:(NSString *)path

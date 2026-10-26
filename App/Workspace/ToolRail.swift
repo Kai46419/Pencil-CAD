@@ -50,7 +50,7 @@ enum ToolGroup: String, CaseIterable, Identifiable {
         case .transform: "Körper oder Skizzen verschieben, drehen, spiegeln, skalieren, ausrichten oder als Muster vervielfältigen."
         case .construct: "Hilfsebenen, -achsen und -punkte, z. B. eine versetzte Ebene zum Skizzieren."
         case .inspect: "Messen, Schnittansicht und Isolieren."
-        case .insert: "Normteile (Schrauben, Muttern, Lager), Vorlagen (Gehäuse, Stirnrad), STEP-Datei, Bild als Vorlage, Körper eines anderen Projekts oder eine Variable einfügen."
+        case .insert: "Normteile (Schrauben, Muttern, Lager), Vorlagen (Gehäuse, Stirnrad), STEP-, STL- und 3MF-Dateien, Bild als Vorlage, Körper eines anderen Projekts oder eine Variable einfügen."
         case .visualize: "Anzeigemodus, orthografische Projektion und Körperfarbe."
         }
     }
@@ -700,7 +700,7 @@ struct ToolRail: View {
             return group == .construct
         case .move, .mirror, .pattern, .scale, .align, .scaleSketch:
             return group == .transform
-        case .boolean, .shell, .split, .offsetEdges, .offsetFace, .replaceFace, .wrap, .imprint, .hole:
+        case .boolean, .shell, .split, .offsetEdges, .offsetFace, .replaceFace, .wrap, .imprint, .hole, .meshSculpt:
             return group == .modify
         case .translate:
             return group == .transform
@@ -772,6 +772,7 @@ struct ToolRail: View {
                 item(.offsetEdges, "Kante versetzen", subtitle: "Fläche antippen", "square.dashed.inset.filled"),
                 item(.wrap, "Umhüllen und Prägen", subtitle: "Auf Zylinder", "cylinder.split.1x2"),
                 item(.imprint, "Kante abdrücken", subtitle: "Skizze auf Fläche", "square.on.square.dashed"),
+                item(.meshSculpt, "Netz bearbeiten", subtitle: "Pinsel, STL/3MF", "paintbrush.pointed"),
             ]
             items += BooleanKind.allCases.map { kind in
                 item(.boolean(kind), kind.rawValue, subtitle: "Kombinieren", kind.systemImage)
@@ -815,6 +816,8 @@ struct ToolRail: View {
                 item(.part(.template), "Vorlagen", subtitle: "Gehäuse, Stirnrad", PartTool.template.systemImage),
                 ToolItem(id: "insert.step", title: "STEP-Datei", subtitle: ".step / .stp",
                          systemImage: "square.and.arrow.down", action: importSTEP),
+                ToolItem(id: "insert.mesh", title: "STL / 3MF", subtitle: "Netz als Körper (3D-Druck)",
+                         systemImage: "triangle", action: importSTEP),
                 ToolItem(id: "insert.vector", title: "SVG / DXF", subtitle: "Als Skizze (Laser, CNC, Logos)",
                          systemImage: "scribble.variable", action: importSTEP),
                 ToolItem(id: "insert.image", title: "Bild", subtitle: "Aus Fotos, als Vorlage", systemImage: "photo") {

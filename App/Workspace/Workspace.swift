@@ -123,6 +123,8 @@ enum ModelTool: Equatable {
     case hole
     /// Druckbarkeit prüfen: Überhänge, dünne Wände, Ausrichtung
     case printCheck
+    /// Netz mit dem Stift formen (Anheben, Absenken, Glätten, Abflachen), MeshSculpt.swift
+    case meshSculpt
 
     var title: String {
         switch self {
@@ -154,6 +156,7 @@ enum ModelTool: Equatable {
         case .translate: "Übersetzen"
         case .hole: "Bohrung"
         case .printCheck: "Druckprüfung"
+        case .meshSculpt: "Netz bearbeiten"
         }
     }
 
@@ -246,6 +249,8 @@ final class Workspace: ObservableObject {
     let camera = CameraState()
     /// Einstellungen von Normteilen, Vorlagen, Helix, dünnen Linien, Verjüngung, Sweep entlang Kanten
     let parts = PartSettings()
+    /// Ändern › Netz bearbeiten (Pinsel, MeshSculpt.swift)
+    let sculpt = MeshSculpt()
 
     @Published var tool: ModelTool = .select
     @Published var displayMode: DisplayMode = .shaded
@@ -724,6 +729,10 @@ final class Workspace: ObservableObject {
             printBody = previousBody ?? previousFace?.body
             runPrintCheck()
             return
+        case .meshSculpt:
+            model.resetSelection()
+            sculpt.activate(model: model, body: previousBody ?? previousFace?.body)
+            return
         case .translate:
             model.resetSelection()
             translateStart = nil
@@ -1115,7 +1124,7 @@ final class Workspace: ObservableObject {
         if sketch.isActive { return true }
         switch tool {
         case .boolean: return model.selectedBodies.count > 1
-        case .color, .construct, .measure, .section, .canvas, .offsetEdges, .printCheck: return true
+        case .color, .construct, .measure, .section, .canvas, .offsetEdges, .printCheck, .meshSculpt: return true
         case .translate: return model.hasPreview
         case .move where model.movingSketch != nil: return model.moveOffset != .zero
         case .scaleSketch: return !model.selectedRegions.isEmpty
@@ -1167,6 +1176,8 @@ final class Workspace: ObservableObject {
             constructTapped(kind, face: face, edge: edge, point: point)
         case .hole:
             holeTapped(face: face, point: point)
+        case .meshSculpt:
+            if let body = face?.body ?? edge?.body { sculpt.choose(body, model: model) }
         case .printCheck:
             guard let body = face?.body ?? edge?.body else { return }
             if body != printBody { printUp = [0, 0, 1] }
@@ -2031,6 +2042,9 @@ final class Workspace: ObservableObject {
                 : "Weitere Stellen antippen · Bohrung erneut antippen entfernt sie"
         case .printCheck:
             return printBody == nil ? "Körper antippen, der gedruckt werden soll" : "Rot = Überhang, Orange = zu dünne Wand"
+        case .meshSculpt:
+            return sculpt.body == nil ? "Körper antippen oder mit dem Stift darauf malen"
+                : "Stift ziehen formt das Netz, fester drücken verstärkt · ein Finger dreht die Ansicht"
         case .section: return "Ebene wählen oder ebene Fläche antippen"
         case .measure:
             if measureMode == .element { return "Kante antippen = ganze Länge · Fläche antippen = Inhalt und Länge × Breite" }
