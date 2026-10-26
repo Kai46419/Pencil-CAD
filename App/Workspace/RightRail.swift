@@ -83,6 +83,10 @@ struct SnapMenu: View {
                     Text("Fang")
                         .font(.headline)
                 }
+                // Maßband-Ticken beim Ziehen; das Klicken beim Einrasten bleibt immer an (Kai)
+                Toggle(isOn: $sketch.drawHaptics) {
+                    row("Haptik beim Zeichnen", "Feines Ticken beim Ziehen von Linien und Formen", "hand.tap")
+                }
                 Divider()
                 Text("EINRASTEN")
                     .font(.caption.weight(.semibold))

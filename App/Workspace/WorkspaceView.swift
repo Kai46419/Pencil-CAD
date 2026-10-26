@@ -124,9 +124,16 @@ private struct WorkspaceContent: View {
             Button("Abbrechen", role: .cancel) {}
             Button("Umbenennen") { projects.rename(workspace.project.id, to: newName) }
         }
-        .confirmationDialog("Alle Körper löschen?", isPresented: $isClearConfirmationShown,
-                            titleVisibility: .visible) {
-            Button("Alles löschen", role: .destructive, action: model.clear)
+        .confirmationDialog(sketch.isActive ? "Skizze leeren?" : "Alle Körper und Skizzen löschen?",
+                            isPresented: $isClearConfirmationShown, titleVisibility: .visible) {
+            if sketch.isActive {
+                Button("Skizze leeren", role: .destructive, action: sketch.clearAll)
+            } else {
+                Button("Alles löschen", role: .destructive, action: model.clear)
+            }
+        } message: {
+            Text(sketch.isActive ? "Alle Elemente der offenen Skizze werden entfernt. Rückgängig holt sie zurück."
+                                 : "Körper, Skizzen, Konstruktion und Bilder werden entfernt. Rückgängig holt sie zurück.")
         }
         .fileExporter(isPresented: $isExporting, document: exportFile, contentType: exportType,
                       defaultFilename: exportName ?? projectName) { _ in }
@@ -299,7 +306,7 @@ private struct WorkspaceContent: View {
                 Button(role: .destructive) {
                     isClearConfirmationShown = true
                 } label: {
-                    Label("Alles löschen …", systemImage: "trash")
+                    Label(sketch.isActive ? "Skizze leeren …" : "Alles löschen …", systemImage: "trash")
                 }
                 Divider()
                 Text(PCKShape.kernelAvailable ? "Kernel: OpenCASCADE" : "Ohne OpenCASCADE (siehe README)")

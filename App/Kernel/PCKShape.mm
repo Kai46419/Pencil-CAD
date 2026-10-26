@@ -1048,6 +1048,48 @@ static TopoDS_Shape unified(const TopoDS_Shape &shape) {
     }
 }
 
+- (NSArray<PCKShape *> *)separatedSolids {
+    try {
+        std::vector<TopoDS_Shape> solids;
+        for (TopExp_Explorer it(_shape, TopAbs_SOLID); it.More(); it.Next()) solids.push_back(it.Current());
+        if (solids.size() <= 1) return @[self];
+        // Schneller Weg (Vorschau beim Ziehen): berühren sich die Hüllquader nicht, sind die Solids schon getrennt
+        std::vector<Bnd_Box> boxes(solids.size());
+        for (size_t k = 0; k < solids.size(); k++) {
+            BRepBndLib::Add(solids[k], boxes[k]);
+            boxes[k].Enlarge(1e-4);
+        }
+        bool touching = false;
+        for (size_t a = 0; a < solids.size() && !touching; a++) {
+            for (size_t b = a + 1; b < solids.size(); b++) {
+                if (!boxes[a].IsOut(boxes[b])) { touching = true; break; }
+            }
+        }
+        if (!touching) {
+            NSMutableArray<PCKShape *> *parts = [NSMutableArray array];
+            for (const TopoDS_Shape &solid : solids) [parts addObject:[[PCKShape alloc] initWithShape:solid]];
+            return parts;
+        }
+        // Alle Solids miteinander vereinigen: Berührende verschmelzen, getrennte bleiben eigene Solids
+        TopTools_ListOfShape arguments, tools;
+        arguments.Append(solids[0]);
+        for (size_t k = 1; k < solids.size(); k++) tools.Append(solids[k]);
+        BRepAlgoAPI_Fuse fuse;
+        fuse.SetArguments(arguments);
+        fuse.SetTools(tools);
+        fuse.Build();
+        if (!fuse.IsDone()) return @[self];
+        const TopoDS_Shape fused = unified(fuse.Shape());
+        NSMutableArray<PCKShape *> *parts = [NSMutableArray array];
+        for (TopExp_Explorer it(fused, TopAbs_SOLID); it.More(); it.Next()) {
+            [parts addObject:[[PCKShape alloc] initWithShape:it.Current()]];
+        }
+        return parts.count > 0 ? parts : @[self];
+    } catch (...) {
+        return @[self];
+    }
+}
+
 - (nullable NSArray<PCKShape *> *)splitAtPlaneOrigin:(simd_double3)origin normal:(simd_double3)normal {
     if (simd_length(normal) == 0) return nil;
     try {
@@ -1653,6 +1695,10 @@ static std::vector<TopoDS_Edge> edgesFromNumbers(const TopTools_IndexedMapOfShap
 
 - (nullable NSArray<PCKShape *> *)splitByTool:(PCKShape *)tool {
     return nil;
+}
+
+- (NSArray<PCKShape *> *)separatedSolids {
+    return @[self];
 }
 
 - (double)volume {

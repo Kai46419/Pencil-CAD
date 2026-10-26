@@ -125,6 +125,8 @@ final class ViewportView: MTKView {
     private var suppressFingerTap = false
     /// Ende des letzten Stiftstrichs: Drücken/Doppeltippen direkt danach war meist ein festerer Griff, kein Merken
     private var strokeEndedAt: TimeInterval = 0
+    /// Beginn des laufenden Skizzenstrichs (festes Zugreifen beim Ansetzen zählt nicht als Drücken)
+    private var strokeBeganAt: TimeInterval = 0
 
     private func updateHeldFingers(began: Set<UITouch> = [], ended: Set<UITouch> = []) {
         guard let sketch else { return }
@@ -419,7 +421,11 @@ final class ViewportView: MTKView {
             lastSnapKey = nil
             return
         }
-        let key = "\(kind)|\((snap.point.x * 100).rounded())|\((snap.point.y * 100).rounded())"
+        // Punktfänge (Ende, Mitte, Zentrum, Schnitt, 3D-Punkt) klicken immer. Entlang von Leitlinien, Winkeln und
+        // Kurven tickt es wie ein Maßband – nur mit „Haptik beim Zeichnen“; sonst ein Klick beim Einrasten.
+        let pointSnap: Set<SnapKind> = [.endpoint, .midpoint, .center, .intersection, .modelPoint]
+        let ticks = pointSnap.contains(kind) || sketch.drawHaptics || sketchTouch == nil
+        let key = ticks ? "\(kind)|\((snap.point.x * 100).rounded())|\((snap.point.y * 100).rounded())" : "\(kind)"
         guard key != lastSnapKey else { return }
         lastSnapKey = key
         guard sketch.snapHaptics else { return }
@@ -468,6 +474,17 @@ final class ViewportView: MTKView {
             let reach = max(renderer.camera.distance * 10, planeHalfSize * 20)
             for (axis, color) in Self.axes {
                 groups.append(LineGroup(polylines: [[.zero, axis * reach]], color: color, width: 1, onTop: false))
+            }
+        }
+        // Skizze (Kai): Achsen, die in der Skizzenebene liegen, dezent durchgehend – X rot, Y grün, Z blau
+        if sketching, workspace.showsOrigin {
+            let reach = max(renderer.camera.distance * 10, planeHalfSize * 20)
+            let normal = SIMD3<Float>(sketch.plane.normal)
+            let origin = SIMD3<Float>(sketch.plane.origin)
+            for (axis, color) in Self.axes where abs(simd_dot(axis, normal)) < 1e-4 && abs(simd_dot(origin, normal)) < 1e-3 {
+                // Aufgehellt zum Hintergrund hin, damit die Linien nicht mit Skizzenlinien verwechselt werden
+                let soft = color * 0.55 + SIMD3<Float>(repeating: 0.845) * 0.45
+                groups.append(LineGroup(polylines: [[-axis * reach, axis * reach]], color: soft, width: 1, onTop: false))
             }
         }
         // Ebenenwahl: drei kleine graue Felder neben dem Ursprung
@@ -613,14 +630,30 @@ final class ViewportView: MTKView {
                 groups.append(LineGroup(polylines: crosses.map { $0.map(world) }, color: Self.selectionOrange, width: 2.4))
             }
             // Schwebender Stift: Fadenkreuz am (gefangenen) Punkt, damit man sieht, wo der Strich ansetzt
-            if let hover = sketch.hoverSnap?.point {
-                let arm = 9 * perPoint, gap = 2.5 * perPoint
+            if let hoverSnap = sketch.hoverSnap {
+                let hover = hoverSnap.point
+                // Kai: deutlicher – längere, kräftigere Arme; orange, sobald ein Fangpunkt greift
+                let arm = 15 * perPoint, gap = 3.5 * perPoint
                 let cross: [[Point2]] = [
                     [hover + Point2(gap, 0), hover + Point2(arm, 0)], [hover - Point2(gap, 0), hover - Point2(arm, 0)],
                     [hover + Point2(0, gap), hover + Point2(0, arm)], [hover - Point2(0, gap), hover - Point2(0, arm)],
                 ]
-                groups.append(LineGroup(polylines: cross.map { $0.map(world) }, color: Self.sketchInk, width: 1.3,
-                                        dots: [world(hover)], dotRadius: 1.4))
+                let snapped = hoverSnap.kind != nil && hoverSnap.kind != .grid
+                groups.append(LineGroup(polylines: cross.map { $0.map(world) }, color: snapped ? Self.snapOrange : Self.sketchInk,
+                                        width: 2.2, dots: [world(hover)], dotRadius: 2.2))
+                // Rasterpunkte rund um den Stift (nur, wenn das Rastermaß auf dem Bildschirm erkennbar ist)
+                let step = sketch.gridStep
+                if sketch.snapEnabled, sketch.snapKinds.contains(.grid), step > 0, step / perPoint >= 7 {
+                    let base = (hover / step).rounded(.toNearestOrAwayFromZero) * step
+                    var dots: [Point2] = []
+                    for i in -3...3 {
+                        for j in -3...3 where i * i + j * j <= 10 && (i != 0 || j != 0) {
+                            dots.append(base + Point2(Double(i), Double(j)) * step)
+                        }
+                    }
+                    groups.append(LineGroup(polylines: [], color: Self.constructionGray, width: 0, dots: dots.map(world),
+                                            dotRadius: 1.3))
+                }
             }
             // Vorschläge für die Mitte (Rechteck-, Kreis- und Linienmitten), dezent
             let suggestions = sketch.suggestionNodes
@@ -1111,6 +1144,11 @@ final class ViewportView: MTKView {
                 } else {
                     field.text = dimension.value.formatted(.number.precision(.fractionLength(0...3)).grouping(.never))
                 }
+                // Kai: 15°-Schritte (15, 30, 45 …) rot zeigen; einrasten erst nach kurzem Verweilen
+                let isStepAngle = dimension.id == "live-angle" && dimension.value.isFinite
+                    && abs(dimension.value) < 1e6 && Int(dimension.value.rounded()) % 15 == 0
+                field.textColor = isStepAngle || (dimension.id == "live-angle" && sketch?.angleCandidate == true)
+                    ? .systemRed : .black
             }
             field.lockState = dimension.lockState
             let id = dimension.id
@@ -1618,6 +1656,7 @@ final class ViewportView: MTKView {
             return
         }
         sketchTouch = touch
+        strokeBeganAt = CACurrentMediaTime()
         // Ein schon laufendes Verschieben/Zoomen durch den aufgelegten Finger abbrechen: der Finger ist
         // jetzt nur die Bogen-Taste
         for gesture in [orbitGesture, panGesture, pinchGesture] as [UIGestureRecognizer?] {
@@ -1957,6 +1996,10 @@ final class ViewportView: MTKView {
                 return
             }
             updateHoverDwell(at: gesture.location(in: self))
+            if gesture.state == .began, #available(iOS 17.5, *) {
+                // Haptik auch beim Schweben (Kai): Generator vorab bereitmachen, damit der erste Fang klickt
+                canvasFeedback.prepare()
+            }
             sketch.hover(at: point, tolerance: snapTolerance)
         default:
             lastHoverLocation = nil
@@ -1972,6 +2015,17 @@ final class ViewportView: MTKView {
     /// Während und kurz nach einem Strich wird nichts ausgelöst (fester Griff beim Zeichnen zählt als Drücken).
     fileprivate func pencilAction(at location: CGPoint?) {
         if let sketch, sketch.isActive {
+            // Kai: Drücken während des Zeichnens schaltet den Fang für diesen Strich aus bzw. wieder an
+            if sketchTouch != nil, sketch.tool != .select {
+                guard CACurrentMediaTime() - strokeBeganAt > 0.25 else { return }
+                sketch.snapSuspended.toggle()
+                sketch.notice = sketch.snapSuspended ? "Fang aus – nur für diesen Strich" : "Fang wieder an"
+                if #available(iOS 17.5, *), let location = location ?? lastHoverLocation {
+                    canvasFeedback.alignmentOccurred(at: location)
+                }
+                refresh()
+                return
+            }
             guard sketchTouch == nil, heldFingers.isEmpty, CACurrentMediaTime() - strokeEndedAt > 0.8 else { return }
         }
         showQuickTools(at: location ?? lastHoverLocation)

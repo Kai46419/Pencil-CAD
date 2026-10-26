@@ -159,6 +159,9 @@ NS_ASSUME_NONNULL_BEGIN
 /// Teilt den Körper mit einem Werkzeug (anderer Körper, Prisma aus Skizzenbereichen …) in alle entstehenden
 /// Teilkörper; nil, wenn weniger als zwei Teile entstehen.
 - (nullable NSArray<PCKShape *> *)splitByTool:(PCKShape *)tool NS_SWIFT_NAME(split(by:));
+/// Getrennte Teilkörper: sich berührende Solids werden verschmolzen, voneinander getrennte einzeln geliefert
+/// (mindestens ein Eintrag; ohne Kernel bzw. bei Fehler der Körper selbst).
+- (NSArray<PCKShape *> *)separatedSolids NS_SWIFT_NAME(separatedSolids());
 
 /// Messwerte (mm, mm², mm³); 0 ohne Kernel.
 @property (nonatomic, readonly) double volume;

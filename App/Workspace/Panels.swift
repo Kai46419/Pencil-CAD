@@ -1642,10 +1642,14 @@ struct LayersPanel: View {
                         userFolder(entry.name, bodies: entry.bodies)
                     }
                 }
-                if filter == .bodies {
-                    let sketchBodies = model.sketches.indices.flatMap { model.bodies(fromSketch: $0) }
-                    ForEach(sketchBodies + otherBodies, id: \.self) { index in
-                        bodyRow(index)
+                if filter == .all || filter == .bodies, !looseBodies.isEmpty {
+                    // Jeder Körper ein eigener Eintrag, auch mehrere aus einer Skizze (wie Fusion 360)
+                    let anyVisible = looseBodies.contains { !model.bodies[$0].isHidden }
+                    folder("solids", title: "Volumenkörper", systemImage: "folder", count: looseBodies.count,
+                           visible: anyVisible, toggle: { model.setBodiesHidden(anyVisible, bodies: looseBodies) }) {
+                        ForEach(looseBodies, id: \.self) { index in
+                            bodyRow(index)
+                        }
                     }
                 }
                 if filter == .all || filter == .sketches {
@@ -1657,15 +1661,6 @@ struct LayersPanel: View {
                         }
                         ForEach(model.sketches.indices, id: \.self) { index in
                             layer(index)
-                        }
-                    }
-                }
-                if filter == .all, !otherBodies.isEmpty {
-                    let anyVisible = otherBodies.contains { !model.bodies[$0].isHidden }
-                    folder("bodies", title: "Körper", systemImage: "folder", count: otherBodies.count,
-                           visible: anyVisible, toggle: { model.setBodiesHidden(anyVisible, bodies: otherBodies) }) {
-                        ForEach(otherBodies, id: \.self) { index in
-                            bodyRow(index)
                         }
                     }
                 }
@@ -1777,7 +1772,8 @@ struct LayersPanel: View {
         .frame(height: 30)
     }
 
-    private var otherBodies: [Int] { model.unassignedBodies }
+    /// Alle Körper, die in keinem eigenen Ordner liegen (aus Skizzen, Grundkörper, Importe).
+    private var looseBodies: [Int] { model.bodies.indices.filter { model.bodies[$0].folder == nil } }
 
     /// Eigener Ordner mit Körpern (Kontextmenü: auflösen, exportieren).
     private func userFolder(_ name: String, bodies: [Int]) -> some View {
@@ -1807,7 +1803,8 @@ struct LayersPanel: View {
 
     // MARK: Ebene
 
-    /// Kopfzeile der Ebene (auf- und zuklappbar, Auge für alles) und darunter Skizze und Körper.
+    /// Kopfzeile der Ebene (auf- und zuklappbar, Auge für alles) und darunter die Skizze;
+    /// die Körper stehen im Ordner „Volumenkörper“.
     private func layer(_ index: Int) -> some View {
         let item = model.sketches[index]
         let bodies = model.bodies(fromSketch: index)
@@ -1865,10 +1862,6 @@ struct LayersPanel: View {
             if isOpen {
                 sketchRow(index)
                     .padding(.leading, 18)
-                ForEach(bodies, id: \.self) { body in
-                    bodyRow(body)
-                        .padding(.leading, 18)
-                }
             }
         }
         .padding(.vertical, 2)
@@ -1959,6 +1952,7 @@ struct LayersPanel: View {
             } label: {
                 Label("In Ordner", systemImage: "folder")
             }
+            Button("In Einzelkörper trennen", systemImage: "square.split.2x1") { model.separateBody(index) }
             Button("Löschen", systemImage: "trash", role: .destructive) {
                 model.toggleBody(index, exclusive: true)
                 model.deleteSelected()

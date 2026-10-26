@@ -131,6 +131,8 @@ struct ToolRail: View {
     @State private var modifyTool: SketchTool = .fillet
     /// Zuletzt gewähltes Werkzeug unter „Mehr“
     @State private var moreTool: SketchTool = .project
+    /// Zugeklappte Abschnitte im Skizzenmodus (Kai: „Ändern“ und „Prüfen“ anfangs zu, „Erstellen“ immer offen)
+    @State private var collapsedSections: Set<ToolCategory> = [.modify, .inspect]
 
     private let tileSize: CGFloat = 52
     private let spacing: CGFloat = 10
@@ -138,7 +140,7 @@ struct ToolRail: View {
 
     var body: some View {
         if sketch.isActive {
-            entryRail(sketchEntries, tile: 44, header: sketchHeader)
+            entryRail(sketchEntries, tile: 44, header: sketchHeader, collapsible: true)
         } else if showsContext {
             entryRail(contextEntries, tile: 44, header: nil)
         } else {
@@ -155,7 +157,12 @@ struct ToolRail: View {
         return index == 0 || entries[index - 1].category != category ? category : nil
     }
 
-    private func entryRail(_ entries: [RailEntry], tile: CGFloat, header: String?) -> some View {
+    /// Eintrag ausgeblendet, weil sein Abschnitt zugeklappt ist (das aktive Werkzeug bleibt sichtbar).
+    private func isHidden(_ entry: RailEntry, collapsible: Bool) -> Bool {
+        collapsible && collapsedSections.contains(entry.category) && !entry.isActive && openEntry != entry.id
+    }
+
+    private func entryRail(_ entries: [RailEntry], tile: CGFloat, header: String?, collapsible: Bool = false) -> some View {
         let gap: CGFloat = 6
         let list = VStack(alignment: .leading, spacing: gap) {
             if let header {
@@ -168,9 +175,25 @@ struct ToolRail: View {
             }
             ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
                 if let section = sectionStart(entries, index) {
-                    SectionHeader(category: section)
-                        .frame(height: headerHeight)
+                    if collapsible, section != .create {
+                        SectionHeader(category: section, isCollapsed: collapsedSections.contains(section))
+                            .frame(height: headerHeight)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                if collapsedSections.contains(section) {
+                                    collapsedSections.remove(section)
+                                } else {
+                                    collapsedSections.insert(section)
+                                }
+                            }
+                            .accessibilityAddTraits(.isButton)
+                            .hoverTip(collapsedSections.contains(section) ? "Aufklappen" : "Zuklappen")
+                    } else {
+                        SectionHeader(category: section)
+                            .frame(height: headerHeight)
+                    }
                 }
+                if !isHidden(entry, collapsible: collapsible) {
                 RailTile(title: entry.title, subtitle: entry.subtitle, systemImage: entry.systemImage,
                          category: entry.category, isActive: entry.isActive, isOpen: openEntry == entry.id,
                          size: tile, hasVariants: entry.flyout != nil && entry.primary != nil)
@@ -195,6 +218,7 @@ struct ToolRail: View {
                     .accessibilityAddTraits(.isButton)
                     .hoverTip(entry.title, entry.primary == nil ? nil
                               : (ToolTips.detail(for: entry.title).map { $0 + " " } ?? "") + "Lange drücken: alle Varianten.")
+                }
             }
         }
         return HStack(alignment: .top, spacing: 12) {
@@ -205,10 +229,11 @@ struct ToolRail: View {
             if let openEntry, let index = entries.firstIndex(where: { $0.id == openEntry }),
                let items = entries[index].flyout {
                 let sections = (0...index).filter { sectionStart(entries, $0) != nil }.count
+                let tilesAbove = (0..<index).filter { !isHidden(entries[$0], collapsible: collapsible) }.count
                 Flyout(title: entries[index].title, category: entries[index].category, items: items) {
                     self.openEntry = nil
                 }
-                .padding(.top, CGFloat(index) * (tile + gap) + CGFloat(sections) * (headerHeight + gap)
+                .padding(.top, CGFloat(tilesAbove) * (tile + gap) + CGFloat(sections) * (headerHeight + gap)
                          + (header == nil ? 0 : 30))
                 .transition(.opacity.combined(with: .move(edge: .leading)))
             }
@@ -789,6 +814,8 @@ struct ToolRail: View {
 /// Abschnittsüberschrift der Leiste (ERSTELLEN, ÄNDERN …) mit Kategoriefarbe.
 private struct SectionHeader: View {
     let category: ToolCategory
+    /// nil = nicht aufklappbar; sonst Pfeil nach rechts (zu) bzw. unten (offen)
+    var isCollapsed: Bool?
 
     var body: some View {
         HStack(spacing: 5) {
@@ -799,6 +826,12 @@ private struct SectionHeader: View {
                 .font(.system(size: 9.5, weight: .bold))
                 .tracking(0.7)
                 .foregroundStyle(category.color)
+            if let isCollapsed {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(category.color)
+                    .rotationEffect(.degrees(isCollapsed ? 0 : 90))
+            }
         }
         .padding(.horizontal, 7)
         .frame(maxHeight: .infinity)

@@ -11,6 +11,10 @@ struct HomeView: View {
     @State private var renaming: Project?
     @State private var newName = ""
     @State private var deleting: Project?
+    /// Auswahlmodus „Löschen“: Häkchen an den Kacheln, dann alle gewählten auf einmal löschen
+    @State private var isSelecting = false
+    @State private var selected: Set<UUID> = []
+    @State private var isBulkDeleteShown = false
 
     private let columns = [GridItem(.adaptive(minimum: 220, maximum: 280), spacing: 24)]
 
@@ -18,14 +22,23 @@ struct HomeView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 header
-                Text("Letzte Projekte")
+                Text(isSelecting ? "Projekte zum Löschen antippen" : "Letzte Projekte")
                     .font(.title2.weight(.semibold))
                 LazyVGrid(columns: columns, alignment: .leading, spacing: 28) {
-                    newProjectCard
+                    if !isSelecting {
+                        newProjectCard
+                    }
                     ForEach(projects.projects) { project in
-                        ProjectCard(project: project, revision: projects.thumbnailRevision)
-                            .onTapGesture { open(project, nil) }
-                            .contextMenu { contextMenu(for: project) }
+                        ProjectCard(project: project, revision: projects.thumbnailRevision,
+                                    isSelected: isSelecting ? selected.contains(project.id) : nil)
+                            .onTapGesture {
+                                if isSelecting {
+                                    if selected.contains(project.id) { selected.remove(project.id) } else { selected.insert(project.id) }
+                                } else {
+                                    open(project, nil)
+                                }
+                            }
+                            .contextMenu { if !isSelecting { contextMenu(for: project) } }
                     }
                 }
             }
@@ -52,6 +65,19 @@ struct HomeView: View {
             }
         } message: {
             Text("„\(deleting?.name ?? "")“ wird endgültig gelöscht.")
+        }
+        .confirmationDialog(selected.count == 1 ? "1 Projekt löschen?" : "\(selected.count) Projekte löschen?",
+                            isPresented: $isBulkDeleteShown, titleVisibility: .visible) {
+            Button(selected.count == 1 ? "1 Projekt löschen" : "\(selected.count) Projekte löschen", role: .destructive) {
+                projects.delete(selected)
+                selected = []
+                isSelecting = false
+            }
+        } message: {
+            Text("Die gewählten Projekte werden endgültig gelöscht. Das lässt sich nicht rückgängig machen.")
+        }
+        .onChange(of: projects.projects.map(\.id)) { _, ids in
+            selected.formIntersection(ids)
         }
     }
 
@@ -85,21 +111,63 @@ struct HomeView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Button {
-                isImporting = true
-            } label: {
-                Label("Importieren", systemImage: "square.and.arrow.down")
-                    .padding(.horizontal, 6)
+            if isSelecting {
+                selectionButtons
+            } else {
+                normalButtons
             }
-            .buttonStyle(.bordered)
-            Button {
-                open(projects.create(), nil)
-            } label: {
-                Label("Neues Projekt", systemImage: "plus")
-                    .padding(.horizontal, 6)
-            }
-            .buttonStyle(.borderedProminent)
         }
+    }
+
+    /// Im Auswahlmodus: alle wählen, abbrechen, gewählte löschen (mit Rückfrage).
+    @ViewBuilder
+    private var selectionButtons: some View {
+        let allSelected = !projects.projects.isEmpty && selected.count == projects.projects.count
+        Button(allSelected ? "Keine auswählen" : "Alle auswählen") {
+            selected = allSelected ? [] : Set(projects.projects.map(\.id))
+        }
+        .buttonStyle(.bordered)
+        Button("Abbrechen") {
+            selected = []
+            isSelecting = false
+        }
+        .buttonStyle(.bordered)
+        Button(role: .destructive) {
+            isBulkDeleteShown = true
+        } label: {
+            Label(selected.isEmpty ? "Löschen" : "Löschen (\(selected.count))", systemImage: "trash")
+                .padding(.horizontal, 6)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(.red)
+        .disabled(selected.isEmpty)
+    }
+
+    @ViewBuilder
+    private var normalButtons: some View {
+        Button {
+            selected = []
+            isSelecting = true
+        } label: {
+            Label("Löschen", systemImage: "trash")
+                .padding(.horizontal, 6)
+        }
+        .buttonStyle(.bordered)
+        .disabled(projects.projects.isEmpty)
+        Button {
+            isImporting = true
+        } label: {
+            Label("Importieren", systemImage: "square.and.arrow.down")
+                .padding(.horizontal, 6)
+        }
+        .buttonStyle(.bordered)
+        Button {
+            open(projects.create(), nil)
+        } label: {
+            Label("Neues Projekt", systemImage: "plus")
+                .padding(.horizontal, 6)
+        }
+        .buttonStyle(.borderedProminent)
     }
 
     private var newProjectCard: some View {
@@ -143,12 +211,30 @@ private struct ProjectCard: View {
     let project: Project
     /// Nur damit SwiftUI das Bild nach dem Schließen eines Projekts neu lädt.
     let revision: Int
+    /// Auswahlmodus: Häkchen gesetzt bzw. leer; nil = kein Auswahlmodus
+    var isSelected: Bool? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             thumbnail
                 .aspectRatio(4 / 3, contentMode: .fit)
                 .clipShape(RoundedRectangle(cornerRadius: 14))
+                .overlay {
+                    if isSelected == true {
+                        RoundedRectangle(cornerRadius: 14)
+                            .strokeBorder(Color.red, lineWidth: 3)
+                    }
+                }
+                .overlay(alignment: .topTrailing) {
+                    if let isSelected {
+                        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                            .font(.system(size: 28, weight: .semibold))
+                            .foregroundStyle(isSelected ? Color.red : Color.secondary)
+                            .background(Circle().fill(Color.white).padding(2))
+                            .shadow(color: .black.opacity(0.2), radius: 2)
+                            .padding(10)
+                    }
+                }
                 .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
             Text(project.name)
                 .font(.headline)

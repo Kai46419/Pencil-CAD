@@ -216,8 +216,11 @@ struct SnapIndex {
             let step = Double.pi / 12
             let angle = (atan2(p.y - anchor.y, p.x - anchor.x) / step).rounded() * step
             let d = Point2(cos(angle), sin(angle))
-            let projected = anchor + d * max(simd_dot(p - anchor, d), 0)
-            if simd_distance(projected, p) <= tolerance {
+            // Länge entlang des Winkelstrahls im Rastermaß (Kai: Raster gilt auch für schräge Linien)
+            let along = max(simd_dot(p - anchor, d), 0)
+            let stepped = kinds.contains(.grid) && gridStep > 0 ? (along / gridStep).rounded() * gridStep : along
+            let projected = anchor + d * stepped
+            if simd_distance(anchor + d * along, p) <= tolerance {
                 direction = d
                 result.point = projected
                 result.kind = .angle

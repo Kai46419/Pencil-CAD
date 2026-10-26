@@ -277,24 +277,23 @@ enum HelpTopic: String, CaseIterable, Identifiable {
             ]
         case .news:
             [
-                "Skizze: Fang erkennt parallele und rechtwinklige Richtungen zu vorhandenen Linien sowie die "
-                    + "Verlängerung von Linien; „Automatisch einschränken“ (Fang-Menü) setzt dabei gleich die "
-                    + "Einschränkung. Im Linienzug-Fenster lässt sich die Richtung sperren (waagerecht, senkrecht, "
-                    + "parallel, rechtwinklig).",
-                "Bestimmtheit: vollständig festgelegte Skizzenelemente werden grün (Skizzenpalette).",
-                "Bohrung (Ändern): Einfach, Senkbohrung, Kegelsenkung, Sackloch mit Bohrspitze, Druckzugabe und "
-                    + "Vorlagen für M2 bis M8, Kernlöcher und Gewindeeinsätze.",
-                "Druckprüfung (Prüfen): Überhänge rot, zu dünne Wände orange, offene Kanten, Auflage, Höhe, Gewicht; "
-                    + "„Beste Ausrichtung“ dreht den Körper auf Wunsch druckfertig aufs Bett.",
-                "Körper teilen mit Ebene, mit einem anderen Körper oder mit einer Skizze.",
-                "Konstruktionsebenen: Mittelebene, durch drei Punkte, senkrecht zur Kante, Kante und Winkel. "
-                    + "Achsen: zwei Punkte, zwei Ebenen, Zylinderachse.",
-                "SVG und DXF: über Einfügen als Skizze laden, im Ebenen-Browser (lange drücken) als Datei sichern.",
-                "Doppeltippen auf Bereich oder Fläche wiederholt die letzte Extrusionshöhe. Kopieren in Reihe: "
-                    + "× (je um den Versatz) oder ÷ (aufgeteilt).",
-                "In AR ansehen (Menü …) und Export als USDZ. Gespeicherte Ansichten (rechts), Befehlssuche (Lupe, ⌘K).",
-                "Messen: Radius und Durchmesser runder Flächen, Winkel bzw. Abstand zweier ebener Flächen. Fase auch "
-                    + "mit Abstand und Winkel.",
+                "Linie = ein Strich: nach dem Absetzen ist die Linie fertig, für die nächste neu ansetzen (das "
+                    + "Linienende rastet ein). Zweimal antippen zeichnet ebenfalls genau eine Linie.",
+                "Winkelfang: 15°, 30°, 45° … wird nur rot angezeigt. Erst wenn der Stift dort kurz ruhig bleibt "
+                    + "(ca. 0,4 s), rastet der Winkel ein – jeder ganze Grad dazwischen ist erreichbar.",
+                "Stift drücken während des Zeichnens schaltet den Fang nur für diesen Strich aus und wieder an. "
+                    + "Ohne laufenden Strich öffnet Drücken wie gewohnt das Werkzeugrad.",
+                "Fang-Menü: „Haptik beim Zeichnen“ schaltet das Maßband-Ticken beim Ziehen ab; das Klicken beim "
+                    + "Einrasten bleibt immer an. Raster gilt ab dem ersten Punkt, auch 0,001 mm.",
+                "Neuer Fangpunkt: Schnitt einer Richtung (parallel, rechtwinklig, waagerecht, senkrecht) mit der "
+                    + "Leitlinie eines gemerkten Punkts oder der Verlängerung einer Linie.",
+                "Skizze: X-Achse (rot) und Y-Achse (grün) dezent eingeblendet, deutlicheres Fadenkreuz am Stift "
+                    + "mit Rasterpunkten beim Hineinzoomen. Schilder „H“ und „V“ statt „H/V“.",
+                "Werkzeugleiste in der Skizze: „Ändern“ und „Prüfen“ sind aufklappbare Gruppen.",
+                "Mehrere Körper aus einer Skizze sind jetzt einzelne Körper. Im Ebenen-Browser stehen alle im Ordner "
+                    + "„Volumenkörper“; ältere zusammenhängende Körper trennt „In Einzelkörper trennen“ (lange drücken).",
+                "Startseite: „Löschen“ wählt mehrere Projekte mit Häkchen und löscht sie nach Rückfrage.",
+                "Menü …: im Skizzenmodus „Skizze leeren“, sonst löscht „Alles löschen“ Körper und Skizzen.",
             ]
         }
     }

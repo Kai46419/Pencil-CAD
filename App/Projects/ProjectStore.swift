@@ -86,6 +86,14 @@ final class ProjectStore: ObservableObject {
         reload()
     }
 
+    /// Mehrere Projekte auf einmal löschen (Auswahlmodus der Startseite).
+    func delete(_ ids: Set<UUID>) {
+        for id in ids {
+            if let project = project(id) { try? FileManager.default.removeItem(at: project.folder) }
+        }
+        reload()
+    }
+
     // MARK: Intern
 
     private func write(_ project: Project) {

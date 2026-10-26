@@ -954,6 +954,30 @@ final class ModelStore: ObservableObject {
         commit(result, name: chosen.count == 1 ? "Löschen" : "\(chosen.count) Körper löschen")
     }
 
+    /// Körper aus mehreren getrennten Teilen (ältere Projekte, Importe) in Einzelkörper zerlegen.
+    func separateBody(_ index: Int) {
+        guard bodies.indices.contains(index) else { return }
+        let parts = bodies[index].shape.separatedSolids()
+        guard parts.count > 1 else {
+            message = "„\(bodies[index].name)“ besteht nur aus einem Teil."
+            return
+        }
+        dropPreview()
+        clearSelectionState()
+        var result = bodies
+        let source = result.remove(at: index)
+        for (offset, part) in parts.enumerated() {
+            var piece = source.with(part)
+            if offset > 0 {
+                piece.name = "\(source.name).\(offset + 1)"
+                piece.color = SceneBody.palette[(result.count + offset) % SceneBody.palette.count]
+            }
+            result.insert(piece, at: index + offset)
+        }
+        commit(result, name: "In Einzelkörper trennen")
+        message = "\(parts.count) Einzelkörper – jeder ist jetzt einzeln wählbar."
+    }
+
     func clear() {
         dropPreview()
         commit([], sketches: [], constructions: [], canvases: [], name: "Alles löschen")
@@ -1133,7 +1157,14 @@ final class ModelStore: ObservableObject {
     private func extrusionResult(_ solid: PCKShape, sourceBody: Int?, mode: ExtrudeMode, sketch: UUID? = nil) -> [SceneBody]? {
         switch mode {
         case .newBody:
-            return bodies + [newBody(solid, name: "Körper", sketch: sketch)]
+            // Kai: getrennte Bereiche einer Skizze werden getrennte Körper (einzeln wählbar, z. B. zum Verschieben);
+            // sich berührende Bereiche bleiben ein Körper
+            var result = bodies
+            for part in solid.separatedSolids() {
+                result.append(SceneBody(shape: part, name: "Körper \(result.count + 1)",
+                                        color: SceneBody.palette[result.count % SceneBody.palette.count], sketchID: sketch))
+            }
+            return result
         case .union:
             // Mit dem Körper der Skizzenfläche vereinigen, sonst mit dem zuletzt erzeugten.
             let target = sourceBody.flatMap { bodies.indices.contains($0) ? $0 : nil } ?? bodies.indices.last

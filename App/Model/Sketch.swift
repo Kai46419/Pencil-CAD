@@ -1,4 +1,5 @@
 import Foundation
+import QuartzCore
 import simd
 
 enum SketchTool: String, CaseIterable, Identifiable {
@@ -568,6 +569,24 @@ final class SketchController: ObservableObject {
     @Published var snapHaptics = UserDefaults.standard.object(forKey: "snapHaptics") as? Bool ?? true {
         didSet { UserDefaults.standard.set(snapHaptics, forKey: "snapHaptics") }
     }
+    /// „Haptik beim Zeichnen“ (Kai): Maßband-Ticken, während der Stift entlang von Leitlinien, Winkeln und Kurven
+    /// zieht. Aus = nur noch ein Klick beim Einrasten.
+    @Published var drawHaptics = UserDefaults.standard.object(forKey: "drawHaptics") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(drawHaptics, forKey: "drawHaptics") }
+    }
+    /// Stift drücken während des Zeichnens: Fang nur für diesen Strich aus (Kai)
+    @Published var snapSuspended = false
+
+    /// Winkelfang mit Verweilen (Kai: „Snap-Loch“ 15° → 19° bei kurzen Linien): Ein Winkelschritt bzw. eine
+    /// parallele/rechtwinklige Richtung wird nur angezeigt (Winkelschild rot) und rastet erst ein, wenn der Stift
+    /// kurz ruhig darauf bleibt. Bis dahin bleibt jeder Zwischenwinkel erreichbar.
+    private var angleDwell: (direction: Point2, since: CFTimeInterval)?
+    private var angleAccepted: Point2?
+    /// Letzter Stiftpunkt des laufenden Strichs (für das Einrasten nach dem Verweilen ohne Bewegung)
+    private var lastStrokePoint: (point: Point2, tolerance: Double)?
+    static let angleDwellTime: CFTimeInterval = 0.4
+    /// Richtung, auf die der Stift gerade zielt (fürs rote Winkelschild), solange sie noch nicht eingerastet ist
+    private(set) var angleCandidate = false
 
     // MARK: Zustand
 
@@ -675,6 +694,7 @@ final class SketchController: ObservableObject {
             chainStart = nil
             chainEnd = nil
         }
+        lastStrokePoint = (point, tolerance)
         dragCurrent = snap(point, tolerance: tolerance, anchor: strokeAnchor)
         if strokeSamples.count < 4000 { strokeSamples.append(point) }
         if tool == .polyline, strokeSamples.count % 4 == 0 { strokeShape = recognizedShape() }
@@ -732,6 +752,7 @@ final class SketchController: ObservableObject {
         directionLock = nil
         strokeSamples = []
         strokeShape = nil
+        resetStrokeSnapState()
 
         // Kritzeln über Elemente löscht sie (in allen Zeichenwerkzeugen)
         if Self.scribbleTools.contains(tool), !arcStroke, arcChord == nil, stepBase == nil,
@@ -887,7 +908,17 @@ final class SketchController: ObservableObject {
         return [a, b, b + n * h, a + n * h]
     }
 
+    /// Fang-Ausnahmen des Strichs zurücksetzen (Stift-Drücken, Winkel-Verweilen).
+    private func resetStrokeSnapState() {
+        snapSuspended = false
+        angleDwell = nil
+        angleAccepted = nil
+        angleCandidate = false
+        lastStrokePoint = nil
+    }
+
     func cancelStroke() {
+        resetStrokeSnapState()
         if let drag = selectDrag {
             if drag.hasMoved {
                 entities = drag.original
@@ -1654,24 +1685,26 @@ final class SketchController: ObservableObject {
             strokeRelation = nil
             directionLock = nil
         }
+        // Kai: eine Linie = ein Strich. Nach dem Abheben ist die Linie fertig, es läuft kein Linienzug weiter;
+        // die nächste Linie setzt neu an (der Fang auf das Linienende verbindet sie). Nur Antippen setzt einen
+        // Startpunkt, das zweite Antippen beendet die Linie.
         guard let from = chainEnd else {
-            chainStart = start
             if simd_distance(start, end) > 1e-6 {
                 add(.line(start, end), editable: true)
                 autoConstrainLine(entities.count - 1)
+                chainStart = nil
+                chainEnd = nil
+            } else {
+                chainStart = start
+                chainEnd = end
             }
-            chainEnd = end
             return
         }
         guard simd_distance(from, end) > 1e-6 else { return }
         add(.line(from, end), editable: true)
         autoConstrainLine(entities.count - 1)
-        if let first = chainStart, simd_distance(first, end) < 1e-6 {
-            chainStart = nil
-            chainEnd = nil
-        } else {
-            chainEnd = end
-        }
+        chainStart = nil
+        chainEnd = nil
     }
 
     /// Beziehung, die beim Abheben des Stifts galt (für die automatische Einschränkung)
@@ -1754,7 +1787,7 @@ final class SketchController: ObservableObject {
         case .spline: splinePoints.last
         default: nil
         }
-        hoverSnap = snapEnabled
+        hoverSnap = snapEnabled && !snapSuspended
             ? withParallel(snapIndex.snap(point, tolerance: tolerance, kinds: snapKinds, extra: inputPoints, anchor: anchor,
                                           gridStep: gridStep), raw: point, anchor: anchor, tolerance: tolerance)
             : SnapResult(point: point, kind: nil)
@@ -2948,6 +2981,36 @@ final class SketchController: ObservableObject {
         entitiesChanged()
     }
 
+    /// „Skizze leeren“ im Menü „…“: alle Elemente der offenen Skizze entfernen (Rückgängig holt sie zurück).
+    func clearAll() {
+        if dragStart != nil { cancelStroke() }
+        splinePoints = []
+        chainStart = nil
+        chainEnd = nil
+        arcChord = nil
+        rectangleBase = nil
+        stepBase = nil
+        offsetTarget = nil
+        offsetPreview = []
+        editableIndex = nil
+        selection = []
+        marks = []
+        guideLines = []
+        selectedMarks = []
+        capturedPoints = []
+        parallelLines = []
+        guard !entities.isEmpty else {
+            changed()
+            return
+        }
+        remember()
+        entities = []
+        constraints = []
+        construction = []
+        notice = "Skizze geleert – Rückgängig holt alles zurück."
+        entitiesChanged()
+    }
+
     var selectedMarkPoints: [Point2] {
         selectedMarks.filter { marks.indices.contains($0) }.map { marks[$0] }
     }
@@ -3329,7 +3392,12 @@ final class SketchController: ObservableObject {
             // Übereinanderliegende Zeichen leicht versetzen
             while used.contains(where: { simd_distance($0, position) < 1e-6 }) { position.x += 1e-3 }
             used.append(position)
-            return (position, constraint.kind.badge)
+            // Kai: „H/V“ war missverständlich – waagerecht nur „H“, senkrecht nur „V“
+            switch constraint.variant {
+            case .horizontal, .horizontalPoints: return (position, "H")
+            case .vertical, .verticalPoints: return (position, "V")
+            default: return (position, constraint.kind.badge)
+            }
         }
     }
 
@@ -3477,8 +3545,10 @@ final class SketchController: ObservableObject {
 
     private func snap(_ p: Point2, tolerance pickTolerance: Double, anchor: Point2?) -> Point2 {
         let tolerance = pickTolerance * Self.snapSensitivity
-        guard snapEnabled else {
+        guard snapEnabled, !snapSuspended else {
             activeSnap = nil
+            parallelLines = []
+            inferredRelation = nil
             return p
         }
         if let anchor, directionLock != nil, tool == .polyline || tool == .rectangle && rectangleMode == .threePoint,
@@ -3492,6 +3562,9 @@ final class SketchController: ObservableObject {
                                   raw: p, anchor: anchor, tolerance: tolerance)
         if result.kind == nil || result.kind == .grid, let extended = onExtension(p, tolerance: tolerance) {
             result = extended
+        }
+        if dragStart != nil, !arcActive, let anchor, tool == .polyline || tool == .rectangle && rectangleMode == .threePoint {
+            result = dwelled(result, raw: p, anchor: anchor)
         }
         // Bogen (Finger aufgelegt): Winkelschritte wie 90° zum Linienende bleiben samt Hilfslinie, nur ein Strahl
         // genau entlang der Tangente fällt weg – auf ihm gäbe es keinen Bogen, nur eine gerade Linie
@@ -3524,6 +3597,49 @@ final class SketchController: ObservableObject {
         return result.point
     }
 
+    /// Winkelrichtung erst nach kurzem Verweilen einrasten (siehe angleDwell). Schnittpunkte auf dem Strahl
+    /// (zweite Leitlinie) sind echte Punkte und rasten sofort ein.
+    private func dwelled(_ result: SnapResult, raw p: Point2, anchor: Point2) -> SnapResult {
+        guard result.kind == .angle, result.guides.count < 2,
+              simd_distance(result.point, anchor) > 1e-9 else {
+            angleDwell = nil
+            angleAccepted = nil
+            angleCandidate = false
+            return result
+        }
+        let direction = simd_normalize(result.point - anchor)
+        func same(_ other: Point2) -> Bool { simd_dot(other, direction) > cos(0.05 * .pi / 180) }
+        if let accepted = angleAccepted, same(accepted) {
+            angleCandidate = false
+            return result
+        }
+        angleAccepted = nil
+        let now = CACurrentMediaTime()
+        if let dwell = angleDwell, same(dwell.direction) {
+            if now - dwell.since >= Self.angleDwellTime {
+                angleAccepted = direction
+                angleDwell = nil
+                angleCandidate = false
+                return result
+            }
+        } else {
+            angleDwell = (direction, now)
+            // Bleibt der Stift ganz ruhig, kommen keine neuen Punkte: nach der Wartezeit selbst prüfen
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.angleDwellTime + 0.03) { [weak self] in
+                guard let self, self.dragStart != nil, self.angleDwell != nil, let last = self.lastStrokePoint else { return }
+                self.moved(to: last.point, tolerance: last.tolerance)
+                self.changed()
+            }
+        }
+        // Noch nicht eingerastet: freier Punkt (im Raster), Winkelschild rot, keine automatische Einschränkung
+        angleCandidate = true
+        inferredRelation = nil
+        if snapKinds.contains(.grid), gridStep > 0 {
+            return SnapResult(point: (p / gridStep).rounded(.toNearestOrAwayFromZero) * gridStep, kind: .grid)
+        }
+        return SnapResult(point: p, kind: nil)
+    }
+
     /// Gleicher Winkel wie eine vorhandene Linie: Richtung einrasten und die Linie grün hervorheben.
     private func withParallel(_ snapped: SnapResult, raw p: Point2, anchor: Point2?, tolerance: Double) -> SnapResult {
         parallelLines = []
@@ -3544,8 +3660,10 @@ final class SketchController: ObservableObject {
             let d = simd_normalize(line.b - line.a)
             for (direction, perpendicular) in [(d, false), (Point2(-d.y, d.x), true)] {
                 let along = simd_dot(p - anchor, direction)
-                let projected = anchor + direction * along
-                let distance = simd_distance(projected, p)
+                let distance = simd_distance(anchor + direction * along, p)
+                // Länge entlang der Richtung im Rastermaß
+                let stepped = snapKinds.contains(.grid) && gridStep > 0 ? (along / gridStep).rounded() * gridStep : along
+                let projected = anchor + direction * stepped
                 if distance <= tolerance, distance < (best?.distance ?? .infinity) {
                     best = (distance, projected,
                             perpendicular ? InferredRelation.perpendicular(line.ref) : .parallel(line.ref))
@@ -3714,6 +3832,22 @@ final class SketchController: ObservableObject {
                 if distance <= tolerance, distance < (nearest?.distance ?? .infinity) {
                     nearest = (distance, anchor + d * t, k)
                 }
+            }
+        }
+        // Kai: auch der Schnitt mit der gedachten Verlängerung vorhandener Linien (z. B. rechtwinklig zu einer
+        // Linie bis auf die Verlängerung einer anderen, deren Ende gemerkt ist)
+        func cross(_ u: Point2, _ v: Point2) -> Double { u.x * v.y - u.y * v.x }
+        for line in sketchLines {
+            let e = line.b - line.a
+            let denominator = cross(d, e)
+            guard abs(denominator) > 1e-6 * simd_length(e) else { continue }
+            let t = cross(line.a - anchor, e) / denominator
+            guard t > tolerance else { continue }
+            let distance = abs(t - length)
+            if distance <= tolerance, distance < (nearest?.distance ?? .infinity) {
+                let hit = anchor + d * t
+                let source = simd_distance(line.a, hit) < simd_distance(line.b, hit) ? line.a : line.b
+                nearest = (distance, hit, source)
             }
         }
         guard let nearest else { return result }
