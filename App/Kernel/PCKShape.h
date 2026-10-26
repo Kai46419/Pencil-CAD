@@ -304,6 +304,11 @@ NS_ASSUME_NONNULL_BEGIN
 /// Ebene einer planaren Fläche als [ox, oy, oz, nx, ny, nz], Normale zeigt aus dem Körper heraus.
 /// nil bei gekrümmten Flächen.
 - (nullable NSArray<NSNumber *> *)planeOfFace:(NSInteger)face NS_SWIFT_NAME(plane(ofFace:));
+/// Punkt einer beliebigen Fläche (eben oder gewölbt), der point am nächsten liegt, mit der Flächennormale dort:
+/// [px, py, pz, nx, ny, nz], Normale zeigt aus dem Körper heraus (Gewindebohrung auf Rundungen).
+/// nil bei Fehler bzw. an entarteten Stellen (z. B. Kugelpol) oder ohne Kernel.
+- (nullable NSArray<NSNumber *> *)surfacePointOfFace:(NSInteger)face near:(simd_double3)point
+    NS_SWIFT_NAME(surfacePoint(ofFace:near:));
 
 /// Trianguliert den Körper. deflection = maximale Sehnenabweichung in mm.
 - (PCKMesh *)triangulateWithDeflection:(double)deflection NS_SWIFT_NAME(triangulate(deflection:));

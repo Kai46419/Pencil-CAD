@@ -2752,18 +2752,22 @@ extension ModelStore {
         var preview = bodies
         for hole in holes {
             let body = hole.face.body
-            guard bodies.indices.contains(body), let plane = plane(of: hole.face) else {
-                message = "Bohrungen nur auf ebenen Flächen."
+            // Eben oder gewölbt: Punkt und Normale am Tippunkt (SurfaceHoles.swift)
+            guard bodies.indices.contains(body), let spot = surfacePoint(of: hole.face, near: hole.point) else {
+                message = "An dieser Stelle der Fläche ist keine Bohrung möglich."
                 dropPreview()
                 return
             }
             // Normale zeigt aus dem Körper heraus; gebohrt wird entgegen
-            let n = simd_normalize(plane.normal)
+            let n = spot.normal
+            let point = spot.point
             // Gewindebohrung: nur so lang wie nötig (jede Umdrehung kostet Rechenzeit)
-            let reach = spec.thread == nil ? sceneExtent * 2 + 10 : threadReach(body: body, from: hole.point, direction: -n)
+            let reach = spec.thread == nil ? sceneExtent * 2 + 10 : threadReach(body: body, from: point, direction: -n)
             // Gewindebohrung: Werkzeug ist ein Verbund (Gänge, Kernloch, Senkung) – in einem Schritt mit Fuzzy-Wert
             let shape = preview[body].shape
-            guard let tool = spec.tool(at: hole.point, outward: n, through: reach),
+            // Nach innen gewölbte Flächen: Werkzeug beginnt so hoch, dass es sauber aus der Fläche austritt
+            let lift = holeLift(shape, at: point, outward: n, radius: spec.toolRadius, planar: spot.planar)
+            guard let tool = spec.tool(at: point, outward: n, through: reach, lift: lift),
                   let cut = spec.thread == nil ? shape.cutting(tool) : shape.cutting(tool, fuzzy: threadCutFuzzy) else {
                 message = "Bohrung an dieser Stelle nicht möglich."
                 dropPreview()
@@ -2771,10 +2775,11 @@ extension ModelStore {
             }
             preview[body] = preview[body].with(cut)
             // Gewinde als Eigenschaft am Körper (ThreadNotes.swift)
-            if let note = spec.threadNote(at: hole.point, outward: n, reach: reach) { preview[body].addThread(note) }
+            if let note = spec.threadNote(at: point, outward: n, reach: reach) { preview[body].addThread(note) }
         }
         message = holes.count == 1 ? spec.summary : "\(holes.count) Bohrungen · \(spec.summary)"
-        showPreview(preview, name: holes.count == 1 ? "Bohrung" : "Bohrungen")
+        let kind: String = spec.thread == nil ? "Bohrung" : "Gewindebohrung"
+        showPreview(preview, name: holes.count == 1 ? kind : "\(kind)en")
     }
 
     // MARK: Skizzen bewegen
@@ -2880,8 +2885,9 @@ struct HoleSpec: Equatable {
     }
 
     /// Werkzeugkörper der Bohrung: beginnt knapp über der Fläche bei point und geht entgegen outward.
-    func tool(at point: SIMD3<Double>, outward n: SIMD3<Double>, through reach: Double) -> PCKShape? {
-        let lift = 0.05
+    /// lift: Abstand über der Fläche (Tangentialebene), an nach innen gewölbten Flächen größer (holeLift).
+    func tool(at point: SIMD3<Double>, outward n: SIMD3<Double>, through reach: Double,
+              lift: Double = 0.05) -> PCKShape? {
         let top = point + n * lift
         let r = (diameter + clearance) / 2
         guard r > 0 else { return nil }

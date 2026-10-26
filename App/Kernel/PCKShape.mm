@@ -59,6 +59,8 @@
 #include <Geom_BSplineCurve.hxx>
 #include <Geom_Ellipse.hxx>
 #include <Geom_TrimmedCurve.hxx>
+#include <Geom_Surface.hxx>
+#include <ShapeAnalysis_Surface.hxx>
 #include <ShapeFix_Face.hxx>
 #include <ShapeFix_ShapeTolerance.hxx>
 #include <ShapeFix_Solid.hxx>
@@ -2518,6 +2520,53 @@ static TopoDS_Shape variableFilletOnce(const TopoDS_Shape &shape, const std::vec
     return @[@(origin.X()), @(origin.Y()), @(origin.Z()), @(normal.X()), @(normal.Y()), @(normal.Z())];
 }
 
+- (nullable NSArray<NSNumber *> *)surfacePointOfFace:(NSInteger)index near:(simd_double3)point {
+    if (index < 1 || index > _faces.Extent()) return nil;
+    try {
+        const TopoDS_Face face = TopoDS::Face(_faces(int(index)));
+        const Handle(Geom_Surface) geometry = BRep_Tool::Surface(face);
+        if (geometry.IsNull()) return nil;
+        // UV des nächsten Flächenpunkts (Lage der Fläche ist in geometry schon enthalten)
+        ShapeAnalysis_Surface analysis(geometry);
+        const gp_Pnt2d uv = analysis.ValueOfUV(gp_Pnt(point.x, point.y, point.z), 1e-6);
+        BRepAdaptor_Surface surface(face);
+        double u = uv.X();
+        double v = uv.Y();
+        gp_Pnt p;
+        gp_Vec du;
+        gp_Vec dv;
+        surface.D1(u, v, p, du, dv);
+        gp_Vec n = du.Crossed(dv);
+        if (n.Magnitude() < 1e-12) {
+            // Entartete Stelle (Kugelpol, Kegelspitze): ein Stück zur Mitte des Parameterbereichs rücken
+            const double um = 0.5 * (surface.FirstUParameter() + surface.LastUParameter());
+            const double vm = 0.5 * (surface.FirstVParameter() + surface.LastVParameter());
+            u += 1e-3 * (um - u);
+            v += 1e-3 * (vm - v);
+            surface.D1(u, v, p, du, dv);
+            n = du.Crossed(dv);
+            if (n.Magnitude() < 1e-12) return nil;
+        }
+        gp_Dir normal(n);
+        if (face.Orientation() == TopAbs_REVERSED) normal.Reverse();
+        // Wie planeOfFace: prüfen, auf welcher Seite der Körper liegt, damit die Normale sicher nach außen zeigt
+        try {
+            const double eps = 0.02;
+            const gp_Pnt outside(p.X() + normal.X() * eps, p.Y() + normal.Y() * eps, p.Z() + normal.Z() * eps);
+            const gp_Pnt inside(p.X() - normal.X() * eps, p.Y() - normal.Y() * eps, p.Z() - normal.Z() * eps);
+            BRepClass3d_SolidClassifier atOutside(_shape, outside, 1e-6);
+            BRepClass3d_SolidClassifier atInside(_shape, inside, 1e-6);
+            if (atOutside.State() == TopAbs_IN && atInside.State() == TopAbs_OUT) normal.Reverse();
+        } catch (...) {
+        }
+        return @[@(p.X()), @(p.Y()), @(p.Z()), @(normal.X()), @(normal.Y()), @(normal.Z())];
+    } catch (const Standard_Failure &) {
+        return nil;
+    } catch (...) {
+        return nil;
+    }
+}
+
 - (PCKMesh *)triangulateWithDeflection:(double)deflection {
     @synchronized (self) {
         if (_cachedMesh != nil && _cachedDeflection == deflection) return _cachedMesh;
@@ -3199,6 +3248,16 @@ static bool isSoftMeshEdge(const TopTools_ListOfShape &faces) {
     if (face < 1 || size_t(face) > _fallback.planes.size() || !_fallback.planar[face - 1]) return nil;
     const auto &p = _fallback.planes[face - 1];
     return @[@(p[0]), @(p[1]), @(p[2]), @(p[3]), @(p[4]), @(p[5])];
+}
+
+- (nullable NSArray<NSNumber *> *)surfacePointOfFace:(NSInteger)face near:(simd_double3)point {
+    // Ohne Kernel nur ebene Flächen: Punkt in die Ebene legen
+    NSArray<NSNumber *> *plane = [self planeOfFace:face];
+    if (plane == nil) return nil;
+    const double nx = plane[3].doubleValue, ny = plane[4].doubleValue, nz = plane[5].doubleValue;
+    const double d = (point.x - plane[0].doubleValue) * nx + (point.y - plane[1].doubleValue) * ny
+        + (point.z - plane[2].doubleValue) * nz;
+    return @[@(point.x - d * nx), @(point.y - d * ny), @(point.z - d * nz), @(nx), @(ny), @(nz)];
 }
 
 - (PCKMesh *)triangulateWithDeflection:(double)deflection {

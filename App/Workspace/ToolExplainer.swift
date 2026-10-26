@@ -77,7 +77,7 @@ enum ToolExplainer {
         case .translate:
             return "Körper antippen, dann Start- und Zielpunkt: er wandert genau diese Strecke (mit „Kopieren“ als Kopie)."
         case .hole:
-            return "Ebene Fläche antippen: Bohrung für Schraube, Gewindeeinsatz oder mit Gewinde, Senkung wählbar."
+            return "Fläche antippen (eben oder gewölbt): Bohrung für Schraube, Gewindeeinsatz oder mit Gewinde, Senkung wählbar."
         case .printCheck:
             return "Zeigt Überhänge, zu dünne Wände und eine gute Druckausrichtung für den 3D-Druck."
         case .meshSculpt:
@@ -90,7 +90,7 @@ enum ToolExplainer {
         case .standard: "Schrauben, Muttern, Scheiben oder Lager nach Norm einfügen."
         case .template: "Fertige Vorlagen wie Gehäuse oder Zahnrad einfügen und anpassen."
         case .helix: "Feder oder Spirale um eine Achse erzeugen."
-        case .thread: "Runde Fläche antippen: Bolzen bekommen ein Außen-, Bohrungen ein Innengewinde nach Norm."
+        case .thread: "Bolzen bekommen ein Außen-, Bohrungen ein Innengewinde nach Norm; jede andere Fläche eine Gewindebohrung am Tippunkt."
         case .thinLines: "Skizzenlinien (auch offene) werden zu einer Wand mit fester Dicke."
         case .draft: "Seitenflächen antippen: sie werden um einen Winkel geneigt (Entformungsschräge)."
         }
