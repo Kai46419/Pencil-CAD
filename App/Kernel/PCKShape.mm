@@ -20,6 +20,9 @@
 #include <BRepClass3d_SolidClassifier.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
+#include <BRepAlgoAPI_Splitter.hxx>
+#include <BRepCheck_Analyzer.hxx>
+#include <BRepOffset_MakeOffset.hxx>
 #include <BRepBuilderAPI_GTransform.hxx>
 #include <BRepGProp.hxx>
 #include <BRepOffsetAPI_MakePipe.hxx>
@@ -73,6 +76,7 @@
 #include <TopTools_ListOfShape.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Compound.hxx>
+#include <TopoDS_Solid.hxx>
 #include <TopoDS_Shape.hxx>
 #include <gp_Ax1.hxx>
 #include <gp_Circ.hxx>
@@ -736,11 +740,229 @@ static TopoDS_Shape unified(const TopoDS_Shape &shape) {
     }
 }
 
+- (nullable PCKShape *)extrudingFaces:(NSArray<NSNumber *> *)indices distance:(double)distance {
+    if (distance == 0 || indices.count == 0) return nil;
+    if (indices.count == 1) return [self extrudingFace:indices[0].integerValue distance:distance];
+    try {
+        const double overlap = 0.01;
+        const double start = distance > 0 ? -overlap : overlap;
+        BRep_Builder builder;
+        TopoDS_Compound tools;
+        builder.MakeCompound(tools);
+        for (NSNumber *number in indices) {
+            NSArray<NSNumber *> *plane = [self planeOfFace:number.integerValue];
+            if (plane == nil) return nil;
+            const gp_Vec normal(plane[3].doubleValue, plane[4].doubleValue, plane[5].doubleValue);
+            gp_Trsf shift;
+            shift.SetTranslation(normal * start);
+            const TopoDS_Shape face = _faces(number.intValue).Moved(TopLoc_Location(shift));
+            BRepPrimAPI_MakePrism prism(face, normal * (distance - start));
+            if (!prism.IsDone()) return nil;
+            builder.Add(tools, prism.Shape());
+        }
+        TopoDS_Shape result;
+        if (distance > 0) {
+            BRepAlgoAPI_Fuse op(_shape, tools);
+            if (!op.IsDone()) return nil;
+            result = op.Shape();
+        } else {
+            BRepAlgoAPI_Cut op(_shape, tools);
+            if (!op.IsDone()) return nil;
+            result = op.Shape();
+        }
+        return [[PCKShape alloc] initWithShape:unified(result)];
+    } catch (...) {
+        return nil;
+    }
+}
+
+- (nullable PCKShape *)offsettingFaces:(NSArray<NSNumber *> *)indices distance:(double)distance {
+    if (distance == 0 || indices.count == 0) return nil;
+    try {
+        // Alle übrigen Flächen mit Versatz 0, nur die gewählten mit distance (Verlängern der Nachbarn per Schnitt)
+        BRepOffset_MakeOffset offset;
+        offset.Initialize(_shape, 0.0, 1e-6, BRepOffset_Skin, Standard_False, Standard_False, GeomAbs_Intersection,
+                          Standard_False);
+        for (NSNumber *number in indices) {
+            if (number.integerValue < 1 || number.integerValue > _faces.Extent()) return nil;
+            offset.SetOffsetOnFace(TopoDS::Face(_faces(number.intValue)), distance);
+        }
+        offset.MakeOffsetShape();
+        if (offset.IsDone() && !offset.Shape().IsNull()) {
+            TopoDS_Shape solid;
+            for (TopExp_Explorer it(offset.Shape(), TopAbs_SOLID); it.More(); it.Next()) {
+                solid = it.Current();
+                break;
+            }
+            if (!solid.IsNull() && BRepCheck_Analyzer(solid).IsValid()) {
+                return [[PCKShape alloc] initWithShape:unified(solid)];
+            }
+        }
+    } catch (...) {
+    }
+    // Ebene Flächen: wie Extrudieren (ergibt bei senkrechten Nachbarflächen dasselbe)
+    return [self extrudingFaces:indices distance:distance];
+}
+
+- (nullable PCKShape *)replacingFaces:(NSArray<NSNumber *> *)indices planeOrigin:(simd_double3)origin
+                          planeNormal:(simd_double3)normalIn {
+    if (indices.count == 0 || simd_length(normalIn) == 0) return nil;
+    try {
+        Bnd_Box box;
+        BRepBndLib::Add(_shape, box);
+        const double diagonal = box.IsVoid() ? 1000 : std::sqrt(box.SquareExtent());
+        const gp_Pnt p0 = toPnt(origin);
+        const gp_Dir m = toDir(normalIn);
+        TopoDS_Shape result = _shape;
+        bool changed = false;
+        for (NSNumber *number in indices) {
+            NSArray<NSNumber *> *plane = [self planeOfFace:number.integerValue];
+            if (plane == nil) return nil;
+            const gp_Vec n(plane[3].doubleValue, plane[4].doubleValue, plane[5].doubleValue);
+            const TopoDS_Face face = TopoDS::Face(_faces(number.intValue));
+            GProp_GProps props;
+            BRepGProp::SurfaceProperties(face, props);
+            const gp_Pnt c = props.CentreOfMass();
+            const double denominator = n.Dot(gp_Vec(m));
+            if (std::abs(denominator) < 1e-6) return nil;
+            const double t = gp_Vec(c, p0).Dot(gp_Vec(m)) / denominator;
+            if (std::abs(t) < 1e-7) continue;
+            // Bereich zwischen Fläche und Zielebene: Prisma der Fläche (nach vorn zum Verlängern, nach hinten zum
+            // Kürzen) geschnitten mit dem Halbraum, in dem die Fläche liegt
+            const double length = std::abs(t) + 2 * diagonal + 1;
+            const gp_Vec along = t > 0 ? n : -n;
+            gp_Trsf shift;
+            shift.SetTranslation(along * -0.01);
+            BRepPrimAPI_MakePrism prism(face.Moved(TopLoc_Location(shift)), along * length);
+            if (!prism.IsDone()) return nil;
+            BRepBuilderAPI_MakeFace target(gp_Pln(p0, m));
+            if (!target.IsDone()) return nil;
+            BRepPrimAPI_MakeHalfSpace half(target.Face(), c);
+            BRepAlgoAPI_Common region(prism.Shape(), half.Solid());
+            if (!region.IsDone()) return nil;
+            if (t > 0) {
+                BRepAlgoAPI_Fuse op(result, region.Shape());
+                if (!op.IsDone()) return nil;
+                result = op.Shape();
+            } else {
+                BRepAlgoAPI_Cut op(result, region.Shape());
+                if (!op.IsDone()) return nil;
+                result = op.Shape();
+            }
+            changed = true;
+        }
+        if (!changed) return nil;
+        return [[PCKShape alloc] initWithShape:unified(result)];
+    } catch (...) {
+        return nil;
+    }
+}
+
+- (nullable NSArray<NSNumber *> *)cylinderOfFace:(NSInteger)index {
+    if (index < 1 || index > _faces.Extent()) return nil;
+    try {
+        BRepAdaptor_Surface surface(TopoDS::Face(_faces(int(index))));
+        if (surface.GetType() != GeomAbs_Cylinder) return nil;
+        const gp_Cylinder cylinder = surface.Cylinder();
+        const gp_Pnt o = cylinder.Axis().Location();
+        const gp_Dir d = cylinder.Axis().Direction();
+        return @[@(o.X()), @(o.Y()), @(o.Z()), @(d.X()), @(d.Y()), @(d.Z()), @(cylinder.Radius())];
+    } catch (...) {
+        return nil;
+    }
+}
+
++ (nullable PCKShape *)ruledSolidBetween:(NSArray<NSNumber *> *)first and:(NSArray<NSNumber *> *)second {
+    if (first.count != second.count || first.count < 9 || first.count % 3 != 0) return nil;
+    try {
+        BRepOffsetAPI_ThruSections loft(Standard_True, Standard_True);
+        for (NSArray<NSNumber *> *points in @[first, second]) {
+            BRepBuilderAPI_MakePolygon polygon;
+            for (NSUInteger i = 0; i + 2 < points.count; i += 3) {
+                polygon.Add(gp_Pnt(points[i].doubleValue, points[i + 1].doubleValue, points[i + 2].doubleValue));
+            }
+            polygon.Close();
+            if (!polygon.IsDone()) return nil;
+            loft.AddWire(polygon.Wire());
+        }
+        loft.CheckCompatibility(Standard_False);
+        loft.Build();
+        if (!loft.IsDone()) return nil;
+        return [[PCKShape alloc] initWithShape:loft.Shape()];
+    } catch (...) {
+        return nil;
+    }
+}
+
+- (nullable PCKShape *)imprinting:(PCKShape *)tool {
+    try {
+        BRepAlgoAPI_Splitter splitter;
+        TopTools_ListOfShape arguments, tools;
+        arguments.Append(_shape);
+        tools.Append(tool->_shape);
+        splitter.SetArguments(arguments);
+        splitter.SetTools(tools);
+        splitter.Build();
+        if (!splitter.IsDone()) return nil;
+        // Nicht zusammenfassen (unified würde die neuen Teilflächen wieder verschmelzen)
+        std::vector<TopoDS_Shape> solids;
+        for (TopExp_Explorer it(splitter.Shape(), TopAbs_SOLID); it.More(); it.Next()) solids.push_back(it.Current());
+        if (solids.size() != 1) return nil;
+        return [[PCKShape alloc] initWithShape:solids[0]];
+    } catch (...) {
+        return nil;
+    }
+}
+
 - (nullable PCKShape *)shellingRemovingFace:(NSInteger)face thickness:(double)thickness {
     if (face < 1 || face > _faces.Extent() || thickness <= 0) return nil;
     try {
         TopTools_ListOfShape removed;
         removed.Append(_faces(int(face)));
+        BRepOffsetAPI_MakeThickSolid maker;
+        maker.MakeThickSolidByJoin(_shape, removed, -thickness, 1e-3);
+        maker.Build();
+        if (!maker.IsDone()) return nil;
+        return [[PCKShape alloc] initWithShape:maker.Shape()];
+    } catch (...) {
+        return nil;
+    }
+}
+
+- (nullable PCKShape *)shellingRemovingFaces:(NSArray<NSNumber *> *)indices thickness:(double)thickness {
+    if (thickness <= 0) return nil;
+    try {
+        if (indices.count == 0) {
+            // Keine offene Fläche: Hohlkörper (Innenhaut um die Wandstärke versetzt, Kammer geschlossen)
+            BRepOffset_MakeOffset offset;
+            offset.Initialize(_shape, -thickness, 1e-6, BRepOffset_Skin, Standard_False, Standard_False,
+                              GeomAbs_Intersection, Standard_False);
+            offset.MakeOffsetShape();
+            if (!offset.IsDone() || offset.Shape().IsNull()) return nil;
+            TopoDS_Shape inner;
+            for (TopExp_Explorer it(offset.Shape(), TopAbs_SHELL); it.More(); it.Next()) {
+                inner = it.Current();
+                break;
+            }
+            TopoDS_Shape outer;
+            for (TopExp_Explorer it(_shape, TopAbs_SHELL); it.More(); it.Next()) {
+                outer = it.Current();
+                break;
+            }
+            if (inner.IsNull() || outer.IsNull()) return nil;
+            BRep_Builder builder;
+            TopoDS_Solid hollow;
+            builder.MakeSolid(hollow);
+            builder.Add(hollow, outer);
+            builder.Add(hollow, inner.Reversed());
+            if (!BRepCheck_Analyzer(hollow).IsValid()) return nil;
+            return [[PCKShape alloc] initWithShape:hollow];
+        }
+        TopTools_ListOfShape removed;
+        for (NSNumber *number in indices) {
+            if (number.integerValue < 1 || number.integerValue > _faces.Extent()) return nil;
+            removed.Append(_faces(number.intValue));
+        }
         BRepOffsetAPI_MakeThickSolid maker;
         maker.MakeThickSolidByJoin(_shape, removed, -thickness, 1e-3);
         maker.Build();
@@ -834,6 +1056,30 @@ static TopoDS_Shape unified(const TopoDS_Shape &shape) {
         return std::abs(props.Mass());
     } catch (...) {
         return 0;
+    }
+}
+
+- (nullable NSArray<NSNumber *> *)centerOfMass {
+    try {
+        GProp_GProps props;
+        BRepGProp::VolumeProperties(_shape, props);
+        if (std::abs(props.Mass()) < 1e-9) return nil;
+        const gp_Pnt c = props.CentreOfMass();
+        return @[@(c.X()), @(c.Y()), @(c.Z())];
+    } catch (...) {
+        return nil;
+    }
+}
+
+- (nullable NSArray<NSNumber *> *)minimumDistanceTo:(PCKShape *)other {
+    try {
+        BRepExtrema_DistShapeShape distance(_shape, other->_shape);
+        if (!distance.IsDone() || distance.NbSolution() < 1) return nil;
+        const gp_Pnt a = distance.PointOnShape1(1);
+        const gp_Pnt b = distance.PointOnShape2(1);
+        return @[@(distance.Value()), @(a.X()), @(a.Y()), @(a.Z()), @(b.X()), @(b.Y()), @(b.Z())];
+    } catch (...) {
+        return nil;
     }
 }
 
@@ -1007,6 +1253,30 @@ static std::vector<TopoDS_Edge> edgesFromNumbers(const TopTools_IndexedMapOfShap
 - (nullable PCKShape *)chamferingEdges:(NSArray<NSNumber *> *)numbers distance:(double)distance {
     const TopoDS_Shape result = blendEdges(_shape, edgesFromNumbers(_edges, numbers), distance, true);
     return result.IsNull() ? nil : [[PCKShape alloc] initWithShape:result];
+}
+
+- (nullable PCKShape *)chamferingEdges:(NSArray<NSNumber *> *)numbers distance:(double)distance
+                             distance2:(double)distance2 {
+    if (std::abs(distance - distance2) < 1e-9) return [self chamferingEdges:numbers distance:distance];
+    if (distance <= 0 || distance2 <= 0) return nil;
+    try {
+        // Zwei Abstände: distance auf der ersten Nachbarfläche der Kante, distance2 auf der anderen
+        TopTools_IndexedDataMapOfShapeListOfShape edgeFaces;
+        TopExp::MapShapesAndAncestors(_shape, TopAbs_EDGE, TopAbs_FACE, edgeFaces);
+        BRepFilletAPI_MakeChamfer chamfer(_shape);
+        int added = 0;
+        for (const auto &edge : edgesFromNumbers(_edges, numbers)) {
+            if (!edgeFaces.Contains(edge) || edgeFaces.FindFromKey(edge).IsEmpty()) continue;
+            chamfer.Add(distance, distance2, edge, TopoDS::Face(edgeFaces.FindFromKey(edge).First()));
+            added += 1;
+        }
+        if (added == 0) return nil;
+        chamfer.Build();
+        if (!chamfer.IsDone() || chamfer.Shape().IsNull()) return nil;
+        return [[PCKShape alloc] initWithShape:chamfer.Shape()];
+    } catch (...) {
+        return nil;
+    }
 }
 
 - (double)maximumBlendForEdges:(NSArray<NSNumber *> *)numbers upTo:(double)limit chamfer:(BOOL)chamfer {
@@ -1410,7 +1680,49 @@ static std::vector<TopoDS_Edge> edgesFromNumbers(const TopTools_IndexedMapOfShap
     return nil;
 }
 
+- (nullable PCKShape *)extrudingFaces:(NSArray<NSNumber *> *)faces distance:(double)distance {
+    return nil;
+}
+
+- (nullable PCKShape *)offsettingFaces:(NSArray<NSNumber *> *)faces distance:(double)distance {
+    return nil;
+}
+
+- (nullable PCKShape *)replacingFaces:(NSArray<NSNumber *> *)faces planeOrigin:(simd_double3)origin
+                          planeNormal:(simd_double3)normal {
+    return nil;
+}
+
+- (nullable NSArray<NSNumber *> *)cylinderOfFace:(NSInteger)face {
+    return nil;
+}
+
++ (nullable PCKShape *)ruledSolidBetween:(NSArray<NSNumber *> *)first and:(NSArray<NSNumber *> *)second {
+    return nil;
+}
+
+- (nullable PCKShape *)imprinting:(PCKShape *)tool {
+    return nil;
+}
+
 - (nullable PCKShape *)shellingRemovingFace:(NSInteger)face thickness:(double)thickness {
+    return nil;
+}
+
+- (nullable PCKShape *)shellingRemovingFaces:(NSArray<NSNumber *> *)faces thickness:(double)thickness {
+    return nil;
+}
+
+- (nullable NSArray<NSNumber *> *)centerOfMass {
+    return nil;
+}
+
+- (nullable NSArray<NSNumber *> *)minimumDistanceTo:(PCKShape *)other {
+    return nil;
+}
+
+- (nullable PCKShape *)chamferingEdges:(NSArray<NSNumber *> *)edges distance:(double)distance
+                             distance2:(double)distance2 {
     return nil;
 }
 

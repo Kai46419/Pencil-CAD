@@ -144,7 +144,7 @@ enum ToolTips {
     private static let texts: [String: String] = [
         // Werkzeuggruppen (3D)
         "Skizze": "Neue Skizze beginnen: Ebene oder ebene Körperfläche antippen, dann mit dem Stift zeichnen.",
-        "Einfügen": "Grundkörper (Quader, Zylinder, Kugel …), STEP-Datei oder ein Bild als Vorlage einfügen.",
+        "Einfügen": "STEP-Datei, Bild als Vorlage, Körper eines anderen Projekts oder eine Variable einfügen.",
         "Konstruieren": "Hilfsebenen, -achsen und -punkte, z. B. eine versetzte Ebene zum Skizzieren.",
         "Transformation": "Körper oder Skizzen verschieben, drehen, spiegeln, skalieren, ausrichten oder als Muster vervielfältigen.",
         "Tools": "Kanten abrunden/fasen, Schale, boolesche Verknüpfung, Drehen, Sweep, Loft, Körper teilen.",
@@ -186,6 +186,14 @@ enum ToolTips {
         "Polygon": "Regelmäßiges Vieleck von der Mitte aus; Eckenzahl unten einstellen. Radius bis Ecke (innen) oder bis Kantenmitte (außen) wie in Fusion 360.",
         "Projizieren": "Körperkanten oder Flächenränder in die Skizze übernehmen.",
         "Kante versetzen": "Kontur oder Kurve antippen und um einen Abstand parallel versetzen.",
+        "Fläche versetzen": "Flächen antippen (mehrere, auch runde) und am Pfeil ziehen: Nachbarflächen wachsen mit. „Gesamt“ setzt das Gesamtmaß des Körpers, „Durchmesser“ macht Zapfen bzw. Bohrungen genau so groß.",
+        "Fläche ersetzen": "Flächen antippen, dann unter „Ziel“ eine ebene Fläche: die Flächen werden bis an deren Ebene verlängert oder gekürzt.",
+        "Umhüllen und Prägen": "Skizzenbereiche (Text, Logo) antippen, dann eine Zylinderfläche: das Motiv legt sich um den Zylinder und wird erhaben geprägt oder eingraviert.",
+        "Kante abdrücken": "Skizzenbereiche, die auf einer Körperfläche liegen, als Kanten auf den Körper übertragen – danach lässt sich der Teil der Fläche einzeln ziehen.",
+        "Übersetzen": "Körper antippen, dann Start- und Zielpunkt (rastet an Ecken und Kantenmitten): der Körper wandert genau so weit. Mit „Kopieren“ bleibt das Original stehen.",
+        "Projekt": "Körper eines anderen Projekts als Kopie einfügen (landen in einem eigenen Ordner).",
+        "Variable": "Benannte Werte (z. B. wand = 2 mm), die in jedem Zahlenfeld und in Skizzenmaßen verwendet werden können.",
+        "Hilfe": "Kurzanleitungen zu Gesten, Skizzieren, Modellieren, Formeln und KI-Assistent.",
         "Mehr": "Projizieren, Spiegeln, Rechteck- und Kreismuster, Punkt und Text. Antippen startet das zuletzt gewählte.",
         "Alle Werkzeuge": "Zeigt wieder alle Werkzeuggruppen (Erstellen, Ändern, Transformieren …).",
         "Punkt": "Einzelnen Punkt setzen, z. B. als Bezug für Einschränkungen.",

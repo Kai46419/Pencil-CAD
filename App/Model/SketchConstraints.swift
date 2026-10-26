@@ -134,6 +134,8 @@ struct SketchConstraint: Codable, Hashable {
     var variant: Variant
     /// Treibendes Maß gelöst (rotes Schloss): bleibt sichtbar, wird aber nicht eingehalten
     var isSuspended = false
+    /// Formel mit Projektvariablen (z. B. „breite / 2“); das Maß folgt, wenn sich die Variablen ändern
+    var expression: String?
 
     var kind: ConstraintKind {
         switch variant {
@@ -161,15 +163,19 @@ struct SketchConstraint: Codable, Hashable {
         }
     }
 
-    /// Dasselbe Maß mit neuem Wert.
+    /// Dasselbe Maß mit neuem Wert (wieder fest, die Formel bleibt verknüpft).
     func withDimensionValue(_ newValue: Double) -> SketchConstraint {
+        let changed: Variant
         switch variant {
-        case .distance(let a, let b, _): SketchConstraint(variant: .distance(a, b, value: newValue))
-        case .pointLineDistance(let p, let c, _): SketchConstraint(variant: .pointLineDistance(p, c, value: newValue))
-        case .angle(let a, let b, _): SketchConstraint(variant: .angle(a, b, degrees: newValue))
-        case .radius(let c, _, let diameter): SketchConstraint(variant: .radius(c, value: newValue, diameter: diameter))
-        default: self
+        case .distance(let a, let b, _): changed = .distance(a, b, value: newValue)
+        case .pointLineDistance(let p, let c, _): changed = .pointLineDistance(p, c, value: newValue)
+        case .angle(let a, let b, _): changed = .angle(a, b, degrees: newValue)
+        case .radius(let c, _, let diameter): changed = .radius(c, value: newValue, diameter: diameter)
+        default: return self
         }
+        var result = SketchConstraint(variant: changed)
+        result.expression = expression
+        return result
     }
 
     var entities: [Int] {
@@ -226,10 +232,11 @@ struct SketchConstraint: Codable, Hashable {
         case .angle(let a, let b, let degrees): v = c(a).flatMap { a in c(b).map { .angle(a, $0, degrees: degrees) } }
         case .radius(let a, let value, let diameter): v = c(a).map { .radius($0, value: value, diameter: diameter) }
         }
-        let suspended = isSuspended
+        let suspended = isSuspended, expression = expression
         return v.map { variant -> SketchConstraint in
             var constraint = SketchConstraint(variant: variant)
             constraint.isSuspended = suspended
+            constraint.expression = expression
             return constraint
         }
     }
@@ -244,20 +251,22 @@ enum ConstraintCurve {
 
 extension SketchConstraint {
     private enum CodingKeys: String, CodingKey {
-        case variant, isSuspended
+        case variant, isSuspended, expression
     }
 
-    /// Ältere Skizzen kennen isSuspended noch nicht
+    /// Ältere Skizzen kennen isSuspended und expression noch nicht
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.init(variant: try container.decode(Variant.self, forKey: .variant))
         isSuspended = try container.decodeIfPresent(Bool.self, forKey: .isSuspended) ?? false
+        expression = try container.decodeIfPresent(String.self, forKey: .expression)
     }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(variant, forKey: .variant)
         if isSuspended { try container.encode(isSuspended, forKey: .isSuspended) }
+        try container.encodeIfPresent(expression, forKey: .expression)
     }
 }
 

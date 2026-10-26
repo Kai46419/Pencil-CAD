@@ -7,17 +7,24 @@ struct AIPanel: View {
     @FocusState private var isFocused: Bool
     @State private var isEnteringKey = false
     @State private var newKey = ""
+    @StateObject private var speech = SpeechInput()
 
     var body: some View {
         Card {
             VStack(alignment: .leading, spacing: 10) {
                 header
                 inputRow
+                if let error = speech.error {
+                    Label(error, systemImage: "mic.slash")
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                }
                 status
             }
             .frame(width: 440)
         }
         .onAppear { isFocused = true }
+        .onDisappear { speech.stop() }
         .alert("API-Schlüssel für Claude", isPresented: $isEnteringKey) {
             SecureField("sk-ant-…", text: $newKey)
             Button("Abbrechen", role: .cancel) { newKey = "" }
@@ -82,6 +89,21 @@ struct AIPanel: View {
                 .submitLabel(.send)
                 .onSubmit(assistant.send)
                 .disabled(assistant.isWorking)
+            // Mikrofon: Auftrag sprechen; nach dem Satzende wird er gleich abgeschickt
+            Button {
+                speech.toggle(text: { assistant.input = $0 }, finished: { spoken in
+                    if !spoken.trimmingCharacters(in: .whitespaces).isEmpty { assistant.send() }
+                })
+            } label: {
+                Image(systemName: speech.isRecording ? "mic.fill" : "mic")
+                    .font(.title3)
+                    .symbolEffect(.pulse, isActive: speech.isRecording)
+                    .foregroundStyle(speech.isRecording ? Color.red : Color.accentColor)
+                    .frame(width: 30, height: 30)
+            }
+            .buttonStyle(.plain)
+            .disabled(assistant.isWorking)
+            .hoverTip(speech.isRecording ? "Diktat beenden" : "Auftrag sprechen")
             Button(action: assistant.send) {
                 Image(systemName: "arrow.up.circle.fill")
                     .font(.title2)

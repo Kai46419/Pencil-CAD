@@ -14,6 +14,10 @@ enum SnapKind: String, CaseIterable, Identifiable, Codable {
     case alignment = "Waagerecht/Senkrecht"
     case angle = "Winkel 15°"
     case grid = "Raster"
+    /// Ecken und Kantenmitten der Körper, auf die Skizzenebene projiziert (Shapr3D „3D-Leitpunkte“)
+    case modelPoint = "3D-Leitpunkte"
+    /// Körperkanten außerhalb der Skizzenebene, projiziert (Shapr3D „Entfernte Kanten“)
+    case distantEdge = "Entfernte Kanten"
 
     var id: Self { self }
 
@@ -27,6 +31,8 @@ enum SnapKind: String, CaseIterable, Identifiable, Codable {
         case .alignment: "arrow.up.and.down.and.arrow.left.and.right"
         case .angle: "angle"
         case .grid: "grid"
+        case .modelPoint: "cube"
+        case .distantEdge: "cube.transparent"
         }
     }
 
@@ -40,6 +46,24 @@ enum SnapKind: String, CaseIterable, Identifiable, Codable {
         case .alignment: "Hilfslinien zu vorhandenen Punkten"
         case .angle: "Linien in 15°-Schritten"
         case .grid: "Rasterpunkte"
+        case .modelPoint: "Ecken und Kantenmitten der Körper"
+        case .distantEdge: "Projizierte Körperkanten"
+        }
+    }
+
+    /// Einrasthinweis am Stift (Shapr3D „Einrasthinweise“)
+    var hint: String {
+        switch self {
+        case .endpoint: "Endpunkt"
+        case .midpoint: "Mittelpunkt"
+        case .center: "Zentrum"
+        case .intersection: "Schnittpunkt"
+        case .onCurve: "Auf Kurve"
+        case .alignment: "Ausgerichtet"
+        case .angle: "Winkel"
+        case .grid: "Raster"
+        case .modelPoint: "3D-Punkt"
+        case .distantEdge: "Körperkante"
         }
     }
 }
@@ -58,10 +82,13 @@ struct SnapIndex {
     private(set) var centers: [Point2] = []
     private(set) var intersections: [Point2] = []
     private(set) var curves: [[Point2]] = []
+    /// Projizierte Körpergeometrie (3D-Leitpunkte, entfernte Kanten)
+    private(set) var guides = SketchGuides()
 
     init() {}
 
-    init(entities: [SketchEntity]) {
+    init(entities: [SketchEntity], guides: SketchGuides = SketchGuides()) {
+        self.guides = guides
         var crossable: [[Point2]] = []
         for entity in entities {
             if case .point(let p) = entity {
@@ -126,7 +153,7 @@ struct SnapIndex {
         var best: (score: Double, point: Point2, kind: SnapKind)?
         let lists: [(SnapKind, [Point2], Double)] = [
             (.endpoint, endpoints + extra, 1), (.center, centers, 1),
-            (.intersection, intersections, 1), (.midpoint, midpoints, 1.2),
+            (.intersection, intersections, 1), (.midpoint, midpoints, 1.2), (.modelPoint, guides.points, 1.1),
         ]
         for (kind, points, weight) in lists where kinds.contains(kind) {
             for q in points {
@@ -143,13 +170,17 @@ struct SnapIndex {
         // 1b. Auf Kurve – vor Ausrichtung und Winkel, sonst fanden Kreis und Linie viele Stellen einer Linie
         //     nicht. Mit Raster rastet der Punkt im Rastermaß entlang der Linie ein (ab ihrem Anfang).
         if kinds.contains(.onCurve),
-           let point = onCurve(p, tolerance: tolerance * 0.7, step: kinds.contains(.grid) ? gridStep : 0) {
+           let point = onCurve(p, in: curves, tolerance: tolerance * 0.7, step: kinds.contains(.grid) ? gridStep : 0) {
             return SnapResult(point: point, kind: .onCurve)
+        }
+        if kinds.contains(.distantEdge),
+           let point = onCurve(p, in: guides.curves, tolerance: tolerance * 0.6, step: 0) {
+            return SnapResult(point: point, kind: .distantEdge)
         }
 
         // 2. Winkelschritte und Ausrichtung
         var result = SnapResult(point: p, kind: nil)
-        let keyPoints = endpoints + centers + midpoints + extra
+        let keyPoints = endpoints + centers + midpoints + extra + (kinds.contains(.modelPoint) ? guides.points : [])
         var direction: Point2?
         if kinds.contains(.angle), let anchor, simd_distance(p, anchor) > tolerance {
             let step = Double.pi / 12
@@ -218,7 +249,7 @@ struct SnapIndex {
 
     /// Nächster Punkt auf einer Kurve innerhalb tolerance. step > 0: im Rastermaß entlang der Kurve – bei
     /// Linienzügen ab der Ecke der getroffenen Strecke, bei fein abgetasteten Bögen/Splines ab Kurvenanfang.
-    private func onCurve(_ p: Point2, tolerance: Double, step: Double) -> Point2? {
+    private func onCurve(_ p: Point2, in curves: [[Point2]], tolerance: Double, step: Double) -> Point2? {
         var best: (distance: Double, curve: Int, segment: Int, point: Point2)?
         for (index, curve) in curves.enumerated() where curve.count >= 2 {
             for k in 0..<(curve.count - 1) {
@@ -314,6 +345,11 @@ func snapMarker(_ kind: SnapKind, at p: Point2, size s: Double) -> [[Point2]] {
         return [[p + Point2(-s, -s), p + Point2(s, s)], [p + Point2(-s, s), p + Point2(s, -s)]]
     case .onCurve:
         return [[p + Point2(0, -s), p + Point2(s, 0), p + Point2(0, s), p + Point2(-s, 0), p + Point2(0, -s)]]
+    case .modelPoint:
+        return [[p + Point2(0, -s), p + Point2(s, 0), p + Point2(0, s), p + Point2(-s, 0), p + Point2(0, -s)],
+                [p + Point2(-s * 0.3, 0), p + Point2(s * 0.3, 0)]]
+    case .distantEdge:
+        return [[p + Point2(-s, -s * 0.5), p + Point2(s, -s * 0.5)], [p + Point2(-s, s * 0.5), p + Point2(s, s * 0.5)]]
     case .alignment, .angle:
         let k = s * 0.6
         return [[p + Point2(-k, -k), p + Point2(k, k)], [p + Point2(-k, k), p + Point2(k, -k)]]

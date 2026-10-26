@@ -22,6 +22,15 @@ struct SectionSettings: Equatable {
     var flipped = false
 }
 
+/// „Fläche versetzen“ wie Shapr3D: Wert als Versatz, als Gesamtmaß des Körpers oder als Durchmesser (Zylinder).
+enum OffsetFaceMode: String, CaseIterable, Identifiable {
+    case distance = "Abstand"
+    case total = "Gesamt"
+    case diameter = "Durchmesser"
+
+    var id: Self { self }
+}
+
 /// Achse aus einer Kante oder Flächennormale (für „Achse“ im Konstruieren-Werkzeug).
 struct AxisSpec: Equatable {
     var origin: SIMD3<Double>
@@ -53,6 +62,16 @@ enum ModelTool: Equatable {
     case scaleSketch
     /// 3D „Kante versetzen“: ebene Fläche antippen, ihre Kanten werden in einer Skizze versetzt
     case offsetEdges
+    /// Flächen versetzen (Shapr3D „Offset Face“), auch Zylinderflächen
+    case offsetFace
+    /// Flächen bis an eine Zielfläche verlängern bzw. kürzen (Shapr3D „Replace Face“)
+    case replaceFace
+    /// Skizzenbereiche auf eine Zylinderfläche legen und prägen bzw. gravieren (Shapr3D „Wrap and Emboss“)
+    case wrap
+    /// Skizzenbereiche als Kanten auf einen Körper übertragen (Imprint)
+    case imprint
+    /// Körper von einem Punkt zu einem anderen verschieben bzw. kopieren (Shapr3D „Translate“)
+    case translate
 
     var title: String {
         switch self {
@@ -76,13 +95,18 @@ enum ModelTool: Equatable {
         case .canvas: "Bild"
         case .scaleSketch: "Skizze skalieren"
         case .offsetEdges: "Kante versetzen"
+        case .offsetFace: "Fläche versetzen"
+        case .replaceFace: "Fläche ersetzen"
+        case .wrap: "Umhüllen und Prägen"
+        case .imprint: "Kante abdrücken"
+        case .translate: "Übersetzen"
         }
     }
 
     /// Werkzeuge, die Körper antippen und mehrere sammeln.
     var collectsBodies: Bool {
         switch self {
-        case .boolean, .move, .mirror, .color, .pattern, .scale, .align, .split: true
+        case .boolean, .move, .mirror, .color, .pattern, .scale, .align, .split, .translate: true
         default: false
         }
     }
@@ -103,6 +127,8 @@ enum HandleKind: Equatable {
     case edge
     case move(axis: Int)
     case offset
+    /// Fläche versetzen: Pfeil entlang der Flächennormale
+    case offsetFace
 }
 
 /// Ziehpfeil: Achse (Ursprung + Richtung), aktueller Wert in mm entlang der Achse.
@@ -166,7 +192,16 @@ final class Workspace: ObservableObject {
     @Published var insertSize: SIMD3<Double> = Primitive.box.defaultSize
     @Published var mirrorPlane: MirrorPlane = .yz
     @Published var mirrorKeepsOriginal = true
+    /// Spiegeln an einer Fläche bzw. Konstruktionsebene statt an der Ebene durch die Körpermitte
+    @Published var mirrorFace: FaceRef?
+    @Published var mirrorConstruction: UUID?
+    /// Nächstes Antippen wählt die Spiegelfläche (statt Körper)
+    @Published var mirrorPicksFace = false
+    /// Boolesche Operationen: Werkzeugkörper bleiben erhalten (Fusion 360 „Werkzeuge beibehalten“)
+    @Published var booleanKeepsTools = false
     @Published var shellThickness: Double = 2
+    /// Schale ohne offene Fläche: geschlossener Hohlkörper
+    @Published var shellClosed = false
     @Published var patternCount = 4
     @Published var patternSpacing: Double = 20
     @Published var patternAngle: Double = 360
@@ -191,12 +226,39 @@ final class Workspace: ObservableObject {
     @Published var sketchSection = false
     @Published private(set) var measureLines: [String] = []
     @Published private(set) var measurePoints: [SIMD3<Double>] = []
+    /// Zuletzt gemessene Körper (für den kürzesten Abstand zwischen zwei Körpern)
+    private var measureBodies: [Int] = []
     @Published var constructReference: ReferencePlane = .world(2)
     @Published var constructOffset: Double = 10
     @Published var constructAxis: ReferenceAxis = .world(2)
     @Published var constructCustomAxis: AxisSpec?
     @Published var constructPoint: SIMD3<Double> = .zero
     @Published var sketchScaleFactor: Double = 2
+    // Fläche versetzen / ersetzen
+    @Published var offsetFaceMode: OffsetFaceMode = .distance
+    @Published var offsetFaceValue: Double = 0
+    /// Pfeil zum Versetzen: an der zuerst gewählten Fläche, entlang ihrer Normale (vor der Vorschau berechnet,
+    /// weil sich die Flächennummern in der Vorschau ändern)
+    @Published private(set) var offsetFaceHandle: (origin: SIMD3<Double>, direction: SIMD3<Double>)?
+    @Published var replaceTarget: FaceRef?
+    /// Fläche ersetzen: nächstes Antippen wählt die Zielfläche
+    @Published var pickingReplaceTarget = false
+    // Umhüllen und Prägen
+    @Published var wrapFace: FaceRef?
+    /// > 0 prägen (erhaben), < 0 gravieren
+    @Published var wrapDepth: Double = 1
+    @Published var wrapRotation: Double = 0
+    // Übersetzen: Start- und Zielpunkt
+    @Published private(set) var translateStart: SIMD3<Double>?
+    @Published private(set) var translateEnd: SIMD3<Double>?
+    /// Fangradius in mm für angetippte Punkte (vom Viewport passend zum Zoom gesetzt)
+    var pickTolerance: Double = 1
+    /// Einfügen › Variable
+    @Published var showsVariables = false
+    /// Einfügen › Projekt
+    @Published var showsProjectPicker = false
+    /// Hilfe-Menü: gewählte Hilfeseite
+    @Published var helpTopic: HelpTopic?
     /// Fotoauswahl für „Bild einfügen“
     @Published var isPickingImage = false
     /// Kontextleiste: alle Werkzeuggruppen zeigen („Mehr“)
@@ -247,8 +309,14 @@ final class Workspace: ObservableObject {
         sketch.plane = plane
         sketch.isActive = true
         sketch.isChoosingPlane = false
+        refreshSketchGuides()
         send(.alignToSketchPlane)
         sketchNumber += 1
+    }
+
+    /// 3D-Leitpunkte und entfernte Kanten für die aktuelle Skizzenebene neu berechnen.
+    func refreshSketchGuides() {
+        sketch.modelGuides = model.sketchGuides(on: sketch.plane)
     }
 
     /// 3D „Kante versetzen“: Kanten der ebenen Fläche in eine neue Skizze übernehmen, dann versetzen.
@@ -272,6 +340,7 @@ final class Workspace: ObservableObject {
         if let face = model.selection, let plane = model.plane(of: face) {
             sketch.plane = plane
             sketch.isActive = true
+            refreshSketchGuides()
             send(.alignToSketchPlane)
         } else {
             sketch.isActive = true
@@ -286,6 +355,7 @@ final class Workspace: ObservableObject {
     /// Standardebene wählen; die Ansicht dreht sich senkrecht darauf (Oben = Draufsicht).
     func chooseSketchPlane(_ side: BasePlane) {
         sketch.choose(side)
+        refreshSketchGuides()
         send(.alignToSketchPlane)
     }
 
@@ -293,12 +363,14 @@ final class Workspace: ObservableObject {
     func chooseSketchPlane(_ plane: SketchPlane) {
         sketch.isChoosingPlane = false
         sketch.plane = plane
+        refreshSketchGuides()
         send(.alignToSketchPlane)
     }
 
     /// Skizze verlassen, ohne zu speichern; danach wieder 3D-Ansicht.
     func endSketch() {
         sketch.isActive = false
+        sketch.modelGuides = SketchGuides()
         editingSketchIndex = nil
         send(.look(SIMD3<Float>(1, -1, 0.85)))
     }
@@ -328,6 +400,7 @@ final class Workspace: ObservableObject {
         sketch.isActive = true
         sketch.load(plane: stored.plane, entities: stored.entities, constraints: stored.constraints,
                     construction: stored.construction)
+        refreshSketchGuides()
         editingSketchIndex = index
         send(.alignToSketchPlane)
     }
@@ -343,10 +416,13 @@ final class Workspace: ObservableObject {
         let previousBodies = model.selectedBodies
         let previousFace = model.selection
         let previousRegions = model.selectedRegions
+        let previousFaces = model.selectedFaces
         model.cancelPreview()
         tool = newTool
+        if newTool != .move && newTool != .translate { model.moveCopies = false }
         measureLines = []
         measurePoints = []
+        measureBodies = []
         switch newTool {
         case .move where previousBody == nil && !previousRegions.isEmpty:
             // Skizze verschieben/drehen
@@ -398,6 +474,35 @@ final class Workspace: ObservableObject {
             model.resetSelection()
             if let previousFace { offsetFaceEdges(previousFace) }
             return
+        case .offsetFace, .replaceFace:
+            model.resetSelection()
+            offsetFaceValue = 0
+            replaceTarget = nil
+            pickingReplaceTarget = false
+            if let first = previousFaces.first {
+                model.selectForTool(first)
+                for face in previousFaces.dropFirst() { model.toggleFace(face, commitsPreview: false) }
+                if newTool == .replaceFace { pickingReplaceTarget = true }
+            }
+            refreshOffsetFaceHandle()
+            return
+        case .wrap, .imprint:
+            model.resetSelection()
+            wrapFace = nil
+            if !previousRegions.isEmpty { model.selectRegions(previousRegions) }
+            if newTool == .wrap, let previousFace, model.cylinder(of: previousFace) != nil { wrapFace = previousFace }
+            updateWrapPreview()
+            return
+        case .translate:
+            model.resetSelection()
+            translateStart = nil
+            translateEnd = nil
+            if previousBodies.count > 1 {
+                model.selectBodies(previousBodies)
+            } else if let previousBody {
+                model.toggleBody(previousBody, exclusive: true)
+            }
+            return
         default:
             break
         }
@@ -416,12 +521,15 @@ final class Workspace: ObservableObject {
                 model.toggleBody(previousBody, exclusive: true)
             }
             if newTool == .mirror {
+                mirrorFace = nil
+                mirrorConstruction = nil
+                mirrorPicksFace = false
                 updateMirrorPreview()
             }
         case .shell:
             if let previousFace {
                 model.select(face: previousFace)
-                model.previewShell(thickness: shellThickness)
+                model.previewShell(thickness: shellThickness, closed: shellClosed)
             } else {
                 model.resetSelection()
             }
@@ -448,12 +556,131 @@ final class Workspace: ObservableObject {
 
     func updateMirrorPreview() {
         guard tool == .mirror, !model.selectedBodies.isEmpty else { return }
-        model.previewMirror(mirrorPlane, keepOriginal: mirrorKeepsOriginal)
+        model.previewMirror(mirrorPlane, keepOriginal: mirrorKeepsOriginal, at: mirrorReferencePlane)
+    }
+
+    /// Feste Spiegelebene (Fläche bzw. Konstruktionsebene); nil = Ebene durch die Körpermitte.
+    var mirrorReferencePlane: (origin: SIMD3<Double>, normal: SIMD3<Double>)? {
+        if let mirrorFace, let plane = model.plane(of: mirrorFace) { return (plane.anchor, plane.normal) }
+        if let id = mirrorConstruction, let item = model.constructions.first(where: { $0.id == id }), item.kind == .plane {
+            return (item.origin, item.direction)
+        }
+        return nil
+    }
+
+    /// Name der festen Spiegelebene für die Karte.
+    var mirrorReferenceName: String? {
+        if mirrorFace != nil { return "Fläche" }
+        if let id = mirrorConstruction { return model.constructions.first(where: { $0.id == id })?.name }
+        return nil
     }
 
     func updateShellPreview() {
         guard tool == .shell, model.selection != nil else { return }
-        model.previewShell(thickness: shellThickness)
+        model.previewShell(thickness: shellThickness, closed: shellClosed)
+    }
+
+    // MARK: Rückgängig per Geste
+
+    /// Zwei Finger tippen: in der Skizze zuerst Skizzenschritte, sonst Modellschritte (wie Shapr3D).
+    func undo() {
+        if sketch.isActive {
+            if sketch.canUndo { sketch.undo() }
+            return
+        }
+        let name = model.lastStepName
+        guard model.canUndo else { return }
+        model.undo()
+        afterHistoryJump()
+        model.message = name.map { "Rückgängig: \($0)" } ?? "Rückgängig"
+    }
+
+    /// Drei Finger tippen: Wiederholen (nur im Modell).
+    func redo() {
+        guard !sketch.isActive, let name = model.nextStepName else { return }
+        model.redo()
+        afterHistoryJump()
+        model.message = "Wiederholt: \(name)"
+    }
+
+    private func afterHistoryJump() {
+        if tool != .select { tool = .select }
+        measureLines = []
+        measurePoints = []
+        measureBodies = []
+    }
+
+    /// Fläche versetzen: Wert je nach Art in einen Versatz umrechnen und als Vorschau zeigen.
+    func updateOffsetFacePreview() {
+        guard tool == .offsetFace, let face = model.selection else { return }
+        var distance = offsetFaceValue
+        switch offsetFaceMode {
+        case .distance:
+            break
+        case .total:
+            // Gesamtmaß des Körpers entlang der Flächennormale
+            guard let plane = model.plane(of: face), let current = model.extent(ofBody: face.body, along: plane.normal) else {
+                model.message = "„Gesamt“ geht mit ebenen Flächen."
+                return
+            }
+            guard offsetFaceValue > 0 else { return }
+            distance = offsetFaceValue - current
+        case .diameter:
+            guard let cylinder = model.cylinder(of: face) else {
+                model.message = "„Durchmesser“ geht mit Zylinderflächen (Zapfen oder Bohrung)."
+                return
+            }
+            guard offsetFaceValue > 0 else { return }
+            let change = offsetFaceValue / 2 - cylinder.radius
+            // Bohrung: Versatz ins Material macht sie weiter
+            distance = cylinder.convex ? change : -change
+        }
+        model.previewOffsetFaces(distance: distance)
+    }
+
+    /// Pfeil für „Fläche versetzen“ an der zuerst gewählten Fläche: Normale bzw. bei Zylindern radial nach außen.
+    private func refreshOffsetFaceHandle() {
+        offsetFaceHandle = nil
+        guard let face = model.selection,
+              let center = model.mesh.centroid(of: face).map({ SIMD3<Double>($0) }) else { return }
+        var direction: SIMD3<Double>
+        if let plane = model.plane(of: face) {
+            direction = plane.normal
+        } else if let cylinder = model.cylinder(of: face) {
+            direction = center - cylinder.origin
+            direction -= simd_dot(direction, cylinder.axis) * cylinder.axis
+            if !cylinder.convex { direction = -direction }
+        } else {
+            return
+        }
+        guard simd_length(direction) > 1e-9 else { return }
+        offsetFaceHandle = (center, simd_normalize(direction))
+    }
+
+    func updateReplacePreview() {
+        guard tool == .replaceFace, let target = replaceTarget else { return }
+        model.previewReplaceFaces(target: target)
+    }
+
+    func updateWrapPreview() {
+        guard tool == .wrap, let wrapFace, !model.selectedRegions.isEmpty else { return }
+        model.previewWrap(onto: wrapFace, depth: wrapDepth, rotation: wrapRotation)
+    }
+
+    /// Bereich für Umhüllen bzw. Abdrücken dazunehmen oder herausnehmen (nur aus einer Skizze).
+    private func toggleToolRegion(_ region: RegionRef) {
+        if let first = model.selectedRegions.first, first.sketch != region.sketch {
+            model.selectRegions([region])
+        } else {
+            model.toggleRegionAcrossSketches(region)
+        }
+    }
+
+    /// Übersetzen von vorn: Punkte vergessen, Vorschau verwerfen.
+    func resetTranslate() {
+        translateStart = nil
+        translateEnd = nil
+        model.cancelPreview()
     }
 
     /// „Fertig“: aktuelles Werkzeug bzw. Vorschau übernehmen.
@@ -472,7 +699,7 @@ final class Workspace: ObservableObject {
         case .boolean(let kind):
             let chosen = model.selectedBodies
             if let target = chosen.first, chosen.count > 1 {
-                model.applyBoolean(kind, target: target, tools: Array(chosen.dropFirst()))
+                model.applyBoolean(kind, target: target, tools: Array(chosen.dropFirst()), keepTools: booleanKeepsTools)
             }
         case .move where model.movingSketch != nil:
             if let index = model.movingSketch { model.translateSketch(index, by: model.moveOffset) }
@@ -516,6 +743,7 @@ final class Workspace: ObservableObject {
         switch tool {
         case .boolean: return model.selectedBodies.count > 1
         case .color, .construct, .measure, .section, .canvas, .offsetEdges: return true
+        case .translate: return model.hasPreview
         case .move where model.movingSketch != nil: return model.moveOffset != .zero
         case .scaleSketch: return !model.selectedRegions.isEmpty
         default: return model.hasPreview
@@ -525,8 +753,17 @@ final class Workspace: ObservableObject {
     // MARK: Antippen im Viewport
 
     /// Tippen im Modellierbereich (nicht im Skizzenmodus).
-    func tapped(face: FaceRef?, edge: EdgeRef?, region: RegionRef? = nil, point: SIMD3<Float>? = nil) {
+    func tapped(face tappedFace: FaceRef?, edge: EdgeRef?, region: RegionRef? = nil, point: SIMD3<Float>? = nil) {
         model.message = nil
+        // Während einer Vorschau zeigt das Netz die Vorschaukörper mit anderen Flächennummern: für Werkzeuge,
+        // die Flächen der echten Körper sammeln, die passende echte Fläche unter dem Punkt suchen
+        var face = tappedFace
+        switch tool {
+        case .shell, .offsetFace, .replaceFace, .wrap, .imprint, .mirror:
+            face = tappedFace.flatMap { model.originalFace($0, near: point) }
+        default:
+            break
+        }
         switch tool {
         case .pattern, .scale, .align:
             guard let body = face?.body ?? edge?.body else { return }
@@ -574,6 +811,59 @@ final class Workspace: ObservableObject {
             if let face, model.plane(of: face) != nil { section?.plane = .face(face) }
         case .offsetEdges:
             if let face { offsetFaceEdges(face) }
+        case .offsetFace:
+            guard let face else { return }
+            model.toggleFace(face, commitsPreview: false)
+            refreshOffsetFaceHandle()
+            updateOffsetFacePreview()
+        case .replaceFace:
+            guard let face else { return }
+            if pickingReplaceTarget {
+                guard model.plane(of: face) != nil else {
+                    model.message = "Die Zielfläche muss eben sein."
+                    return
+                }
+                model.cancelPreview()
+                replaceTarget = face
+                pickingReplaceTarget = false
+            } else {
+                model.toggleFace(face, commitsPreview: false)
+                // Erste Fläche gewählt: als Nächstes die Zielfläche (wie Shapr3D); weitere Flächen über „Flächen“
+                if replaceTarget == nil, model.selectedFaces.count == 1 { pickingReplaceTarget = true }
+            }
+            updateReplacePreview()
+        case .wrap:
+            if let region {
+                toggleToolRegion(region)
+            } else if let face, model.cylinder(of: face) != nil {
+                wrapFace = face
+            } else if face != nil {
+                model.message = "Für das Umhüllen eine Zylinderfläche antippen."
+            }
+            updateWrapPreview()
+        case .imprint:
+            if let region, model.selectedRegions.isEmpty || model.selectedRegions.first?.sketch == region.sketch
+                || face == nil {
+                toggleToolRegion(region)
+            } else if let face {
+                model.previewImprint(onto: face.body)
+            }
+        case .translate:
+            let body = face?.body ?? edge?.body
+            if model.selectedBodies.isEmpty || (translateStart == nil && body.map { !model.selectedBodies.contains($0) } ?? false) {
+                if let body { model.toggleBody(body) }
+                return
+            }
+            guard let point else { return }
+            let snapped = model.snappedModelPoint(SIMD3<Double>(point), tolerance: pickTolerance)
+            if translateStart == nil || translateEnd != nil {
+                model.cancelPreview()
+                translateStart = snapped
+                translateEnd = nil
+            } else if let start = translateStart {
+                translateEnd = snapped
+                model.setMoveOffset(snapped - start)
+            }
         case .canvas:
             break
         case .select:
@@ -588,18 +878,40 @@ final class Workspace: ObservableObject {
             } else if let region {
                 model.toggleRegion(region)
             } else if let face {
-                model.select(face: face)
+                // Weitere ebene Fläche antippen nimmt sie dazu (gemeinsam extrudieren), erneut antippen nimmt sie heraus
+                if model.selection != nil, model.faceHandle != nil, model.plane(of: face) != nil {
+                    model.toggleFace(face)
+                } else {
+                    model.select(face: face)
+                }
             } else {
                 model.clearSelection()
             }
+        case .mirror where mirrorPicksFace:
+            guard let face, model.plane(of: face) != nil else {
+                model.message = "Für die Spiegelebene eine ebene Fläche antippen."
+                return
+            }
+            mirrorFace = face
+            mirrorConstruction = nil
+            mirrorPicksFace = false
+            updateMirrorPreview()
         case .boolean, .move, .mirror, .color:
             guard let body = face?.body ?? edge?.body else { return }
             model.toggleBody(body, exclusive: tool == .move)
             updateMirrorPreview()
         case .shell:
             guard let face else { return }
-            model.cancelPreview()
-            model.select(face: face)
+            if shellClosed {
+                model.cancelPreview()
+                model.select(face: face)
+            } else if model.selection?.body == face.body {
+                // Weitere Flächen desselben Körpers bleiben ebenfalls offen (wie Shapr3D, mehrere Flächen)
+                model.toggleFace(face, commitsPreview: false)
+            } else {
+                model.cancelPreview()
+                model.selectForTool(face)
+            }
             updateShellPreview()
         case .insert:
             break
@@ -695,9 +1007,10 @@ final class Workspace: ObservableObject {
             return
         }
         let before = model.bodies.count
-        model.applyBoolean(kind, target: target, tools: Array(chosen.dropFirst()))
-        guard model.bodies.count < before else { return }
-        let result = target - chosen.dropFirst().filter { $0 < target }.count
+        let revision = model.revision
+        model.applyBoolean(kind, target: target, tools: Array(chosen.dropFirst()), keepTools: booleanKeepsTools)
+        guard model.bodies.count < before || (booleanKeepsTools && model.revision != revision) else { return }
+        let result = booleanKeepsTools ? target : target - chosen.dropFirst().filter { $0 < target }.count
         model.resetSelection()
         model.selectBodies([result])
         switch kind {
@@ -826,6 +1139,19 @@ final class Workspace: ObservableObject {
             let volume = model.volume(ofBody: face.body)
             if volume > 0, model.bodies.indices.contains(face.body) {
                 lines.append("Volumen \(model.bodies[face.body].name): \(mm(volume / 1000, "cm³"))")
+                // Eigene Idee: Gewicht für den 3D-Druck (PLA 1,24 g/cm³, voll gefüllt)
+                lines.append("Gewicht in PLA: \(mm(volume / 1000 * 1.24, "g")) (100 % Füllung)")
+            }
+            if let c = model.centerOfMass(ofBody: face.body) {
+                lines.append("Schwerpunkt: X \(mm(c.x))  Y \(mm(c.y))  Z \(mm(c.z))")
+            }
+            if measureBodies.last != face.body { measureBodies = Array((measureBodies + [face.body]).suffix(2)) }
+            if measureBodies.count == 2, let gap = model.minimumDistance(between: measureBodies[0], and: measureBodies[1]) {
+                let names = measureBodies.map { model.bodies.indices.contains($0) ? model.bodies[$0].name : "?" }
+                lines.append("Kleinster Abstand \(names[0]) – \(names[1]): \(mm(gap.distance))")
+                measurePoints = [gap.a, gap.b]
+                measureLines = lines
+                return
             }
         } else {
             model.resetSelection()
@@ -890,6 +1216,10 @@ final class Workspace: ObservableObject {
                                    value: model.faceValue, color: blue)]
             }
             return []
+        case .offsetFace:
+            guard offsetFaceMode == .distance, let handle = offsetFaceHandle else { return [] }
+            return [DragHandle(kind: .offsetFace, axisOrigin: SIMD3<Float>(handle.origin),
+                               direction: SIMD3<Float>(handle.direction), value: offsetFaceValue, color: blue)]
         case .move:
             let offset = model.moveOffset
             let sketchCenter = model.movingSketch.flatMap { model.center(ofSketch: $0) }
@@ -917,6 +1247,11 @@ final class Workspace: ObservableObject {
             if value != sketch.offsetDistance { sketch.offsetDistance = value }
         case .face:
             if value != model.faceValue { model.setFaceValue(value) }
+        case .offsetFace:
+            if value != offsetFaceValue {
+                offsetFaceValue = value
+                updateOffsetFacePreview()
+            }
         case .edge:
             let clamped = max(0, value)
             if clamped != model.edgeValue { model.setEdgeValue(clamped) }
@@ -958,16 +1293,47 @@ final class Workspace: ObservableObject {
         }
     }
 
-    /// Drehwinkel am Ring (Vorschau).
-    func ringRotation(degrees: Double, center: SIMD3<Double>) {
-        model.previewRotation(degrees: degrees, center: center)
+    /// Mitte der Auswahl im Verschieben-Werkzeug (Ansatz der Ebenengriffe).
+    var moveCenter: SIMD3<Double>? {
+        guard !sketch.isActive, tool == .move, model.movingSketch == nil, let first = model.selectedBodies.first else {
+            return nil
+        }
+        return model.center(ofBody: first)
     }
 
-    /// Ring losgelassen: Drehung übernehmen, Auswahl bleibt für weiteres Drehen oder Verschieben.
+    /// Größe der Auswahl in mm (für die Größe der Griffe).
+    var handleSize: Double { rotationArcs.first?.radius ?? 20 }
+
+    /// Drehbögen um X und Y (Shapr3D): senkrecht stehende Ringe durch die Mitte der Auswahl.
+    var rotationArcs: [(axis: Int, center: SIMD3<Double>, radius: Double)] {
+        guard !sketch.isActive, tool == .move, model.movingSketch == nil, !model.selectedBodies.isEmpty else { return [] }
+        var low = SIMD3<Float>(repeating: .infinity), high = SIMD3<Float>(repeating: -.infinity)
+        for body in model.selectedBodies {
+            guard let box = model.mesh.bounds(ofBody: body) else { continue }
+            low = simd_min(low, box.min)
+            high = simd_max(high, box.max)
+        }
+        guard low.x <= high.x else { return [] }
+        let center = SIMD3<Double>((low + high) / 2)
+        let radius = max(Double(simd_length(high - low)) / 2 * 1.15, 8)
+        return [(0, center, radius), (1, center, radius)]
+    }
+
+    /// Drehwinkel am Ring (Vorschau); axis 0 = X, 1 = Y, 2 = Z.
+    func ringRotation(degrees: Double, center: SIMD3<Double>, axis: Int = 2) {
+        var vector = SIMD3<Double>(0, 0, 0)
+        vector[axis] = 1
+        model.previewRotation(degrees: degrees, center: center, axis: vector)
+    }
+
+    /// Ring losgelassen: Drehung übernehmen, Auswahl bleibt für weiteres Drehen oder Verschieben
+    /// (beim Kopieren die neuen Kopien).
     func endRingRotation() {
         let chosen = model.selectedBodies
+        let count = model.bodies.count
+        let copies = model.moveCopies && model.hasPreview
         model.commitPreview()
-        model.selectBodies(chosen)
+        model.selectBodies(copies ? Array(count..<model.bodies.count) : chosen)
     }
 
     // MARK: Hinweise
@@ -986,7 +1352,8 @@ final class Workspace: ObservableObject {
             if !model.selectedEdges.isEmpty { return "Pfeil ziehen · weitere Kanten antippen" }
             if !model.selectedRegions.isEmpty { return "Pfeil ziehen · weitere Bereiche antippen · Körperfläche antippen = Höhe bis dorthin" }
             if model.selection != nil {
-                return model.faceHandle != nil ? "Pfeil ziehen zum Extrudieren" : "Fläche gewählt"
+                if model.selectedFaces.count > 1 { return "\(model.selectedFaces.count) Flächen · Pfeil ziehen zieht alle zugleich" }
+                return model.faceHandle != nil ? "Pfeil ziehen · weitere Flächen antippen zieht sie mit" : "Fläche gewählt"
             }
             if boxSelects { return "Rahmen aufziehen: nach rechts ganz umschlossene, nach links auch angeschnittene Körper" }
             if selectsBodies { return "Körper antippen – mehrere möglich, dann Vereinigen, Abziehen oder Schneiden" }
@@ -1001,8 +1368,13 @@ final class Workspace: ObservableObject {
         case .move:
             if model.movingSketch != nil { return "Skizze: Achsenpfeil ziehen oder Werte eingeben, dann „Fertig“" }
             return model.selectedBodies.isEmpty ? "Körper antippen" : "Achsenpfeil ziehen · am Ring drehen (rastet alle 15°)"
-        case .mirror: return model.selectedBodies.isEmpty ? "Körper antippen" : "Ebene wählen, dann „Fertig“"
-        case .shell: return model.selection == nil ? "Fläche antippen, die offen sein soll" : "Wandstärke eingeben"
+        case .mirror:
+            if mirrorPicksFace { return "Ebene Fläche antippen, an der gespiegelt wird" }
+            return model.selectedBodies.isEmpty ? "Körper antippen" : "Ebene wählen, dann „Fertig“"
+        case .shell:
+            if shellClosed { return model.selection == nil ? "Körper antippen, der hohl werden soll" : "Wandstärke eingeben" }
+            return model.selection == nil ? "Flächen antippen, die offen sein sollen"
+                : "Weitere Flächen antippen oder Wandstärke eingeben"
         case .color: return model.selectedBodies.isEmpty ? "Körper antippen" : "Farbe wählen"
         case .pattern: return model.selectedBodies.isEmpty ? "Körper antippen" : "Anzahl und Abstand einstellen"
         case .scale: return model.selectedBodies.isEmpty ? "Körper antippen" : "Faktor eingeben"
@@ -1024,6 +1396,23 @@ final class Workspace: ObservableObject {
         case .canvas: return "Größe und Lage des Bilds einstellen"
         case .scaleSketch: return model.selectedRegions.isEmpty ? "Skizzenbereich antippen" : "Faktor eingeben"
         case .offsetEdges: return "Ebene Fläche antippen"
+        case .offsetFace:
+            if model.selection == nil { return "Flächen antippen (mehrere möglich), auch runde" }
+            return offsetFaceMode == .distance ? "Pfeil ziehen oder Abstand eingeben · weitere Flächen antippen"
+                : "\(offsetFaceMode.rawValue) eingeben"
+        case .replaceFace:
+            if model.selection == nil { return "Flächen antippen, die ersetzt werden sollen" }
+            if pickingReplaceTarget { return "Zielfläche antippen (eben)" }
+            return replaceTarget == nil ? "Weitere Flächen antippen oder unten „Ziel“ wählen" : "„Fertig“ tippen"
+        case .wrap:
+            if model.selectedRegions.isEmpty { return "Skizzenbereiche antippen (Text, Logo …)" }
+            return wrapFace == nil ? "Zylinderfläche antippen" : "Tiefe und Drehung einstellen, dann „Fertig“"
+        case .imprint:
+            return model.selectedRegions.isEmpty ? "Skizzenbereiche auf einer Körperfläche antippen" : "Körper antippen"
+        case .translate:
+            if model.selectedBodies.isEmpty { return "Körper antippen" }
+            if translateStart == nil { return "Startpunkt antippen (rastet an Ecken und Kantenmitten)" }
+            return translateEnd == nil ? "Zielpunkt antippen" : "„Fertig“ – oder neuen Startpunkt antippen"
         }
     }
 

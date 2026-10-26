@@ -101,6 +101,10 @@ private struct WorkspaceContent: View {
                 || !model.selectedRegions.isEmpty
             if !hasSelection { workspace.showsAllTools = false }
         }
+        .onChange(of: model.variables) {
+            // Offene Skizze: Maße mit Variablen gleich nachziehen
+            if sketch.isActive { sketch.reevaluateExpressions(model.variableValues) }
+        }
         .photosPicker(isPresented: $workspace.isPickingImage, selection: $photoItem, matching: .images)
         .onChange(of: photoItem) { _, item in
             guard let item else { return }
@@ -130,6 +134,15 @@ private struct WorkspaceContent: View {
             }
         }
         .sheet(item: $screenshot) { ScreenshotSheet(screenshot: $0) }
+        .sheet(isPresented: $workspace.showsVariables) { VariablesSheet(model: model) }
+        .sheet(isPresented: $workspace.showsProjectPicker) {
+            ProjectPickerSheet(current: workspace.project.id) { project in
+                model.insertProject(from: project.folder, name: project.name)
+                workspace.send(.fitAll)
+            }
+        }
+        .sheet(item: $workspace.helpTopic) { HelpSheet(topic: $0) }
+        .environment(\.variableValues, model.variableValues)
         .sheet(isPresented: Binding(get: { sketch.pendingTextAnchor != nil },
                                     set: { if !$0 { sketch.pendingTextAnchor = nil } })) {
             TextEntrySheet(sketch: sketch)
@@ -208,6 +221,23 @@ private struct WorkspaceContent: View {
                 .padding(.horizontal, 10)
                 .frame(height: 36)
             }
+            Menu {
+                ForEach(HelpTopic.allCases) { topic in
+                    Button(topic.rawValue, systemImage: topic.systemImage) { workspace.helpTopic = topic }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text("Hilfe")
+                        .font(.callout)
+                    Image(systemName: "chevron.down")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 8)
+                .frame(height: 36)
+            }
+            .accessibilityLabel("Hilfe")
+            .hoverTip("Hilfe")
             Divider()
                 .frame(height: 20)
             Button {

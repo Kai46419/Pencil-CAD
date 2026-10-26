@@ -58,50 +58,93 @@ struct MagnetRailIcon: View {
     }
 }
 
-/// Fangeinstellungen: Hauptschalter, einzelne Fangarten, Rastermaß.
+/// Fangeinstellungen wie bei Shapr3D: Hauptschalter, Einrasten (Raster, Skizzenleitlinien, Skizzenleitpunkte,
+/// 3D-Leitpunkte, entfernte Kanten), Zeigen (Leitpunkte, Einrasthinweise); die einzelnen Fangarten aufklappbar.
 struct SnapMenu: View {
     @ObservedObject var sketch: SketchController
     let gridSteps: [Double]
+    @State private var showsDetails = false
+
+    /// Gruppen wie in Shapr3D; jede schaltet mehrere Fangarten
+    private static let groups: [(title: String, detail: String, systemImage: String, kinds: Set<SnapKind>)] = [
+        ("Raster", "Punkte rasten im Rastermaß ein", "grid", [.grid]),
+        ("Skizzenleitlinien", "Waagerecht, senkrecht und 15°-Winkel zu vorhandenen Punkten", "line.diagonal",
+         [.alignment, .angle]),
+        ("Skizzenleitpunkte", "Enden, Mitten, Zentren, Schnittpunkte und Kurven", "smallcircle.filled.circle",
+         [.endpoint, .midpoint, .center, .intersection, .onCurve]),
+        ("3D-Leitpunkte", "Ecken und Kantenmitten der Körper", "cube", [.modelPoint]),
+        ("Entfernte Kanten", "Körperkanten außerhalb der Skizzenebene", "cube.transparent", [.distantEdge]),
+    ]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Toggle(isOn: $sketch.snapEnabled) {
-                Text("Fang")
-                    .font(.headline)
-            }
-            Divider()
-            ForEach(SnapKind.allCases) { kind in
-                Toggle(isOn: Binding(get: { sketch.snapKinds.contains(kind) }, set: { on in
-                    if on { sketch.snapKinds.insert(kind) } else { sketch.snapKinds.remove(kind) }
-                })) {
-                    HStack(spacing: 10) {
-                        Image(systemName: kind.systemImage)
-                            .frame(width: 22)
-                            .foregroundStyle(.orange)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(kind.rawValue)
-                            Text(kind.detail)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                Toggle(isOn: $sketch.snapEnabled) {
+                    Text("Fang")
+                        .font(.headline)
+                }
+                Divider()
+                Text("EINRASTEN")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                ForEach(Self.groups.indices, id: \.self) { index in
+                    let group = Self.groups[index]
+                    Toggle(isOn: Binding(get: { !sketch.snapKinds.isDisjoint(with: group.kinds) }, set: { on in
+                        if on { sketch.snapKinds.formUnion(group.kinds) } else { sketch.snapKinds.subtract(group.kinds) }
+                    })) {
+                        row(group.title, group.detail, group.systemImage)
                     }
                 }
-            }
-            .disabled(!sketch.snapEnabled)
-            Divider()
-            Picker("Raster", selection: $sketch.gridStep) {
-                ForEach(gridSteps, id: \.self) { step in
-                    Text("\(step.formatted()) mm").tag(step)
+                .disabled(!sketch.snapEnabled)
+                Picker("Raster", selection: $sketch.gridStep) {
+                    ForEach(gridSteps, id: \.self) { step in
+                        Text("\(step.formatted()) mm").tag(step)
+                    }
+                }
+                .pickerStyle(.segmented)
+                DisclosureGroup("Einzelne Fangarten", isExpanded: $showsDetails) {
+                    ForEach(SnapKind.allCases) { kind in
+                        Toggle(isOn: Binding(get: { sketch.snapKinds.contains(kind) }, set: { on in
+                            if on { sketch.snapKinds.insert(kind) } else { sketch.snapKinds.remove(kind) }
+                        })) {
+                            row(kind.rawValue, kind.detail, kind.systemImage)
+                        }
+                    }
+                    .disabled(!sketch.snapEnabled)
+                }
+                Divider()
+                Text("ZEIGEN")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Toggle(isOn: $sketch.showsGuidePoints) {
+                    row("Leitpunkte", "Knoten in Stiftnähe beim Schweben", "circle.dotted")
+                }
+                Toggle(isOn: $sketch.showsSnapHints) {
+                    row("Einrasthinweise", "Art des Fangs als Schild am Stift", "text.bubble")
+                }
+                Toggle(isOn: $sketch.snapHaptics) {
+                    row("Fühlbares Einrasten", "Kurzes Klicken, wenn ein Fangpunkt greift", "hand.tap")
                 }
             }
-            .pickerStyle(.segmented)
-            Text("Schwebt der Stift über der Skizze, zeigt er Fangpunkte und Knoten an.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            .font(.callout)
+            .padding(16)
         }
-        .font(.callout)
-        .padding(16)
-        .frame(width: 320)
+        .frame(width: 340)
+        .frame(maxHeight: 620)
+    }
+
+    private func row(_ title: String, _ detail: String, _ systemImage: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: systemImage)
+                .frame(width: 22)
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 }
 
@@ -395,7 +438,8 @@ struct ConstraintColumn: View {
             [Row(id: ConstraintKind.lock.rawValue, systemImage: ConstraintKind.lock.systemImage, action: .constraint(.lock),
                  applicable: sketch.canApply(.lock))],
             kinds,
-            [Row(id: "Trennen", systemImage: "link.badge.plus", action: .detach, applicable: hasSelection)],
+            [Row(id: "Trennen", systemImage: "link.badge.plus", action: .detach,
+                 applicable: hasSelection && sketch.selectionHasConstraints)],
             [Row(id: "Konstruktion erstellen", systemImage: "square.dashed", action: .construction, applicable: hasSelection)],
         ]
     }

@@ -109,9 +109,38 @@ NS_ASSUME_NONNULL_BEGIN
 - (nullable PCKShape *)extrudingFace:(NSInteger)face distance:(double)distance
     NS_SWIFT_NAME(extruding(face:distance:));
 
+/// Mehrere ebene Flächen zugleich entlang ihrer eigenen Normale ziehen (Nummern bleiben gültig, weil alle
+/// Prismen aus dem Ausgangskörper entstehen).
+- (nullable PCKShape *)extrudingFaces:(NSArray<NSNumber *> *)faces distance:(double)distance
+    NS_SWIFT_NAME(extruding(faces:distance:));
+
+/// Fläche versetzen (Shapr3D „Offset Face“): Flächen um distance nach außen (> 0) bzw. innen verschieben,
+/// Nachbarflächen werden verlängert oder gekürzt; geht auch mit Zylinderflächen (Bohrung weiter/enger).
+- (nullable PCKShape *)offsettingFaces:(NSArray<NSNumber *> *)faces distance:(double)distance
+    NS_SWIFT_NAME(offsetting(faces:distance:));
+
+/// Fläche ersetzen (Shapr3D „Replace Face“): ebene Flächen bis an die Zielebene verlängern bzw. kürzen.
+- (nullable PCKShape *)replacingFaces:(NSArray<NSNumber *> *)faces planeOrigin:(simd_double3)origin
+                          planeNormal:(simd_double3)normal NS_SWIFT_NAME(replacing(faces:planeOrigin:planeNormal:));
+
+/// Zylinderfläche als [ox, oy, oz, dx, dy, dz, r] (Achse und Radius); nil bei anderen Flächen.
+- (nullable NSArray<NSNumber *> *)cylinderOfFace:(NSInteger)face NS_SWIFT_NAME(cylinder(ofFace:));
+
+/// Körper zwischen zwei geschlossenen Linienzügen gleicher Punktzahl (x, y, z je Punkt), Seiten geradlinig
+/// verbunden (für „Umhüllen und Prägen“).
++ (nullable PCKShape *)ruledSolidBetween:(NSArray<NSNumber *> *)first and:(NSArray<NSNumber *> *)second
+    NS_SWIFT_NAME(ruledSolid(between:and:));
+
+/// Kante abdrücken (Imprint): teilt die Körperflächen entlang der Werkzeugform (z. B. einer Skizzenfläche auf
+/// der Körperfläche); der Körper bleibt ganz, bekommt aber neue Kanten und Teilflächen.
+- (nullable PCKShape *)imprinting:(PCKShape *)tool NS_SWIFT_NAME(imprinting(_:));
+
 /// Schale: entfernt die Fläche (Nummer aus faceIndexData) und höhlt den Körper mit der Wandstärke aus.
 - (nullable PCKShape *)shellingRemovingFace:(NSInteger)face thickness:(double)thickness
     NS_SWIFT_NAME(shelling(removingFace:thickness:));
+/// Schale mit mehreren offenen Flächen; ohne Flächen entsteht ein geschlossener Hohlkörper.
+- (nullable PCKShape *)shellingRemovingFaces:(NSArray<NSNumber *> *)faces thickness:(double)thickness
+    NS_SWIFT_NAME(shelling(removingFaces:thickness:));
 
 /// Lageänderungen; liefern jeweils einen neuen Körper.
 - (nullable PCKShape *)translatedBy:(simd_double3)offset NS_SWIFT_NAME(translated(by:));
@@ -130,6 +159,10 @@ NS_ASSUME_NONNULL_BEGIN
 
 /// Messwerte (mm, mm², mm³); 0 ohne Kernel.
 @property (nonatomic, readonly) double volume;
+/// Schwerpunkt [x, y, z] (gleichmäßige Dichte); nil ohne Kernel.
+@property (nonatomic, readonly, nullable) NSArray<NSNumber *> *centerOfMass;
+/// Kürzester Abstand zu einem anderen Körper: [Abstand, x1, y1, z1, x2, y2, z2]; nil bei Fehler.
+- (nullable NSArray<NSNumber *> *)minimumDistanceTo:(PCKShape *)other NS_SWIFT_NAME(minimumDistance(to:));
 - (double)lengthOfEdge:(NSInteger)edge NS_SWIFT_NAME(length(ofEdge:));
 - (double)areaOfFace:(NSInteger)face NS_SWIFT_NAME(area(ofFace:));
 /// Kantennummern einer Fläche (ohne Nahtkanten).
@@ -146,6 +179,9 @@ NS_ASSUME_NONNULL_BEGIN
     NS_SWIFT_NAME(filleting(edges:radius:));
 - (nullable PCKShape *)chamferingEdges:(NSArray<NSNumber *> *)edges distance:(double)distance
     NS_SWIFT_NAME(chamfering(edges:distance:));
+/// Fase mit zwei Abständen (distance auf der einen, distance2 auf der anderen Nachbarfläche).
+- (nullable PCKShape *)chamferingEdges:(NSArray<NSNumber *> *)edges distance:(double)distance
+                             distance2:(double)distance2 NS_SWIFT_NAME(chamfering(edges:distance:distance2:));
 
 /// Größter Radius bzw. größte Fasenbreite bis limit, die für diese Kanten noch geht (Halbierungssuche,
 /// auf 1 % genau). 0, wenn gar nichts geht.

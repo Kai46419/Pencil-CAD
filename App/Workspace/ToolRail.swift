@@ -46,11 +46,11 @@ enum ToolGroup: String, CaseIterable, Identifiable {
         case .sketch: "Neue Skizze beginnen: Ebene oder ebene Körperfläche antippen, dann mit dem Stift zeichnen."
         case .extrude: "Geschlossenen Skizzenbereich oder ebene Fläche antippen und am Pfeil ziehen bzw. Abstand eingeben."
         case .create: "Achsendrehung, Sweep, Loft und Grundkörper (Quader, Zylinder, Kugel …)."
-        case .modify: "Kanten abrunden/fasen, Schale, Kante versetzen, Körper vereinigen, abziehen, schneiden oder teilen."
+        case .modify: "Kanten abrunden/fasen, Schale, Fläche versetzen/ersetzen, Umhüllen und Prägen, Kante versetzen/abdrücken, Körper vereinigen, abziehen, schneiden oder teilen."
         case .transform: "Körper oder Skizzen verschieben, drehen, spiegeln, skalieren, ausrichten oder als Muster vervielfältigen."
         case .construct: "Hilfsebenen, -achsen und -punkte, z. B. eine versetzte Ebene zum Skizzieren."
         case .inspect: "Messen, Schnittansicht und Isolieren."
-        case .insert: "STEP-Datei oder ein Bild als Vorlage einfügen."
+        case .insert: "STEP-Datei, Bild als Vorlage, Körper eines anderen Projekts oder eine Variable einfügen."
         case .visualize: "Anzeigemodus, orthografische Projektion und Körperfarbe."
         }
     }
@@ -410,7 +410,9 @@ struct ToolRail: View {
         if !model.selectedEdges.isEmpty {
             return model.selectedEdges.count == 1 ? "1 Kante" : "\(model.selectedEdges.count) Kanten"
         }
-        if model.selection != nil { return "1 Außenfläche" }
+        if model.selection != nil {
+            return model.selectedFaces.count == 1 ? "1 Außenfläche" : "\(model.selectedFaces.count) Außenflächen"
+        }
         return model.selectedBodies.count == 1 ? "1 Körper" : "\(model.selectedBodies.count) Körper"
     }
 
@@ -479,10 +481,31 @@ struct ToolRail: View {
                 }
             }
         }
+        if face != nil {
+            entries.append(RailEntry(id: "context.offsetFace", title: "Fläche versetzen",
+                                     subtitle: model.selectedFaces.count > 1 ? "\(model.selectedFaces.count) Flächen" : nil,
+                                     systemImage: "arrow.up.and.down.square", category: .modify) {
+                workspace.activate(.offsetFace)
+            })
+        }
         if planarFace {
+            entries.append(RailEntry(id: "context.replaceFace", title: "Fläche ersetzen",
+                                     systemImage: "rectangle.portrait.and.arrow.forward", category: .modify) {
+                workspace.activate(.replaceFace)
+            })
             entries.append(RailEntry(id: "context.offsetEdges", title: "Kante versetzen",
                                      systemImage: SketchTool.offset.systemImage, category: .modify) {
                 workspace.activate(.offsetEdges)
+            })
+        }
+        if hasRegions {
+            entries.append(RailEntry(id: "context.wrap", title: "Umhüllen und Prägen",
+                                     systemImage: "cylinder.split.1x2", category: .modify) {
+                workspace.activate(.wrap)
+            })
+            entries.append(RailEntry(id: "context.imprint", title: "Kante abdrücken",
+                                     systemImage: "square.on.square.dashed", category: .modify) {
+                workspace.activate(.imprint)
             })
         }
 
@@ -491,6 +514,13 @@ struct ToolRail: View {
                                  category: .arrange) {
             workspace.activate(.move)
         })
+        if !model.selectedBodies.isEmpty || face != nil || !model.selectedEdges.isEmpty {
+            entries.append(RailEntry(id: "context.translate", title: "Übersetzen", subtitle: "Punkt zu Punkt",
+                                     systemImage: "point.topleft.down.to.point.bottomright.curvepath",
+                                     category: .arrange) {
+                workspace.activate(.translate)
+            })
+        }
         if hasRegions {
             entries.append(RailEntry(id: "context.scaleSketch", title: "Skizze skalieren",
                                      systemImage: "arrow.up.left.and.arrow.down.right", category: .arrange) {
@@ -615,8 +645,10 @@ struct ToolRail: View {
             return group == .construct
         case .move, .mirror, .pattern, .scale, .align, .scaleSketch:
             return group == .transform
-        case .boolean, .shell, .split, .offsetEdges:
+        case .boolean, .shell, .split, .offsetEdges, .offsetFace, .replaceFace, .wrap, .imprint:
             return group == .modify
+        case .translate:
+            return group == .transform
         case .section, .measure:
             return group == .inspect
         case .color:
@@ -676,7 +708,11 @@ struct ToolRail: View {
             }
             items += [
                 item(.shell, "Schale", subtitle: "Fläche öffnen", "shippingbox"),
+                item(.offsetFace, "Fläche versetzen", subtitle: "Auch Bohrungen", "arrow.up.and.down.square"),
+                item(.replaceFace, "Fläche ersetzen", subtitle: "Bis Zielfläche", "rectangle.portrait.and.arrow.forward"),
                 item(.offsetEdges, "Kante versetzen", subtitle: "Fläche antippen", "square.dashed.inset.filled"),
+                item(.wrap, "Umhüllen und Prägen", subtitle: "Auf Zylinder", "cylinder.split.1x2"),
+                item(.imprint, "Kante abdrücken", subtitle: "Skizze auf Fläche", "square.on.square.dashed"),
             ]
             items += BooleanKind.allCases.map { kind in
                 item(.boolean(kind), kind.rawValue, subtitle: "Kombinieren", kind.systemImage)
@@ -690,6 +726,7 @@ struct ToolRail: View {
         case .transform:
             return [
                 item(.move, "Verschieben/Rotieren", subtitle: "Körper oder Skizze", "move.3d"),
+                item(.translate, "Übersetzen", subtitle: "Punkt zu Punkt", "point.topleft.down.to.point.bottomright.curvepath"),
                 item(.mirror, "Spiegeln", subtitle: "Körper", "arrow.left.and.right.righttriangle.left.righttriangle.right"),
                 item(.pattern(.linear), "Muster linear", subtitle: "Körper", PatternKind.linear.systemImage),
                 item(.pattern(.circular), "Muster kreisförmig", subtitle: "Körper", PatternKind.circular.systemImage),
@@ -718,6 +755,14 @@ struct ToolRail: View {
                          systemImage: "square.and.arrow.down", action: importSTEP),
                 ToolItem(id: "insert.image", title: "Bild", subtitle: "Aus Fotos, als Vorlage", systemImage: "photo") {
                     workspace.isPickingImage = true
+                },
+                ToolItem(id: "insert.project", title: "Projekt", subtitle: "Körper eines anderen Projekts",
+                         systemImage: "folder.badge.plus") {
+                    workspace.showsProjectPicker = true
+                },
+                ToolItem(id: "insert.variable", title: "Variable", subtitle: model.variables.isEmpty ? "Name = Wert"
+                             : "\(model.variables.count) im Projekt", systemImage: "x.squareroot") {
+                    workspace.showsVariables = true
                 },
             ]
         case .visualize:

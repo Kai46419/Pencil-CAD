@@ -97,6 +97,15 @@ struct Mesh {
         return result
     }
 
+    /// Eckpunkte der Dreiecke einer Fläche (je drei), z. B. für die Hervorhebung beim Schweben.
+    func trianglePoints(of face: FaceRef) -> [SIMD3<Float>] {
+        var result: [SIMD3<Float>] = []
+        for (t, ref) in triangleFaces.enumerated() where ref == face {
+            for k in 0..<3 { result.append(vertices[Int(indices[t * 3 + k])].position) }
+        }
+        return result
+    }
+
     /// Indizes aller Dreiecke eines Körpers.
     func triangleIndices(ofBody body: Int) -> [UInt32] {
         var result: [UInt32] = []
@@ -223,5 +232,36 @@ struct Mesh {
 
     private func appendLittleEndian<T: FixedWidthInteger>(_ value: T, to data: inout Data) {
         withUnsafeBytes(of: value.littleEndian) { data.append(contentsOf: $0) }
+    }
+}
+
+extension Mesh {
+    /// Abstand eines Punkts zu einem Dreieck (nächster Punkt nach Ericson, „Real-Time Collision Detection“).
+    static func distance(from p: SIMD3<Float>, toTriangle a: SIMD3<Float>, _ b: SIMD3<Float>,
+                         _ c: SIMD3<Float>) -> Float {
+        let ab = b - a, ac = c - a, ap = p - a
+        let d1 = simd_dot(ab, ap), d2 = simd_dot(ac, ap)
+        if d1 <= 0, d2 <= 0 { return simd_distance(p, a) }
+        let bp = p - b
+        let d3 = simd_dot(ab, bp), d4 = simd_dot(ac, bp)
+        if d3 >= 0, d4 <= d3 { return simd_distance(p, b) }
+        let vc = d1 * d4 - d3 * d2
+        if vc <= 0, d1 >= 0, d3 <= 0 {
+            return simd_distance(p, a + ab * (d1 / (d1 - d3)))
+        }
+        let cp = p - c
+        let d5 = simd_dot(ab, cp), d6 = simd_dot(ac, cp)
+        if d6 >= 0, d5 <= d6 { return simd_distance(p, c) }
+        let vb = d5 * d2 - d1 * d6
+        if vb <= 0, d2 >= 0, d6 <= 0 {
+            return simd_distance(p, a + ac * (d2 / (d2 - d6)))
+        }
+        let va = d3 * d6 - d5 * d4
+        if va <= 0, d4 - d3 >= 0, d5 - d6 >= 0 {
+            return simd_distance(p, b + (c - b) * ((d4 - d3) / ((d4 - d3) + (d5 - d6))))
+        }
+        let sum = va + vb + vc
+        guard sum != 0 else { return simd_distance(p, a) }
+        return simd_distance(p, a + ab * (vb / sum) + ac * (vc / sum))
     }
 }

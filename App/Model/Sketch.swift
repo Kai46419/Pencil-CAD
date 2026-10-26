@@ -530,10 +530,32 @@ final class SketchController: ObservableObject {
     private var undoStack: [Snapshot] = []
 
     private static let snapKindsKey = "snapKinds"
+    /// Fangarten, die es beim letzten Speichern gab; neu hinzugekommene sind zunächst an
+    private static let knownSnapKindsKey = "snapKindsKnown"
 
     private static func storedSnapKinds() -> Set<SnapKind> {
-        guard let raw = UserDefaults.standard.stringArray(forKey: snapKindsKey) else { return Set(SnapKind.allCases) }
-        return Set(raw.compactMap(SnapKind.init(rawValue:)))
+        let defaults = UserDefaults.standard
+        defer { defaults.set(SnapKind.allCases.map(\.rawValue), forKey: knownSnapKindsKey) }
+        guard let raw = defaults.stringArray(forKey: snapKindsKey) else { return Set(SnapKind.allCases) }
+        let known = Set(defaults.stringArray(forKey: knownSnapKindsKey) ?? SnapKind.allCases.prefix(8).map(\.rawValue))
+        return Set(raw.compactMap(SnapKind.init(rawValue:))).union(SnapKind.allCases.filter { !known.contains($0.rawValue) })
+    }
+
+    /// Projizierte Körpergeometrie für 3D-Leitpunkte und entfernte Kanten (beim Öffnen der Skizze gesetzt).
+    var modelGuides = SketchGuides() {
+        didSet { snapIndex = SnapIndex(entities: entities, guides: modelGuides) }
+    }
+    /// Shapr3D „Zeigen › Leitpunkte“: Knoten in Stiftnähe anzeigen
+    @Published var showsGuidePoints = UserDefaults.standard.object(forKey: "showsGuidePoints") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(showsGuidePoints, forKey: "showsGuidePoints") }
+    }
+    /// Shapr3D „Zeigen › Einrasthinweise“: Art des Fangs als Schild am Stift
+    @Published var showsSnapHints = UserDefaults.standard.object(forKey: "showsSnapHints") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(showsSnapHints, forKey: "showsSnapHints") }
+    }
+    /// Kurzes Klicken im Stift bzw. iPad, wenn ein neuer Fangpunkt greift (Haptik wie bei SketchUp-Inferenzen)
+    @Published var snapHaptics = UserDefaults.standard.object(forKey: "snapHaptics") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(snapHaptics, forKey: "snapHaptics") }
     }
 
     // MARK: Zustand
@@ -884,7 +906,7 @@ final class SketchController: ObservableObject {
 
     private static func isPointSnap(_ kind: SnapKind?) -> Bool {
         guard let kind else { return false }
-        return [.endpoint, .midpoint, .center, .intersection].contains(kind)
+        return [.endpoint, .midpoint, .center, .intersection, .modelPoint].contains(kind)
     }
 
     /// Radius, bei dem der Kreis eine Linie oder einen Kreis berührt, denselben Radius wie ein vorhandener
@@ -1486,7 +1508,7 @@ final class SketchController: ObservableObject {
         }
         let others = entities.indices.filter { $0 != index }.map { entities[$0] }
         selectDrag = SelectDrag(entity: index, kind: kind, start: p, grab: grab, original: entities,
-                                snapIndex: SnapIndex(entities: others))
+                                snapIndex: SnapIndex(entities: others, guides: modelGuides))
     }
 
     private func moveSelectDrag(to p: Point2, tolerance: Double) {
@@ -1688,9 +1710,15 @@ final class SketchController: ObservableObject {
                                           gridStep: gridStep), raw: point, anchor: anchor, tolerance: tolerance)
             : SnapResult(point: point, kind: nil)
         let radius = tolerance * 5
-        hoverNodes = snapEnabled
-            ? (snapIndex.nodes.map { $0.point } + inputPoints).filter { simd_distance($0, point) <= radius }
-            : []
+        guard snapEnabled, showsGuidePoints else {
+            hoverNodes = []
+            return
+        }
+        // In Teilschritten, damit der Typprüfer nicht zu lange rechnet
+        var nodes: [Point2] = snapIndex.nodes.filter { snapKinds.contains($0.kind) }.map { $0.point }
+        nodes += inputPoints
+        if snapKinds.contains(.modelPoint) { nodes += snapIndex.guides.points }
+        hoverNodes = nodes.filter { simd_distance($0, point) <= radius }
     }
 
     func endHover() {
@@ -2265,22 +2293,59 @@ final class SketchController: ObservableObject {
     }
 
     /// Wert eines Maßfelds übernehmen: Element ändern, treibendes Maß ändern oder neu anlegen.
-    func setDimension(id: String, to value: Double) {
+    /// expression: Formel mit Projektvariablen; das Maß bleibt mit ihr verknüpft (nil = feste Zahl).
+    func setDimension(id: String, to value: Double, expression: String? = nil) {
         guard value > 0, let dimension = dimensions.first(where: { $0.id == id }) else { return }
         switch dimension.target {
         case .display:
             return
         case .entity(let index):
             setEntityDimension(dimension.kind, of: index, to: value)
+            if let fixed = constraints.firstIndex(where: { constraint in
+                fixedEntityKind(of: constraint).map { $0.entity == index && $0.kind == dimension.kind } ?? false
+            }) {
+                constraints[fixed].expression = expression
+            }
         case .constraint(let index):
             guard constraints.indices.contains(index) else { return }
             var updated = constraints
             updated[index] = updated[index].withDimensionValue(value)
+            updated[index].expression = expression
             applyDimension(updated, anchor: constraints[index].entities.first)
         case .create(let variant):
-            let constraint = SketchConstraint(variant: variant).withDimensionValue(value)
+            var constraint = SketchConstraint(variant: variant).withDimensionValue(value)
+            constraint.expression = expression
             applyDimension(constraints + [constraint], anchor: selection.first?.entity)
         }
+    }
+
+    /// Formel, mit der ein Maß verknüpft ist (nil = feste Zahl bzw. kein treibendes Maß).
+    func expression(of dimension: SketchDimension) -> String? {
+        switch dimension.target {
+        case .constraint(let index):
+            return constraints.indices.contains(index) ? constraints[index].expression : nil
+        case .entity(let index):
+            return constraints.first { constraint in
+                fixedEntityKind(of: constraint).map { $0.entity == index && $0.kind == dimension.kind } ?? false
+            }?.expression
+        case .display, .create:
+            return nil
+        }
+    }
+
+    /// Variablen geändert: verknüpfte Maße neu berechnen und einhalten.
+    func reevaluateExpressions(_ values: [String: Double]) {
+        var updated = constraints
+        var touched = false
+        for index in updated.indices {
+            guard let expression = updated[index].expression, let old = updated[index].dimensionValue,
+                  let value = try? Formula.evaluate(expression, variables: values), value > 0,
+                  abs(value - old) > 1e-9 else { continue }
+            updated[index] = updated[index].withDimensionValue(value)
+            touched = true
+        }
+        guard touched else { return }
+        applyDimension(updated, anchor: nil)
     }
 
     /// Treibendes Maß einhalten; das zuerst gewählte Element bleibt nach Möglichkeit stehen.
@@ -2855,6 +2920,12 @@ final class SketchController: ObservableObject {
         entitiesChanged()
     }
 
+    /// Hängen an der Auswahl Einschränkungen (für „Trennen“, sonst ausgegraut)?
+    var selectionHasConstraints: Bool {
+        let chosen = selectedEntities
+        return constraints.contains { !chosen.isDisjoint(with: $0.entities) }
+    }
+
     /// „Trennen“: Einschränkungen der Auswahl lösen.
     func detachSelection() {
         let chosen = selectedEntities
@@ -3368,7 +3439,8 @@ final class SketchController: ObservableObject {
         guard let anchor, tool == .polyline || tool == .rectangle && rectangleMode == .threePoint,
               snapKinds.contains(.angle) else { return snapped }
         // Punktfang hat Vorrang
-        if let kind = snapped.kind, ([.endpoint, .midpoint, .center, .intersection, .onCurve] as [SnapKind]).contains(kind) {
+        if let kind = snapped.kind,
+           ([.endpoint, .midpoint, .center, .intersection, .onCurve, .modelPoint, .distantEdge] as [SnapKind]).contains(kind) {
             return snapped
         }
         let lines = entities.indices.flatMap { index -> [(Point2, Point2)] in
@@ -3529,7 +3601,7 @@ final class SketchController: ObservableObject {
         let found = findRegions(in: profile)
         regions = found.regions
         loops = found.loops
-        snapIndex = SnapIndex(entities: entities)
+        snapIndex = SnapIndex(entities: entities, guides: modelGuides)
         measureRefs = measureRefs.filter { entities.indices.contains($0.entity) }
         geometryRevision += 1
         changed()

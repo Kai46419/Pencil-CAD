@@ -3,7 +3,20 @@ import simd
 
 // MARK: Bausteine
 
-/// Zahlenfeld mit Titel und Einheit. Übernimmt den Wert beim Bestätigen.
+/// Werte der Projektvariablen für Zahlenfelder (Name → mm bzw. Grad).
+private struct VariableValuesKey: EnvironmentKey {
+    static let defaultValue: [String: Double] = [:]
+}
+
+extension EnvironmentValues {
+    var variableValues: [String: Double] {
+        get { self[VariableValuesKey.self] }
+        set { self[VariableValuesKey.self] = newValue }
+    }
+}
+
+/// Zahlenfeld mit Titel und Einheit. Übernimmt den Wert beim Bestätigen. Wie bei Shapr3D und Fusion 360 rechnet
+/// es Formeln aus („40 / 2 + wand“, „1,5 cm“, „sqrt(2) * a“) – mit den Projektvariablen.
 struct NumberField: View {
     let title: String
     let value: Double
@@ -11,24 +24,65 @@ struct NumberField: View {
     var width: CGFloat = 72
     let set: (Double) -> Void
 
+    @Environment(\.variableValues) private var variables
+    @State private var text = ""
+    @State private var error: String?
+    @FocusState private var isFocused: Bool
+
     var body: some View {
         HStack(spacing: 6) {
             Text(title)
                 .foregroundStyle(.secondary)
                 .fixedSize()
-            TextField(title, value: Binding(get: { value }, set: set),
-                      format: .number.precision(.fractionLength(0...3)))
+            TextField(title, text: $text)
+                .focused($isFocused)
                 .keyboardType(.numbersAndPunctuation)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
                 .multilineTextAlignment(.trailing)
                 .monospacedDigit()
                 .frame(width: width)
                 .textFieldStyle(.roundedBorder)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color.red, lineWidth: error == nil ? 0 : 1.5)
+                }
+                .help(error ?? "")
+                .onSubmit(commit)
+                .onChange(of: isFocused) { _, focused in
+                    if !focused { commit() }
+                }
+                .onChange(of: value) { _, newValue in
+                    if !isFocused { text = Self.format(newValue) }
+                }
+                .onAppear { text = Self.format(value) }
             if !unit.isEmpty {
                 Text(unit)
                     .foregroundStyle(.secondary)
                     .fixedSize()
             }
         }
+    }
+
+    private func commit() {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else {
+            text = Self.format(value)
+            error = nil
+            return
+        }
+        do {
+            let result = try Formula.evaluate(trimmed, variables: variables)
+            error = nil
+            set(result)
+            text = Self.format(result)
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    static func format(_ value: Double) -> String {
+        value.formatted(.number.precision(.fractionLength(0...3)).grouping(.never))
     }
 }
 
@@ -114,6 +168,20 @@ struct ParameterCard: View {
                 Card {
                     Label("Kante versetzen: ebene Fläche antippen", systemImage: "square.dashed.inset.filled")
                 }
+            case .offsetFace:
+                offsetFaceCard
+            case .replaceFace:
+                replaceFaceCard
+            case .wrap:
+                wrapCard
+            case .imprint:
+                Card {
+                    Label(model.selectedRegions.isEmpty ? "Kante abdrücken: Skizzenbereiche antippen"
+                          : "\(model.selectedRegions.count) Bereich(e) · Körper antippen, dann „Fertig“",
+                          systemImage: "square.on.square.dashed")
+                }
+            case .translate:
+                translateCard
             }
         }
     }
@@ -367,8 +435,19 @@ struct ParameterCard: View {
                 }
                 .pickerStyle(.segmented)
                 .fixedSize()
-                NumberField(title: model.edgeOperation == .fillet ? "Radius" : "Breite", value: model.edgeValue) {
+                NumberField(title: model.edgeOperation == .fillet ? "Radius"
+                            : model.edgeSecondValue == nil ? "Breite" : "Abstand 1", value: model.edgeValue) {
                     model.setEdgeValue($0)
+                }
+                if model.edgeOperation == .chamfer {
+                    Toggle("Zwei Abstände", isOn: Binding(get: { model.edgeSecondValue != nil }, set: { on in
+                        model.setEdgeSecondValue(on ? model.edgeValue : nil)
+                    }))
+                    .fixedSize()
+                    .hoverTip("Zwei Abstände", "Wie Fusion 360: die Fase ist auf beiden Nachbarflächen verschieden breit, z. B. 2 × 4 mm.")
+                    if let second = model.edgeSecondValue {
+                        NumberField(title: "Abstand 2", value: second) { model.setEdgeSecondValue($0) }
+                    }
                 }
                 Text(model.selectedEdges.count == 1 ? "1 Kante" : "\(model.selectedEdges.count) Kanten")
                     .foregroundStyle(.secondary)
@@ -513,6 +592,9 @@ struct ParameterCard: View {
                     Text("Zuerst den Zielkörper antippen")
                         .foregroundStyle(.secondary)
                 }
+                Toggle("Werkzeuge behalten", isOn: $workspace.booleanKeepsTools)
+                    .fixedSize()
+                    .hoverTip("Werkzeuge behalten", "Wie Fusion 360: die Werkzeugkörper bleiben nach dem Abziehen bzw. Schneiden stehen, z. B. um sie noch einmal zu verwenden.")
             }
         }
     }
@@ -542,6 +624,117 @@ struct ParameterCard: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .disabled(model.selectedBodies.isEmpty && model.movingSketch == nil)
+                if model.movingSketch == nil {
+                    Toggle(isOn: Binding(get: { model.moveCopies }, set: { copies in
+                        model.moveCopies = copies
+                        if model.moveOffset != .zero { model.setMoveOffset(model.moveOffset) }
+                    })) {
+                        Label("Kopieren", systemImage: "plus.square.on.square")
+                    }
+                    .fixedSize()
+                    .disabled(model.selectedBodies.isEmpty)
+                }
+            }
+        }
+    }
+
+    // MARK: Fläche versetzen, ersetzen, umhüllen, übersetzen
+
+    private var offsetFaceCard: some View {
+        Card {
+            HStack(spacing: 16) {
+                Label("Fläche versetzen", systemImage: "arrow.up.and.down.square")
+                    .font(.callout.weight(.semibold))
+                Picker("Art", selection: Binding(get: { workspace.offsetFaceMode }, set: { mode in
+                    workspace.offsetFaceMode = mode
+                    workspace.offsetFaceValue = 0
+                    model.cancelPreview()
+                })) {
+                    ForEach(OffsetFaceMode.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
+                NumberField(title: workspace.offsetFaceMode.rawValue, value: workspace.offsetFaceValue) { value in
+                    workspace.offsetFaceValue = value
+                    workspace.updateOffsetFacePreview()
+                }
+                if model.selectedFaces.count > 1 {
+                    Text("\(model.selectedFaces.count) Flächen")
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private var replaceFaceCard: some View {
+        Card {
+            HStack(spacing: 16) {
+                Label("Fläche ersetzen", systemImage: "rectangle.portrait.and.arrow.forward")
+                    .font(.callout.weight(.semibold))
+                Picker("Wählen", selection: $workspace.pickingReplaceTarget) {
+                    Text("Flächen (\(model.selectedFaces.count))").tag(false)
+                    Text(workspace.replaceTarget == nil ? "Ziel" : "Ziel ✓").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
+            }
+        }
+    }
+
+    private var wrapCard: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 16) {
+                    Label("Umhüllen und Prägen", systemImage: "cylinder.split.1x2")
+                        .font(.callout.weight(.semibold))
+                    Picker("Art", selection: Binding(get: { workspace.wrapDepth >= 0 }, set: { emboss in
+                        workspace.wrapDepth = emboss ? abs(workspace.wrapDepth) : -abs(workspace.wrapDepth)
+                        workspace.updateWrapPreview()
+                    })) {
+                        Text("Prägen").tag(true)
+                        Text("Gravieren").tag(false)
+                    }
+                    .pickerStyle(.segmented)
+                    .fixedSize()
+                }
+                HStack(spacing: 16) {
+                    NumberField(title: "Tiefe", value: abs(workspace.wrapDepth), width: 60) { value in
+                        guard value > 0 else { return }
+                        workspace.wrapDepth = workspace.wrapDepth >= 0 ? value : -value
+                        workspace.updateWrapPreview()
+                    }
+                    NumberField(title: "Drehung", value: workspace.wrapRotation, unit: "°", width: 56) { value in
+                        workspace.wrapRotation = value
+                        workspace.updateWrapPreview()
+                    }
+                    Text(workspace.wrapFace == nil ? "Zylinderfläche antippen" : "Zylinder gewählt")
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private var translateCard: some View {
+        Card {
+            HStack(spacing: 16) {
+                Label("Übersetzen", systemImage: "point.topleft.down.to.point.bottomright.curvepath")
+                    .font(.callout.weight(.semibold))
+                Toggle("Kopieren", isOn: Binding(get: { model.moveCopies }, set: { copies in
+                    model.moveCopies = copies
+                    if let start = workspace.translateStart, let end = workspace.translateEnd {
+                        model.setMoveOffset(end - start)
+                    }
+                }))
+                .fixedSize()
+                if let start = workspace.translateStart, let end = workspace.translateEnd {
+                    let d = end - start
+                    Text("Δ \(NumberField.format(simd_length(d))) mm")
+                        .monospacedDigit()
+                }
+                Button("Neu", systemImage: "arrow.counterclockwise", action: workspace.resetTranslate)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(workspace.translateStart == nil)
             }
         }
     }
@@ -566,14 +759,46 @@ struct ParameterCard: View {
             HStack(spacing: 16) {
                 Label("Spiegeln", systemImage: "arrow.left.and.right.righttriangle.left.righttriangle.right")
                     .font(.callout.weight(.semibold))
-                Picker("Ebene", selection: Binding(get: { workspace.mirrorPlane }, set: { plane in
-                    workspace.mirrorPlane = plane
-                    workspace.updateMirrorPreview()
-                })) {
-                    ForEach(MirrorPlane.allCases) { Text("Ebene \($0.rawValue)").tag($0) }
+                if let name = workspace.mirrorReferenceName {
+                    Label("An \(name)", systemImage: "square.split.diagonal")
+                    Button("Mitte") {
+                        workspace.mirrorFace = nil
+                        workspace.mirrorConstruction = nil
+                        workspace.updateMirrorPreview()
+                    }
+                    .hoverTip("Wieder an der Ebene durch die Körpermitte spiegeln")
+                } else {
+                    Picker("Ebene", selection: Binding(get: { workspace.mirrorPlane }, set: { plane in
+                        workspace.mirrorPlane = plane
+                        workspace.updateMirrorPreview()
+                    })) {
+                        ForEach(MirrorPlane.allCases) { Text("Ebene \($0.rawValue)").tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .fixedSize()
                 }
-                .pickerStyle(.segmented)
+                Menu {
+                    Button("Fläche antippen …", systemImage: "hand.tap") {
+                        workspace.mirrorPicksFace = true
+                    }
+                    let planes = model.constructions.filter { $0.kind == .plane }
+                    if !planes.isEmpty {
+                        Section("Konstruktionsebenen") {
+                            ForEach(planes) { item in
+                                Button(item.name) {
+                                    workspace.mirrorConstruction = item.id
+                                    workspace.mirrorFace = nil
+                                    workspace.mirrorPicksFace = false
+                                    workspace.updateMirrorPreview()
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    Label("Andere Ebene", systemImage: "square.3.layers.3d.down.right")
+                }
                 .fixedSize()
+                .hoverTip("Andere Ebene", "Wie Shapr3D: an einer ebenen Körperfläche oder einer Konstruktionsebene spiegeln.")
                 Toggle("Original behalten", isOn: Binding(get: { workspace.mirrorKeepsOriginal }, set: { keep in
                     workspace.mirrorKeepsOriginal = keep
                     workspace.updateMirrorPreview()
@@ -592,6 +817,17 @@ struct ParameterCard: View {
                     guard value > 0 else { return }
                     workspace.shellThickness = value
                     workspace.updateShellPreview()
+                }
+                Toggle("Hohlkörper", isOn: Binding(get: { workspace.shellClosed }, set: { closed in
+                    workspace.shellClosed = closed
+                    workspace.updateShellPreview()
+                }))
+                .fixedSize()
+                .hoverTip("Hohlkörper", "Keine Fläche offen: der Körper wird innen hohl und bleibt geschlossen (z. B. für Gussteile oder leichte Druckteile).")
+                if !workspace.shellClosed, model.selectedFaces.count > 1 {
+                    Text("\(model.selectedFaces.count) Flächen offen")
+                        .foregroundStyle(.secondary)
+                        .fixedSize()
                 }
             }
         }
@@ -1069,6 +1305,20 @@ struct LayersPanel: View {
     @State private var closedFolders: Set<String> = ["settings"]
     @State private var renaming: Renaming?
     @State private var newName = ""
+    /// Filter wie bei Shapr3D: Alle, Körper, Skizzen, Konstruktion
+    @State private var filter: LayerFilter = .all
+    /// Körper, die in einen neuen Ordner sollen (Name wird abgefragt)
+    @State private var folderBodies: [Int]?
+    @State private var folderName = ""
+
+    enum LayerFilter: String, CaseIterable, Identifiable {
+        case all = "Alle"
+        case bodies = "Körper"
+        case sketches = "Skizzen"
+        case construction = "Konstruktion"
+
+        var id: Self { self }
+    }
 
     /// „Skizze 3“ heißt im Reiter „Ebene 3“.
     static func layerName(_ sketchName: String) -> String {
@@ -1077,25 +1327,46 @@ struct LayersPanel: View {
 
     var body: some View {
         SidePanelFrame(title: "Ebenen", close: close) {
+            Picker("Filter", selection: $filter) {
+                ForEach(LayerFilter.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .controlSize(.small)
+            .padding(.bottom, 4)
             folder("root", title: projectName, systemImage: "cube.transparent", visible: nil) {
-                folder("settings", title: "Dokumenteinstellungen", systemImage: "gearshape", visible: nil) {
-                    infoRow("Einheiten: mm", systemImage: "ruler")
-                }
-                folder("origin", title: "Ursprung", systemImage: "move.3d", visible: workspace.showsOrigin,
-                       toggle: { workspace.showsOrigin.toggle() }, hasChildren: false) {
-                    EmptyView()
-                }
-                folder("sketches", title: "Skizzen", systemImage: "folder",
-                       count: model.sketches.count, visible: model.sketches.isEmpty ? nil : model.showsSketches,
-                       toggle: { model.setSketchesHidden(model.showsSketches) }) {
-                    if model.sketches.isEmpty {
-                        infoRow("Noch keine Skizze", systemImage: "pencil.and.outline")
+                if filter == .all {
+                    folder("settings", title: "Dokumenteinstellungen", systemImage: "gearshape", visible: nil) {
+                        infoRow("Einheiten: mm", systemImage: "ruler")
                     }
-                    ForEach(model.sketches.indices, id: \.self) { index in
-                        layer(index)
+                    folder("origin", title: "Ursprung", systemImage: "move.3d", visible: workspace.showsOrigin,
+                           toggle: { workspace.showsOrigin.toggle() }, hasChildren: false) {
+                        EmptyView()
                     }
                 }
-                if !otherBodies.isEmpty {
+                if filter == .all || filter == .bodies {
+                    ForEach(model.bodyFolders) { entry in
+                        userFolder(entry.name, bodies: entry.bodies)
+                    }
+                }
+                if filter == .bodies {
+                    let sketchBodies = model.sketches.indices.flatMap { model.bodies(fromSketch: $0) }
+                    ForEach(sketchBodies + otherBodies, id: \.self) { index in
+                        bodyRow(index)
+                    }
+                }
+                if filter == .all || filter == .sketches {
+                    folder("sketches", title: "Skizzen", systemImage: "folder",
+                           count: model.sketches.count, visible: model.sketches.isEmpty ? nil : model.showsSketches,
+                           toggle: { model.setSketchesHidden(model.showsSketches) }) {
+                        if model.sketches.isEmpty {
+                            infoRow("Noch keine Skizze", systemImage: "pencil.and.outline")
+                        }
+                        ForEach(model.sketches.indices, id: \.self) { index in
+                            layer(index)
+                        }
+                    }
+                }
+                if filter == .all, !otherBodies.isEmpty {
                     let anyVisible = otherBodies.contains { !model.bodies[$0].isHidden }
                     folder("bodies", title: "Körper", systemImage: "folder", count: otherBodies.count,
                            visible: anyVisible, toggle: { model.setBodiesHidden(anyVisible, bodies: otherBodies) }) {
@@ -1104,7 +1375,7 @@ struct LayersPanel: View {
                         }
                     }
                 }
-                if !model.constructions.isEmpty {
+                if filter == .all || filter == .construction, !model.constructions.isEmpty {
                     folder("constructions", title: "Konstruktion", systemImage: "folder",
                            count: model.constructions.count, visible: model.showsConstructions,
                            toggle: { model.setConstructionsHidden(model.showsConstructions) }) {
@@ -1113,7 +1384,7 @@ struct LayersPanel: View {
                         }
                     }
                 }
-                if !model.canvases.isEmpty {
+                if filter == .all, !model.canvases.isEmpty {
                     folder("canvases", title: "Bilder", systemImage: "folder", count: model.canvases.count,
                            visible: model.showsCanvases, toggle: { model.setCanvasesHidden(model.showsCanvases) }) {
                         ForEach(model.canvases) { canvas in
@@ -1122,6 +1393,16 @@ struct LayersPanel: View {
                     }
                 }
             }
+        }
+        .alert("Neuer Ordner", isPresented: Binding(get: { folderBodies != nil }, set: { if !$0 { folderBodies = nil } })) {
+            TextField("Name", text: $folderName)
+            Button("Abbrechen", role: .cancel) {}
+            Button("Anlegen") {
+                let name = folderName.trimmingCharacters(in: .whitespaces)
+                if !name.isEmpty, let chosen = folderBodies { model.setFolder(name, bodies: chosen) }
+            }
+        } message: {
+            Text("Die Körper kommen in den neuen Ordner im Browser.")
         }
         .alert(isRenamingSketch ? "Ebene umbenennen" : "Körper umbenennen",
                isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
@@ -1203,6 +1484,27 @@ struct LayersPanel: View {
     }
 
     private var otherBodies: [Int] { model.unassignedBodies }
+
+    /// Eigener Ordner mit Körpern (Kontextmenü: auflösen, exportieren).
+    private func userFolder(_ name: String, bodies: [Int]) -> some View {
+        let anyVisible = bodies.contains { !model.bodies[$0].isHidden }
+        return folder("user.\(name)", title: name, systemImage: "folder.fill", count: bodies.count, visible: anyVisible,
+                      toggle: { model.setBodiesHidden(anyVisible, bodies: bodies) }) {
+            ForEach(bodies, id: \.self) { index in
+                bodyRow(index)
+            }
+        }
+        .contextMenu {
+            exportMenu(title: "Ordner exportieren", bodies: bodies, name: name)
+            Button("Alle wählen", systemImage: "checkmark.circle") { model.selectBodies(bodies) }
+            Button("Ordner auflösen", systemImage: "folder.badge.minus") { model.setFolder(nil, bodies: bodies) }
+        }
+    }
+
+    /// Körper für das Ordner-Menü: der angetippte, bzw. alle gewählten, wenn er dazugehört.
+    private func folderTargets(_ index: Int) -> [Int] {
+        model.selectedBodies.contains(index) ? model.selectedBodies : [index]
+    }
 
     private var isRenamingSketch: Bool {
         guard case .sketch? = renaming else { return false }
@@ -1340,6 +1642,22 @@ struct LayersPanel: View {
             Button("Umbenennen", systemImage: "pencil") {
                 newName = item.name
                 renaming = .body(index)
+            }
+            Menu {
+                ForEach(model.bodyFolders.map(\.name).filter { $0 != item.folder }, id: \.self) { name in
+                    Button(name, systemImage: "folder") { model.setFolder(name, bodies: folderTargets(index)) }
+                }
+                Button("Neuer Ordner …", systemImage: "folder.badge.plus") {
+                    folderName = ""
+                    folderBodies = folderTargets(index)
+                }
+                if item.folder != nil {
+                    Button("Aus Ordner nehmen", systemImage: "folder.badge.minus") {
+                        model.setFolder(nil, bodies: folderTargets(index))
+                    }
+                }
+            } label: {
+                Label("In Ordner", systemImage: "folder")
             }
             Button("Löschen", systemImage: "trash", role: .destructive) {
                 model.toggleBody(index, exclusive: true)

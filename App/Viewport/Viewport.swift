@@ -66,12 +66,27 @@ final class ViewportView: MTKView {
     private var panGesture: UIPanGestureRecognizer?
     private var pinchGesture: UIPinchGestureRecognizer?
     private var tapGesture: UITapGestureRecognizer?
+    private var undoGesture: UITapGestureRecognizer?
+    private var redoGesture: UITapGestureRecognizer?
     private var sketchTouch: UITouch?
     private var handleDrag: HandleDragState?
     /// Drehscheibe im Verschieben-Werkzeug
     private var ringDrag: RingDragState?
     private let ringLabel = PaddedLabel()
     private let valueLabel = PaddedLabel()
+    /// Einrasthinweis am Stift (Endpunkt, Mittelpunkt …)
+    private let snapHintLabel = PaddedLabel()
+    private var lastSnapKey: String?
+    private lazy var selectionFeedback = UISelectionFeedbackGenerator()
+    private var canvasFeedbackStorage: UIFeedbackGenerator?
+    /// Ab iPadOS 17.5: Haptik auch im Apple Pencil Pro
+    @available(iOS 17.5, *)
+    private var canvasFeedback: UICanvasFeedbackGenerator {
+        if let existing = canvasFeedbackStorage as? UICanvasFeedbackGenerator { return existing }
+        let generator = UICanvasFeedbackGenerator(view: self)
+        canvasFeedbackStorage = generator
+        return generator
+    }
     private var planeLabels: [PaddedLabel] = []
     private var dimensionFields: [String: DimensionField] = [:]
     /// Kleines Ziffernfeld am gerade bearbeiteten Maß (statt der Bildschirmtastatur, die die Maße verdeckt)
@@ -95,6 +110,14 @@ final class ViewportView: MTKView {
     /// Punkt merken durch ruhiges Schweben (1 s)
     private var hoverDwell: DispatchWorkItem?
     private var hoverDwellOrigin: CGPoint?
+    /// Was der schwebende Stift im Modell treffen würde (Hervorhebung vor dem Antippen, wie Shapr3D)
+    private enum HoverPick: Equatable {
+        case face(FaceRef)
+        case edge(EdgeRef)
+        case region(RegionRef)
+        case point(SIMD3<Double>)
+    }
+    private var hoverPick: HoverPick?
     /// Aufgelegte Finger beim Skizzieren mit dem Stift (Finger auflegen = tangentialer Bogen)
     private var heldFingers = Set<UITouch>()
     /// Der aufgelegte Finger hat als Bogen-Taste gedient: sein Loslassen ist kein Antippen
@@ -160,7 +183,19 @@ final class ViewportView: MTKView {
         var lastAngle: Double
         var sweep: Double = 0
         var degrees: Double = 0
+        var axis: Int = 2
     }
+
+    /// Ziehen am Ebenengriff: Ebene (Normale), Ansatzpunkt und Verschiebung beim Ansetzen.
+    private struct PlaneDragState {
+        let touch: UITouch
+        let normal: Int
+        let origin: SIMD3<Double>
+        let start: SIMD3<Double>
+        let startOffset: SIMD3<Double>
+        let step: Double
+    }
+    private var planeDrag: PlaneDragState?
 
     private let fingersOnly = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
     private let fingersAndPencil = [NSNumber(value: UITouch.TouchType.direct.rawValue),
@@ -206,7 +241,17 @@ final class ViewportView: MTKView {
         doubleTap.numberOfTapsRequired = 2
         doubleTap.allowedTouchTypes = fingersOnly
 
-        for recognizer in [orbit, pan, pinch, tap, hover, doubleTap] as [UIGestureRecognizer] {
+        // Wie Shapr3D: mit zwei Fingern tippen = Rückgängig, mit drei Fingern = Wiederholen
+        let undoTap = UITapGestureRecognizer(target: self, action: #selector(handleUndoTap))
+        undoTap.numberOfTouchesRequired = 2
+        undoTap.allowedTouchTypes = fingersOnly
+        let redoTap = UITapGestureRecognizer(target: self, action: #selector(handleRedoTap))
+        redoTap.numberOfTouchesRequired = 3
+        redoTap.allowedTouchTypes = fingersOnly
+        undoGesture = undoTap
+        redoGesture = redoTap
+
+        for recognizer in [orbit, pan, pinch, tap, hover, doubleTap, undoTap, redoTap] as [UIGestureRecognizer] {
             recognizer.delegate = self
             addGestureRecognizer(recognizer)
         }
@@ -327,6 +372,63 @@ final class ViewportView: MTKView {
         }
         updateValueLabel(handles)
         updateDimensionFields()
+        updateSnapHint()
+        workspace.pickTolerance = snapTolerance
+    }
+
+    // MARK: Einrasthinweis
+
+    /// Shapr3D „Einrasthinweise“: Art des Fangs als kleines Schild neben dem Stift.
+    private func updateSnapHint() {
+        snapFeedback()
+        guard let renderer, let sketch, sketch.isActive, !sketch.isChoosingPlane, sketch.showsSnapHints,
+              let snap = sketch.currentSnap, let kind = snap.kind, kind != .grid,
+              let point = renderer.camera.project(SIMD3<Float>(sketch.plane.world(snap.point)), viewSize: bounds.size) else {
+            snapHintLabel.isHidden = true
+            return
+        }
+        if snapHintLabel.superview == nil {
+            snapHintLabel.font = .systemFont(ofSize: 12, weight: .semibold)
+            snapHintLabel.textColor = .white
+            snapHintLabel.backgroundColor = UIColor(red: 0.98, green: 0.45, blue: 0.05, alpha: 0.92)
+            snapHintLabel.layer.cornerRadius = 8
+            snapHintLabel.layer.masksToBounds = true
+            snapHintLabel.isUserInteractionEnabled = false
+            addSubview(snapHintLabel)
+        }
+        if snapHintLabel.text != kind.hint {
+            snapHintLabel.text = kind.hint
+            snapHintLabel.sizeToFit()
+        }
+        snapHintLabel.center = CGPoint(x: point.x + snapHintLabel.bounds.width / 2 + 14,
+                                       y: point.y - snapHintLabel.bounds.height / 2 - 12)
+        snapHintLabel.isHidden = false
+    }
+
+    /// Haptik beim Einrasten: einmal je neuem Fangpunkt (nicht beim Raster, nicht wiederholt am selben Punkt).
+    private func snapFeedback() {
+        guard let sketch, sketch.isActive, !sketch.isChoosingPlane,
+              let snap = sketch.currentSnap, let kind = snap.kind, kind != .grid else {
+            lastSnapKey = nil
+            return
+        }
+        let key = "\(kind)|\((snap.point.x * 100).rounded())|\((snap.point.y * 100).rounded())"
+        guard key != lastSnapKey else { return }
+        lastSnapKey = key
+        guard sketch.snapHaptics else { return }
+        if #available(iOS 17.5, *) {
+            canvasFeedback.alignmentOccurred(at: snapHintAnchor(snap.point))
+        } else {
+            selectionFeedback.selectionChanged()
+        }
+    }
+
+    private func snapHintAnchor(_ point: Point2) -> CGPoint {
+        guard let renderer, let sketch,
+              let p = renderer.camera.project(SIMD3<Float>(sketch.plane.world(point)), viewSize: bounds.size) else {
+            return CGPoint(x: bounds.midX, y: bounds.midY)
+        }
+        return p
     }
 
     // MARK: Linien und Bereiche
@@ -393,11 +495,21 @@ final class ViewportView: MTKView {
         }
 
         addConstructionItems(to: &groups, perPoint: perPoint, sketching: sketching)
-        if !sketching { addRotationRing(to: &groups) }
+        if !sketching {
+            addRotationRing(to: &groups)
+            addPlaneHandles(to: &fills, groups: &groups)
+        }
+        if !sketch.isActive { addHoverHighlight(to: &groups, fills: &fills) }
         if !sketch.isActive, workspace.tool == .measure, !workspace.measurePoints.isEmpty {
             let points = workspace.measurePoints.map { SIMD3<Float>($0) }
             groups.append(LineGroup(polylines: points.count == 2 ? [points] : [], color: Self.previewBlue, width: 2,
                                     dots: points, dotRadius: 5))
+        }
+        // Übersetzen: Start- und Zielpunkt mit Verbindung
+        if !sketch.isActive, workspace.tool == .translate, let start = workspace.translateStart {
+            let points = ([start] + (workspace.translateEnd.map { [$0] } ?? [])).map { SIMD3<Float>($0) }
+            groups.append(LineGroup(polylines: points.count == 2 ? [points] : [], color: Self.snapOrange, width: 2.4,
+                                    dots: points, dotRadius: 6, onTop: true))
         }
 
         if sketching {
@@ -521,66 +633,164 @@ final class ViewportView: MTKView {
         renderer.fills = fills
     }
 
-    // MARK: Drehscheibe
+    // MARK: Schweben im Modell
 
-    /// Ring des Verschieben-Werkzeugs: beim Drehen der beim Ansetzen gemerkte, sonst der aktuelle.
-    private var currentRing: (center: SIMD3<Double>, radius: Double)? {
-        if let ringDrag { return (ringDrag.center, ringDrag.radius) }
-        return workspace?.rotationRing
+    private static let hoverBlue = SIMD3<Float>(0.2, 0.55, 1)
+
+    /// Fläche, Kante oder Skizzenbereich unter dem schwebenden Stift: hellblau, bevor getippt wird. So sieht man
+    /// vorher, ob das Antippen eine Fläche zum Extrudieren oder eine Kante zum Abrunden trifft.
+    private func addHoverHighlight(to groups: inout [LineGroup], fills: inout [FillGroup]) {
+        guard let hoverPick, let model else { return }
+        switch hoverPick {
+        case .edge(let edge):
+            let lines = model.edgePolylines(edge).map { $0.map { SIMD3<Float>($0) } }
+            groups.append(LineGroup(polylines: lines, color: Self.hoverBlue, width: 4.5))
+        case .face(let face):
+            fills.append(FillGroup(triangles: model.mesh.trianglePoints(of: face), color: SIMD4(0.2, 0.55, 1, 0.3)))
+            let outline = model.edgePolylines(ofFace: face).map { $0.map { SIMD3<Float>($0) } }
+            groups.append(LineGroup(polylines: outline, color: Self.hoverBlue, width: 2.2, onTop: false))
+        case .region(let region):
+            guard model.sketches.indices.contains(region.sketch),
+                  model.sketches[region.sketch].fills.indices.contains(region.region) else { return }
+            fills.append(FillGroup(triangles: model.sketches[region.sketch].fills[region.region],
+                                   color: SIMD4(0.2, 0.55, 1, 0.35)))
+        case .point(let point):
+            groups.append(LineGroup(polylines: [], color: Self.snapOrange, width: 0, dots: [SIMD3<Float>(point)],
+                                    dotRadius: 6, onTop: true))
+        }
+    }
+
+    /// Was ein Antippen an dieser Stelle treffen würde (gleiche Regeln wie handleTap): Kante vor Fläche,
+    /// Skizzenbereich vor der Fläche, auf der er liegt. Nur ebene Flächen (extrudierbar) werden gezeigt.
+    private func updateHoverPick(at location: CGPoint?) {
+        var pick: HoverPick?
+        if let location, let renderer, let model, let workspace, let sketch, !sketch.isActive, handleDrag == nil,
+           ringDrag == nil, Self.hoverTools(workspace.tool),
+           let ray = renderer.camera.ray(through: location, viewSize: bounds.size) {
+            let hit = model.pick(origin: ray.origin, direction: ray.direction)
+            if let edge = pickEdge(at: location, ray: ray, faceHit: hit)?.edge, workspace.tool == .select {
+                if !model.selectedEdges.contains(edge) { pick = .edge(edge) }
+            } else if let regionHit = model.pickRegion(origin: ray.origin, direction: ray.direction),
+                      regionHit.t <= (hit.map { simd_dot($0.point - ray.origin, ray.direction) } ?? .infinity) + 0.05 {
+                if !model.selectedRegions.contains(regionHit.ref) { pick = .region(regionHit.ref) }
+            } else if let face = hit?.face, !model.selectedFaces.contains(face),
+                      workspace.tool != .select || model.hasPreview || model.plane(of: face) != nil {
+                pick = .face(face)
+            }
+        } else if let location, let renderer, let model, let workspace, workspace.tool == .translate,
+                  !model.selectedBodies.isEmpty, let ray = renderer.camera.ray(through: location, viewSize: bounds.size),
+                  let hit = model.pick(origin: ray.origin, direction: ray.direction) {
+            // Übersetzen: Fangpunkt unter dem Stift zeigen
+            pick = .point(model.snappedModelPoint(SIMD3<Double>(hit.point), tolerance: snapTolerance))
+        }
+        if pick != hoverPick {
+            hoverPick = pick
+            refresh()
+        }
+    }
+
+    /// Werkzeuge, in denen Antippen Flächen bzw. Kanten wählt.
+    private static func hoverTools(_ tool: ModelTool) -> Bool {
+        switch tool {
+        case .select, .shell, .offsetFace, .replaceFace, .wrap, .imprint: true
+        default: false
+        }
+    }
+
+    // MARK: Drehscheibe und Drehbögen
+
+    /// Ring zum Drehen: Mitte, Radius und Achse (0 = X, 1 = Y, 2 = Z).
+    private typealias Ring = (center: SIMD3<Double>, radius: Double, axis: Int)
+
+    /// Ringe des Verschieben-Werkzeugs: beim Drehen nur der gegriffene (wie beim Ansetzen gemerkt), sonst die
+    /// Drehscheibe am Boden (Z) und die Drehbögen um X und Y.
+    private var currentRings: [Ring] {
+        if let ringDrag { return [(ringDrag.center, ringDrag.radius, ringDrag.axis)] }
+        guard let workspace else { return [] }
+        var rings: [Ring] = workspace.rotationArcs.map { ($0.center, $0.radius, $0.axis) }
+        if let ring = workspace.rotationRing { rings.append((ring.center, ring.radius, 2)) }
+        return rings
     }
 
     private static let ringBlue = SIMD3<Float>(0.1, 0.36, 0.88)
+    private static let ringColors: [SIMD3<Float>] = [SIMD3(0.88, 0.2, 0.2), SIMD3(0.2, 0.66, 0.28), ringBlue]
 
-    /// Punkt auf dem Ring zum Winkel (Bogenmaß, 0 = +X).
-    private static func ringPoint(_ ring: (center: SIMD3<Double>, radius: Double), angle: Double,
-                                  scale: Double = 1) -> SIMD3<Float> {
-        SIMD3<Float>(ring.center + SIMD3<Double>(cos(angle), sin(angle), 0) * ring.radius * scale)
+    /// Zwei Richtungen in der Ringebene (Winkel 0 entlang der ersten).
+    private static func ringBasis(_ axis: Int) -> (SIMD3<Double>, SIMD3<Double>) {
+        switch axis {
+        case 0: ([0, 1, 0], [0, 0, 1])
+        case 1: ([0, 0, 1], [1, 0, 0])
+        default: ([1, 0, 0], [0, 1, 0])
+        }
     }
 
-    /// Drehscheibe wie in Bambu Studio / PrusaSlicer: blauer Ring am Boden der Auswahl, Striche alle 15°,
-    /// Griffpunkt; beim Drehen der überstrichene Bogen orange.
+    private static func axisVector(_ axis: Int) -> SIMD3<Double> {
+        var vector = SIMD3<Double>(0, 0, 0)
+        vector[min(max(axis, 0), 2)] = 1
+        return vector
+    }
+
+    /// Punkt auf dem Ring zum Winkel (Bogenmaß).
+    private static func ringPoint(_ ring: Ring, angle: Double, scale: Double = 1) -> SIMD3<Float> {
+        let (e1, e2) = ringBasis(ring.axis)
+        return SIMD3<Float>(ring.center + (e1 * cos(angle) + e2 * sin(angle)) * ring.radius * scale)
+    }
+
+    /// Drehscheibe wie in Bambu Studio / PrusaSlicer (blau, Z) und Drehbögen um X (rot) und Y (grün) wie bei
+    /// Shapr3D: Striche alle 15°, Griffpunkt; beim Drehen der überstrichene Bogen orange.
     private func addRotationRing(to groups: inout [LineGroup]) {
-        guard let ring = currentRing else { return }
-        let segments = 120
-        let circle = (0...segments).map { Self.ringPoint(ring, angle: Double($0) / Double(segments) * 2 * .pi) }
-        let ticks = (0..<24).map { k -> [SIMD3<Float>] in
-            let angle = Double(k) * .pi / 12
-            let inner = k % 6 == 0 ? 0.86 : 0.93
-            return [Self.ringPoint(ring, angle: angle, scale: inner), Self.ringPoint(ring, angle: angle)]
-        }
-        let start = ringDrag?.startAngle ?? -.pi / 2
-        let turned = (ringDrag?.degrees ?? 0) * .pi / 180
-        let knob = Self.ringPoint(ring, angle: start + turned)
-        groups.append(LineGroup(polylines: [circle], color: Self.ringBlue, width: 3.2))
-        groups.append(LineGroup(polylines: ticks, color: Self.ringBlue, width: 1.4, dots: [knob], dotRadius: 8))
-        if abs(turned) > 1e-9 {
-            let steps = max(2, Int(abs(turned) / (.pi / 90)))
-            let arc = (0...steps).map { Self.ringPoint(ring, angle: start + turned * Double($0) / Double(steps)) }
-            groups.append(LineGroup(polylines: [arc], color: Self.snapOrange, width: 4.5,
-                                    dots: [Self.ringPoint(ring, angle: start)], dotRadius: 3.5))
+        for ring in currentRings {
+            let color = Self.ringColors[ring.axis]
+            let segments = 120
+            let circle = (0...segments).map { Self.ringPoint(ring, angle: Double($0) / Double(segments) * 2 * .pi) }
+            let ticks = (0..<24).map { k -> [SIMD3<Float>] in
+                let angle = Double(k) * .pi / 12
+                let inner = k % 6 == 0 ? 0.86 : 0.93
+                return [Self.ringPoint(ring, angle: angle, scale: inner), Self.ringPoint(ring, angle: angle)]
+            }
+            let start = ringDrag?.startAngle ?? -.pi / 2
+            let turned = (ringDrag?.degrees ?? 0) * .pi / 180
+            let knob = Self.ringPoint(ring, angle: start + turned)
+            groups.append(LineGroup(polylines: [circle], color: color, width: ring.axis == 2 ? 3.2 : 2.4))
+            groups.append(LineGroup(polylines: ring.axis == 2 || ringDrag != nil ? ticks : [], color: color, width: 1.4,
+                                    dots: [knob], dotRadius: ring.axis == 2 ? 8 : 6.5))
+            if abs(turned) > 1e-9 {
+                let steps = max(2, Int(abs(turned) / (.pi / 90)))
+                let arc = (0...steps).map { Self.ringPoint(ring, angle: start + turned * Double($0) / Double(steps)) }
+                groups.append(LineGroup(polylines: [arc], color: Self.snapOrange, width: 4.5,
+                                        dots: [Self.ringPoint(ring, angle: start)], dotRadius: 3.5))
+            }
         }
     }
 
     /// Winkel (Bogenmaß) des Bildschirmpunkts in der Ringebene um die Ringmitte.
-    private func ringAngle(at location: CGPoint, ring: (center: SIMD3<Double>, radius: Double)) -> Double? {
+    private func ringAngle(at location: CGPoint, ring: Ring) -> Double? {
         guard let renderer,
               let hit = renderer.camera.intersect(screenPoint: location, viewSize: bounds.size,
-                                                  planeOrigin: SIMD3<Float>(ring.center), planeNormal: [0, 0, 1]) else {
+                                                  planeOrigin: SIMD3<Float>(ring.center),
+                                                  planeNormal: SIMD3<Float>(Self.axisVector(ring.axis))) else {
             return nil
         }
         let d = SIMD3<Double>(hit) - ring.center
-        guard simd_length(SIMD2(d.x, d.y)) > 1e-9 else { return nil }
-        return atan2(d.y, d.x)
+        let (e1, e2) = Self.ringBasis(ring.axis)
+        let x = simd_dot(d, e1), y = simd_dot(d, e2)
+        guard x * x + y * y > 1e-18 else { return nil }
+        return atan2(y, x)
     }
 
-    /// Berührung nah am gezeichneten Ring (höchstens 24 pt)?
-    private func ringHit(at location: CGPoint) -> Bool {
-        guard let renderer, let ring = currentRing else { return false }
-        let points = (0...72).compactMap {
-            renderer.camera.project(Self.ringPoint(ring, angle: Double($0) / 72 * 2 * .pi), viewSize: bounds.size)
+    /// Ring nah an der Berührung (höchstens 24 pt), der nächste zuerst.
+    private func ringHit(at location: CGPoint) -> Ring? {
+        guard let renderer else { return nil }
+        var best: (ring: Ring, distance: CGFloat)?
+        for ring in currentRings {
+            let points = (0...72).compactMap {
+                renderer.camera.project(Self.ringPoint(ring, angle: Double($0) / 72 * 2 * .pi), viewSize: bounds.size)
+            }
+            guard points.count > 1 else { continue }
+            let distance = (1..<points.count).map { location.distance(toSegment: points[$0 - 1], points[$0]) }.min() ?? .infinity
+            if distance <= 24, distance < (best?.distance ?? .infinity) { best = (ring, distance) }
         }
-        guard points.count > 1 else { return false }
-        return (1..<points.count).contains { location.distance(toSegment: points[$0 - 1], points[$0]) <= 24 }
+        return best?.ring
     }
 
     /// Ganze Grad, nahe einem Vielfachen von 15° rastet es dort ein.
@@ -591,17 +801,72 @@ final class ViewportView: MTKView {
     }
 
     private func updateRingLabel() {
-        guard let ringDrag, let renderer, let ring = currentRing,
-              let point = renderer.camera.project(Self.ringPoint(ring, angle: ringDrag.startAngle
-                                                                   + ringDrag.degrees * .pi / 180, scale: 1.18),
+        guard let ringDrag, let renderer,
+              let point = renderer.camera.project(Self.ringPoint((ringDrag.center, ringDrag.radius, ringDrag.axis),
+                                                                 angle: ringDrag.startAngle + ringDrag.degrees * .pi / 180,
+                                                                 scale: 1.18),
                                                   viewSize: bounds.size) else {
             ringLabel.isHidden = true
             return
         }
-        ringLabel.text = "\(Int(ringDrag.degrees))°"
+        ringLabel.text = "\(["X", "Y", "Z"][ringDrag.axis]) \(Int(ringDrag.degrees))°"
+        ringLabel.backgroundColor = UIColor(red: CGFloat(Self.ringColors[ringDrag.axis].x),
+                                            green: CGFloat(Self.ringColors[ringDrag.axis].y),
+                                            blue: CGFloat(Self.ringColors[ringDrag.axis].z), alpha: 1)
         ringLabel.sizeToFit()
         ringLabel.center = CGPoint(x: point.x, y: point.y - 22)
         ringLabel.isHidden = false
+    }
+
+    // MARK: Ebenengriffe
+
+    /// Quadrate in den Ebenen XY, YZ und XZ an der Mitte der Auswahl (Shapr3D): Ziehen verschiebt in der Ebene.
+    /// normal = Achse senkrecht zur Ebene.
+    private var planeHandles: [(normal: Int, corners: [SIMD3<Double>])] {
+        guard let workspace, workspace.tool == .move, !(sketch?.isActive ?? false),
+              let center = workspace.moveCenter else { return [] }
+        let size = workspace.handleSize * 0.22
+        let offset = workspace.handleSize * 0.18
+        return (0..<3).map { normal in
+            let (e1, e2) = Self.ringBasis(normal)
+            let base = center + (e1 + e2) * offset
+            return (normal, [base, base + e1 * size, base + (e1 + e2) * size, base + e2 * size])
+        }
+    }
+
+    private func addPlaneHandles(to fills: inout [FillGroup], groups: inout [LineGroup]) {
+        for handle in planeHandles {
+            let corners = handle.corners.map { SIMD3<Float>($0) }
+            let color = Self.ringColors[handle.normal]
+            let active = planeDrag?.normal == handle.normal
+            fills.append(FillGroup(triangles: [corners[0], corners[1], corners[2], corners[0], corners[2], corners[3]],
+                                   color: SIMD4(color.x, color.y, color.z, active ? 0.75 : 0.4)))
+            groups.append(LineGroup(polylines: [corners + [corners[0]]], color: color, width: 1.6))
+        }
+    }
+
+    /// Ebenengriff unter der Berührung.
+    private func planeHandleHit(at location: CGPoint) -> Int? {
+        guard let renderer else { return nil }
+        for handle in planeHandles {
+            let projected = handle.corners.compactMap { renderer.camera.project(SIMD3<Float>($0), viewSize: bounds.size) }
+            guard projected.count == 4 else { continue }
+            let polygon = projected.map { Point2(Double($0.x), Double($0.y)) }
+            let center = polygon.reduce(.zero, +) / 4
+            // Etwas größer als gezeichnet, damit der Finger trifft
+            let grown = polygon.map { center + ($0 - center) * 1.35 }
+            if polygonContains(grown, Point2(Double(location.x), Double(location.y))) { return handle.normal }
+        }
+        return nil
+    }
+
+    /// Punkt der Ebene (durch die Mitte der Auswahl, senkrecht zu normal) unter dem Bildschirmpunkt.
+    private func planePoint(at location: CGPoint, normal: Int, origin: SIMD3<Double>) -> SIMD3<Double>? {
+        guard let renderer,
+              let hit = renderer.camera.intersect(screenPoint: location, viewSize: bounds.size,
+                                                  planeOrigin: SIMD3<Float>(origin),
+                                                  planeNormal: SIMD3<Float>(Self.axisVector(normal))) else { return nil }
+        return SIMD3<Double>(hit)
     }
 
     /// Konstruktionsachsen (gestrichelt) und -punkte; Ebenen zeichnet refreshPlanes.
@@ -778,7 +1043,9 @@ final class ViewportView: MTKView {
             shown.insert(dimension.id)
             field.allowsEditing = dimension.isEditable
             field.isFine = dimension.id.hasPrefix("mark-")
-            field.prefix = dimension.prefix
+            field.expression = sketch.expression(of: dimension)
+            // Mit einer Variable verknüpft: ƒ vor dem Wert (wie Fusion 360 „fx“)
+            field.prefix = field.expression == nil ? dimension.prefix : "ƒ " + dimension.prefix
             if !field.isFirstResponder {
                 if dimension.kind == .angle {
                     // Winkel nur in ganzen Grad (Kai)
@@ -846,14 +1113,31 @@ final class ViewportView: MTKView {
     private func keypadPressed(_ key: DimensionKeypad.Key) {
         guard let field = dimensionFields.values.first(where: { $0.isFirstResponder }) else { return }
         switch key {
-        case .digit(let text):
-            // Ein Komma genügt
-            if text == ",", (field.text ?? "").contains(where: { $0 == "," || $0 == "." }) { return }
+        case .text(let text):
             field.insertText(text)
         case .delete:
             field.deleteBackward()
         case .clear:
             field.text = ""
+        case .negate:
+            let text = (field.text ?? "").trimmingCharacters(in: .whitespaces)
+            field.text = text.hasPrefix("-") || text.hasPrefix("−") ? String(text.dropFirst()) : "-" + text
+        case .lock:
+            field.onLockTap?()
+        case .keyboard:
+            // Umschalten zwischen Rechner-Tastatur und Bildschirmtastatur (für Variablennamen und Formeln)
+            if field.inputView == nil {
+                field.inputView = UIView(frame: .zero)
+                field.keyboardType = .decimalPad
+            } else {
+                field.inputView = nil
+                field.keyboardType = .asciiCapable
+            }
+            field.reloadInputViews()
+        case .createVariable:
+            field.appliesOnEnd = false
+            field.resignFirstResponder()
+            workspace?.showsVariables = true
         case .cancel:
             field.appliesOnEnd = false
             field.resignFirstResponder()
@@ -861,6 +1145,7 @@ final class ViewportView: MTKView {
             field.resignFirstResponder()
         }
         field.sizeToFit()
+        keypad.lockState = field.lockState
     }
 
     private func makeDimensionField(_ id: String) -> DimensionField {
@@ -872,10 +1157,23 @@ final class ViewportView: MTKView {
         return field
     }
 
+    /// Eingabe übernehmen: Zahl oder Formel (z. B. „2 × wand + 5“, „1,5 cm“); verwendet sie Projektvariablen,
+    /// bleibt das Maß mit ihnen verknüpft.
     private func apply(_ field: DimensionField) {
-        let text = (field.text ?? "").replacingOccurrences(of: ",", with: ".").trimmingCharacters(in: .whitespaces)
-        guard let value = Double(text), value > 0 else { return }
-        sketch?.setDimension(id: field.dimensionID, to: value)
+        let text = (field.text ?? "").trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty, let sketch else { return }
+        let values = model?.variableValues ?? [:]
+        do {
+            let value = try Formula.evaluate(text, variables: values)
+            guard value > 0 else {
+                sketch.notice = "Das Maß muss größer als 0 sein."
+                return
+            }
+            let linked = Formula.names(in: text).contains { values[$0] != nil } ? text : nil
+            sketch.setDimension(id: field.dimensionID, to: value, expression: linked)
+        } catch {
+            sketch.notice = "Formel „\(text)“: \(error.localizedDescription)"
+        }
         refresh()
     }
 
@@ -1231,13 +1529,23 @@ final class ViewportView: MTKView {
                                          step: dragStep(at: handle.base))
             return
         }
+        if planeDrag == nil, ringDrag == nil, handleDrag == nil, alone,
+           let touch = touches.first(where: { $0.type == .pencil || $0.type == .direct }),
+           let normal = planeHandleHit(at: touch.location(in: self)), let workspace, let model,
+           let center = workspace.moveCenter,
+           let start = planePoint(at: touch.location(in: self), normal: normal, origin: center) {
+            planeDrag = PlaneDragState(touch: touch, normal: normal, origin: center, start: start,
+                                       startOffset: model.moveOffset, step: dragStep(at: SIMD3<Float>(center)))
+            refresh()
+            return
+        }
         if ringDrag == nil, handleDrag == nil, alone,
            let touch = touches.first(where: { $0.type == .pencil || $0.type == .direct }),
-           ringHit(at: touch.location(in: self)), let ring = currentRing,
+           let ring = ringHit(at: touch.location(in: self)),
            let angle = ringAngle(at: touch.location(in: self), ring: ring) {
             workspace?.beginRingRotation()
             ringDrag = RingDragState(touch: touch, center: ring.center, radius: ring.radius, startAngle: angle,
-                                     lastAngle: angle)
+                                     lastAngle: angle, axis: ring.axis)
             updateRingLabel()
             refresh()
             return
@@ -1281,8 +1589,20 @@ final class ViewportView: MTKView {
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if let drag = planeDrag, touches.contains(drag.touch) {
+            if let point = planePoint(at: drag.touch.location(in: self), normal: drag.normal, origin: drag.origin) {
+                var offset = drag.startOffset + (point - drag.start)
+                for k in 0..<3 where k != drag.normal {
+                    offset[k] = (offset[k] / drag.step).rounded() * drag.step
+                }
+                offset[drag.normal] = drag.startOffset[drag.normal]
+                if offset != model?.moveOffset { model?.setMoveOffset(offset) }
+                refresh()
+            }
+            return
+        }
         if var drag = ringDrag, touches.contains(drag.touch) {
-            if let angle = ringAngle(at: drag.touch.location(in: self), ring: (drag.center, drag.radius)) {
+            if let angle = ringAngle(at: drag.touch.location(in: self), ring: (drag.center, drag.radius, drag.axis)) {
                 drag.sweep += remainder(angle - drag.lastAngle, 2 * .pi)
                 drag.lastAngle = angle
                 let degrees = Self.ringDegrees(drag.sweep)
@@ -1290,7 +1610,7 @@ final class ViewportView: MTKView {
                     if Int(degrees) % 15 == 0 { UISelectionFeedbackGenerator().selectionChanged() }
                     drag.degrees = degrees
                     ringDrag = drag
-                    workspace?.ringRotation(degrees: degrees, center: drag.center)
+                    workspace?.ringRotation(degrees: degrees, center: drag.center, axis: drag.axis)
                 } else {
                     ringDrag = drag
                 }
@@ -1332,6 +1652,11 @@ final class ViewportView: MTKView {
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         updateHeldFingers(ended: touches)
+        if let drag = planeDrag, touches.contains(drag.touch) {
+            planeDrag = nil
+            refresh()
+            return
+        }
         if let drag = ringDrag, touches.contains(drag.touch) {
             finishRingDrag()
             return
@@ -1373,6 +1698,11 @@ final class ViewportView: MTKView {
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
         updateHeldFingers(ended: touches)
+        if let drag = planeDrag, touches.contains(drag.touch) {
+            planeDrag = nil
+            refresh()
+            return
+        }
         if let drag = ringDrag, touches.contains(drag.touch) {
             finishRingDrag()
             return
@@ -1563,6 +1893,7 @@ final class ViewportView: MTKView {
         switch gesture.state {
         case .began, .changed:
             lastHoverLocation = gesture.location(in: self)
+            updateHoverPick(at: sketch.isActive ? nil : gesture.location(in: self))
             guard sketch.isActive, !sketch.isChoosingPlane, sketchTouch == nil,
                   let point = sketchPoint(at: gesture.location(in: self)) else {
                 updateHoverDwell(at: nil)
@@ -1573,6 +1904,7 @@ final class ViewportView: MTKView {
         default:
             lastHoverLocation = nil
             updateHoverDwell(at: nil)
+            updateHoverPick(at: nil)
             sketch.endHover()
         }
         refresh()
@@ -1635,10 +1967,23 @@ final class ViewportView: MTKView {
         }
         if sketchTouch != nil,
            gestureRecognizer === orbitGesture || gestureRecognizer === panGesture
-            || gestureRecognizer === pinchGesture || gestureRecognizer === tapGesture {
+            || gestureRecognizer === pinchGesture || gestureRecognizer === tapGesture
+            || gestureRecognizer === undoGesture || gestureRecognizer === redoGesture {
             return false
         }
         return super.gestureRecognizerShouldBegin(gestureRecognizer)
+    }
+
+    @objc private func handleUndoTap(_ gesture: UITapGestureRecognizer) {
+        guard handleDrag == nil, ringDrag == nil else { return }
+        workspace?.undo()
+        refresh()
+    }
+
+    @objc private func handleRedoTap(_ gesture: UITapGestureRecognizer) {
+        guard handleDrag == nil, ringDrag == nil else { return }
+        workspace?.redo()
+        refresh()
     }
 
     /// Werkzeugrad an der Stiftspitze (bzw. in der Mitte, wenn der Stift nicht schwebt).
@@ -1696,7 +2041,15 @@ extension ViewportView: UITextFieldDelegate {
 
     /// Cursor hinter die letzte Ziffer (nicht davor, nicht alles markiert) und das Ziffernfeld daneben öffnen.
     func textFieldDidBeginEditing(_ textField: UITextField) {
-        (textField as? DimensionField)?.appliesOnEnd = true
+        if let field = textField as? DimensionField {
+            field.appliesOnEnd = true
+            // Verknüpftes Maß: Formel zum Bearbeiten zeigen
+            if let expression = field.expression { field.text = expression }
+            field.inputView = UIView(frame: .zero)
+            field.keyboardType = .decimalPad
+            keypad.lockState = field.lockState
+            keypad.variableNames = model?.variables.map(\.name) ?? []
+        }
         let toEnd = { [weak textField] in
             guard let textField else { return }
             textField.selectedTextRange = textField.textRange(from: textField.endOfDocument, to: textField.endOfDocument)
@@ -1812,6 +2165,8 @@ final class PaddedLabel: UILabel {
 final class DimensionField: UITextField {
     /// Kennung des Maßes (SketchDimension.id)
     let dimensionID: String
+    /// Formel, mit der das Maß verknüpft ist
+    var expression: String?
     /// false, wenn das Feld geschlossen wird, weil sein Element nicht mehr das aktuelle ist.
     var appliesOnEnd = true
     var allowsEditing = false {
@@ -1924,26 +2279,53 @@ final class DimensionField: UITextField {
     }
 }
 
-/// Kleines Ziffernfeld für Maße (schwebt neben dem Maß statt der großen Bildschirmtastatur).
+/// Rechner-Tastatur für Maße wie bei Shapr3D (schwebt neben dem Maß statt der großen Bildschirmtastatur):
+/// Ziffern, Rechenzeichen, Klammern, Einheiten, Schloss, Variablen und Umschalten auf die Bildschirmtastatur.
 final class DimensionKeypad: UIView {
     enum Key {
-        case digit(String)
-        case delete, clear, cancel, done
+        case text(String)
+        case delete, clear, cancel, done, negate, lock, keyboard
+        case createVariable
     }
 
     var onKey: (Key) -> Void = { _ in }
+    /// Namen der Projektvariablen für das Menü „Variable einfügen“
+    var variableNames: [String] = [] {
+        didSet {
+            guard variableNames != oldValue else { return }
+            updateVariableMenu()
+        }
+    }
+    /// Schloss-Taste: nil = Maß ohne Schloss (ausgegraut)
+    var lockState: Bool? {
+        didSet {
+            guard lockState != oldValue else { return }
+            updateLockKey()
+        }
+    }
 
-    private static let keySize = CGSize(width: 48, height: 42)
+    private static let keySize = CGSize(width: 50, height: 40)
     private static let spacing: CGFloat = 6
     private static let padding: CGFloat = 8
+    private static let headerHeight: CGFloat = 32
+    private static let columns = 5
 
-    /// Zeilen: Titel und Taste; „✓“ in der letzten Zeile doppelt breit
-    private static let rows: [[(String, Key)]] = [
-        [("7", .digit("7")), ("8", .digit("8")), ("9", .digit("9")), ("⌫", .delete)],
-        [("4", .digit("4")), ("5", .digit("5")), ("6", .digit("6")), ("C", .clear)],
-        [("1", .digit("1")), ("2", .digit("2")), ("3", .digit("3")), ("✕", .cancel)],
-        [(",", .digit(",")), ("0", .digit("0")), ("✓", .done)],
+    /// Erste Zeile: Klammern und Einheiten (schmaler, sechs Tasten)
+    private static let unitRow: [(String, Key)] = [
+        ("(", .text("(")), (")", .text(")")), ("mm", .text(" mm")), ("cm", .text(" cm")), ("m", .text(" m")),
+        ("°", .text("°")),
     ]
+
+    /// Ziffernblock: Titel und Taste; „✓“ doppelt breit
+    private static let rows: [[(String, Key)]] = [
+        [("7", .text("7")), ("8", .text("8")), ("9", .text("9")), ("÷", .text("÷")), ("⌫", .delete)],
+        [("4", .text("4")), ("5", .text("5")), ("6", .text("6")), ("×", .text("×")), ("🔒", .lock)],
+        [("1", .text("1")), ("2", .text("2")), ("3", .text("3")), ("−", .text("−")), ("+", .text("+"))],
+        [("±", .negate), ("0", .text("0")), (",", .text(",")), ("✓", .done)],
+    ]
+
+    private let variableButton = UIButton(type: .system)
+    private var lockButton: UIButton?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -1957,45 +2339,113 @@ final class DimensionKeypad: UIView {
         stack.axis = .vertical
         stack.spacing = Self.spacing
         stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.addArrangedSubview(header())
+        let fullWidth = Self.keySize.width * CGFloat(Self.columns) + Self.spacing * CGFloat(Self.columns - 1)
+        let unitWidth = (fullWidth - Self.spacing * CGFloat(Self.unitRow.count - 1)) / CGFloat(Self.unitRow.count)
+        stack.addArrangedSubview(line(Self.unitRow, width: { _ in unitWidth }, height: 32, font: 15))
         for row in Self.rows {
-            let line = UIStackView()
-            line.axis = .horizontal
-            line.spacing = Self.spacing
-            for (title, key) in row {
-                let button = UIButton(type: .system)
-                button.setTitle(title, for: .normal)
-                button.titleLabel?.font = .monospacedDigitSystemFont(ofSize: 20, weight: .semibold)
-                var isDone = false
-                if case .done = key { isDone = true }
-                var isAction = isDone
-                switch key {
-                case .delete, .clear, .cancel: isAction = true
-                default: break
-                }
-                button.backgroundColor = isDone ? .systemBlue
-                    : isAction ? .tertiarySystemFill : .secondarySystemBackground
-                button.setTitleColor(isDone ? .white : .label, for: .normal)
-                button.layer.cornerRadius = 10
-                let width = isDone ? Self.keySize.width * 2 + Self.spacing : Self.keySize.width
-                button.widthAnchor.constraint(equalToConstant: width).isActive = true
-                button.heightAnchor.constraint(equalToConstant: Self.keySize.height).isActive = true
-                button.addAction(UIAction { [weak self] _ in
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    self?.onKey(key)
-                }, for: .touchUpInside)
-                line.addArrangedSubview(button)
-            }
-            stack.addArrangedSubview(line)
+            stack.addArrangedSubview(line(row, width: { key in
+                if case .done = key { return Self.keySize.width * 2 + Self.spacing }
+                return Self.keySize.width
+            }, height: Self.keySize.height, font: 20))
         }
         addSubview(stack)
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.padding),
             stack.topAnchor.constraint(equalTo: topAnchor, constant: Self.padding),
         ])
+        updateVariableMenu()
+        updateLockKey()
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) wird nicht verwendet")
+    }
+
+    /// Kopfzeile: Variable einfügen, Bildschirmtastatur, Löschen, Abbrechen.
+    private func header() -> UIView {
+        let row = UIStackView()
+        row.axis = .horizontal
+        row.spacing = Self.spacing
+        row.alignment = .center
+        var configuration = UIButton.Configuration.tinted()
+        configuration.image = UIImage(systemName: "x.squareroot")
+        configuration.title = "Variable"
+        configuration.imagePadding = 4
+        configuration.buttonSize = .small
+        configuration.cornerStyle = .capsule
+        variableButton.configuration = configuration
+        variableButton.showsMenuAsPrimaryAction = true
+        row.addArrangedSubview(variableButton)
+        row.addArrangedSubview(UIView())
+        for (symbol, key, label) in [("keyboard", Key.keyboard, "Bildschirmtastatur"), ("c.circle", Key.clear, "Leeren"),
+                                     ("xmark.circle", Key.cancel, "Abbrechen")] {
+            let button = UIButton(type: .system)
+            button.setImage(UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: 17)),
+                            for: .normal)
+            button.accessibilityLabel = label
+            button.widthAnchor.constraint(equalToConstant: 36).isActive = true
+            button.heightAnchor.constraint(equalToConstant: Self.headerHeight).isActive = true
+            button.addAction(UIAction { [weak self] _ in self?.onKey(key) }, for: .touchUpInside)
+            row.addArrangedSubview(button)
+        }
+        let width = Self.keySize.width * CGFloat(Self.columns) + Self.spacing * CGFloat(Self.columns - 1)
+        row.widthAnchor.constraint(equalToConstant: width).isActive = true
+        row.heightAnchor.constraint(equalToConstant: Self.headerHeight).isActive = true
+        return row
+    }
+
+    private func line(_ keys: [(String, Key)], width: (Key) -> CGFloat, height: CGFloat, font: CGFloat) -> UIView {
+        let line = UIStackView()
+        line.axis = .horizontal
+        line.spacing = Self.spacing
+        for (title, key) in keys {
+            let button = UIButton(type: .system)
+            button.setTitle(title, for: .normal)
+            button.titleLabel?.font = .monospacedDigitSystemFont(ofSize: font, weight: .semibold)
+            var isDone = false, isAction = false
+            switch key {
+            case .done: isDone = true
+            case .delete, .lock, .negate: isAction = true
+            case .text(let text): isAction = !text.allSatisfy { $0.isNumber || $0 == "," }
+            default: break
+            }
+            button.backgroundColor = isDone ? .systemBlue : isAction ? .tertiarySystemFill : .secondarySystemBackground
+            button.setTitleColor(isDone ? .white : .label, for: .normal)
+            button.layer.cornerRadius = 10
+            button.widthAnchor.constraint(equalToConstant: width(key)).isActive = true
+            button.heightAnchor.constraint(equalToConstant: height).isActive = true
+            button.addAction(UIAction { [weak self] _ in
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                self?.onKey(key)
+            }, for: .touchUpInside)
+            if case .lock = key { lockButton = button }
+            line.addArrangedSubview(button)
+        }
+        return line
+    }
+
+    private func updateVariableMenu() {
+        var actions: [UIMenuElement] = variableNames.sorted().map { name in
+            UIAction(title: name, image: UIImage(systemName: "function")) { [weak self] _ in self?.onKey(.text(name)) }
+        }
+        let create = UIAction(title: "Variable erstellen …", image: UIImage(systemName: "plus")) { [weak self] _ in
+            self?.onKey(.createVariable)
+        }
+        if actions.isEmpty {
+            actions = [create]
+        } else {
+            actions.append(UIMenu(options: .displayInline, children: [create]))
+        }
+        variableButton.menu = UIMenu(title: "Variable einfügen", children: actions)
+    }
+
+    private func updateLockKey() {
+        guard let lockButton else { return }
+        lockButton.setTitle(lockState == false ? "🔓" : "🔒", for: .normal)
+        lockButton.isEnabled = lockState != nil
+        lockButton.alpha = lockState == nil ? 0.35 : 1
+        lockButton.accessibilityLabel = lockState == true ? "Maß lösen" : "Maß festlegen"
     }
 
     // Berührungen neben den Tasten nicht an den Viewport weiterreichen (sonst begänne dort ein Strich)
@@ -2005,7 +2455,9 @@ final class DimensionKeypad: UIView {
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {}
 
     override func sizeThatFits(_ size: CGSize) -> CGSize {
-        CGSize(width: Self.keySize.width * 4 + Self.spacing * 3 + Self.padding * 2,
-               height: Self.keySize.height * 4 + Self.spacing * 3 + Self.padding * 2)
+        let width = Self.keySize.width * CGFloat(Self.columns) + Self.spacing * CGFloat(Self.columns - 1)
+        let height = Self.headerHeight + 32 + Self.keySize.height * CGFloat(Self.rows.count)
+            + Self.spacing * CGFloat(Self.rows.count + 1)
+        return CGSize(width: width + Self.padding * 2, height: height + Self.padding * 2)
     }
 }

@@ -1,0 +1,316 @@
+import SwiftUI
+
+// MARK: Variablen
+
+/// Einfügen › Variable: benannte Werte des Projekts (wie Shapr3D „Variables“ bzw. Fusion 360 „Parameter“).
+/// Jede Variable darf eine Formel mit anderen Variablen sein; Skizzenmaße mit Variablen folgen beim Sichern.
+struct VariablesSheet: View {
+    @ObservedObject var model: ModelStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var list: [ProjectVariable] = []
+    @State private var newName = ""
+    @State private var newExpression = ""
+    @State private var problem: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    if list.isEmpty {
+                        Text("Noch keine Variable. Unten anlegen, z. B. „wand“ = „2 mm“.")
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach($list) { $variable in
+                        HStack(spacing: 10) {
+                            TextField("Name", text: $variable.name)
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.never)
+                                .frame(width: 140)
+                            Text("=")
+                                .foregroundStyle(.secondary)
+                            TextField("Wert oder Formel", text: $variable.expression)
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.never)
+                            Text(valueText(variable.name))
+                                .monospacedDigit()
+                                .foregroundStyle(values[variable.name] == nil ? Color.red : Color.secondary)
+                                .frame(minWidth: 80, alignment: .trailing)
+                        }
+                    }
+                    .onDelete { list.remove(atOffsets: $0) }
+                } header: {
+                    Text("Variablen")
+                } footer: {
+                    Text("In jedem Zahlenfeld und in Skizzenmaßen nutzbar, z. B. „2 × wand“, „breite / 2 + 5“, "
+                         + "„sqrt(a^2 + b^2)“. Einheiten: mm, cm, m, in, ft, deg. Ein Skizzenmaß mit Variable (ƒ) "
+                         + "folgt ihr; Körper ändern sich nicht nachträglich.")
+                }
+                Section("Neue Variable") {
+                    HStack(spacing: 10) {
+                        TextField("Name, z. B. wand", text: $newName)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                            .frame(width: 160)
+                        Text("=")
+                            .foregroundStyle(.secondary)
+                        TextField("Wert, z. B. 2 mm", text: $newExpression)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                            .onSubmit(add)
+                        Button("Hinzufügen", systemImage: "plus.circle.fill", action: add)
+                            .disabled(newName.isEmpty || newExpression.isEmpty)
+                    }
+                }
+                if let problem {
+                    Section {
+                        Label(problem, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                    }
+                }
+                Section("Funktionen") {
+                    Text(Formula.functionNames.joined(separator: ", ") + ", pi, e")
+                        .font(.footnote.monospaced())
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Variablen")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Abbrechen") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Sichern", action: save)
+                }
+            }
+            .onAppear { list = model.variables }
+        }
+    }
+
+    private var values: [String: Double] { Formula.resolve(list) }
+
+    private func valueText(_ name: String) -> String {
+        guard let value = values[name] else { return "Fehler" }
+        return "= " + NumberField.format(value)
+    }
+
+    private func add() {
+        let name = newName.trimmingCharacters(in: .whitespaces)
+        let expression = newExpression.trimmingCharacters(in: .whitespaces)
+        guard Formula.isValidName(name) else {
+            problem = "„\(name)“ geht nicht als Name: Buchstaben, Ziffern und _, nicht mit einer Ziffer beginnend, "
+                + "keine Einheit oder Funktion."
+            return
+        }
+        guard !list.contains(where: { $0.name == name }) else {
+            problem = "„\(name)“ gibt es schon."
+            return
+        }
+        problem = nil
+        list.append(ProjectVariable(name: name, expression: expression))
+        newName = ""
+        newExpression = ""
+    }
+
+    private func save() {
+        let names = list.map(\.name)
+        if let invalid = names.first(where: { !Formula.isValidName($0) }) {
+            problem = "„\(invalid)“ geht nicht als Name."
+            return
+        }
+        if Set(names).count != names.count {
+            problem = "Jeder Name darf nur einmal vorkommen."
+            return
+        }
+        if let broken = list.first(where: { values[$0.name] == nil }) {
+            problem = "„\(broken.name)“ lässt sich nicht ausrechnen (Tippfehler oder Kreisbezug?)."
+            return
+        }
+        model.setVariables(list)
+        dismiss()
+    }
+}
+
+// MARK: Projekt einfügen
+
+/// Einfügen › Projekt: ein anderes Projekt wählen, seine Körper kommen als Kopie in einen eigenen Ordner.
+struct ProjectPickerSheet: View {
+    @EnvironmentObject private var projects: ProjectStore
+    @Environment(\.dismiss) private var dismiss
+    let current: UUID
+    let pick: (Project) -> Void
+
+    var body: some View {
+        NavigationStack {
+            List {
+                let others = projects.projects.filter { $0.id != current }
+                if others.isEmpty {
+                    Text("Es gibt noch kein anderes Projekt.")
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(others) { project in
+                    Button {
+                        pick(project)
+                        dismiss()
+                    } label: {
+                        HStack(spacing: 12) {
+                            thumbnail(project)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(project.name)
+                                    .foregroundStyle(.primary)
+                                Text(project.modified.formatted(date: .abbreviated, time: .shortened))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Projekt einfügen")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Abbrechen") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func thumbnail(_ project: Project) -> some View {
+        Group {
+            if let image = UIImage(contentsOfFile: project.thumbnailURL.path(percentEncoded: false)) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Image(systemName: "cube.transparent")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(width: 64, height: 48)
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+// MARK: Hilfe
+
+/// Hilfeseiten im Menü „Hilfe“ der Titelleiste.
+enum HelpTopic: String, CaseIterable, Identifiable {
+    case gestures = "Gesten und Stift"
+    case sketch = "Skizzieren"
+    case model = "Modellieren"
+    case formulas = "Formeln und Variablen"
+    case assistant = "KI-Assistent"
+    case news = "Neu in diesem Build"
+
+    var id: Self { self }
+
+    var systemImage: String {
+        switch self {
+        case .gestures: "hand.draw"
+        case .sketch: "pencil.and.outline"
+        case .model: "cube"
+        case .formulas: "x.squareroot"
+        case .assistant: "sparkles"
+        case .news: "star"
+        }
+    }
+
+    var paragraphs: [String] {
+        switch self {
+        case .gestures:
+            [
+                "Ein Finger dreht die Ansicht, zwei Finger verschieben und zoomen. Der Stift zeichnet und wählt.",
+                "Stift schweben lassen: die Fläche, der Skizzenbereich oder die Kante darunter leuchtet hellblau – so "
+                    + "sieht man vor dem Antippen, was getroffen wird.",
+                "Stift drücken (Apple Pencil Pro) oder doppeltippen öffnet das Werkzeugrad.",
+                "Mit zwei Fingern tippen nimmt den letzten Schritt zurück, mit drei Fingern tippen wiederholt ihn.",
+                "In der Skizze: Stift 1 s ruhig über einem Punkt halten merkt ihn; zwei gemerkte Punkte zeigen Abstand "
+                    + "und Mitte. Finger auflegen, während der Stift zeichnet, macht aus der Linie einen tangentialen Bogen.",
+                "Rahmen aufziehen (mit dem Stift ins Leere ziehen): nach rechts ganz umschlossene, nach links auch "
+                    + "angeschnittene Körper.",
+            ]
+        case .sketch:
+            [
+                "Skizze beginnen, Ebene oder ebene Körperfläche antippen, dann zeichnen. Der grüne Haken beendet die Skizze.",
+                "Maße direkt am Element antippen: die Rechner-Tastatur kann rechnen (+ − × ÷, Klammern, mm/cm/m, °), "
+                    + "Variablen einsetzen und mit ⌨︎ auf die Bildschirmtastatur wechseln. Das Schloss legt ein Maß fest "
+                    + "oder löst es.",
+                "Fang (Magnet rechts): Raster, Skizzenleitlinien (waagerecht/senkrecht, 15°-Winkel), Skizzenleitpunkte "
+                    + "(Enden, Mitten, Zentren, Schnittpunkte), 3D-Leitpunkte (Ecken und Kantenmitten der Körper) und "
+                    + "entfernte Kanten. Unter „Zeigen“ lassen sich die Leitpunkte und die Einrasthinweise am Stift abschalten.",
+                "Einschränkungen rechts: Elemente antippen, dann die Einschränkung. Was zur Auswahl nicht passt, ist "
+                    + "ausgegraut. „Trennen“ löst die Einschränkungen der Auswahl, „Konstruktion erstellen“ macht sie zu "
+                    + "Hilfslinien.",
+            ]
+        case .model:
+            [
+                "Skizzenbereich oder ebene Fläche antippen und am blauen Pfeil ziehen. Weitere Flächen antippen zieht sie "
+                    + "gemeinsam.",
+                "Fläche versetzen: auch runde Flächen und Bohrungen; „Gesamt“ setzt das Gesamtmaß, „Durchmesser“ den "
+                    + "Durchmesser. Fläche ersetzen verlängert Flächen bis an eine Zielfläche.",
+                "Umhüllen und Prägen legt Text oder ein Logo um einen Zylinder. Kante abdrücken überträgt eine Skizze als "
+                    + "Kanten auf den Körper.",
+                "Verschieben: Pfeile ziehen entlang einer Achse, die farbigen Quadrate in einer Ebene, die Ringe drehen "
+                    + "um X (rot), Y (grün) und Z (blau). „Kopieren“ lässt das Original stehen. Übersetzen bringt einen "
+                    + "Körper von einem Punkt genau auf einen anderen.",
+                "Im Browser „Ebenen“ lassen sich Körper in Ordner legen (lange drücken › In Ordner) und nach Körpern, "
+                    + "Skizzen oder Konstruktion filtern.",
+            ]
+        case .formulas:
+            [
+                "Jedes Zahlenfeld rechnet: „40 / 2“, „3 × 12,5“, „1,5 cm“, „30°“, „sqrt(2) × 10“.",
+                "Einfügen › Variable legt benannte Werte an, z. B. wand = 2 mm, breite = 40. Danach geht überall "
+                    + "„breite − 2 × wand“.",
+                "Ein Skizzenmaß mit Variable trägt ein ƒ und folgt, wenn die Variable sich ändert. Fertige Körper bleiben, "
+                    + "wie sie sind (PencilCAD speichert keinen Konstruktionsverlauf).",
+                "Funktionen: " + Formula.functionNames.joined(separator: ", ") + ". Winkelfunktionen rechnen in Grad.",
+            ]
+        case .assistant:
+            [
+                "Sparkles-Symbol oben: Auftrag in Worten eintippen, mit dem Stift schreiben oder über das Mikrofon "
+                    + "sprechen (nach dem Satz Mikrofon erneut antippen – der Auftrag geht dann gleich los).",
+                "Einfache Aufträge plant Apple Intelligence auf dem iPad, umfangreichere Claude (eigener API-Schlüssel "
+                    + "unter dem Zahnrad).",
+                "Das Ergebnis erscheint als Vorschau: Übernehmen oder Verwerfen.",
+            ]
+        case .news:
+            [
+                "Stift-Schweben zeigt Flächen, Bereiche und Kanten vor dem Antippen.",
+                "Mehrere Flächen auf einmal extrudieren.",
+                "Rechner-Tastatur, Formeln und Variablen.",
+                "Fang wie Shapr3D: 3D-Leitpunkte, entfernte Kanten, Einrasthinweise.",
+                "Verschieben mit Kopieren, Ebenengriffen und Drehbögen um X/Y/Z; neues Werkzeug Übersetzen.",
+                "Fläche versetzen und ersetzen, Umhüllen und Prägen, Kante abdrücken.",
+                "Ordner und Filter im Browser, Projekt einfügen, Mikrofon im KI-Assistenten, diese Hilfe.",
+                "Aus dem Vergleich mit Shapr3D, Fusion 360 und SketchUp: Schale mit mehreren offenen Flächen oder als "
+                    + "Hohlkörper, Fase mit zwei Abständen, Spiegeln an Fläche oder Konstruktionsebene, boolesche "
+                    + "Operationen mit „Werkzeuge behalten“.",
+                "Messen zeigt Schwerpunkt, Gewicht in PLA und den kürzesten Abstand zwischen zwei Körpern.",
+                "Zwei Finger tippen = Rückgängig, drei Finger = Wiederholen; fühlbares Einrasten in der Skizze.",
+            ]
+        }
+    }
+}
+
+struct HelpSheet: View {
+    let topic: HelpTopic
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List(topic.paragraphs, id: \.self) { paragraph in
+                Text(paragraph)
+                    .padding(.vertical, 4)
+            }
+            .navigationTitle(topic.rawValue)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Fertig") { dismiss() }
+                }
+            }
+        }
+    }
+}

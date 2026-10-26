@@ -33,6 +33,9 @@ targets:
         INFOPLIST_KEY_UIRequiresFullScreen: NO
         INFOPLIST_KEY_UIFileSharingEnabled: YES
         INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace: YES
+        # Mikrofon im KI-Assistenten: Auftrag sprechen statt tippen
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: "Damit du dem KI-Assistenten Aufträge sprechen kannst."
+        INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: "Gesprochene Aufträge an den KI-Assistenten werden in Text umgewandelt."
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: >-
           UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown
           UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight

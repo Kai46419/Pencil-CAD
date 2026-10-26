@@ -101,6 +101,8 @@ struct SceneBody {
     var isHidden = false
     /// Skizze, aus der der Körper extrudiert wurde (Gruppierung im Reiter „Ebenen“)
     var sketchID: UUID? = nil
+    /// Ordner im Browser „Ebenen“ (nil = oberste Ebene)
+    var folder: String? = nil
 
     func with(_ shape: PCKShape) -> SceneBody {
         var body = self
@@ -195,6 +197,19 @@ struct StoredSketch: Codable {
     }
 }
 
+/// Ordner im Browser „Ebenen“ mit seinen Körpern.
+struct BodyFolder: Identifiable {
+    var name: String
+    var bodies: [Int]
+    var id: String { name }
+}
+
+/// Körpergeometrie, auf eine Skizzenebene projiziert: Fangpunkte (Ecken, Kantenmitten) und Kanten.
+struct SketchGuides {
+    var points: [Point2] = []
+    var curves: [[Point2]] = []
+}
+
 /// Bereich einer gespeicherten Skizze.
 struct RegionRef: Hashable {
     var sketch: Int
@@ -221,10 +236,16 @@ final class ModelStore: ObservableObject {
     @Published private(set) var constructions: [ConstructionItem] = []
     /// Bilder (Canvas) auf Standardebenen
     @Published private(set) var canvases: [CanvasImage] = []
+    /// Projektvariablen (Einfügen › Variable), nutzbar in jedem Zahlenfeld und in Skizzenmaßen
+    @Published private(set) var variables: [ProjectVariable] = []
     @Published var message: String?
 
     // Auswahl
     @Published private(set) var selection: FaceRef?
+    /// Weitere gewählte Flächen (Mehrfachauswahl zum gemeinsamen Extrudieren bzw. Versetzen)
+    @Published private(set) var extraFaces: [FaceRef] = []
+    /// Alle gewählten Flächen, die zuerst gewählte vorn
+    var selectedFaces: [FaceRef] { (selection.map { [$0] } ?? []) + extraFaces }
     @Published private(set) var selectedEdges: [EdgeRef] = []
     @Published private(set) var selectedBodies: [Int] = []
     /// Gewählte Skizzenbereiche (alle aus derselben Skizze).
@@ -241,12 +262,16 @@ final class ModelStore: ObservableObject {
     }
     /// Radius bzw. Fasenbreite in mm; 0 = nichts angewendet.
     @Published private(set) var edgeValue: Double = 0
+    /// Zweiter Fasenabstand (auf der anderen Nachbarfläche); nil = gleich breite Fase
+    @Published private(set) var edgeSecondValue: Double?
     /// Kantenmitte und Richtung ins Material.
     @Published private(set) var edgeHandle: (origin: SIMD3<Double>, direction: SIMD3<Double>)?
     /// Flächenmitte und Normale der gewählten ebenen Fläche (Extrudieren per Pfeil).
     @Published private(set) var faceHandle: (origin: SIMD3<Double>, direction: SIMD3<Double>)?
     @Published private(set) var faceValue: Double = 0
     @Published private(set) var moveOffset: SIMD3<Double> = .zero
+    /// Verschieben, Drehen und Übersetzen erzeugen Kopien; die Originale bleiben stehen
+    @Published var moveCopies = false
     /// Skizze, die mit „Verschieben/Rotieren“ bewegt wird (Übernahme mit „Fertig“).
     @Published var movingSketch: Int?
     /// Extrusion gewählter Skizzenbereiche: Wert in mm entlang der Normale der Skizze.
@@ -348,6 +373,43 @@ final class ModelStore: ObservableObject {
         if let face, let plane = plane(of: face), let center = mesh.centroid(of: face) {
             faceHandle = (SIMD3<Double>(center), plane.normal)
         }
+        refreshHighlight()
+    }
+
+    /// Weitere Fläche zur Auswahl nehmen bzw. wieder herausnehmen (wie Shapr3D: mehrere Flächen zugleich ziehen).
+    /// commitsPreview false: eine offene Vorschau des Werkzeugs wird verworfen (es rechnet danach neu).
+    func toggleFace(_ face: FaceRef, commitsPreview: Bool = true) {
+        guard selection != nil else {
+            if commitsPreview { select(face: face) } else { selectForTool(face) }
+            return
+        }
+        if commitsPreview { commitPreview() } else { dropPreview() }
+        var faces = selectedFaces
+        if let index = faces.firstIndex(of: face) {
+            faces.remove(at: index)
+        } else {
+            faces.append(face)
+        }
+        let handle = faceHandle
+        let primary = selection
+        clearSelectionState()
+        selection = faces.first
+        extraFaces = Array(faces.dropFirst())
+        if let first = faces.first {
+            if first == primary, let handle {
+                faceHandle = handle
+            } else if let plane = plane(of: first), let center = mesh.centroid(of: first) {
+                faceHandle = (SIMD3<Double>(center), plane.normal)
+            }
+        }
+        refreshHighlight()
+    }
+
+    /// Fläche für ein Werkzeug wählen (Versetzen, Ersetzen …): Vorschau verwerfen statt übernehmen.
+    func selectForTool(_ face: FaceRef?) {
+        dropPreview()
+        clearSelectionState()
+        selection = face
         refreshHighlight()
     }
 
@@ -477,6 +539,12 @@ final class ModelStore: ObservableObject {
 
     // MARK: Ziehpfeile
 
+    /// Fase mit zwei Abständen ein- (Wert) bzw. ausschalten (nil) und die Vorschau erneuern.
+    func setEdgeSecondValue(_ value: Double?) {
+        edgeSecondValue = value.map { max(0.01, $0) }
+        if edgeValue > 0 { setEdgeValue(edgeValue) }
+    }
+
     /// Radius bzw. Fasenbreite der gewählten Kanten setzen und als Vorschau zeigen.
     func setEdgeValue(_ newValue: Double) {
         let value = max(0, newValue)
@@ -490,11 +558,25 @@ final class ModelStore: ObservableObject {
         let numbers = selectedEdges.map { NSNumber(value: $0.edge) }
         let shape = bodies[body].shape
         let operation = edgeOperation
+        // Fase mit zwei Abständen (Fusion 360 „Zwei Abstände“); nil = gleich breit
+        let second = operation == .chamfer ? edgeSecondValue : nil
         func blend(_ amount: Double) -> PCKShape? {
-            switch operation {
-            case .fillet: shape.filleting(edges: numbers, radius: amount)
-            case .chamfer: shape.chamfering(edges: numbers, distance: amount)
+            if operation == .fillet { return shape.filleting(edges: numbers, radius: amount) }
+            if let second { return shape.chamfering(edges: numbers, distance: amount, distance2: second) }
+            return shape.chamfering(edges: numbers, distance: amount)
+        }
+        if second != nil {
+            guard let result = blend(value) else {
+                message = "Fase \(value.formatted()) × \((second ?? 0).formatted()) mm an dieser Kante nicht möglich."
+                dropPreview()
+                return
             }
+            message = nil
+            var preview = bodies
+            preview[body] = preview[body].with(result)
+            previewHiddenSketch = bodies[body].sketchID
+            showPreview(preview, name: operation.rawValue)
+            return
         }
         // Zu groß: nicht einfach nichts zeigen, sondern den größten möglichen Wert (einmal je Auswahl gesucht)
         let key = EdgeLimitKey(edges: selectedEdges, operation: operation, shape: ObjectIdentifier(shape))
@@ -562,14 +644,20 @@ final class ModelStore: ObservableObject {
             return
         }
         guard requireKernel() else { return }
-        guard let result = bodies[face.body].shape.extruding(face: face.face, distance: value) else {
-            message = "Extrudieren der Fläche nicht möglich."
-            return
+        // Mehrere Flächen: je Körper alle zugleich, jede entlang ihrer eigenen Normale
+        var preview = bodies
+        let faces = selectedFaces.filter { bodies.indices.contains($0.body) }
+        for body in Set(faces.map(\.body)) {
+            let numbers = faces.filter { $0.body == body }.map { NSNumber(value: $0.face) }
+            guard let result = bodies[body].shape.extruding(faces: numbers, distance: value) else {
+                message = faces.count > 1 ? "Diese Flächen lassen sich nicht zusammen extrudieren."
+                    : "Extrudieren der Fläche nicht möglich."
+                return
+            }
+            preview[body] = preview[body].with(result)
         }
         message = nil
-        var preview = bodies
-        preview[face.body] = preview[face.body].with(result)
-        showPreview(preview, name: "Extrudieren")
+        showPreview(preview, name: faces.count > 1 ? "Flächen extrudieren" : "Extrudieren")
     }
 
     private static let regionPreviewName = "Extrudieren"
@@ -680,10 +768,16 @@ final class ModelStore: ObservableObject {
                 message = "Verschieben nicht möglich."
                 return
             }
-            preview[index] = preview[index].with(moved)
+            if moveCopies {
+                var copy = bodies[index].with(moved)
+                copy.name += " (Kopie)"
+                preview.append(copy)
+            } else {
+                preview[index] = preview[index].with(moved)
+            }
         }
         message = nil
-        showPreview(preview, name: "Verschieben")
+        showPreview(preview, name: moveCopies ? "Kopieren" : "Verschieben")
     }
 
     /// Gewählte Körper um ihre Mitte drehen (sofort übernommen).
@@ -735,13 +829,15 @@ final class ModelStore: ObservableObject {
         showPreview(bodies + [newBody(shape, name: primitive.rawValue)], name: "\(primitive.rawValue) einfügen")
     }
 
-    /// Gewählte Körper spiegeln, Ebene durch die Körpermitte (Vorschau).
-    func previewMirror(_ plane: MirrorPlane, keepOriginal: Bool) {
+    /// Gewählte Körper spiegeln (Vorschau): an fixed (Fläche bzw. Konstruktionsebene) oder an der Ebene plane
+    /// durch die Körpermitte.
+    func previewMirror(_ plane: MirrorPlane, keepOriginal: Bool,
+                       at fixed: (origin: SIMD3<Double>, normal: SIMD3<Double>)? = nil) {
         guard requireKernel(), !selectedBodies.isEmpty else { return }
         var preview = bodies
         for index in selectedBodies where bodies.indices.contains(index) {
-            guard let center = center(ofBody: index),
-                  let mirrored = bodies[index].shape.mirrored(planeOrigin: center, normal: plane.normal) else {
+            guard let origin = fixed?.origin ?? center(ofBody: index),
+                  let mirrored = bodies[index].shape.mirrored(planeOrigin: origin, normal: fixed?.normal ?? plane.normal) else {
                 message = "Spiegeln nicht möglich."
                 return
             }
@@ -757,22 +853,25 @@ final class ModelStore: ObservableObject {
         showPreview(preview, name: "Spiegeln")
     }
 
-    /// Schale: gewählte Fläche entfernen, Wandstärke thickness (Vorschau).
-    func previewShell(thickness: Double) {
+    /// Schale (Vorschau): alle gewählten Flächen des Körpers werden offen, Wandstärke thickness nach innen.
+    /// closed = keine Fläche offen, der Körper wird ein geschlossener Hohlkörper.
+    func previewShell(thickness: Double, closed: Bool = false) {
         guard requireKernel(), let face = selection, bodies.indices.contains(face.body) else { return }
-        guard thickness > 0, let result = bodies[face.body].shape.shelling(removingFace: face.face, thickness: thickness) else {
+        let faces = closed ? [] : selectedFaces.filter { $0.body == face.body }.map { NSNumber(value: $0.face) }
+        guard thickness > 0,
+              let result = bodies[face.body].shape.shelling(removingFaces: faces, thickness: thickness) else {
             message = "Schale mit \(thickness.formatted()) mm nicht möglich."
             dropPreview()
             return
         }
-        message = nil
+        message = closed ? "Hohlkörper: innen geschlossen, von außen nicht sichtbar (Schnittansicht zeigt ihn)." : nil
         var preview = bodies
         preview[face.body] = preview[face.body].with(result)
         showPreview(preview, name: "Schale")
     }
 
-    /// Boolesche Operation: target bleibt, die anderen Körper werden verbraucht.
-    func applyBoolean(_ kind: BooleanKind, target: Int, tools: [Int]) {
+    /// Boolesche Operation: target bleibt, die anderen Körper werden verbraucht (keepTools: bleiben stehen).
+    func applyBoolean(_ kind: BooleanKind, target: Int, tools: [Int], keepTools: Bool = false) {
         guard requireKernel(), bodies.indices.contains(target), !tools.isEmpty else { return }
         commitPreview()
         var shape = bodies[target].shape
@@ -791,8 +890,10 @@ final class ModelStore: ObservableObject {
         }
         var result = bodies
         result[target] = result[target].with(shape)
-        for tool in tools.filter({ $0 != target && result.indices.contains($0) }).sorted(by: >) {
-            result.remove(at: tool)
+        if !keepTools {
+            for tool in tools.filter({ $0 != target && result.indices.contains($0) }).sorted(by: >) {
+                result.remove(at: tool)
+            }
         }
         commit(result, name: kind.rawValue)
     }
@@ -918,13 +1019,20 @@ final class ModelStore: ObservableObject {
     func bodies(fromSketch index: Int) -> [Int] {
         guard sketches.indices.contains(index) else { return [] }
         let id = sketches[index].id
-        return bodies.indices.filter { bodies[$0].sketchID == id }
+        return bodies.indices.filter { bodies[$0].sketchID == id && bodies[$0].folder == nil }
+    }
+
+    /// Ordner des Browsers (alphabetisch) und ihre Körper.
+    var bodyFolders: [BodyFolder] {
+        let grouped = Dictionary(grouping: bodies.indices.filter { bodies[$0].folder != nil }) { bodies[$0].folder ?? "" }
+        return grouped.keys.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+            .map { BodyFolder(name: $0, bodies: grouped[$0] ?? []) }
     }
 
     /// Körper ohne (noch vorhandene) Skizze: Grundkörper, STEP-Import, Skizze gelöscht.
     var unassignedBodies: [Int] {
         let ids = Set(sketches.map(\.id))
-        return bodies.indices.filter { bodies[$0].sketchID.map { !ids.contains($0) } ?? true }
+        return bodies.indices.filter { bodies[$0].folder == nil && (bodies[$0].sketchID.map { !ids.contains($0) } ?? true) }
     }
 
     /// Ganze Ebene ein- oder ausblenden: Skizze und alle Körper daraus.
@@ -1052,6 +1160,10 @@ final class ModelStore: ObservableObject {
     }
 
     // MARK: Verlauf
+
+    /// Name des Schritts, den Rückgängig zurücknimmt bzw. Wiederholen wiederholt (für die Meldung).
+    var lastStepName: String? { previewBodies == nil ? history.last?.name : nil }
+    var nextStepName: String? { future.last?.name }
 
     func undo() {
         if previewBodies != nil {
@@ -1206,6 +1318,7 @@ final class ModelStore: ObservableObject {
 
     private func clearSelectionState() {
         selection = nil
+        extraFaces = []
         selectedEdges = []
         selectedBodies = []
         selectedRegions = []
@@ -1221,8 +1334,8 @@ final class ModelStore: ObservableObject {
     /// Hervorhebung passend zu Auswahl und Vorschau. Während einer Vorschau ändern sich Flächen- und
     /// Kantennummern, daher werden dann nur ganze Körper hervorgehoben.
     private func refreshHighlight() {
-        if previewBodies == nil, let selection {
-            selectionIndices = mesh.triangleIndices(of: selection)
+        if previewBodies == nil, selection != nil {
+            selectionIndices = selectedFaces.flatMap { mesh.triangleIndices(of: $0) }
         } else {
             selectionIndices = selectedBodies.flatMap { mesh.triangleIndices(ofBody: $0) }
         }
@@ -1239,6 +1352,396 @@ final class ModelStore: ObservableObject {
         revision += 1
     }
 
+    // MARK: Messen
+
+    func centerOfMass(ofBody body: Int) -> SIMD3<Double>? {
+        guard bodies.indices.contains(body), let values = bodies[body].shape.centerOfMass?.map(\.doubleValue),
+              values.count == 3 else { return nil }
+        return SIMD3(values[0], values[1], values[2])
+    }
+
+    /// Kürzester Abstand zwischen zwei Körpern samt den beiden nächsten Punkten.
+    func minimumDistance(between first: Int, and second: Int)
+        -> (distance: Double, a: SIMD3<Double>, b: SIMD3<Double>)? {
+        guard first != second, bodies.indices.contains(first), bodies.indices.contains(second),
+              let v = bodies[first].shape.minimumDistance(to: bodies[second].shape)?.map(\.doubleValue),
+              v.count == 7 else { return nil }
+        return (v[0], SIMD3(v[1], v[2], v[3]), SIMD3(v[4], v[5], v[6]))
+    }
+
+    // MARK: Flächen während einer Vorschau
+
+    /// Während einer Vorschau zeigt das Netz die Vorschaukörper, deren Flächennummern von denen der echten
+    /// Körper abweichen. Liefert die Fläche des echten Körpers, die dem angetippten Punkt am nächsten liegt
+    /// (nil = den Körper gibt es nur in der Vorschau).
+    func originalFace(_ face: FaceRef, near point: SIMD3<Float>?) -> FaceRef? {
+        guard let preview = previewBodies else { return face }
+        guard bodies.indices.contains(face.body) else { return nil }
+        if preview.indices.contains(face.body), preview[face.body].shape === bodies[face.body].shape { return face }
+        guard let point else { return nil }
+        let shape = bodies[face.body].shape
+        let original: Mesh
+        if let cached = originalMesh, cached.shape === shape, cached.body == face.body {
+            original = cached.mesh
+        } else {
+            original = Mesh(shape.triangulate(deflection: 0.05), body: face.body)
+            originalMesh = (shape, face.body, original)
+        }
+        var best: (distance: Float, face: FaceRef)?
+        for t in 0..<original.triangleCount {
+            let a = original.vertices[Int(original.indices[t * 3])].position
+            let b = original.vertices[Int(original.indices[t * 3 + 1])].position
+            let c = original.vertices[Int(original.indices[t * 3 + 2])].position
+            let d = Mesh.distance(from: point, toTriangle: a, b, c)
+            if best.map({ d < $0.distance }) ?? true { best = (d, original.triangleFaces[t]) }
+        }
+        return best?.face
+    }
+    private var originalMesh: (shape: PCKShape, body: Int, mesh: Mesh)?
+
+    // MARK: Fläche versetzen, ersetzen, umhüllen, abdrücken
+
+    /// Gewählte Flächen (auch auf mehreren Körpern) um distance versetzen (Vorschau). Wie Shapr3D „Offset Face“:
+    /// Nachbarflächen wachsen bzw. schrumpfen mit; Zylinderflächen werden dicker bzw. Bohrungen enger.
+    func previewOffsetFaces(distance: Double) {
+        guard requireKernel() else { return }
+        let faces = selectedFaces
+        guard !faces.isEmpty else { return }
+        guard abs(distance) > 1e-9 else {
+            dropPreview()
+            return
+        }
+        var preview = bodies
+        for (body, group) in Dictionary(grouping: faces, by: \.body) where bodies.indices.contains(body) {
+            guard let result = bodies[body].shape.offsetting(faces: group.map { NSNumber(value: $0.face) },
+                                                             distance: distance) else {
+                message = "Versetzen um \(distance.formatted(.number.precision(.fractionLength(0...3)))) mm nicht möglich."
+                dropPreview()
+                return
+            }
+            preview[body] = preview[body].with(result)
+        }
+        message = nil
+        showPreview(preview, name: faces.count > 1 ? "\(faces.count) Flächen versetzen" : "Fläche versetzen")
+    }
+
+    /// Zylinder einer Fläche: Achse, Radius und ob sie nach außen gewölbt ist (Zapfen) oder nach innen (Bohrung).
+    func cylinder(of face: FaceRef) -> (origin: SIMD3<Double>, axis: SIMD3<Double>, radius: Double, convex: Bool)? {
+        guard bodies.indices.contains(face.body),
+              let v = bodies[face.body].shape.cylinder(ofFace: face.face)?.map(\.doubleValue), v.count == 7 else { return nil }
+        let origin = SIMD3(v[0], v[1], v[2]), axis = simd_normalize(SIMD3(v[3], v[4], v[5]))
+        let points = mesh.trianglePoints(of: face)
+        var convex = true
+        if points.count >= 3 {
+            let a = SIMD3<Double>(points[0]), b = SIMD3<Double>(points[1]), c = SIMD3<Double>(points[2])
+            var radial = (a + b + c) / 3 - origin
+            radial -= simd_dot(radial, axis) * axis
+            convex = simd_dot(simd_cross(b - a, c - a), radial) >= 0
+        }
+        return (origin, axis, v[6], convex)
+    }
+
+    /// Ausdehnung eines Körpers entlang einer Richtung (für „Gesamt“ beim Versetzen).
+    func extent(ofBody body: Int, along direction: SIMD3<Double>) -> Double? {
+        let indices = mesh.triangleIndices(ofBody: body)
+        guard !indices.isEmpty, simd_length(direction) > 1e-12 else { return nil }
+        let n = simd_normalize(direction)
+        var low = Double.infinity, high = -Double.infinity
+        for index in indices where Int(index) < mesh.vertices.count {
+            let d = simd_dot(SIMD3<Double>(mesh.vertices[Int(index)].position), n)
+            low = min(low, d)
+            high = max(high, d)
+        }
+        return high >= low ? high - low : nil
+    }
+
+    /// Fläche ersetzen: gewählte ebene Flächen bis an die Ebene der Zielfläche verlängern bzw. kürzen (Vorschau).
+    func previewReplaceFaces(target: FaceRef) {
+        guard requireKernel() else { return }
+        guard let plane = plane(of: target) else {
+            message = "Die Zielfläche muss eben sein."
+            return
+        }
+        let faces = selectedFaces.filter { $0 != target }
+        guard !faces.isEmpty else {
+            message = "Erst die Flächen antippen, die ersetzt werden sollen."
+            return
+        }
+        var preview = bodies
+        for (body, group) in Dictionary(grouping: faces, by: \.body) where bodies.indices.contains(body) {
+            guard let result = bodies[body].shape.replacing(faces: group.map { NSNumber(value: $0.face) },
+                                                            planeOrigin: plane.origin, planeNormal: plane.normal) else {
+                message = "Fläche ersetzen nicht möglich – geht mit ebenen Flächen, die die Zielebene schneiden würden."
+                dropPreview()
+                return
+            }
+            preview[body] = preview[body].with(result)
+        }
+        message = nil
+        showPreview(preview, name: "Fläche ersetzen")
+    }
+
+    /// Umhüllen und Prägen (Shapr3D „Wrap and Emboss“): gewählte Skizzenbereiche auf die Zylinderfläche legen und
+    /// um depth herausheben (> 0) bzw. eingravieren (< 0); rotation dreht das Motiv um die Achse (Grad).
+    func previewWrap(onto face: FaceRef, depth: Double, rotation: Double) {
+        guard requireKernel(), abs(depth) > 1e-6 else {
+            dropPreview()
+            return
+        }
+        guard let cylinder = cylinder(of: face) else {
+            message = "Umhüllen geht auf Zylinderflächen – eine runde Fläche antippen."
+            return
+        }
+        guard let first = selectedRegions.first, sketches.indices.contains(first.sketch) else {
+            message = "Erst Skizzenbereiche antippen (Text, Logo …), dann die Zylinderfläche."
+            return
+        }
+        let sketch = sketches[first.sketch]
+        let regions = selectedRegions.filter { $0.sketch == first.sketch && sketch.regions.indices.contains($0.region) }
+            .map { sketch.regions[$0.region] }
+        let o = cylinder.origin, d = cylinder.axis, r = cylinder.radius
+        let world = regions.flatMap(\.polygon).map { sketch.plane.world($0) }
+        guard !world.isEmpty else { return }
+        var radial = world.reduce(.zero, +) / Double(world.count) - o
+        radial -= simd_dot(radial, d) * d
+        guard simd_length(radial) > 1e-9 else {
+            message = "Die Skizze liegt auf der Achse – auf einer Ebene neben dem Zylinder skizzieren."
+            return
+        }
+        let e = simd_normalize(radial), w = simd_cross(d, e)
+        let turn = rotation * .pi / 180
+        // Bei einer Bohrung zeigt „heraus“ zur Achse hin
+        let outward = cylinder.convex ? 1.0 : -1.0
+        let overlap = 0.02
+        let embossing = depth > 0
+        let innerRadius = embossing ? r - outward * overlap : r - outward * abs(depth)
+        let outerRadius = embossing ? r + outward * depth : r + outward * overlap
+        guard innerRadius > 0, outerRadius > 0 else {
+            message = "Gravur tiefer als der Radius."
+            return
+        }
+        let maxStep = r * 3 * .pi / 180
+        func dense(_ polygon: [Point2]) -> [Point2] {
+            var result: [Point2] = []
+            for k in polygon.indices {
+                let a = polygon[k], b = polygon[(k + 1) % polygon.count]
+                let n = max(1, min(64, Int((simd_distance(a, b) / maxStep).rounded(.up))))
+                for i in 0..<n { result.append(a + (b - a) * (Double(i) / Double(n))) }
+            }
+            return result
+        }
+        func wrapped(_ polygon: [Point2], radius: Double) -> [NSNumber] {
+            polygon.flatMap { p -> [NSNumber] in
+                let q = sketch.plane.world(p) - o
+                let angle = simd_dot(q, w) / r + turn
+                let point = o + d * simd_dot(q, d) + (e * cos(angle) + w * sin(angle)) * radius
+                return [NSNumber(value: point.x), NSNumber(value: point.y), NSNumber(value: point.z)]
+            }
+        }
+        func solid(_ polygon: [Point2]) -> PCKShape? {
+            let points = dense(polygon)
+            guard points.count >= 3 else { return nil }
+            return PCKShape.ruledSolid(between: wrapped(points, radius: innerRadius), and: wrapped(points, radius: outerRadius))
+        }
+        var tools: [PCKShape] = []
+        for region in regions {
+            guard var shape = solid(region.outer.polygon) else { continue }
+            for hole in region.holes {
+                if let cut = solid(hole.polygon), let result = shape.cutting(cut) { shape = result }
+            }
+            tools.append(shape)
+        }
+        guard bodies.indices.contains(face.body), !tools.isEmpty else {
+            message = "Umhüllen nicht möglich."
+            return
+        }
+        var shape = bodies[face.body].shape
+        for tool in tools {
+            guard let result = embossing ? shape.fusing(tool) : shape.cutting(tool) else {
+                message = "Umhüllen nicht möglich – Motiv kleiner machen oder Tiefe ändern."
+                dropPreview()
+                return
+            }
+            shape = result
+        }
+        var preview = bodies
+        preview[face.body] = preview[face.body].with(shape)
+        message = nil
+        previewHiddenSketch = sketch.id
+        showPreview(preview, name: embossing ? "Prägen" : "Gravieren")
+    }
+
+    /// Kante abdrücken (Imprint): gewählte Skizzenbereiche als neue Kanten auf den Körper übertragen, z. B. um
+    /// danach nur einen Teil einer Fläche zu ziehen.
+    func previewImprint(onto body: Int) {
+        guard requireKernel(), bodies.indices.contains(body) else { return }
+        guard let first = selectedRegions.first, sketches.indices.contains(first.sketch) else {
+            message = "Erst Skizzenbereiche antippen, dann den Körper."
+            return
+        }
+        let sketch = sketches[first.sketch]
+        let faces = selectedRegions.filter { $0.sketch == first.sketch && sketch.regions.indices.contains($0.region) }
+            .compactMap { PCKShape.face(profileWires: profileWires(sketch.regions[$0.region], plane: sketch.plane)) }
+        guard let tool = faces.count == 1 ? faces.first : PCKShape.compound(faces),
+              let result = bodies[body].shape.imprinting(tool) else {
+            message = "Abdrücken nicht möglich – die Skizze muss auf einer Fläche des Körpers liegen."
+            return
+        }
+        var preview = bodies
+        preview[body] = preview[body].with(result)
+        message = nil
+        previewHiddenSketch = sketch.id
+        showPreview(preview, name: "Kante abdrücken")
+    }
+
+    /// Körperecken und Kantenmitten (3D), z. B. als Fangpunkte für „Übersetzen“.
+    func modelKeyPoints() -> [SIMD3<Double>] {
+        var byEdge: [EdgeRef: [(SIMD3<Double>, SIMD3<Double>)]] = [:]
+        for (i, ref) in mesh.edgeRefs.enumerated() where i * 2 + 1 < mesh.edges.count {
+            byEdge[ref, default: []].append((SIMD3<Double>(mesh.edges[i * 2]), SIMD3<Double>(mesh.edges[i * 2 + 1])))
+        }
+        var points: [SIMD3<Double>] = []
+        for segments in byEdge.values {
+            for line in chain3D(segments) where line.count >= 2 {
+                points += [line[0], line[line.count - 1]]
+                if line.count == 2 { points.append((line[0] + line[1]) / 2) }
+            }
+        }
+        return points
+    }
+
+    /// Nächster Fangpunkt (Ecke, Kantenmitte) innerhalb tolerance, sonst point selbst.
+    func snappedModelPoint(_ point: SIMD3<Double>, tolerance: Double) -> SIMD3<Double> {
+        var best = point, distance = tolerance
+        for candidate in modelKeyPoints() {
+            let d = simd_distance(candidate, point)
+            if d < distance {
+                distance = d
+                best = candidate
+            }
+        }
+        return best
+    }
+
+    /// Körper in einen Ordner des Browsers legen (nil = heraus).
+    func setFolder(_ folder: String?, bodies indices: [Int]) {
+        let chosen = indices.filter { bodies.indices.contains($0) }
+        guard !chosen.isEmpty else { return }
+        commitPreview()
+        var result = bodies
+        for index in chosen { result[index].folder = folder }
+        commit(result, name: folder.map { "In Ordner „\($0)“" } ?? "Aus Ordner")
+    }
+
+    /// Einfügen › Projekt: Körper eines anderen Projekts als Kopie übernehmen.
+    func insertProject(from otherFolder: URL, name: String) {
+        guard PCKShape.stepAvailable else {
+            message = "Projekt einfügen braucht OpenCASCADE (siehe README)."
+            return
+        }
+        let step = otherFolder.appending(path: "model.step").path(percentEncoded: false)
+        guard FileManager.default.fileExists(atPath: step), let shapes = PCKShape.readSTEP(path: step), !shapes.isEmpty else {
+            message = "„\(name)“ enthält keine Körper."
+            return
+        }
+        let metas = (try? Data(contentsOf: otherFolder.appending(path: "bodies.json")))
+            .flatMap { try? JSONDecoder().decode([BodyMeta].self, from: $0) } ?? []
+        commitPreview()
+        let inserted = shapes.enumerated().map { index, shape -> SceneBody in
+            var body = newBody(shape, name: name)
+            if index < metas.count, metas[index].color.count == 3 {
+                body.name = metas[index].name
+                body.color = SIMD3(metas[index].color[0], metas[index].color[1], metas[index].color[2])
+            }
+            body.folder = name
+            return body
+        }
+        commit(bodies + inserted, name: "Projekt „\(name)“ einfügen")
+        message = "\(inserted.count) Körper aus „\(name)“ eingefügt (Ordner „\(name)“)."
+    }
+
+    // MARK: Variablen
+
+    /// Werte aller Projektvariablen (Name → mm bzw. Grad).
+    var variableValues: [String: Double] { Formula.resolve(variables) }
+
+    /// Variablen ersetzen; Skizzenmaße, die eine Variable verwenden, folgen sofort.
+    /// Körper folgen nicht: Ohne Verlauf der Konstruktion (wie Shapr3D „direkt“) bleiben sie, wie sie sind.
+    func setVariables(_ list: [ProjectVariable]) {
+        variables = list
+        let values = variableValues
+        var result = sketches
+        var changed = false
+        for index in result.indices {
+            if let updated = Self.reevaluated(result[index], values: values) {
+                result[index] = updated
+                changed = true
+            }
+        }
+        if changed {
+            commitPreview()
+            commit(bodies, sketches: result, name: "Variablen ändern")
+        } else {
+            save()
+        }
+    }
+
+    /// Skizze mit neu berechneten Formelmaßen; nil, wenn sich nichts ändert oder der Löser scheitert.
+    private static func reevaluated(_ sketch: StoredSketch, values: [String: Double]) -> StoredSketch? {
+        var constraints = sketch.constraints
+        var touched = false
+        for index in constraints.indices {
+            guard let expression = constraints[index].expression, let old = constraints[index].dimensionValue,
+                  let value = try? Formula.evaluate(expression, variables: values), value > 0,
+                  abs(value - old) > 1e-9 else { continue }
+            constraints[index] = constraints[index].withDimensionValue(value)
+            touched = true
+        }
+        guard touched, let solved = ConstraintSolver.solve(sketch.entities, constraints: constraints) else { return nil }
+        var result = sketch
+        result.entities = solved
+        result.constraints = constraints
+        result.rebuild()
+        return result
+    }
+
+    // MARK: 3D-Leitpunkte für Skizzen
+
+    /// Ecken, Kantenmitten und Kanten der sichtbaren Körper, auf eine Skizzenebene projiziert
+    /// (Shapr3D „3D-Leitpunkte“ und „Entfernte Kanten“).
+    func sketchGuides(on plane: SketchPlane) -> SketchGuides {
+        var byEdge: [EdgeRef: [(SIMD3<Double>, SIMD3<Double>)]] = [:]
+        for (i, ref) in mesh.edgeRefs.enumerated() where i * 2 + 1 < mesh.edges.count {
+            guard bodies.indices.contains(ref.body), !bodies[ref.body].isHidden else { continue }
+            byEdge[ref, default: []].append((SIMD3<Double>(mesh.edges[i * 2]), SIMD3<Double>(mesh.edges[i * 2 + 1])))
+        }
+        var guides = SketchGuides()
+        for segments in byEdge.values {
+            for line in chain3D(segments) where line.count >= 2 {
+                let local = line.map(plane.local)
+                guides.curves.append(local)
+                guides.points += [local[0], local[local.count - 1]]
+                // Mitte entlang der Kante
+                var lengths = [0.0]
+                for k in 1..<local.count { lengths.append(lengths[k - 1] + simd_distance(local[k - 1], local[k])) }
+                let half = lengths[lengths.count - 1] / 2
+                if half > 1e-6, let k = lengths.firstIndex(where: { $0 >= half }), k > 0 {
+                    let piece = lengths[k] - lengths[k - 1]
+                    let f = piece > 1e-12 ? (half - lengths[k - 1]) / piece : 0
+                    guides.points.append(local[k - 1] + (local[k] - local[k - 1]) * f)
+                }
+            }
+        }
+        var unique: [Point2] = []
+        for p in guides.points where !unique.contains(where: { simd_distance($0, p) < 1e-4 }) {
+            unique.append(p)
+            if unique.count >= 1500 { break }
+        }
+        guides.points = unique
+        if guides.curves.count > 3000 { guides.curves = Array(guides.curves.prefix(3000)) }
+        return guides
+    }
+
     // MARK: Speichern
 
     private struct BodyMeta: Codable {
@@ -1246,6 +1749,8 @@ final class ModelStore: ObservableObject {
         var color: [Float]
         var isHidden: Bool
         var sketchID: UUID?
+        /// Ordner im Browser „Ebenen“ (nil = oberste Ebene)
+        var folder: String?
     }
 
     private var modelURL: URL? { folder?.appending(path: "model.step") }
@@ -1253,8 +1758,13 @@ final class ModelStore: ObservableObject {
     private var sketchesURL: URL? { folder?.appending(path: "sketches.json") }
     private var constructionsURL: URL? { folder?.appending(path: "constructions.json") }
     private var canvasesURL: URL? { folder?.appending(path: "canvases.json") }
+    private var variablesURL: URL? { folder?.appending(path: "variables.json") }
 
     private func load() {
+        if let url = variablesURL, let data = try? Data(contentsOf: url),
+           let stored = try? JSONDecoder().decode([ProjectVariable].self, from: data) {
+            variables = stored
+        }
         if let url = sketchesURL, let data = try? Data(contentsOf: url),
            let stored = try? JSONDecoder().decode([StoredSketch].self, from: data) {
             sketches = stored
@@ -1276,7 +1786,7 @@ final class ModelStore: ObservableObject {
             if index < metas.count, metas[index].color.count == 3 {
                 let meta = metas[index]
                 return SceneBody(shape: shape, name: meta.name, color: SIMD3(meta.color[0], meta.color[1], meta.color[2]),
-                                 isHidden: meta.isHidden, sketchID: meta.sketchID)
+                                 isHidden: meta.isHidden, sketchID: meta.sketchID, folder: meta.folder)
             }
             return SceneBody(shape: shape, name: "Körper \(index + 1)", color: SceneBody.palette[index % SceneBody.palette.count])
         }
@@ -1292,6 +1802,9 @@ final class ModelStore: ObservableObject {
         if let canvasesURL, let data = try? JSONEncoder().encode(canvases) {
             try? data.write(to: canvasesURL)
         }
+        if let variablesURL, let data = try? JSONEncoder().encode(variables) {
+            try? data.write(to: variablesURL)
+        }
         guard PCKShape.stepAvailable, let modelURL, let metaURL else { return }
         let path = modelURL.path(percentEncoded: false)
         if bodies.isEmpty {
@@ -1300,7 +1813,8 @@ final class ModelStore: ObservableObject {
             _ = PCKShape.writeSTEP(bodies.map(\.shape), path: path)
         }
         let metas = bodies.map {
-            BodyMeta(name: $0.name, color: [$0.color.x, $0.color.y, $0.color.z], isHidden: $0.isHidden, sketchID: $0.sketchID)
+            BodyMeta(name: $0.name, color: [$0.color.x, $0.color.y, $0.color.z], isHidden: $0.isHidden, sketchID: $0.sketchID,
+                     folder: $0.folder)
         }
         if let data = try? JSONEncoder().encode(metas) {
             try? data.write(to: metaURL)
@@ -1675,10 +2189,16 @@ extension ModelStore {
                 message = "Drehen nicht möglich."
                 return
             }
-            preview[index] = preview[index].with(rotated)
+            if moveCopies {
+                var copy = bodies[index].with(rotated)
+                copy.name += " (Kopie)"
+                preview.append(copy)
+            } else {
+                preview[index] = preview[index].with(rotated)
+            }
         }
         message = nil
-        showPreview(preview, name: "Drehen")
+        showPreview(preview, name: moveCopies ? "Gedreht kopieren" : "Drehen")
     }
 
     /// Ergebnis der KI-Anbindung als Vorschau zeigen (Übernehmen mit commitPreview, Verwerfen mit cancelPreview).
