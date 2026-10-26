@@ -68,10 +68,20 @@ enum LengthUnit: String, CaseIterable, Identifiable, Codable {
 
     /// Wählbare Fangraster (mm), passend zur Einheit: metrisch in 1-5-10-Schritten, Zoll in Zweierbrüchen.
     var gridSteps: [Double] {
+        // Feste Typen und einzelne Schritte, sonst braucht der Typprüfer zu lange
         switch self {
-        case .mm: [0.001, 0.01, 0.1, 0.5, 1, 5, 10]
-        case .cm: [0.01, 0.1, 0.5, 1, 5, 10, 50]
-        case .inch: [0.001, 0.01, 1.0 / 64, 1.0 / 32, 1.0 / 16, 1.0 / 8, 1.0 / 4, 1.0 / 2, 1].map { $0 * 25.4 }
+        case .mm:
+            let steps: [Double] = [0.001, 0.01, 0.1, 0.5, 1, 5, 10]
+            return steps
+        case .cm:
+            let steps: [Double] = [0.01, 0.1, 0.5, 1, 5, 10, 50]
+            return steps
+        case .inch:
+            let fractions: [Double] = [64, 32, 16, 8, 4, 2]
+            var inches: [Double] = [0.001, 0.01]
+            inches += fractions.map { (denominator: Double) -> Double in 1 / denominator }
+            inches.append(1)
+            return inches.map { (inch: Double) -> Double in inch * 25.4 }
         }
     }
 
@@ -101,11 +111,16 @@ enum LengthUnit: String, CaseIterable, Identifiable, Codable {
     var displayGridSteps: [Float] {
         switch self {
         case .mm, .cm:
-            return [0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000]
+            let steps: [Float] = [0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500,
+                                  1000, 2000]
+            return steps
         case .inch:
-            let inches: [Float] = [0.001, 0.01, 1.0 / 64, 1.0 / 32, 1.0 / 16, 1.0 / 8, 1.0 / 4, 1.0 / 2, 1, 2, 6, 12, 24,
-                                   60, 120, 240, 600, 1200]
-            return inches.map { $0 * 25.4 }
+            let fractions: [Float] = [64, 32, 16, 8, 4, 2]
+            var inches: [Float] = [0.001, 0.01]
+            inches += fractions.map { (denominator: Float) -> Float in 1 / denominator }
+            let whole: [Float] = [1, 2, 6, 12, 24, 60, 120, 240, 600, 1200]
+            inches += whole
+            return inches.map { (inch: Float) -> Float in inch * 25.4 }
         }
     }
 

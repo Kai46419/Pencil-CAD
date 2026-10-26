@@ -302,20 +302,27 @@ enum PartBuilder {
         let r = max(0, min(radius, min(hx, hy) - 0.01))
         func p(_ x: Double, _ y: Double) -> [NSNumber] { [NSNumber(value: x), NSNumber(value: y), NSNumber(value: z)] }
         func line(_ a: [NSNumber], _ b: [NSNumber]) -> [NSNumber] { [NSNumber(value: 0)] + a + b }
+        // Schrittweise zusammensetzen: eine lange „+“-Kette überfordert den Swift-Typprüfer
+        var result: [NSNumber] = []
         guard r > 0.01 else {
-            return line(p(-hx, -hy), p(hx, -hy)) + line(p(hx, -hy), p(hx, hy)) + line(p(hx, hy), p(-hx, hy))
-                + line(p(-hx, hy), p(-hx, -hy))
+            result += line(p(-hx, -hy), p(hx, -hy))
+            result += line(p(hx, -hy), p(hx, hy))
+            result += line(p(hx, hy), p(-hx, hy))
+            result += line(p(-hx, hy), p(-hx, -hy))
+            return result
         }
-        let s = r * (1 - 1 / sqrt(2))
+        let s: Double = r * (1 - 1 / sqrt(2))
         func arc(_ a: [NSNumber], _ m: [NSNumber], _ b: [NSNumber]) -> [NSNumber] { [NSNumber(value: 1)] + a + m + b }
-        return line(p(-hx + r, -hy), p(hx - r, -hy))
-            + arc(p(hx - r, -hy), p(hx - s, -hy + s), p(hx, -hy + r))
-            + line(p(hx, -hy + r), p(hx, hy - r))
-            + arc(p(hx, hy - r), p(hx - s, hy - s), p(hx - r, hy))
-            + line(p(hx - r, hy), p(-hx + r, hy))
-            + arc(p(-hx + r, hy), p(-hx + s, hy - s), p(-hx, hy - r))
-            + line(p(-hx, hy - r), p(-hx, -hy + r))
-            + arc(p(-hx, -hy + r), p(-hx + s, -hy + s), p(-hx + r, -hy))
+        let xl: Double = -hx, xr: Double = hx, yb: Double = -hy, yt: Double = hy
+        result += line(p(xl + r, yb), p(xr - r, yb))
+        result += arc(p(xr - r, yb), p(xr - s, yb + s), p(xr, yb + r))
+        result += line(p(xr, yb + r), p(xr, yt - r))
+        result += arc(p(xr, yt - r), p(xr - s, yt - s), p(xr - r, yt))
+        result += line(p(xr - r, yt), p(xl + r, yt))
+        result += arc(p(xl + r, yt), p(xl + s, yt - s), p(xl, yt - r))
+        result += line(p(xl, yt - r), p(xl, yb + r))
+        result += arc(p(xl, yb + r), p(xl + s, yb + s), p(xl + r, yb))
+        return result
     }
 
     private static func roundedPrism(length: Double, width: Double, radius: Double, z0: Double, height: Double) -> PCKShape? {
@@ -398,7 +405,11 @@ enum PartBuilder {
             code += [NSNumber(value: 5), NSNumber(value: flankRadii.count)]
             code += flankRadii.reversed().flatMap { p($0, c + flankAngle($0)) }
             // Fußkreis bis zur nächsten Zahnlücke
-            code += [NSNumber(value: 1)] + p(rf, c + rootHalf) + p(rf, (c + next) / 2) + p(rf, next - rootHalf)
+            let rootStart: Double = c + rootHalf, rootMid: Double = (c + next) / 2, rootEnd: Double = next - rootHalf
+            code.append(NSNumber(value: 1))
+            code += p(rf, rootStart)
+            code += p(rf, rootMid)
+            code += p(rf, rootEnd)
         }
         guard var gear = PCKShape.prism(profileWires: [code], direction: [0, 0, s.gearWidth]) else { return nil }
         if s.bore > 0 {

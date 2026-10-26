@@ -116,7 +116,10 @@ enum SplineFit {
         for _ in 0..<2 {
             let previous = smoothed
             for i in 1..<(previous.count - 1) {
-                smoothed[i] = previous[i - 1] * 0.25 + previous[i] * 0.5 + previous[i + 1] * 0.25
+                let before: Point2 = previous[i - 1] * 0.25
+                let middle: Point2 = previous[i] * 0.5
+                let after: Point2 = previous[i + 1] * 0.25
+                smoothed[i] = before + middle + after
             }
         }
         return smoothed
