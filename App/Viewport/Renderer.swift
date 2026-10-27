@@ -83,6 +83,8 @@ struct CanvasGraphic {
 struct FillGroup {
     var triangles: [SIMD3<Float>]
     var color: SIMD4<Float>
+    /// true = vor Körpern sichtbar (Griffe), false = von Körpern verdeckt
+    var onTop = false
 }
 
 /// Hintergrund wie bei Shapr3D: neutrales helles Grau (linear, ergibt etwa sRGB 237).
@@ -655,7 +657,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         for fill in fills {
             guard let buffer = makeBuffer(fill.triangles.map { Vertex(position: $0, normal: SIMD3(0, 0, 1)) }) else { continue }
             encoder.setRenderPipelineState(fillPipeline)
-            encoder.setDepthStencilState(readOnlyDepthState)
+            encoder.setDepthStencilState(fill.onTop ? alwaysDepthState : readOnlyDepthState)
             encoder.setVertexBuffer(buffer, offset: 0, index: 0)
             setUniforms(&uniforms)
             setColor(fill.color.x, fill.color.y, fill.color.z, fill.color.w)
@@ -680,10 +682,13 @@ final class Renderer: NSObject, MTKViewDelegate {
             arrows += Renderer.arrowVertices(handle, length: length)
         }
         if let arrowBuffer = makeBuffer(arrows) {
+            // Nicht von der Schnittebene abschneiden (der Pfeil der Schnittansicht zeigt in die ausgeblendete Hälfte)
+            var noClip = uniforms
+            noClip.clipPlane = .zero
             encoder.setRenderPipelineState(solidPipeline)
             encoder.setDepthStencilState(alwaysDepthState)
             encoder.setVertexBuffer(arrowBuffer, offset: 0, index: 0)
-            setUniforms(&uniforms)
+            setUniforms(&noClip)
             encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: arrows.count)
         }
     }
