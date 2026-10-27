@@ -28,6 +28,8 @@ enum SketchTool: String, CaseIterable, Identifiable {
     case extend = "Verlängern"
     /// Kurve an den Schnittpunkten teilen, ohne etwas zu löschen (Fusion 360 „Break“)
     case breakCurve = "Unterbrechen"
+    /// Kurve an der angetippten Stelle in zwei Teile trennen (Fusion 360 „Split“ an einem Punkt, SketchCut.swift)
+    case splitAtPoint = "Teilen an Punkt"
     /// Gewählte Elemente an einer Linie spiegeln (Fusion 360 „Mirror“)
     case mirror = "Spiegeln"
     /// Gewählte Elemente in Zeilen und Spalten vervielfältigen (Fusion 360 „Rectangular Pattern“)
@@ -60,6 +62,7 @@ enum SketchTool: String, CaseIterable, Identifiable {
         case .chamfer: "octagon"
         case .extend: "arrow.right.to.line"
         case .breakCurve: "divide"
+        case .splitAtPoint: "scissors.badge.ellipsis"
         case .mirror: "arrow.left.and.right.righttriangle.left.righttriangle.right"
         case .rectPattern: "square.grid.3x3"
         case .circPattern: "circle.grid.cross"
@@ -76,12 +79,13 @@ enum SketchTool: String, CaseIterable, Identifiable {
         case .text: "Schrift als Profil"
         case .offset: "Kurven versetzen"
         case .project: "Körperkanten"
-        case .trim: "Bis zum Schnittpunkt"
+        case .trim: "Bis Schnittpunkt, auch wischen"
         case .fillet: "Ecke antippen"
         case .scale: "Auswahl oder alles"
         case .chamfer: "Ecke antippen"
         case .extend: "Linienende antippen"
         case .breakCurve: "An Schnittpunkten teilen"
+        case .splitAtPoint: "An der Stelle trennen"
         case .mirror: "Auswahl, zuletzt Achse"
         case .rectPattern, .circPattern: "Auswahl vervielfältigen"
         case .measure: "Länge, Abstand, Winkel"
@@ -880,8 +884,9 @@ final class SketchController: ObservableObject {
         case .offset:
             pickOffset(at: end, tolerance: tolerance)
         case .trim:
-            // Ungefangener Punkt: der Fang würde auf Schnittpunkte springen
-            trim(at: point, tolerance: tolerance)
+            // Über mehrere Kurven gewischt: jedes überstrichene Stück (SketchCut.swift). Sonst wie Antippen,
+            // mit dem ungefangenen Punkt: der Fang würde auf Schnittpunkte springen
+            if !trimSwiped(samples, tolerance: tolerance) { trim(at: point, tolerance: tolerance) }
         case .fillet:
             filletCorner(at: point, tolerance: tolerance)
         case .chamfer:
@@ -897,6 +902,8 @@ final class SketchController: ObservableObject {
             extendLine(at: point, tolerance: tolerance)
         case .breakCurve:
             breakCurve(at: point, tolerance: tolerance)
+        case .splitAtPoint:
+            splitCurve(at: point, snapped: end, tolerance: tolerance)
         case .mirror, .rectPattern, .circPattern:
             // Antippen wählt Elemente (bzw. beim Spiegeln zuletzt die Achse), angewendet wird über die Karte
             select(at: point, tolerance: tolerance)
@@ -3841,7 +3848,8 @@ final class SketchController: ObservableObject {
                 polylines += preview.drawing
                 if splineKind == .control { polylines.append(points) }
             }
-        case .point, .text, .offset, .project, .trim, .scale, .select, .fillet, .chamfer, .extend, .breakCurve, .measure:
+        case .point, .text, .offset, .project, .trim, .scale, .select, .fillet, .chamfer, .extend, .breakCurve, .splitAtPoint,
+             .measure:
             break
         }
         return polylines
@@ -4342,6 +4350,37 @@ extension SketchController {
         editableIndex = selection.count == 1 ? selection[0].entity : nil
         notice = nil
         changed()
+    }
+}
+
+// MARK: Zugang für das Schneiden (SketchCut.swift)
+
+extension SketchController {
+    /// Stand vor dem Schneiden merken (ein Rückgängig-Schritt, auch für einen ganzen Wisch).
+    func rememberForCut() { remember() }
+
+    /// Gemerkten Stand wiederherstellen und verwerfen (Schneiden ging nicht).
+    func revertCut() {
+        if let snapshot = undoStack.popLast() { restore(snapshot) }
+    }
+
+    /// Element, dessen Kurve dem Punkt am nächsten liegt (höchstens tolerance entfernt).
+    func cutTarget(near p: Point2, tolerance: Double, among candidates: [Int]? = nil) -> Int? {
+        nearestEntity(to: p, tolerance: tolerance, among: candidates)
+    }
+
+    /// Element durch Teile ersetzen (mit Nachbarn verbunden, Konstruktionsart bleibt). Liefert den ersten neuen Index.
+    @discardableResult
+    func replaceForCut(_ index: Int, with pieces: [SketchEntity]) -> Int {
+        replaceEntity(index, with: pieces)
+    }
+
+    /// Nach dem Schneiden: Bereiche und Fang neu aufbauen.
+    func finishCut() { entitiesChanged() }
+
+    /// Spur des laufenden Wischens beim Beschneiden (der Viewport zeichnet sie dünn rot).
+    var cutTrace: [Point2] {
+        tool == .trim && dragStart != nil && strokeSamples.count >= 2 ? strokeSamples : []
     }
 }
 

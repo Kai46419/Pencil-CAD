@@ -2223,6 +2223,8 @@ final class Workspace: ObservableObject {
             return "Linie nahe dem Ende antippen – sie wächst bis zur nächsten Kurve"
         case .breakCurve:
             return "Kurve antippen – sie wird an den nächsten Schnittpunkten geteilt"
+        case .splitAtPoint:
+            return "Linie, Bogen, Kreis oder Spline antippen – sie wird genau dort geteilt (rastet auf Mitten ein)"
         case .measure:
             return sketch.measureRefs.isEmpty ? "Element oder Punkt antippen"
                 : "Zweites Element antippen für Abstand und Winkel · erneut antippen nimmt es heraus"
@@ -2243,7 +2245,7 @@ final class Workspace: ObservableObject {
         case .offset:
             return sketch.hasOffsetTarget ? "Pfeil ziehen, dann „Fertig“" : "Kontur oder Kurve antippen"
         case .trim:
-            return "Stück einer Kurve antippen – es wird bis zu den Schnittpunkten entfernt"
+            return "Stück einer Kurve antippen – es wird bis zu den Schnittpunkten entfernt · über mehrere wischen entfernt alle überstrichenen"
         case .fillet:
             return "Ecke antippen, an der zwei Linien zusammenstoßen – Radius unten eingeben"
         case .project:
