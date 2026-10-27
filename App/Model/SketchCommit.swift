@@ -126,6 +126,10 @@ extension SketchController {
             return [.parallel(c, line)]
         case .perpendicular(let c):
             return [.perpendicular(c, line)]
+        case .angle, .aligned:
+            // Winkelschritt bzw. Ausrichtung: nur die Lage, keine Bedingung (0/90° ergeben H/V aus der genauen
+            // Lage, 90° zum vorigen Stück „senkrecht“ über inferredAtStart)
+            return []
         default:
             return pointConstraints(end, target: target)
         }

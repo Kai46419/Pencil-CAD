@@ -66,6 +66,8 @@ struct SketchClickState {
         var placedFirst: Bool
         /// Linie: abseits des Zugendes aufgesetzt – Ziehen beginnt einen neuen Linienzug
         var restart: Bool
+        /// Der neue Linienzug hat beim Ziehen schon begonnen (Vorschau und Fang ab dem Aufsetzpunkt)
+        var restarted = false
     }
 
     var points: [SketchClickPoint] = []
@@ -87,6 +89,8 @@ struct SketchClickState {
     var circleInference: SketchController.CircleInference?
     /// mm je Bildschirmpunkt beim letzten Fang (für die Lage der Wertfelder)
     var mmPerPoint = 0.1
+    /// Gemerkte Fangpunkte (zuletzt berührte bzw. gesetzte Punkte) für die Ausrichtung, die neuesten zuletzt
+    var tracked: [(kind: SnapKind, point: Point2)] = []
 
     var isEmpty: Bool { points.isEmpty && picks.isEmpty }
 }
@@ -131,8 +135,10 @@ extension SketchController {
         SnapMetrics(mmPerPoint: max(tolerance / 20, 1e-9), input: snapInput, viewHalfHeight: viewHalfHeight)
     }
 
-    /// Fang nach SolidCraft für einen Stiftpunkt (Schweben, Ziehen, Tippen).
-    func solidCraftSnap(_ raw: Point2, tolerance: Double, prev: Point2?, lineTool: Bool) -> SnapCandidate {
+    /// Fang nach SolidCraft für einen Stiftpunkt (Schweben, Ziehen, Tippen); tracking = Winkelschritte und gemerkte
+    /// Punkte der Klickfolge.
+    func solidCraftSnap(_ raw: Point2, tolerance: Double, prev: Point2?, lineTool: Bool,
+                        tracking: SnapTracking = SnapTracking()) -> SnapCandidate {
         let metrics = snapMetrics(tolerance)
         click.mmPerPoint = metrics.mmPerPoint
         // Fang unterdrückt: Stift fest drücken oder (SolidCraft-Modus) einen Finger auflegen
@@ -142,7 +148,62 @@ extension SketchController {
         let gridOn = snapEnabled && snapKinds.contains(.grid)
         let step = options.gridAuto || gridStep <= 0 ? metrics.fineGridStep : gridStep
         return inference.refine(raw, prev: prev, lineTool: lineTool, metrics: metrics, midOnly: options.midpointOnly,
-                                kinds: snapKinds, extra: extra, woken: wokenCenter, fineStep: step, gridOn: gridOn)
+                                kinds: snapKinds, extra: extra, woken: wokenCenter, fineStep: step, gridOn: gridOn,
+                                tracking: tracking)
+    }
+
+    // MARK: Ausrichtung und gemerkte Fangpunkte (PencilCAD, wie der klassische Fang bis Build 149)
+
+    /// Höchstens so viele zuletzt berührte Punkte bleiben gemerkt
+    private static let trackedLimit = 6
+
+    /// Winkelschritte, voriges Linienstück und Ausrichtungspunkte für den Fang der Klickfolge. fresh = Fang ohne
+    /// Vorgänger (Aufsetzen für einen neuen Linienzug).
+    private func clickTracking(_ raw: Point2, metrics: SnapMetrics, fresh: Bool) -> SnapTracking {
+        var tracking = SnapTracking()
+        if !fresh {
+            tracking.angleSteps = clickKind == .line || clickKind == .rectangleThreePoint && click.points.count == 1
+            if tracking.angleSteps { tracking.previous = previousSegment() }
+        }
+        guard snapKinds.contains(.alignment) else { return tracking }
+        var points = click.tracked.map { $0.point } + click.points.map(\.point)
+        if let first = click.chainFirst { points.append(first) }
+        points += inference.alignmentPoints(near: raw, reach: metrics.alignReach, kinds: snapKinds)
+        var unique: [Point2] = []
+        for p in points where !unique.contains(where: { simd_distance($0, p) < 1e-9 }) { unique.append(p) }
+        tracking.points = unique
+        return tracking
+    }
+
+    /// Linie, an deren Ende der vorige Punkt liegt: Richtung, in der sie dort weiterliefe (für den Winkel zum
+    /// vorigen Stück und das gerade Weiterzeichnen).
+    private func previousSegment() -> (direction: Point2, ref: SketchCurveRef)? {
+        guard let last = click.points.last, case .point(let ref?)? = last.target, entities.indices.contains(ref.entity),
+              ref.index <= 1, case .line(let a, let b) = entities[ref.entity] else { return nil }
+        let from = ref.index == 1 ? a : b
+        let at = ref.index == 1 ? b : a
+        guard simd_distance(from, at) > 1e-9, simd_distance(at, last.point) < 1e-6 else { return nil }
+        return (simd_normalize(at - from), SketchCurveRef(entity: ref.entity, index: 0))
+    }
+
+    /// Punkt merken (zuletzt berührt bzw. gesetzt), ohne Doppelte, höchstens trackedLimit.
+    private func rememberTracked(_ kind: SnapKind, _ p: Point2) {
+        click.tracked.removeAll { simd_distance($0.point, p) < 1e-9 }
+        click.tracked.append((kind: kind, point: p))
+        if click.tracked.count > Self.trackedLimit { click.tracked.removeFirst(click.tracked.count - Self.trackedLimit) }
+    }
+
+    /// Gemerkte Fangpunkte pflegen und für die Anzeige sammeln: Punktfänge am Stift werden gemerkt, verfallene
+    /// (z. B. nach Rückgängig) fallen weg; angezeigt werden die Fangpunkte in Stiftnähe und die gemerkten.
+    private func updateTracking(_ snapped: SnapCandidate, raw: Point2, metrics: SnapMetrics) {
+        click.tracked.removeAll { !inference.holds($0.point) }
+        if let kind = inference.trackKind(snapped.target, at: snapped.point) { rememberTracked(kind, snapped.point) }
+        var shown = inference.trackedNodes(near: raw, radius: metrics.trackRadius, kinds: snapKinds,
+                                           extra: click.points.map(\.point))
+        for item in click.tracked where !shown.contains(where: { simd_distance($0.point, item.point) < 1e-9 }) {
+            shown.append(item)
+        }
+        clickTrackedPoints = shown
     }
 
     /// SolidCraft `wake_centre`: der Rand eines Kreises bzw. Bogens unter dem Stift weckt dessen Mitte; sie bleibt
@@ -245,9 +306,22 @@ extension SketchController {
     func clickPlaced(_ candidate: SnapCandidate, metrics: SnapMetrics) -> SnapCandidate {
         guard let kind = clickKind, let a = click.points.last?.point else { return candidate }
         if hasLockedBox {
-            var free = SnapCandidate.free(clickEffective(candidate.point, axisLimit: metrics.axisSnap))
-            free.guide = nil
-            return free
+            let p = clickEffective(candidate.point, axisLimit: metrics.axisSnap)
+            // Nur die Länge getippt: ein eingerasteter Winkel bleibt samt Leitlinie (die Richtung ändert sich nicht)
+            var alongRay = false
+            switch candidate.target {
+            case .some(.horizontal), .some(.vertical), .some(.angle), .some(.parallel), .some(.perpendicular):
+                alongRay = true
+            default: break
+            }
+            if kind == .line, alongRay, lockedValue("Winkel") == nil, let target = candidate.target,
+               simd_distance(candidate.point, a) > 1e-9, simd_distance(p, a) > 1e-9 {
+                let u = simd_normalize(candidate.point - a), w = simd_normalize(p - a)
+                if abs(u.x * w.y - u.y * w.x) < 1e-9, simd_dot(u, w) > 0 {
+                    return SnapCandidate(point: p, target: target, guide: (a, p), label: candidate.label)
+                }
+            }
+            return SnapCandidate.free(p)
         }
         guard kind == .line else {
             var result = candidate
@@ -255,6 +329,8 @@ extension SketchController {
             return result
         }
         if case .throughCenter? = candidate.target { return candidate }
+        // Leitlinien (Winkelschritt, Ausrichtung, //, ⊥, Verlängerung) liegen schon genau: kein Achsfang darüber
+        if candidate.target?.isGuide == true { return candidate }
         if !candidate.hasArgument {
             let p = clickEffective(candidate.point, axisLimit: metrics.axisSnap)
             if simd_distance(p, candidate.point) < 1e-9 { return candidate }
@@ -262,6 +338,8 @@ extension SketchController {
             let axis: SnapTarget = abs(p.y - a.y) < 1e-9 ? .horizontal : .vertical
             return SnapCandidate(point: p, target: axis, guide: nil, label: "")
         }
+        // Schnitt einer Leitlinie mit der Kurve: liegt schon genau
+        if candidate.guide != nil { return candidate }
         return inference.onCurveAxis(start: a, candidate: candidate, limit: metrics.axisSnap) ?? candidate
     }
 
@@ -269,7 +347,10 @@ extension SketchController {
     private func clickCandidate(_ raw: Point2, tolerance: Double) -> SnapCandidate {
         let metrics = snapMetrics(tolerance)
         let lineTool = clickKind == .line
-        let snapped = solidCraftSnap(raw, tolerance: tolerance, prev: click.points.last?.point, lineTool: lineTool)
+        let tracking = clickTracking(raw, metrics: metrics, fresh: false)
+        let snapped = solidCraftSnap(raw, tolerance: tolerance, prev: click.points.last?.point, lineTool: lineTool,
+                                     tracking: tracking)
+        updateTracking(snapped, raw: raw, metrics: metrics)
         // Mittelpunkt-Bogen: den Bogenwinkel mit dem Stiftpunkt mitzählen, bevor clickEffective den Punkt auf den
         // Kreis beim bisherigen Winkel legt – sonst zählte trackSweep den schon gelegten Punkt, der Winkel blieb 0
         // und nach Mitte und Start erschien nur die Radiuslinie, nie ein Bogen (Kai)
@@ -336,7 +417,8 @@ extension SketchController {
             changed()
             return
         }
-        let fresh = solidCraftSnap(raw, tolerance: tolerance, prev: nil, lineTool: kind == .line)
+        let fresh = solidCraftSnap(raw, tolerance: tolerance, prev: nil, lineTool: kind == .line,
+                                   tracking: clickTracking(raw, metrics: metrics, fresh: true))
         let candidate = clickCandidate(raw, tolerance: tolerance)
         var placedFirst = false
         var restart = false
@@ -344,7 +426,10 @@ extension SketchController {
             clickPlace(candidate)
             placedFirst = !click.points.isEmpty
         } else if kind == .line, let last = click.points.last, simd_distance(last.point, fresh.point) > metrics.tapSlop {
-            restart = true
+            // Knapp neben dem Zugende aufgesetzt (ohne anderen Punktfang, z. B. auf dem letzten Stück selbst):
+            // weiter am Zugende statt eines neuen, unverbundenen Linienzugs (Kai: „manchmal rastet es nicht ein“)
+            let nearEnd = simd_distance(last.point, raw) <= metrics.chainReach && !(fresh.target?.isPointSnap ?? false)
+            restart = !nearEnd
         }
         click.press = SketchClickState.Press(raw: raw, fresh: fresh, placedFirst: placedFirst, restart: restart)
         let shown = placedFirst ? clickCandidate(raw, tolerance: tolerance) : candidate
@@ -354,8 +439,14 @@ extension SketchController {
     }
 
     func clickMoved(to raw: Point2, tolerance: Double) {
-        guard click.press != nil, let kind = clickKind else { return }
+        guard let press = click.press, let kind = clickKind else { return }
         if case .tangentCircle = kind { return }
+        // Abseits des Zugendes gezogen: der neue Linienzug beginnt sofort, damit Vorschau, Winkel und Fang vom
+        // Aufsetzpunkt ausgehen (vorher erst beim Abheben – gezeigt wurde ein Fang zum alten Zugende)
+        if press.restart, !press.restarted, simd_distance(raw, press.raw) > snapMetrics(tolerance).tapSlop {
+            beginChain(at: press.fresh)
+            click.press?.restarted = true
+        }
         let candidate = clickCandidate(raw, tolerance: tolerance)
         click.hover = candidate
         activeCandidate = candidate
@@ -375,7 +466,10 @@ extension SketchController {
         }
         // Beim Abheben zittert der Stift: es gilt der zuletzt gezeigte Punkt
         var candidate: SnapCandidate
-        if let shown = click.hover, let last = click.raw, simd_distance(last, raw) <= metrics.tapSlop * 0.5, dragged {
+        // (bis zur Tipp-Schwelle; ein gezeigter Punktfang bleibt, solange der Stift in seinem Fangradius abhebt)
+        if dragged, let shown = click.hover, let last = click.raw,
+           simd_distance(last, raw) <= metrics.tapSlop
+            || ((shown.target?.isPointSnap ?? false) && simd_distance(shown.point, raw) <= metrics.pointPick) {
             candidate = shown
         } else {
             candidate = clickCandidate(raw, tolerance: tolerance)
@@ -384,18 +478,27 @@ extension SketchController {
         if press.placedFirst {
             if dragged { clickPlace(candidate) }
         } else if press.restart, dragged {
-            // Abseits des Zugendes gezogen: neuer Linienzug ab dem Aufsetzpunkt
-            options.locked = [:]
-            click.points = [SketchClickPoint(point: press.fresh.point, target: press.fresh.target)]
-            click.chainFirst = press.fresh.point
-            placedPointCount += 1
-            candidate = clickCandidate(raw, tolerance: tolerance)
+            // Abseits des Zugendes gezogen: neuer Linienzug ab dem Aufsetzpunkt (meist schon beim Ziehen begonnen)
+            if !press.restarted {
+                beginChain(at: press.fresh)
+                candidate = clickCandidate(raw, tolerance: tolerance)
+            }
             clickPlace(candidate)
         } else {
             clickPlace(candidate)
         }
         click.hover = nil
+        // Nach dem Abheben nur noch die gemerkten Fangpunkte zeigen (die in Stiftnähe folgen beim Schweben)
+        clickTrackedPoints = click.tracked
         changed()
+    }
+
+    /// Neuer Linienzug ab dem Fang beim Aufsetzen.
+    private func beginChain(at fresh: SnapCandidate) {
+        if !options.locked.isEmpty { options.locked = [:] }
+        click.points = [SketchClickPoint(point: fresh.point, target: fresh.target)]
+        click.chainFirst = fresh.point
+        placedPointCount += 1
     }
 
     /// Mit den getippten Werten setzen (Enter im Wertfeld); der Stift bestimmt nur noch die Seite.
@@ -415,6 +518,7 @@ extension SketchController {
         let keepPointer = click.mmPerPoint
         click = SketchClickState()
         click.mmPerPoint = keepPointer
+        clickTrackedPoints = []
         activeCandidate = nil
         hoverCandidate = nil
         if !options.locked.isEmpty { options.locked = [:] }
@@ -427,6 +531,8 @@ extension SketchController {
         guard let kind = clickKind else { return }
         let point = SketchClickPoint(point: candidate.point, target: candidate.target)
         defer { if options.midpointOnly { options.midpointOnly = false } }
+        // Gesetzte Punkte bleiben für die Ausrichtung gemerkt (auch frühere Ecken des Linienzugs)
+        rememberTracked(inference.trackKind(candidate.target, at: candidate.point) ?? .endpoint, candidate.point)
         if kind == .line {
             placeLinePoint(point)
             return

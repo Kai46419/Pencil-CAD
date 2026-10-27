@@ -2013,7 +2013,11 @@ final class SketchController: ObservableObject {
         hoverSnap = nil
         hoverNodes = []
         hoverCandidate = nil
-        if click.press == nil { click.hover = nil }
+        if click.press == nil {
+            click.hover = nil
+            // Fangpunkte in Stiftnähe aus, die gemerkten bleiben sichtbar (SketchClickTool.swift)
+            clickTrackedPoints = click.tracked
+        }
         if dragStart == nil { parallelLines = [] }
     }
 
