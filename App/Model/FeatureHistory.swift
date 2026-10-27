@@ -776,7 +776,15 @@ extension ModelStore {
     /// Nach dem Nachbau: Name, Farbe, Sichtbarkeit, Ordner … der Körper bleiben, nur die Geometrie ist neu.
     func carryingBodyDetails(_ rebuilt: [SceneBody]) -> [SceneBody] {
         var result = rebuilt
-        guard result.count == bodies.count else { return result }
+        guard result.count == bodies.count else {
+            // Andere Körperzahl: wenigstens Farbe und Oberfläche nach Reihenfolge übernehmen (früher lieferte die
+            // Palette nach Index dieselben Farben), damit bunte Körper nicht in der grauen Standardfarbe landen
+            for index in result.indices where bodies.indices.contains(index) {
+                result[index].color = bodies[index].color
+                result[index].finish = bodies[index].finish
+            }
+            return result
+        }
         for index in result.indices {
             var body = bodies[index]
             body.shape = result[index].shape
