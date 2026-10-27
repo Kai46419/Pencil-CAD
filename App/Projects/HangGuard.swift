@@ -24,6 +24,8 @@ enum HangGuard {
         var featureName: String?
         /// Nachbau lief während des Öffnens: danach wieder die Öffnen-Marke setzen statt löschen
         var duringOpen = false
+        /// „Sicher öffnen“ auf der Startseite gewählt (optional: ältere Marken ohne diesen Schlüssel bleiben lesbar)
+        var requested: Bool?
         var date = Date()
     }
 
@@ -62,12 +64,23 @@ enum HangGuard {
 
     /// Projekt geladen und dargestellt.
     static func endOpen(in folder: URL) {
-        if marker(in: folder)?.phase == .open { clear(in: folder) }
+        guard let current = marker(in: folder) else { return }
+        if current.phase == .open {
+            clear(in: folder)
+        } else if current.duringOpen {
+            // Rechnet gerade etwas (z. B. eine Rundung im Hintergrund): danach löschen statt wieder „Öffnen“ setzen,
+            // sonst bliebe die Marke bis zum Schließen liegen und das nächste Öffnen wäre fälschlich „sicher“
+            var updated = current
+            updated.duringOpen = false
+            write(updated, in: folder)
+        }
     }
 
     /// Startseite „Sicher öffnen“: wie nach einem Hänger beim Öffnen (letztes Feature wird unterdrückt).
     static func requestSafeOpen(in folder: URL) {
-        if !hasMarker(in: folder) { write(Marker(phase: .open), in: folder) }
+        var request = marker(in: folder) ?? Marker(phase: .open)
+        request.requested = true
+        write(request, in: folder)
     }
 
     // MARK: Nachbau
@@ -130,8 +143,11 @@ extension ModelStore {
         let list = file.features
         if marker.phase == .replay, let id = marker.featureID {
             // Hängendes Feature nicht im gespeicherten Verlauf: es wurde nie übernommen, model.step ist davor
-            guard let index = list.firstIndex(where: { $0.id == id }) else { return nil }
-            return SafeOpenPlan(features: list, hangIndex: index)
+            if let index = list.firstIndex(where: { $0.id == id }) {
+                return SafeOpenPlan(features: list, hangIndex: index)
+            }
+            // Ausdrücklich „Sicher öffnen“ gewählt: dann wie beim Öffnen das letzte Feature unterdrücken
+            guard marker.requested == true else { return nil }
         }
         // Hänger beim Öffnen: das neueste aktive Feature (kein fester Stand) gilt als Ursache
         let index = list.lastIndex { $0.kind != .snapshot && !$0.isSuppressed }
