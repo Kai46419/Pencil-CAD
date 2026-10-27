@@ -2704,7 +2704,7 @@ final class ViewportView: MTKView {
                     offset[k] = (offset[k] / drag.step).rounded() * drag.step
                 }
                 offset[drag.normal] = drag.startOffset[drag.normal]
-                if offset != model?.moveOffset { model?.setMoveOffset(offset) }
+                if offset != model?.moveOffset { workspace?.setGizmoMoveOffset(offset) }
                 refresh()
             }
             return

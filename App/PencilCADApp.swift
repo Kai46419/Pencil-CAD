@@ -19,6 +19,11 @@ struct PencilCADApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(projects)
+                .onAppear {
+                    // Schütteln öffnet keinen „Rückgängig“-Dialog (Kai). Kein Info.plist-Schlüssel dafür: die
+                    // Eigenschaft gilt nur zur Laufzeit; hier statt in init, weil UIApplication.shared dort noch fehlt.
+                    UIApplication.shared.applicationSupportsShakeToEdit = false
+                }
         }
     }
 }

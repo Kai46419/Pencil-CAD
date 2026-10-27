@@ -168,8 +168,46 @@ enum MoveCommand {
         var offset = Self.offset(cmd)
         guard offset[axis] != value else { return }
         offset[axis] = value
-        putOffset(offset, cmd)
-        ws.model.setMoveOffset(offset)
+        adopt(offset, cmd, ws)
+    }
+
+    /// Gezogener Versatz (Achspfeil oder Ebenengriff im Viewport) wird der Wert des Befehls: Felder X/Y/Z zeigen
+    /// ihn live, die Vorschau folgt, und der Hinweis „An einem Pfeil ziehen …“ verschwindet, damit OK aktiv wird.
+    /// Vorher blieb `cmd.error` vom ersten refresh stehen (Pfeilzug rechnet ohne refresh), OK blieb grau.
+    static func adopt(_ offset: SIMD3<Double>, _ cmd: ModelCommand, _ ws: Workspace) {
+        let model = ws.model
+        if offset != Self.offset(cmd) { putOffset(offset, cmd) }
+        if offset != model.moveOffset { model.setMoveOffset(offset) }
+        let error: String?
+        if cmd.isOn("sketch", default: false) {
+            error = nil
+        } else if offset == .zero {
+            error = "An einem Pfeil ziehen oder X/Y/Z eingeben."
+        } else {
+            error = model.hasPreview ? nil : (model.message ?? "Verschieben nicht möglich.")
+        }
+        if cmd.error != error { cmd.error = error }
+        CommandCache.mark(cmd, error: error)
+    }
+
+    /// OK: Skizze verschieben hat keine Körpervorschau (zählt der Versatz), sonst wie üblich mit Vorschau
+    static func canCommit(_ cmd: ModelCommand, _ ws: Workspace) -> Bool {
+        if cmd.editing != nil { return cmd.error == nil }
+        if cmd.isOn("sketch", default: false) { return ws.model.moveOffset != .zero }
+        return cmd.isReady && cmd.error == nil && ws.model.hasPreview
+    }
+}
+
+extension Workspace {
+    /// Ebenengriff des Verschieben-Gizmos gezogen (Viewport): bei offenem Verschieben/Kopieren in dessen Werte
+    /// schreiben (Felder, OK), sonst wie bisher nur den Versatz der Vorschau setzen.
+    func setGizmoMoveOffset(_ offset: SIMD3<Double>) {
+        if let cmd = command, cmd.id == .move || cmd.id == .copy, cmd.editing == nil,
+           cmd.option("mode", default: "translate") == "translate" {
+            MoveCommand.adopt(offset, cmd, self)
+        } else if offset != model.moveOffset {
+            model.setMoveOffset(offset)
+        }
     }
 }
 
@@ -187,6 +225,8 @@ enum MoveDriver: MainCommandDriver {
     @MainActor static func drag(_ kind: HandleKind, _ value: Double, _ cmd: ModelCommand, _ ws: Workspace) {
         MoveCommand.drag(kind, value, cmd, ws)
     }
+
+    static func canCommit(_ cmd: ModelCommand, _ ws: Workspace) -> Bool { MoveCommand.canCommit(cmd, ws) }
 
     static func mainValueKey(_ cmd: ModelCommand) -> String? {
         cmd.choices["mode"] == "rotate" ? "angle" : nil
@@ -210,6 +250,8 @@ enum CopyDriver: MainCommandDriver {
     @MainActor static func drag(_ kind: HandleKind, _ value: Double, _ cmd: ModelCommand, _ ws: Workspace) {
         MoveCommand.drag(kind, value, cmd, ws)
     }
+
+    static func canCommit(_ cmd: ModelCommand, _ ws: Workspace) -> Bool { MoveCommand.canCommit(cmd, ws) }
 
     static func mainValueKey(_ cmd: ModelCommand) -> String? {
         cmd.choices["mode"] == "rotate" ? "angle" : nil
