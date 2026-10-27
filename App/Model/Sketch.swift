@@ -424,7 +424,11 @@ final class SketchController: ObservableObject {
     /// Neue Elemente als Konstruktionsgeometrie (zählen nicht als Profil).
     @Published var constructionMode = false
     /// Werkzeug-Eigenschaften und Eingabestil (SolidCraft-Palette)
-    let options = SketchToolOptions()
+    lazy var options: SketchToolOptions = {
+        let options = SketchToolOptions()
+        options.onLockedChange = { [weak self] in self?.changed() }
+        return options
+    }()
     /// SolidCraft-Klickfolge der Zeichenwerkzeuge (SketchClickTool.swift)
     var click = SketchClickState()
     /// Eingabeart des aktuellen Fangs (Stift, Finger, Schweben) – setzt der Viewport
@@ -4392,6 +4396,8 @@ final class SketchController: ObservableObject {
 
     func changed(publish: Bool = true) {
         updateLabel()
+        // Panel-Wertfelder folgen dem Stift auch ohne veröffentlichte Änderung
+        options.noteLive(clickKind != nil ? clickLiveValues : [])
         if publish { revision += 1 }
     }
 

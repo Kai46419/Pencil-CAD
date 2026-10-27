@@ -40,7 +40,19 @@ final class SketchToolOptions: ObservableObject {
     @Published var lineType: SketchLineType = .normal
     /// Gesperrte Werte beim Zeichnen (nil = folgt dem Stift), Ausdruckstext wie NumberField.
     /// Schlüssel: "Länge", "Winkel", "Breite", "Höhe", "Radius", "Durchmesser", "Bogenwinkel", "Seiten"
-    @Published var locked: [String: String] = [:]
+    @Published var locked: [String: String] = [:] {
+        didSet { if locked != oldValue { onLockedChange?() } }
+    }
+    /// Vom SketchController gesetzt: Vorschau nach einer Sperre im Panel neu rechnen
+    var onLockedChange: (() -> Void)?
+    /// Live-Werte der Klickfolge für das Panel (meldet nur echte Änderungen)
+    @Published private(set) var liveSnapshot: [String: Double] = [:]
+
+    func noteLive(_ values: [(key: String, value: Double)]) {
+        var next: [String: Double] = [:]
+        for item in values { next[item.key] = (item.value * 100).rounded() / 100 }
+        if next != liveSnapshot { liveSnapshot = next }
+    }
     @Published var roundedRadius: Double?
     @Published var offsetMode: OffsetDirectionMode = .oneSide
     @Published var offsetDistance2: Double = 2
