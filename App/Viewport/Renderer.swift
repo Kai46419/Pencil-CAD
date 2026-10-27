@@ -293,6 +293,8 @@ final class Renderer: NSObject, MTKViewDelegate {
         edgePolylines = polylines
         selectionBuffer = nil
         selectionCount = 0
+        // Nah-/Fernebene an alle angezeigten Körper (inkl. Importkörper) anpassen
+        camera.sceneBounds = mesh.bounds
 
         // Nur beim Öffnen des Projekts einpassen. War es leer, wurde früher beim ersten Extrudieren
         // auf den neuen Körper gezoomt – das stört; die Ansicht bleibt jetzt, wie sie ist.

@@ -20,13 +20,53 @@ struct OrbitCamera {
         .lookAt(eye: position, center: target, up: SIMD3(0, 0, 1))
     }
 
+    /// Hüllquader aller angezeigten Körper (inkl. importierter STEP-/STL-Körper), vom Renderer bei jedem
+    /// neuen Netz gesetzt. Nah- und Fernebene richten sich danach, damit nichts weggeschnitten wird.
+    var sceneBounds: (min: SIMD3<Float>, max: SIMD3<Float>)?
+
+    /// Hüllkugel der Szene (Mitte, Radius); nil ohne Körper.
+    private var sceneSphere: (center: SIMD3<Float>, radius: Float)? {
+        guard let box = sceneBounds else { return nil }
+        let radius = simd_length(box.max - box.min) / 2
+        guard radius.isFinite else { return nil }
+        return ((box.min + box.max) / 2, max(radius, 1e-4))
+    }
+
+    /// Tiefenbereich (nah, fern) entlang der Blickrichtung. Früher hing er nur am Zielabstand
+    /// (nah = 1 %, fern = 20-fach): Lag ein importierter Körper weit vom Drehpunkt (STEP-Ursprung weit weg,
+    /// große Modelle in Metern), schnitt die Fernebene ihn nach dem Heranzoomen bzw. beim Drehen weg.
+    /// Jetzt umfasst der Bereich immer die ganze Szene mit Reserve.
+    func depthRange() -> (near: Float, far: Float) {
+        var near = max(distance * 0.01, 0.0005)
+        var far = distance * 20
+        if isOrthographic {
+            near = -far
+        }
+        guard let sphere = sceneSphere else { return (near, far) }
+        let depth = simd_dot(sphere.center - position, forward)
+        let reach = sphere.radius * 1.5
+        far = max(far, depth + reach * 2)
+        if isOrthographic {
+            near = min(near, depth - reach * 2)
+        } else {
+            let closest = depth - reach
+            // Kamera nahe bzw. in der Szene: Nahebene nur weiter heranholen, aber nicht beliebig nah
+            // (Tiefenauflösung); weiter weg als bisher kommt sie nie, der Drehpunkt bleibt immer sichtbar.
+            if closest < near {
+                near = min(near, max(closest, far * 2e-5, 1e-5))
+            }
+        }
+        return (near, far)
+    }
+
     func projectionMatrix(aspect: Float) -> float4x4 {
+        let range = depthRange()
         if isOrthographic {
             let halfHeight = distance * tan(fieldOfView / 2)
-            return .orthographic(halfWidth: halfHeight * aspect, halfHeight: halfHeight, near: -distance * 20,
-                                 far: distance * 20)
+            return .orthographic(halfWidth: halfHeight * aspect, halfHeight: halfHeight, near: range.near,
+                                 far: range.far)
         }
-        return .perspective(fovY: fieldOfView, aspect: aspect, near: max(distance * 0.01, 0.0005), far: distance * 20)
+        return .perspective(fovY: fieldOfView, aspect: aspect, near: range.near, far: range.far)
     }
 
     /// Richtung von der Kamera zum Ziel.
@@ -93,14 +133,22 @@ struct OrbitCamera {
         target += (-right * dx + up * dy) * unitsPerPoint
     }
 
+    /// Zoomgrenzen passend zur Szene: große Modelle (Meter) lassen sich ganz herauszoomen, kleine weit heran.
+    private var zoomLimits: (min: Float, max: Float) {
+        guard let radius = sceneSphere?.radius else { return (0.05, 5000) }
+        return (max(min(0.05, radius * 0.02), 0.001), max(5000, radius * 40))
+    }
+
     mutating func zoom(by scale: Float) {
-        distance = min(max(distance / scale, 0.05), 5000)
+        guard scale.isFinite, scale > 0 else { return }
+        let limits = zoomLimits
+        distance = min(max(distance / scale, limits.min), max(limits.max, distance))
     }
 
     mutating func frame(min lo: SIMD3<Float>, max hi: SIMD3<Float>) {
         target = (lo + hi) / 2
         let radius = simd_length(hi - lo) / 2
-        distance = max(radius / sin(fieldOfView / 2) * 1.2, 5)
+        distance = max(radius / sin(fieldOfView / 2) * 1.2, 1)
     }
 
     /// Fast senkrecht; genau 90° würde die Blickrichtung mit der Hochachse zusammenfallen lassen.
