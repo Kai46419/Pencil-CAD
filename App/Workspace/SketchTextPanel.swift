@@ -35,19 +35,18 @@ struct SketchTextEditor: View {
                     }
                 FontPickerButton(selection: fontBinding, fullWidth: stacked)
                     .frame(width: stacked ? PaletteStyle.contentWidth : nil)
-                NumberField(title: "Höhe", value: text.height, width: 56) { value in
-                    guard value > 0 else { return }
-                    sketch.updateText(at: index) { $0.with(height: value) }
+                if stacked {
+                    // Schmales Fenster rechts: je Feld eine Zeile, Beschriftung darüber, nichts mit „…“ gekürzt
+                    stackedFields(text)
+                } else {
+                    NumberField(title: "Höhe", value: text.height, width: 56, set: setHeight)
+                    NumberField(title: "Winkel", value: text.rotationDegrees, unit: "°", width: 52, set: setAngle)
+                    Picker("Ausrichtung", selection: alignmentBinding) {
+                        ForEach(TextAlignmentOption.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .fixedSize(horizontal: true, vertical: false)
                 }
-                NumberField(title: "Winkel", value: text.rotationDegrees, unit: "°", width: 52) { value in
-                    let radians: Double = value * .pi / 180
-                    sketch.updateText(at: index) { $0.with(rotation: radians) }
-                }
-                Picker("Ausrichtung", selection: alignmentBinding) {
-                    ForEach(TextAlignmentOption.allCases) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .fixedSize(horizontal: !stacked, vertical: false)
             }
             .onAppear { load(index) }
             // Anderer Text gewählt: Getipptes erst beim bisherigen Text übernehmen (Kai tippt oft gleich weiter)
@@ -65,6 +64,26 @@ struct SketchTextEditor: View {
     }
 
     private var currentString: String { sketch.sketchText(at: index)?.string ?? "" }
+
+    @ViewBuilder private func stackedFields(_ text: SketchText) -> some View {
+        PaletteNumberRow(title: "Höhe", value: text.height, set: setHeight)
+        PaletteNumberRow(title: "Winkel", value: text.rotationDegrees, unit: "°", set: setAngle)
+        CommandSegmentRow(title: "Ausrichtung",
+                          options: TextAlignmentOption.allCases.map { CommandChoice(id: $0.rawValue, title: $0.rawValue) },
+                          selected: text.alignment.rawValue) { id in
+            if let alignment = TextAlignmentOption(rawValue: id) { alignmentBinding.wrappedValue = alignment }
+        }
+    }
+
+    private func setHeight(_ value: Double) {
+        guard value > 0 else { return }
+        sketch.updateText(at: index) { $0.with(height: value) }
+    }
+
+    private func setAngle(_ value: Double) {
+        let radians: Double = value * .pi / 180
+        sketch.updateText(at: index) { $0.with(rotation: radians) }
+    }
 
     private func load(_ at: Int) {
         let string = sketch.sketchText(at: at)?.string ?? ""

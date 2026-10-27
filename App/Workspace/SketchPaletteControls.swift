@@ -110,8 +110,8 @@ struct PaletteFieldLabel: View {
         Text(title)
             .font(.caption)
             .foregroundStyle(.secondary)
-            .lineLimit(1)
-            .minimumScaleFactor(0.8)
+            // Nie mit „…“ kürzen: lange Beschriftungen brechen im schmalen Fenster um
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
 

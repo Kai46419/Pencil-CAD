@@ -171,10 +171,12 @@ struct SketchTextPathSection: View {
         CheckRow(title: "Kontur folgen", icon: "scribble.variable", isOn: binding(\.bends))
         CheckRow(title: "Unterhalb", icon: "arrow.down.to.line", isOn: binding(\.below))
         CheckRow(title: "Umkehren", icon: "arrow.left.arrow.right", isOn: binding(\.reversed))
-        Picker("Ausrichtung", selection: binding(\.alignment)) {
-            ForEach(TextAlignmentOption.allCases) { Text($0.rawValue).tag($0) }
+        // Beschriftung über der Wahl, Segmente umbrechend statt mit „…“ gekürzt (schmales Fenster)
+        CommandSegmentRow(title: "Ausrichtung",
+                          options: TextAlignmentOption.allCases.map { CommandChoice(id: $0.rawValue, title: $0.rawValue) },
+                          selected: path.alignment.rawValue) { id in
+            if let alignment = TextAlignmentOption(rawValue: id) { binding(\.alignment).wrappedValue = alignment }
         }
-        .pickerStyle(.segmented)
         PaletteNumberRow(title: "Startversatz", value: path.offset) { value in
             sketch.updateTextPath(at: index) { $0.offset = value }
         }

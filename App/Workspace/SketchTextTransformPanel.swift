@@ -2,7 +2,8 @@ import SwiftUI
 
 // Lage des gewählten Texts aus den Griffen (SketchTextTransform.swift) als Wertfelder im rechten Fenster:
 // X und Y der Rahmenmitte, Skalierung in Prozent, Drehung um die Mitte, „Zurücksetzen“. Beschriftung über den
-// Feldern, je zwei nebeneinander (schmales 160-pt-Fenster). Jede Eingabe ist ein Rückgängig-Schritt.
+// Feldern, jedes Feld in einer eigenen Zeile (schmales 160-pt-Fenster, Werte und Einheiten voll lesbar).
+// Jede Eingabe ist ein Rückgängig-Schritt.
 
 struct SketchTextTransformFields: View {
     @ObservedObject var sketch: SketchController
@@ -15,22 +16,18 @@ struct SketchTextTransformFields: View {
                 Text("Lage")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                HStack(alignment: .bottom, spacing: PaletteStyle.spacing) {
-                    PaletteNumberRow(title: "X", value: frame.center.x) { x in
-                        sketch.setTextCenter(at: index, x: x)
-                    }
-                    PaletteNumberRow(title: "Y", value: frame.center.y) { y in
-                        sketch.setTextCenter(at: index, y: y)
-                    }
+                PaletteNumberRow(title: "X", value: frame.center.x) { x in
+                    sketch.setTextCenter(at: index, x: x)
                 }
-                HStack(alignment: .bottom, spacing: PaletteStyle.spacing) {
-                    PaletteNumberRow(title: "Skalierung", value: transform.scale * 100, unit: "%") { percent in
-                        guard percent > 0 else { return }
-                        sketch.setTextScale(at: index, to: percent / 100)
-                    }
-                    PaletteNumberRow(title: "Drehung", value: transform.rotation * 180 / .pi, unit: "°") { degrees in
-                        sketch.setTextTurn(at: index, to: degrees * .pi / 180)
-                    }
+                PaletteNumberRow(title: "Y", value: frame.center.y) { y in
+                    sketch.setTextCenter(at: index, y: y)
+                }
+                PaletteNumberRow(title: "Skalierung", value: transform.scale * 100, unit: "%") { percent in
+                    guard percent > 0 else { return }
+                    sketch.setTextScale(at: index, to: percent / 100)
+                }
+                PaletteNumberRow(title: "Drehung", value: transform.rotation * 180 / .pi, unit: "°") { degrees in
+                    sketch.setTextTurn(at: index, to: degrees * .pi / 180)
                 }
                 PrimaryWideButton(title: "Zurücksetzen", systemImage: "arrow.counterclockwise", isPrimary: false) {
                     sketch.resetTextTransform(at: index)
