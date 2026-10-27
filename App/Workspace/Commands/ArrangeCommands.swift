@@ -544,7 +544,13 @@ enum PatternRectDriver: MainCommandDriver {
     @MainActor static func refresh(_ cmd: ModelCommand, _ ws: Workspace) -> String? {
         let model = ws.model
         let bodies = CommandPicks.bodies(cmd, "bodies", model: model)
-        CommandSync.bodies(bodies, model)
+        let changed = CommandSync.bodies(bodies, model)
+        // Bezug der Abstandspfeile vor der Vorschau merken (PatternSpacingHandles.swift)
+        if bodies.isEmpty {
+            CommandCache.anchors[ObjectIdentifier(cmd)] = nil
+        } else {
+            BodyCommandHelpers.cacheCenter(cmd, bodies, changed: changed, model)
+        }
         let count = PatternCommand.count(cmd, "count", default: 4)
         let count2 = PatternCommand.count(cmd, "count2", default: 1)
         let spacing = cmd.number("spacing", default: 20)
@@ -570,6 +576,15 @@ enum PatternRectDriver: MainCommandDriver {
     }
 
     static func mainValueKey(_ cmd: ModelCommand) -> String? { "spacing" }
+
+    /// Abstandspfeile Richtung 1 und 2 (Kai, PatternSpacingHandles.swift)
+    @MainActor static func arrows(_ cmd: ModelCommand, _ ws: Workspace) -> [DragHandle] {
+        PatternRectHandles.arrows(cmd, ws)
+    }
+
+    @MainActor static func drag(_ kind: HandleKind, _ value: Double, _ cmd: ModelCommand, _ ws: Workspace) {
+        PatternRectHandles.drag(kind, value, cmd, ws)
+    }
 
     @MainActor static func panel(_ cmd: ModelCommand, _ ws: Workspace) -> AnyView {
         // Abstand, Anzahl, Winkel: kompakter Ziffernblock statt Bildschirmtastatur
@@ -604,10 +619,29 @@ private struct PatternRectRows: View {
                 CommandFlagRow(title: "Umkehren", icon: "arrow.left.arrow.right", cmd: cmd, key: "dir2Flip",
                                workspace: workspace)
             }
+            spacingInfo
             PaletteSection("Optionen") {
                 CommandPreviewRow(cmd: cmd, workspace: workspace)
             }
         }
+    }
+
+    /// Lichter Abstand und Gesamtgröße aus der Größe der gewählten Körper
+    @MainActor private var spacingInfo: PatternSpacingInfo {
+        guard let box = PatternRectHandles.box(cmd) else {
+            return PatternSpacingInfo(gap1: nil, gap2: nil, total1: nil, total2: nil)
+        }
+        let directions = PatternRectHandles.directions(cmd, workspace.model)
+        let w1: Double = PatternSpacingMath.width(half: box.half, along: directions.0)
+        let w2: Double = PatternSpacingMath.width(half: box.half, along: directions.1)
+        let s1: Double = cmd.number("spacing", default: 20)
+        let s2: Double = cmd.number("spacing2", default: 20)
+        let c1: Int = PatternCommand.count(cmd, "count", default: 4)
+        let c2: Int = PatternCommand.count(cmd, "count2", default: 1)
+        return PatternSpacingInfo(gap1: PatternSpacingMath.gap(spacing: s1, width: w1),
+                                  gap2: PatternSpacingMath.gap(spacing: s2, width: w2),
+                                  total1: PatternSpacingMath.total(count: c1, spacing: s1, width: w1),
+                                  total2: PatternSpacingMath.total(count: c2, spacing: s2, width: w2))
     }
 }
 

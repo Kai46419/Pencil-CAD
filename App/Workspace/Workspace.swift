@@ -1935,6 +1935,8 @@ final class Workspace: ObservableObject {
                                    direction: SIMD3<Float>(simd_normalize(plane.world(direction: handle.direction))),
                                    value: sketch.offsetDistance, color: blue)]
             }
+            // Rechteckmuster: Abstandspfeile Richtung 1 und 2 (PatternSpacingHandles.swift)
+            if sketch.tool == .rectPattern { return sketchPatternHandles }
             return []
         }
         switch tool {
@@ -2024,8 +2026,8 @@ final class Workspace: ObservableObject {
             return
         }
         switch kind {
-        case .command:
-            break
+        case .command(let key):
+            _ = applySketchPatternHandle(key, value: value)
         case .region:
             if value != model.regionValue { model.setRegionValue(value) }
         case .offset:

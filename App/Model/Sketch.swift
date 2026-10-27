@@ -4672,7 +4672,8 @@ extension SketchController {
     }
 
     /// Elemente, die gespiegelt bzw. vervielfältigt werden (ohne Achse bzw. Mittelpunkt).
-    private var transformSources: [Int] {
+    /// Auch für die Abstandspfeile des Rechteckmusters (PatternSpacingHandles.swift)
+    var transformSources: [Int] {
         var refs = selection
         switch tool {
         case .mirror:

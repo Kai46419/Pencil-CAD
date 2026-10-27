@@ -442,12 +442,27 @@ private struct RectPatternFields: View {
                 .foregroundStyle(.secondary)
             CountRow(title: "Anzahl", value: $sketch.patternRows, range: 1...500)
             PaletteNumberRow(title: "Abstand", value: sketch.patternSpacingY) { sketch.patternSpacingY = $0 }
-            Text("Die Anzahl enthält das Original.")
+            spacingInfo
+            Text("Die Anzahl enthält das Original. Die Pfeile an der Vorschau ändern den Abstand.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             PrimaryWideButton(title: "Erstellen", systemImage: "checkmark", action: sketch.applyTransform)
                 .disabled(!sketch.canApplyTransform)
                 .opacity(sketch.canApplyTransform ? 1 : 0.45)
         }
+    }
+
+    /// Lichter Abstand und Gesamtgröße aus dem Rechteck um die gewählten Elemente (PatternSpacingHandles.swift)
+    @MainActor private var spacingInfo: PatternSpacingInfo {
+        guard let box = sketch.patternSourceBox else {
+            return PatternSpacingInfo(gap1: nil, gap2: nil, total1: nil, total2: nil)
+        }
+        let width: Double = box.high.x - box.low.x
+        let height: Double = box.high.y - box.low.y
+        return PatternSpacingInfo(
+            gap1: PatternSpacingMath.gap(spacing: sketch.patternSpacingX, width: width),
+            gap2: PatternSpacingMath.gap(spacing: sketch.patternSpacingY, width: height),
+            total1: PatternSpacingMath.total(count: sketch.patternColumns, spacing: sketch.patternSpacingX, width: width),
+            total2: PatternSpacingMath.total(count: sketch.patternRows, spacing: sketch.patternSpacingY, width: height))
     }
 }
