@@ -125,6 +125,8 @@ enum ModelTool: Equatable {
     case printCheck
     /// Netz mit dem Stift formen (Anheben, Absenken, Glätten, Abflachen), MeshSculpt.swift
     case meshSculpt
+    /// Negativform: Block um einen Körper, Körper mit Spiel herausgeschnitten, wahlweise zweiteilig (MoldTools.swift)
+    case mold
 
     var title: String {
         switch self {
@@ -157,6 +159,7 @@ enum ModelTool: Equatable {
         case .hole: "Bohrung"
         case .printCheck: "Druckprüfung"
         case .meshSculpt: "Netz bearbeiten"
+        case .mold: "Negativform"
         }
     }
 
@@ -251,6 +254,8 @@ final class Workspace: ObservableObject {
     let camera = CameraState()
     /// Einstellungen von Normteilen, Vorlagen, Helix, dünnen Linien, Verjüngung, Sweep entlang Kanten
     let parts = PartSettings()
+    /// Spiel beim Abziehen und Einstellungen der Negativform (BooleanPanel.swift)
+    let mold = MoldSettings()
     /// Ändern › Netz bearbeiten (Pinsel, MeshSculpt.swift)
     let sculpt = MeshSculpt()
 
@@ -797,6 +802,11 @@ final class Workspace: ObservableObject {
                 mirrorPicksFace = false
                 updateMirrorPreview()
             }
+            if case .boolean = newTool { updatePreview() }
+        case .mold:
+            model.resetSelection()
+            if let previousBody { model.toggleBody(previousBody, exclusive: true) }
+            updatePreview()
         case .shell:
             if let previousFace {
                 model.select(face: previousFace)
@@ -1125,10 +1135,7 @@ final class Workspace: ObservableObject {
         }
         switch tool {
         case .boolean(let kind):
-            let chosen = model.selectedBodies
-            if let target = chosen.first, chosen.count > 1 {
-                model.applyBoolean(kind, target: target, tools: Array(chosen.dropFirst()), keepTools: booleanKeepsTools)
-            }
+            applyBooleanTool(kind)
         case .move where model.movingSketch != nil:
             if let index = model.movingSketch { model.translateSketch(index, by: model.moveOffset) }
         case .construct(let kind):
@@ -1324,6 +1331,9 @@ final class Workspace: ObservableObject {
             guard let body = face?.body ?? edge?.body else { return }
             model.toggleBody(body, exclusive: tool == .move)
             updateMirrorPreview()
+            if case .boolean = tool { updatePreview() }
+        case .mold:
+            moldTapped(face?.body ?? edge?.body)
         case .shell:
             guard let face else { return }
             if shellClosed {
@@ -1368,6 +1378,10 @@ final class Workspace: ObservableObject {
             model.previewScale(factors: factors)
         case .align:
             model.previewAlign(alignModes)
+        case .boolean(let kind):
+            updateBooleanPreview(kind)
+        case .mold:
+            updateMoldPreview()
         case .revolve:
             guard let axis = model.resolve(revolveAxis, sketch: model.selectedRegions.first?.sketch) else {
                 if !model.selectedRegions.isEmpty { model.message = "Drehachse wählen." }
@@ -1435,6 +1449,8 @@ final class Workspace: ObservableObject {
                 : "Kein Körper ganz im Rahmen. Von rechts nach links ziehen wählt auch angeschnittene Körper."
             return
         }
+        // Boolesche Vorschau verwerfen statt übernehmen (selectBodies übernimmt eine offene Vorschau)
+        if case .boolean = tool { model.dropPreview() }
         model.selectBodies(bodies)
         model.message = nil
         updatePreview()
@@ -2069,8 +2085,11 @@ final class Workspace: ObservableObject {
             switch model.selectedBodies.count {
             case 0: return "Zielkörper antippen"
             case 1: return kind == .union ? "Körper zum Vereinigen antippen" : "Werkzeugkörper antippen"
-            default: return "„Fertig“ tippen"
+            default: return "Vorschau: Ziel orange umrandet, Werkzeuge rot · „Fertig“ übernimmt"
             }
+        case .mold:
+            return moldBody == nil ? "Körper antippen, für den die Form entsteht"
+                : "Rand, Spiel und Teilung einstellen, dann „Fertig“ – der Körper bleibt erhalten"
         case .move:
             if model.movingSketch != nil { return "Skizze: Achsenpfeil ziehen oder Werte eingeben, dann „Fertig“" }
             return model.selectedBodies.isEmpty ? "Körper antippen" : "Achsenpfeil ziehen · am Ring drehen (rastet alle 15°)"

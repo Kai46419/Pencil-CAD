@@ -27,7 +27,8 @@ enum ToolExplainer {
         case .boolean(.union):
             return "Körper antippen: sie verschmelzen zu einem einzigen Körper."
         case .boolean(.subtract):
-            return "Erst den Körper antippen, der bleibt, dann die Werkzeugkörper – sie werden aus ihm herausgeschnitten."
+            return "Erst den Körper antippen, der bleibt (Ziel), dann die Werkzeugkörper – die Vorschau zeigt das "
+                + "Ergebnis, Werkzeuge rot. Mit Spiel wird die Aussparung etwas größer, damit das Teil hineinpasst."
         case .boolean(.intersect):
             return "Körper antippen: übrig bleibt nur der Bereich, in dem sie sich überlappen."
         case .move:
@@ -82,6 +83,9 @@ enum ToolExplainer {
             return "Zeigt Überhänge, zu dünne Wände und eine gute Druckausrichtung für den 3D-Druck."
         case .meshSculpt:
             return "Körper antippen und mit dem Stift darüberstreichen: anheben, absenken, glätten oder abflachen (Netze aus STL/3MF)."
+        case .mold:
+            return "Körper antippen: ein Block mit Rand entsteht um ihn, der Körper wird mit Spiel herausgeschnitten – "
+                + "wahlweise in zwei Formhälften geteilt. Der Körper selbst bleibt erhalten."
         }
     }
 
@@ -111,6 +115,7 @@ enum ToolExplainer {
         case .split: ("cube", "square.split.diagonal")
         case .part(.thread): ("cylinder", "barcode")
         case .meshSculpt: ("triangle", "paintbrush.pointed")
+        case .mold: ("cube.fill", "cube.transparent")
         default: nil
         }
     }

@@ -142,7 +142,7 @@ struct ParameterCard: View {
             case .part(let kind):
                 PartCard(workspace: workspace, model: model, parts: workspace.parts, kind: kind)
             case .boolean(let kind):
-                booleanCard(kind)
+                BooleanCard(workspace: workspace, model: model, settings: workspace.mold, kind: kind)
             case .move:
                 moveCard
             case .mirror:
@@ -200,6 +200,8 @@ struct ParameterCard: View {
                 printCheckCard
             case .meshSculpt:
                 MeshSculptCard(workspace: workspace, model: model, sculpt: workspace.sculpt)
+            case .mold:
+                MoldCard(workspace: workspace, model: model, settings: workspace.mold)
             }
         }
     }
@@ -720,29 +722,6 @@ struct ParameterCard: View {
             guard value > 0 else { return }
             workspace.insertSize[index] = value
             workspace.updateInsertPreview()
-        }
-    }
-
-    private func booleanCard(_ kind: BooleanKind) -> some View {
-        Card {
-            HStack(spacing: 16) {
-                Label(kind.rawValue, systemImage: kind.systemImage)
-                    .font(.callout.weight(.semibold))
-                if let target = model.selectedBodies.first, model.bodies.indices.contains(target) {
-                    Text("Ziel: \(model.bodies[target].name)")
-                    let tools = model.selectedBodies.dropFirst().filter { model.bodies.indices.contains($0) }
-                    if !tools.isEmpty {
-                        Text("Werkzeug: \(tools.map { model.bodies[$0].name }.joined(separator: ", "))")
-                            .foregroundStyle(.secondary)
-                    }
-                } else {
-                    Text("Zuerst den Zielkörper antippen")
-                        .foregroundStyle(.secondary)
-                }
-                Toggle("Werkzeuge behalten", isOn: $workspace.booleanKeepsTools)
-                    .fixedSize()
-                    .hoverTip("Werkzeuge behalten", "Wie Fusion 360: die Werkzeugkörper bleiben nach dem Abziehen bzw. Schneiden stehen, z. B. um sie noch einmal zu verwenden.")
-            }
         }
     }
 
@@ -2248,7 +2227,7 @@ struct LayersPanel: View {
             model.toggleBody(index)
             workspace.updateMirrorPreview()
             workspace.updatePreview()
-        case .split:
+        case .split, .mold:
             model.toggleBody(index, exclusive: true)
             workspace.updatePreview()
         default:

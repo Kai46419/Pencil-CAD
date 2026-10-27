@@ -1741,6 +1741,68 @@ static TopoDS_Shape cutWithTools(const TopoDS_Shape &body, const TopTools_ListOf
     }
 }
 
+/// Versetzt die geschlossene Hülle eines Solids um distance (BRepOffset_MakeOffset, Haut); leer bei Fehler oder
+/// wenn das Volumen nicht in die erwartete Richtung wächst bzw. schrumpft.
+static TopoDS_Shape offsetClosedSolid(const TopoDS_Shape &solid, double distance, GeomAbs_JoinType join,
+                                     double tolerance) {
+    try {
+        BRepOffset_MakeOffset offset;
+        offset.Initialize(solid, distance, tolerance, BRepOffset_Skin, Standard_False, Standard_False, join,
+                          Standard_False);
+        offset.MakeOffsetShape();
+        if (!offset.IsDone() || offset.Shape().IsNull()) return TopoDS_Shape();
+        TopoDS_Shape result;
+        for (TopExp_Explorer it(offset.Shape(), TopAbs_SOLID); it.More(); it.Next()) {
+            result = it.Current();
+            break;
+        }
+        if (result.IsNull()) {
+            // Manche Versätze liefern nur die geschlossene Hülle: daraus ein Solid bauen
+            TopExp_Explorer shells(offset.Shape(), TopAbs_SHELL);
+            if (!shells.More()) return TopoDS_Shape();
+            BRepBuilderAPI_MakeSolid maker(TopoDS::Shell(shells.Current()));
+            if (!maker.IsDone()) return TopoDS_Shape();
+            result = maker.Solid();
+        }
+        result = validSolid(outwardOriented(result));
+        if (result.IsNull()) return TopoDS_Shape();
+        GProp_GProps before;
+        BRepGProp::VolumeProperties(solid, before);
+        GProp_GProps after;
+        BRepGProp::VolumeProperties(result, after);
+        const double grown = std::fabs(after.Mass()) - std::fabs(before.Mass());
+        if (distance > 0 ? grown <= 0 : grown >= 0) return TopoDS_Shape();
+        return result;
+    } catch (...) {
+        return TopoDS_Shape();
+    }
+}
+
+- (nullable PCKShape *)offsetSolidBy:(double)distance {
+    if (distance == 0) return self;
+    try {
+        BRep_Builder builder;
+        TopoDS_Compound compound;
+        builder.MakeCompound(compound);
+        int count = 0;
+        TopoDS_Shape single;
+        for (TopExp_Explorer it(_shape, TopAbs_SOLID); it.More(); it.Next()) {
+            // Scharfe Kanten zuerst (Quader bleiben Quader), sonst gerundete Kanten, dann gröbere Toleranz
+            TopoDS_Shape moved = offsetClosedSolid(it.Current(), distance, GeomAbs_Intersection, 1e-6);
+            if (moved.IsNull()) moved = offsetClosedSolid(it.Current(), distance, GeomAbs_Arc, 1e-6);
+            if (moved.IsNull()) moved = offsetClosedSolid(it.Current(), distance, GeomAbs_Arc, 1e-4);
+            if (moved.IsNull()) return nil;
+            builder.Add(compound, moved);
+            single = moved;
+            ++count;
+        }
+        if (count == 0) return nil;
+        return [[PCKShape alloc] initWithShape:(count == 1 ? single : TopoDS_Shape(compound))];
+    } catch (...) {
+        return nil;
+    }
+}
+
 - (nullable PCKShape *)transformedBy:(const gp_Trsf &)transform {
     try {
         BRepBuilderAPI_Transform op(_shape, transform, Standard_True);
@@ -1902,6 +1964,19 @@ static TopoDS_Shape cutWithTools(const TopoDS_Shape &body, const TopTools_ListOf
         if (std::abs(props.Mass()) < 1e-9) return nil;
         const gp_Pnt c = props.CentreOfMass();
         return @[@(c.X()), @(c.Y()), @(c.Z())];
+    } catch (...) {
+        return nil;
+    }
+}
+
+- (nullable NSArray<NSNumber *> *)boundingBox {
+    try {
+        Bnd_Box box;
+        BRepBndLib::AddOptimal(_shape, box, Standard_False, Standard_False);
+        if (box.IsVoid()) return nil;
+        double x0 = 0, y0 = 0, z0 = 0, x1 = 0, y1 = 0, z1 = 0;
+        box.Get(x0, y0, z0, x1, y1, z1);
+        return @[@(x0), @(y0), @(z0), @(x1), @(y1), @(z1)];
     } catch (...) {
         return nil;
     }
@@ -3123,6 +3198,14 @@ static bool isSoftMeshEdge(const TopTools_ListOfShape &faces) {
 }
 
 - (nullable NSArray<NSNumber *> *)centerOfMass {
+    return nil;
+}
+
+- (nullable PCKShape *)offsetSolidBy:(double)distance {
+    return nil;
+}
+
+- (nullable NSArray<NSNumber *> *)boundingBox {
     return nil;
 }
 

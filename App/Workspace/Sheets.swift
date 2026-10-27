@@ -268,6 +268,11 @@ enum HelpTopic: String, CaseIterable, Identifiable {
             ]
         case .news:
             [
+                "Abziehen mit Vorschau: das Ergebnis erscheint sofort, das Ziel ist orange umrandet, Werkzeuge sind "
+                    + "halbtransparent rot; in der Karte stehen die Rollen („Als Ziel“ tauscht sie). Neu: Spiel in mm "
+                    + "(Vorlagen FDM 0,2 · Harz 0,1) dickt das Werkzeug vor dem Abziehen auf.",
+                "Ändern › Negativform: Körper antippen – ein Block mit Rand (Standard 10 mm) entsteht um ihn, der Körper "
+                    + "wird mit Spiel herausgeschnitten, auf Wunsch in zwei Hälften geteilt. Der Körper bleibt erhalten.",
                 "Neue Skizze: Die Ebenen Oben, Vorne, Rechts liegen beschriftet und größer neben den Körpern, unten gibt "
                     + "es Kacheln dafür (auch für eigene Konstruktionsebenen). Ebene Körperflächen leuchten unter dem "
                     + "Stift auf – antippen und darauf skizzieren.",

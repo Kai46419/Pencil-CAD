@@ -47,6 +47,8 @@ extension Workspace {
             toolItem(.split, "Mit Ebene, Körper oder Skizze", "rectangle.split.2x1", "split teilen schneiden"),
         ]
         items += BooleanKind.allCases.map { toolItem(.boolean($0), "Körper kombinieren", $0.systemImage, "boolean combine") }
+        items.append(toolItem(.mold, "Form aus Block, mit Spiel, zweiteilig", "cube.transparent",
+                              "mold negativ form gussform abformen block würfel spiel"))
         items += [
             toolItem(.move, "Körper oder Skizze, mit Kopien", "move.3d", "move rotate drehen kopieren"),
             toolItem(.translate, "Punkt zu Punkt", "point.topleft.down.to.point.bottomright.curvepath", "translate"),

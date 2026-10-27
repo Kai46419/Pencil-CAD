@@ -707,7 +707,7 @@ struct ToolRail: View {
             return group == .construct
         case .move, .mirror, .pattern, .scale, .align, .scaleSketch:
             return group == .transform
-        case .boolean, .shell, .split, .offsetEdges, .offsetFace, .replaceFace, .wrap, .imprint, .hole, .meshSculpt:
+        case .boolean, .shell, .split, .offsetEdges, .offsetFace, .replaceFace, .wrap, .imprint, .hole, .meshSculpt, .mold:
             return group == .modify
         case .translate:
             return group == .transform
@@ -785,6 +785,7 @@ struct ToolRail: View {
             items += BooleanKind.allCases.map { kind in
                 item(.boolean(kind), kind.rawValue, subtitle: "Kombinieren", kind.systemImage)
             }
+            items.append(item(.mold, "Negativform", subtitle: "Form aus Block", "cube.transparent"))
             items.append(item(.split, "Körper teilen", subtitle: "Ebene, Körper, Skizze", "rectangle.split.2x1"))
             items.append(ToolItem(id: "tools.delete", title: "Löschen", subtitle: "Körper", systemImage: "trash",
                                   isEnabled: model.hasSelection) {

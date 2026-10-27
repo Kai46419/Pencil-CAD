@@ -361,8 +361,12 @@ extension ModelStore {
     }
 
     /// Boolesche Operation (direkt übernommen).
-    func noteBoolean(_ kind: BooleanKind, target: Int, tools: [Int], keepTools: Bool) {
+    func noteBoolean(_ kind: BooleanKind, target: Int, tools: [Int], keepTools: Bool, clearance: Double = 0) {
         var feature = Feature(name: kind.rawValue, kind: .boolean)
+        if kind == .subtract, clearance > 0 {
+            // Spiel beim Abziehen (MoldTools.swift): in der Zeitleiste änderbar
+            feature.parameters.append(.length("clearance", "Spiel", clearance))
+        }
         feature.data.mode = kind.rawValue
         feature.data.target = target
         feature.data.tools = tools
@@ -1087,8 +1091,11 @@ extension ModelStore {
         let tools = (feature.data.tools ?? []).filter { state.indices.contains($0) && $0 != target }
         guard !tools.isEmpty else { throw FeatureError("Werkzeugkörper fehlen.") }
         var shape = state[target].shape
+        let clearance = feature.value("clearance") ?? 0
         for tool in tools {
-            let other = state[tool].shape
+            guard let other = booleanTool(state[tool].shape, kind: kind, clearance: clearance) else {
+                throw FeatureError(clearanceFailure(clearance))
+            }
             let combined: PCKShape?
             switch kind {
             case .union: combined = shape.fusing(other)

@@ -781,6 +781,9 @@ final class ViewportView: MTKView {
         switch workspace.tool {
         case .meshSculpt:
             addSculptOverlay(to: &groups)
+        case .boolean:
+            // Rollen in der Vorschau: Werkzeuge rot halbtransparent, Ziel orange umrandet (BooleanPanel.swift)
+            addBooleanOverlay(to: &groups, fills: &fills)
         case .hole where !workspace.holePoints.isEmpty:
             groups.append(LineGroup(polylines: [], color: Self.snapOrange, width: 0,
                                     dots: workspace.holePoints.map { SIMD3<Float>($0.point) }, dotRadius: 5, onTop: true))
