@@ -760,6 +760,10 @@ final class ViewportView: MTKView {
             addMeasureOverlay(to: &groups, perPoint: perPoint)
         }
         if !sketch.isActive { addToolOverlays(to: &groups, fills: &fills) }
+        // Blech: gewählte Kanten, Biege- und offene Kanten (App/Sheet/SheetUIOverlay.swift)
+        if !sketch.isActive {
+            SheetUIOverlay.add(to: &groups, fills: &fills, workspace: workspace, model: model, perPoint: perPoint)
+        }
         // Bild kalibrieren: angetippte Punkte und ihre Verbindung (auch in der Skizze)
         if let calibration = workspace.calibrationWorldPoints {
             let points = calibration.map { SIMD3<Float>($0) }

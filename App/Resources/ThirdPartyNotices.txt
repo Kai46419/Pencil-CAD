@@ -27,3 +27,23 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+========================================================================
+
+Blechmodul basiert auf SolidCraft-Engine
+Quelle: https://github.com/tangency-labs/solidcraft (Crate solidcraft-engine mit solidcraft-doc,
+-kernel, -sketch, -geom, -io, -render)
+Commit: 98b57a3588170ec1a1c7acc91b4bf8a60ea29865
+Lizenz: MIT OR Apache-2.0 (hier genutzt unter der MIT-Lizenz oben).
+Copyright (c) 2026 SolidCraft contributors.
+Eingebunden als statische Bibliothek (SheetKit, scripts/build-sheet-ios.sh); alle Blechbefehle
+laufen unverändert in SolidCraft.
+
+Der Geometriekern von SolidCraft baut auf den truck-Crates auf (truck-modeling, truck-shapeops,
+truck-meshalgo, truck-stepio, truck-topology, https://github.com/ricosjp/truck),
+Apache License 2.0, Copyright (c) RICOS Co. Ltd.; truck-shapeops, truck-geometry, truck-stepio,
+truck-meshalgo und matext4cgmath in der von SolidCraft geänderten Fassung (vendor/).
+Schrift für Skizzentext: Liberation Sans, SIL Open Font License 1.1.
+Weitere Rust-Abhängigkeiten (MIT, Apache-2.0, BSD, Zlib u. a.) mit vollständigen Lizenztexten:
+Licenses/SolidCraft-THIRD-PARTY-LICENSES.txt, Licenses/SolidCraft-NOTICE.txt,
+Licenses/SolidCraft-LICENSE-APACHE.txt im Quelltext von PencilCAD.

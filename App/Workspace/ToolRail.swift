@@ -12,6 +12,8 @@ enum ToolGroup: String, CaseIterable, Identifiable {
     case inspect = "Prüfen"
     case insert = "Einfügen"
     case visualize = "Ansicht"
+    /// Blech (Punkt 16, App/Sheet/SheetUI.swift)
+    case sheetMetal = "Blech"
 
     // Frühere Gruppen (PartTools, Befehlssuche, Karten): zeigen auf die neue Gruppe
     static let extrude = ToolGroup.create
@@ -35,6 +37,7 @@ enum ToolGroup: String, CaseIterable, Identifiable {
         case .inspect: "sc.measure"
         case .insert: "sc.import"
         case .visualize: "sc.appearance"
+        case .sheetMetal: "sc.sheet"
         }
     }
 
@@ -48,6 +51,7 @@ enum ToolGroup: String, CaseIterable, Identifiable {
         case .inspect: .inspect
         case .insert: .insert
         case .visualize: .view
+        case .sheetMetal: .create
         }
     }
 
@@ -62,6 +66,7 @@ enum ToolGroup: String, CaseIterable, Identifiable {
         case .inspect: "Messen, Schnittansicht, Druckprüfung (Überhang, dünne Wände) und Isolieren."
         case .insert: "Normteile (Schrauben, Muttern, Lager), Vorlagen (Gehäuse, Stirnrad), STEP-, STL- und 3MF-Dateien, Bild als Vorlage (aus Fotos, Dateien oder direkt mit der Kamera), Körper eines anderen Projekts, eine Variable, Netze bearbeiten."
         case .visualize: "Anzeigemodus, orthografische Projektion, Körperfarbe, Zeichnung und Kontextvorschläge."
+        case .sheetMetal: "Blech wie SolidCraft: Flansche, Umkantung, Falten, Perforieren, In Blech umwandeln (offene Kanten wählbar), Entfalten, Flachmuster mit DXF und Biegetabelle, Blechregeln."
         }
     }
 

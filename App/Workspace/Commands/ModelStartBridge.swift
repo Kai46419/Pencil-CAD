@@ -81,6 +81,8 @@ extension Workspace {
         case .printCheck: return .printCheck
         case .meshSculpt: return .meshSculpt
         case .extrude, .fillet, .chamfer, .pressPull, .deleteFace: return nil
+        case .sheetFlange, .sheetPathFlange, .sheetHem, .sheetFold, .sheetPerforate, .sheetConvert, .sheetUnfold,
+             .sheetRefold, .sheetFlatPattern, .sheetRules, .sheetRuleList: return nil
         }
     }
 

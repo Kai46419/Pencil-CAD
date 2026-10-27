@@ -31,6 +31,8 @@ enum FeatureKind: String, Codable, CaseIterable {
     case mirror
     case pattern
     case delete
+    /// Blechschritt (App/Sheet/SheetModelReplay.swift)
+    case sheetMetal
 
     var systemImage: String {
         switch self {
@@ -48,6 +50,7 @@ enum FeatureKind: String, Codable, CaseIterable {
         case .mirror: "sc.mirror"
         case .pattern: "sc.pattern_rect"
         case .delete: "sc.delete"
+        case .sheetMetal: "sc.flange"
         }
     }
 }
@@ -139,6 +142,8 @@ struct SnapshotBodyMeta: Codable, Hashable {
     var finish: String? = nil
     /// Inhalt des Texts bei Textkörpern (SketchTextEdit.swift); fehlt in älteren Ständen
     var textLabel: String? = nil
+    /// Blechrezept (App/Sheet/SheetModel.swift); fehlt in älteren Ständen
+    var sheetMetal: SheetBodyInfo? = nil
 }
 
 /// Fester Stand: full = alle Körper, sonst nur die geänderten (changed, in dieser Reihenfolge) und die neuen.
@@ -201,6 +206,8 @@ struct FeatureData: Codable {
     var operationAuto: Bool?
     /// Richtung umgekehrt (Panel-Schalter)
     var flipped: Bool?
+    /// Blechschritt (App/Sheet/SheetModelReplay.swift); fehlt in älteren Ständen
+    var sheet: SheetFeatureData?
 }
 
 /// Ein Schritt im parametrischen Verlauf.
@@ -791,6 +798,7 @@ extension ModelStore {
             body.sketchID = result[index].sketchID
             body.componentID = result[index].componentID
             body.placement = result[index].placement
+            body.sheetMetal = result[index].sheetMetal
             // Text nach dem Extrudieren geändert: Textkörper neu benennen (SketchTextEdit.swift)
             body = body.takingTextLabel(from: result[index])
             result[index] = body
@@ -886,6 +894,7 @@ extension ModelStore {
         case .mirror: return try Self.replayMirror(feature, state)
         case .pattern: return try Self.replayPattern(feature, state)
         case .delete: return Self.replayDelete(feature, state)
+        case .sheetMetal: return try replaySheetMetal(feature, state)
         }
     }
 
@@ -1404,7 +1413,8 @@ extension ModelStore {
         SnapshotBodyMeta(name: body.name, color: [body.color.x, body.color.y, body.color.z], isHidden: body.isHidden,
                          sketchID: body.sketchID, folder: body.folder, componentID: body.componentID,
                          placement: body.componentID == nil ? nil : body.placementValues, material: body.material,
-                         threads: body.threads, finish: body.finish, textLabel: body.textLabel)
+                         threads: body.threads, finish: body.finish, textLabel: body.textLabel,
+                         sheetMetal: body.sheetMetal)
     }
 
     private static func snapshotBody(_ shape: PCKShape, meta: SnapshotBodyMeta, number: Int) -> SceneBody {
@@ -1419,6 +1429,7 @@ extension ModelStore {
         body.threads = meta.threads
         body.finish = meta.finish
         body.textLabel = meta.textLabel
+        body.sheetMetal = meta.sheetMetal
         return body.restoringComponent(meta.componentID, placement: meta.placement)
     }
 

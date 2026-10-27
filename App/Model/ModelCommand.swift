@@ -51,6 +51,9 @@ enum ModelCommandID: String, CaseIterable {
     case constructPlane, constructAxis, constructPoint, measure, section
     // PencilCAD-eigene (M2)
     case wrap, imprint, offsetEdges, mold, printCheck, meshSculpt
+    // Blech (Punkt 16, App/Sheet/SheetUI*.swift)
+    case sheetFlange, sheetPathFlange, sheetHem, sheetFold, sheetPerforate, sheetConvert
+    case sheetUnfold, sheetRefold, sheetFlatPattern, sheetRules, sheetRuleList
 }
 
 /// Offener Modellbefehl nach SolidCraft-Vorbild: gehört dem Workspace (`workspace.command`), nil = kein Panel.
@@ -245,5 +248,6 @@ enum ModelCommands {
     static func registerAll() {
         registerCreate()
         registerModify()
+        registerSheet()
     }
 }

@@ -155,6 +155,8 @@ extension Workspace {
             CommandItem(id: "redo", title: "Wiederholen", subtitle: "Drei Finger tippen", systemImage: "arrow.uturn.forward",
                         keywords: "redo") { [weak self] in self?.redo() },
         ]
+        // Blech (App/Sheet/SheetUI.swift)
+        items += SheetUI.searchItems(self)
         return items
     }
 }

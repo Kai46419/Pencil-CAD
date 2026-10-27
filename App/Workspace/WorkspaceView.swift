@@ -66,6 +66,8 @@ private struct WorkspaceContent: View {
                     }
                 }
                 .animation(.spring(duration: 0.2), value: workspace.quickToolsLocation)
+                // Blech › Flachmuster: 2D-Ansicht über dem Ansichtsfenster (App/Sheet/FlatPatternView.swift)
+                .overlay { SheetFlatOverlay(workspace: workspace) }
                 .ignoresSafeArea()
             // Leisten innerhalb des sicheren Bereichs; die leere Fläche lässt Berührungen zum Viewport durch.
             Color.clear

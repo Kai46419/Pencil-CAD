@@ -173,6 +173,8 @@ enum ModelRibbon {
             return insertCommands(ws, importFile: importFile)
         case .visualize:
             return visualizeCommands(ws)
+        case .sheetMetal:
+            return SheetUI.ribbonCommands(ws)
         }
     }
 

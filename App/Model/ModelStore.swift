@@ -115,6 +115,8 @@ struct SceneBody {
     var finish: String? = nil
     /// Aus Text extrudiert: dessen Inhalt (Textkörper im Browser, SketchTextEdit.swift); nil = kein Text
     var textLabel: String? = nil
+    /// Blechkörper: Rezept und Regel (App/Sheet/SheetModel.swift); nil = kein Blech
+    var sheetMetal: SheetBodyInfo? = nil
 
     func with(_ shape: PCKShape) -> SceneBody {
         var body = self
@@ -428,6 +430,8 @@ final class ModelStore: ObservableObject {
     /// Parametrischer Verlauf: Features in Reihenfolge, Zeitleiste unten (FeatureHistory.swift, TimelineBar.swift)
     @Published var features: [Feature] = []
     let featureRecorder = FeatureRecorder()
+    /// Blechmodul: Regeln, Sitzungen, Vorschau (App/Sheet/SheetModel.swift)
+    lazy var sheetDocument = SheetDocument(folder: folder)
 
     /// Projektordner (model.step + bodies.json); nil = nichts speichern.
     let folder: URL?
@@ -2136,6 +2140,8 @@ final class ModelStore: ObservableObject {
         var finish: String?
         /// Inhalt des Texts bei Textkörpern (SketchTextEdit.swift); fehlt in älteren Projekten
         var textLabel: String?
+        /// Blechrezept (App/Sheet/SheetModel.swift); fehlt in älteren Projekten
+        var sheetMetal: SheetBodyInfo?
     }
 
     private var modelURL: URL? { folder?.appending(path: "model.step") }
@@ -2180,6 +2186,7 @@ final class ModelStore: ObservableObject {
                 body.threads = meta.threads
                 body.finish = meta.finish
                 body.textLabel = meta.textLabel
+                body.sheetMetal = meta.sheetMetal
                 return body
             }
             return SceneBody(shape: shape, name: "Körper \(index + 1)", color: SceneBody.defaultColor)
@@ -2212,7 +2219,7 @@ final class ModelStore: ObservableObject {
             BodyMeta(name: $0.name, color: [$0.color.x, $0.color.y, $0.color.z], isHidden: $0.isHidden, sketchID: $0.sketchID,
                      folder: $0.folder, componentID: $0.componentID,
                      placement: $0.componentID == nil ? nil : $0.placementValues, material: $0.material,
-                     threads: $0.threads, finish: $0.finish, textLabel: $0.textLabel)
+                     threads: $0.threads, finish: $0.finish, textLabel: $0.textLabel, sheetMetal: $0.sheetMetal)
         }
         if let data = try? JSONEncoder().encode(metas) {
             try? data.write(to: metaURL)
