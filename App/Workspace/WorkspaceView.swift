@@ -30,6 +30,9 @@ private struct WorkspaceContent: View {
     @State private var exportName: String?
     @State private var isExporting = false
     @State private var isImporting = false
+    /// Dateiimporter für „Bild aus Dateien“ (Bilder, PDF) statt STEP/STL/3MF/SVG/DXF – ein gemeinsamer Importer,
+    /// weil SwiftUI mehrere fileImporter an derselben Ansicht nicht zuverlässig zeigt
+    @State private var importsImages = false
     @State private var isClearConfirmationShown = false
     /// Erklärung zur Auswahl eingeklappt (bleibt gespeichert)
     @State private var screenshot: Screenshot?
@@ -64,6 +67,7 @@ private struct WorkspaceContent: View {
                 .overlay(alignment: .top) { topArea }
                 .overlay(alignment: .topLeading) {
                     ToolRail(workspace: workspace, model: model, sketch: sketch, openGroup: $openGroup) {
+                        importsImages = false
                         isImporting = true
                     }
                     .padding(.leading, 16)
@@ -121,6 +125,18 @@ private struct WorkspaceContent: View {
             photoItem = nil
             Task { await insertImage(item) }
         }
+        .onChange(of: workspace.isImportingImageFile) { _, requested in
+            guard requested else { return }
+            workspace.isImportingImageFile = false
+            importsImages = true
+            isImporting = true
+        }
+        .fullScreenCover(isPresented: $workspace.isTakingPhoto) {
+            CameraCaptureView { image in
+                workspace.isTakingPhoto = false
+                if let image { insertImage(image) }
+            }
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active {
                 workspace.saveThumbnail()
@@ -147,10 +163,16 @@ private struct WorkspaceContent: View {
         }
         .fileExporter(isPresented: $isExporting, document: exportFile, contentType: exportType,
                       defaultFilename: exportName ?? projectName) { _ in }
-        .fileImporter(isPresented: $isImporting,
-                      allowedContentTypes: [.stepFile, .stpFile, .stl, .threeMF, .svg, .dxfFile]) { result in
+        .fileImporter(isPresented: $isImporting, allowedContentTypes: importTypes) { result in
             guard case .success(let url) = result else { return }
-            if ["svg", "dxf"].contains(url.pathExtension.lowercased()) {
+            if ImageFileLoader.isImageFile(url) {
+                // Bild aus Dateien: wie aus Fotos einfügen, danach kalibrieren
+                guard let image = ImageFileLoader.image(from: url) else {
+                    model.message = "Bild konnte nicht geladen werden."
+                    return
+                }
+                insertImage(image)
+            } else if ["svg", "dxf"].contains(url.pathExtension.lowercased()) {
                 workspace.importVectorFile(url)
             } else if MeshFileReader.extensions.contains(url.pathExtension.lowercased()) {
                 // STL/3MF: Umwandeln läuft im Hintergrund (MeshImport.swift)
@@ -282,7 +304,10 @@ private struct WorkspaceContent: View {
             Divider()
                 .frame(height: 20)
             Menu {
-                Button("Importieren (STEP, STL, 3MF, SVG, DXF) …", systemImage: "square.and.arrow.down") { isImporting = true }
+                Button("Importieren (STEP, STL, 3MF, SVG, DXF) …", systemImage: "square.and.arrow.down") {
+                    importsImages = false
+                    isImporting = true
+                }
                 Menu {
                     ForEach(ExportFormat.allCases) { format in
                         Button {
@@ -456,10 +481,25 @@ private struct WorkspaceContent: View {
         screenshot = Screenshot(image: image)
     }
 
-    /// Foto als Bild (Canvas) einfügen: höchstens 2048 Pixel, Ausrichtung normalisiert.
+    /// Erlaubte Dateitypen des gemeinsamen Dateiimporters
+    private var importTypes: [UTType] {
+        if importsImages { return ImageFileLoader.contentTypes }
+        return [.stepFile, .stpFile, .stl, .threeMF, .svg, .dxfFile]
+    }
+
+    /// Foto aus dem Fotoalbum laden und einfügen.
     private func insertImage(_ item: PhotosPickerItem) async {
-        guard let data = try? await item.loadTransferable(type: Data.self), let image = UIImage(data: data),
-              image.size.width > 0, image.size.height > 0 else {
+        guard let data = try? await item.loadTransferable(type: Data.self), let image = UIImage(data: data) else {
+            model.message = "Bild konnte nicht geladen werden."
+            return
+        }
+        insertImage(image)
+    }
+
+    /// Bild (Fotos, Dateien, Kamera) als Canvas einfügen: höchstens 2048 Pixel, Ausrichtung normalisiert
+    /// (Zeichnen über UIGraphicsImageRenderer wendet imageOrientation an, z. B. hochkant aufgenommene Kamerafotos).
+    private func insertImage(_ image: UIImage) {
+        guard image.size.width > 0, image.size.height > 0 else {
             model.message = "Bild konnte nicht geladen werden."
             return
         }

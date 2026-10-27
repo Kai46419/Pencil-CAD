@@ -45,12 +45,12 @@ enum ToolGroup: String, CaseIterable, Identifiable {
         switch self {
         case .sketch: "Neue Skizze beginnen: Ebene oder ebene Körperfläche antippen, dann mit dem Stift zeichnen."
         case .extrude: "Geschlossenen Skizzenbereich oder ebene Fläche antippen und am Pfeil ziehen bzw. Abstand eingeben."
-        case .create: "Achsendrehung, Sweep, Loft und Grundkörper (Quader, Zylinder, Kugel …)."
-        case .modify: "Kanten abrunden/fasen, Schale, Fläche versetzen/ersetzen, Umhüllen und Prägen, Kante versetzen/abdrücken, Körper vereinigen, abziehen, schneiden oder teilen."
-        case .transform: "Körper oder Skizzen verschieben, drehen, spiegeln, skalieren, ausrichten oder als Muster vervielfältigen."
+        case .create: "Erzeugt neue Geometrie: Achsendrehung, Sweep, Loft, Helix, Bohrung, Gewinde, Grundkörper, Spiegeln, Muster und Negativform."
+        case .modify: "Ändert vorhandene Körper: Kanten abrunden/fasen, Schale, Verjüngung, Fläche versetzen/ersetzen, Kante versetzen/abdrücken, Umhüllen und Prägen, Körper vereinigen, abziehen, schneiden oder teilen, Netz bearbeiten."
+        case .transform: "Ändert nur die Lage oder Größe: Körper oder Skizzen verschieben, drehen, übersetzen, skalieren oder ausrichten."
         case .construct: "Hilfsebenen, -achsen und -punkte, z. B. eine versetzte Ebene zum Skizzieren."
         case .inspect: "Messen, Schnittansicht und Isolieren."
-        case .insert: "Normteile (Schrauben, Muttern, Lager), Vorlagen (Gehäuse, Stirnrad), STEP-, STL- und 3MF-Dateien, Bild als Vorlage, Körper eines anderen Projekts oder eine Variable einfügen."
+        case .insert: "Normteile (Schrauben, Muttern, Lager), Vorlagen (Gehäuse, Stirnrad), STEP-, STL- und 3MF-Dateien, Bild als Vorlage (aus Fotos, Dateien oder direkt mit der Kamera), Körper eines anderen Projekts oder eine Variable einfügen."
         case .visualize: "Anzeigemodus, orthografische Projektion und Körperfarbe."
         }
     }
@@ -530,6 +530,13 @@ struct ToolRail: View {
                 sketch.tool = .text
             }))
         }
+        // Muster erzeugen neue Körper und liegen deshalb wie in Fusion 360 unter „Erstellen“
+        entries += PatternKind.allCases.map { kind in
+            RailEntry(id: "context.\(kind.rawValue)", title: kind.rawValue, systemImage: kind.systemImage,
+                      category: .create, action: {
+                workspace.activate(.pattern(kind))
+            })
+        }
 
         // ÄNDERN
         if model.selectedBodies.count > 1 {
@@ -591,12 +598,6 @@ struct ToolRail: View {
                                      systemImage: "arrow.up.left.and.arrow.down.right", category: .arrange, action: {
                 workspace.activate(.scale)
             }))
-        }
-        entries += PatternKind.allCases.map { kind in
-            RailEntry(id: "context.\(kind.rawValue)", title: kind.rawValue, systemImage: kind.systemImage,
-                      category: .arrange, action: {
-                workspace.activate(.pattern(kind))
-            })
         }
 
         // KONSTRUIEREN
@@ -697,7 +698,8 @@ struct ToolRail: View {
 
     private func isActive(_ group: ToolGroup) -> Bool {
         switch workspace.tool {
-        case .insert, .revolve, .sweep, .loft:
+        // Wie Fusion 360: alles, was neue Geometrie erzeugt, liegt unter „Erstellen“ (auch Bohrung, Spiegeln, Muster)
+        case .insert, .revolve, .sweep, .loft, .hole, .mirror, .pattern, .mold:
             return group == .create
         case .part(let kind):
             return group == kind.group
@@ -705,9 +707,9 @@ struct ToolRail: View {
             return group == .insert
         case .construct:
             return group == .construct
-        case .move, .mirror, .pattern, .scale, .align, .scaleSketch:
+        case .move, .scale, .align, .scaleSketch:
             return group == .transform
-        case .boolean, .shell, .split, .offsetEdges, .offsetFace, .replaceFace, .wrap, .imprint, .hole, .meshSculpt, .mold:
+        case .boolean, .shell, .split, .offsetEdges, .offsetFace, .replaceFace, .wrap, .imprint, .meshSculpt:
             return group == .modify
         case .translate:
             return group == .transform
@@ -752,18 +754,29 @@ struct ToolRail: View {
         case .sketch, .extrude:
             return []
         case .create:
-            return [
+            // Fusion-360-Logik: alles, was neue Geometrie erzeugt (auch Bohrung, Spiegeln, Muster, Negativform)
+            var items: [ToolItem] = [
                 item(.revolve, "Achsendrehung", subtitle: "Bereich um Achse", "arrow.triangle.2.circlepath"),
                 item(.sweep, "Sweep", subtitle: "Bereich entlang Pfad", "point.3.connected.trianglepath.dotted"),
                 item(.loft, "Loft", subtitle: "Durch Querschnitte", "square.3.layers.3d"),
-                item(.part(.helix), "Helix", subtitle: "Feder, Gewinde", PartTool.helix.systemImage),
-                item(.part(.thread), "Gewinde", subtitle: "Bolzen, Bohrung, Fläche", PartTool.thread.systemImage),
                 item(.part(.thinLines), "Dünn extrudieren", subtitle: "Linien als Wand", PartTool.thinLines.systemImage),
-            ] + Primitive.allCases.map { primitive in
+                item(.part(.helix), "Helix", subtitle: "Feder, Gewinde", PartTool.helix.systemImage),
+                item(.hole, "Bohrung", subtitle: "Schrauben, Einsätze", "circle.circle"),
+                item(.part(.thread), "Gewinde", subtitle: "Bolzen, Bohrung, Fläche", PartTool.thread.systemImage),
+            ]
+            items += Primitive.allCases.map { primitive in
                 item(.insert(primitive), primitive.rawValue, subtitle: "Grundkörper", primitive.systemImage)
             }
+            items += [
+                item(.mirror, "Spiegeln", subtitle: "Körper", "arrow.left.and.right.righttriangle.left.righttriangle.right"),
+                item(.pattern(.linear), "Muster linear", subtitle: "Körper", PatternKind.linear.systemImage),
+                item(.pattern(.circular), "Muster kreisförmig", subtitle: "Körper", PatternKind.circular.systemImage),
+                item(.mold, "Negativform", subtitle: "Form aus Block", "cube.transparent"),
+            ]
+            return items
         case .modify:
-            var items = EdgeOperation.allCases.map { operation in
+            // Ändert vorhandene Körper
+            var items: [ToolItem] = EdgeOperation.allCases.map { operation in
                 ToolItem(id: "tools.\(operation.rawValue)", title: operation.rawValue, subtitle: "Kanten",
                          systemImage: operation == .fillet ? "app" : "octagon",
                          isActive: workspace.tool == .select && !model.selectedEdges.isEmpty
@@ -772,7 +785,6 @@ struct ToolRail: View {
                 }
             }
             items += [
-                item(.hole, "Bohrung", subtitle: "Schrauben, Einsätze", "circle.circle"),
                 item(.shell, "Schale", subtitle: "Fläche öffnen", "shippingbox"),
                 item(.part(.draft), "Verjüngung", subtitle: "Flächen neigen", PartTool.draft.systemImage),
                 item(.offsetFace, "Fläche versetzen", subtitle: "Auch Bohrungen", "arrow.up.and.down.square"),
@@ -780,25 +792,22 @@ struct ToolRail: View {
                 item(.offsetEdges, "Kante versetzen", subtitle: "Fläche antippen", "square.dashed.inset.filled"),
                 item(.wrap, "Umhüllen und Prägen", subtitle: "Auf Zylinder", "cylinder.split.1x2"),
                 item(.imprint, "Kante abdrücken", subtitle: "Skizze auf Fläche", "square.on.square.dashed"),
-                item(.meshSculpt, "Netz bearbeiten", subtitle: "Pinsel, STL/3MF", "paintbrush.pointed"),
             ]
             items += BooleanKind.allCases.map { kind in
                 item(.boolean(kind), kind.rawValue, subtitle: "Kombinieren", kind.systemImage)
             }
-            items.append(item(.mold, "Negativform", subtitle: "Form aus Block", "cube.transparent"))
             items.append(item(.split, "Körper teilen", subtitle: "Ebene, Körper, Skizze", "rectangle.split.2x1"))
+            items.append(item(.meshSculpt, "Netz bearbeiten", subtitle: "Pinsel, STL/3MF", "paintbrush.pointed"))
             items.append(ToolItem(id: "tools.delete", title: "Löschen", subtitle: "Körper", systemImage: "trash",
                                   isEnabled: model.hasSelection) {
                 model.deleteSelected()
             })
             return items
         case .transform:
+            // Nur Lage und Größe
             return [
                 item(.move, "Verschieben/Rotieren", subtitle: "Körper oder Skizze", "move.3d"),
                 item(.translate, "Übersetzen", subtitle: "Punkt zu Punkt", "point.topleft.down.to.point.bottomright.curvepath"),
-                item(.mirror, "Spiegeln", subtitle: "Körper", "arrow.left.and.right.righttriangle.left.righttriangle.right"),
-                item(.pattern(.linear), "Muster linear", subtitle: "Körper", PatternKind.linear.systemImage),
-                item(.pattern(.circular), "Muster kreisförmig", subtitle: "Körper", PatternKind.circular.systemImage),
                 item(.scale, "Skalieren", subtitle: "Körper", "arrow.up.left.and.arrow.down.right"),
                 item(.scaleSketch, "Skizze skalieren", subtitle: "Bereich antippen", "arrow.up.left.and.arrow.down.right"),
                 item(.align, "Ausrichten", subtitle: "Körper", "align.horizontal.center"),
@@ -829,8 +838,19 @@ struct ToolRail: View {
                          systemImage: "triangle", action: importSTEP),
                 ToolItem(id: "insert.vector", title: "SVG / DXF", subtitle: "Als Skizze (Laser, CNC, Logos)",
                          systemImage: "scribble.variable", action: importSTEP),
-                ToolItem(id: "insert.image", title: "Bild", subtitle: "Aus Fotos, als Vorlage", systemImage: "photo") {
+                // Bild als Vorlage aus drei Quellen; danach gleich kalibrieren (WorkspaceView.insertImage)
+                ToolItem(id: "insert.image", title: "Bild aus Fotos", subtitle: "Fotoalbum, als Vorlage",
+                         systemImage: "photo.on.rectangle") {
                     workspace.isPickingImage = true
+                },
+                ToolItem(id: "insert.imageFile", title: "Bild aus Dateien", subtitle: "PNG, JPEG, HEIC, PDF",
+                         systemImage: "folder") {
+                    workspace.isImportingImageFile = true
+                },
+                ToolItem(id: "insert.camera", title: "Foto aufnehmen",
+                         subtitle: CameraCapture.isAvailable ? "Kamera, als Vorlage" : "Keine Kamera verfügbar",
+                         systemImage: "camera", isEnabled: CameraCapture.isAvailable) {
+                    workspace.isTakingPhoto = true
                 },
                 ToolItem(id: "insert.project", title: "Projekt", subtitle: "Körper eines anderen Projekts",
                          systemImage: "folder.badge.plus") {

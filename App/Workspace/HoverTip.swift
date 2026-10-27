@@ -139,9 +139,9 @@ enum ToolTips {
     private static let texts: [String: String] = [
         // Werkzeuggruppen (3D)
         "Skizze": "Neue Skizze beginnen: Ebene oder ebene Körperfläche antippen, dann mit dem Stift zeichnen.",
-        "Einfügen": "STEP-, STL- und 3MF-Datei, Bild als Vorlage, Körper eines anderen Projekts oder eine Variable einfügen.",
+        "Einfügen": "STEP-, STL- und 3MF-Datei, Bild als Vorlage (aus Fotos, Dateien oder mit der Kamera), Körper eines anderen Projekts oder eine Variable einfügen.",
         "Konstruieren": "Hilfsebenen, -achsen und -punkte, z. B. eine versetzte Ebene zum Skizzieren.",
-        "Transformation": "Körper oder Skizzen verschieben, drehen, spiegeln, skalieren, ausrichten oder als Muster vervielfältigen.",
+        "Transformation": "Ändert nur Lage oder Größe: Körper oder Skizzen verschieben, drehen, übersetzen, skalieren oder ausrichten.",
         "Tools": "Kanten abrunden/fasen, Schale, boolesche Verknüpfung, Drehen, Sweep, Loft, Körper teilen.",
         "Visualisieren": "Anzeigemodus, Farbe, Schnittansicht, Messen und Isolieren.",
         "Extrudieren": "Geschlossenen Skizzenbereich oder ebene Fläche antippen und am Pfeil ziehen bzw. Abstand eingeben.",
@@ -186,6 +186,9 @@ enum ToolTips {
         "Umhüllen und Prägen": "Skizzenbereiche (Text, Logo) antippen, dann eine Zylinderfläche: das Motiv legt sich um den Zylinder und wird erhaben geprägt oder eingraviert.",
         "Kante abdrücken": "Skizzenbereiche, die auf einer Körperfläche liegen, als Kanten auf den Körper übertragen – danach lässt sich der Teil der Fläche einzeln ziehen.",
         "Übersetzen": "Körper antippen, dann Start- und Zielpunkt (rastet an Ecken und Kantenmitten): der Körper wandert genau so weit. Mit „Kopieren“ bleibt das Original stehen.",
+        "Bild aus Fotos": "Foto aus dem Fotoalbum als Vorlage einfügen, danach gleich auf Maß kalibrieren.",
+        "Bild aus Dateien": "PNG, JPEG, HEIC oder die erste Seite eines PDF als Vorlage einfügen, danach gleich auf Maß kalibrieren.",
+        "Foto aufnehmen": "Objekt mit der Kamera fotografieren – möglichst senkrecht von oben, mit einem bekannten Maß (z. B. Lineal) im Bild – und danach kalibrieren.",
         "Projekt": "Körper eines anderen Projekts als Kopie einfügen (landen in einem eigenen Ordner).",
         "Variable": "Benannte Werte (z. B. wand = 2 mm), die in jedem Zahlenfeld und in Skizzenmaßen verwendet werden können.",
         "Hilfe": "Kurzanleitungen zu Gesten, Skizzieren, Modellieren, Formeln und Variablen.",

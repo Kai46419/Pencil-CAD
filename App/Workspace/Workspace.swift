@@ -403,6 +403,9 @@ final class Workspace: ObservableObject {
     @Published var helpTopic: HelpTopic?
     /// Fotoauswahl für „Bild einfügen“
     @Published var isPickingImage = false
+    /// „Bild aus Dateien“ (PNG, JPEG, HEIC, PDF) bzw. „Foto aufnehmen“ (Kamera), CameraCapture.swift
+    @Published var isImportingImageFile = false
+    @Published var isTakingPhoto = false
     /// Kontextleiste: alle Werkzeuggruppen zeigen („Mehr“)
     @Published var showsAllTools = false
     /// Ursprung (Achsen) zeigen – im Browser „Ebenen“ ein- und ausblendbar
