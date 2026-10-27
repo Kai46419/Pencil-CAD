@@ -337,6 +337,9 @@ struct VisibilityMenuItems: View {
                isOn: Binding(get: { model.showsConstructions }, set: { model.setConstructionsHidden(!$0) }))
             .disabled(model.constructions.isEmpty)
         Divider()
+        // Vorschau-Look für alle Körper (Kupfer, Gold, Silber, Schwarz … glänzend oder matt), SurfaceQuickPalette.swift
+        SurfacePreviewMenu(model: model)
+        Divider()
         Button("Einzeln in „Ebenen“ …", systemImage: "square.3.layers.3d") {
             workspace.showsLayers = true
         }
@@ -537,6 +540,11 @@ private struct ModelRailButtons: View {
     @ObservedObject var model: ModelStore
     var showsLabels: Bool
 
+    /// Daneben steht bei gewähltem Körper die Schnellwahl „Oberfläche“ (BodySurfacePalette): dann keine Schilder
+    private var labelsVisible: Bool {
+        showsLabels && !(workspace.tool == .select && model.selectedBody != nil)
+    }
+
     var body: some View {
         let sectionOn = workspace.section != nil
         let isolated = model.isIsolated
@@ -573,7 +581,7 @@ private struct ModelRailButtons: View {
         Button(action: action) {
             RailIcon(systemImage: systemImage, isActive: isActive)
                 .overlay(alignment: .trailing) {
-                    if showsLabels {
+                    if labelsVisible {
                         RailLabel(title: title, subtitle: subtitle)
                             .fixedSize()
                             .offset(x: -52)

@@ -159,6 +159,8 @@ final class Renderer: NSObject, MTKViewDelegate {
     private let zebraPipeline: MTLRenderPipelineState?
     /// Glas und klare Kunststoffe: zweiter, durchsichtiger Durchgang über den Körpern (SurfaceFinish.swift)
     private let glassPipeline: MTLRenderPipelineState?
+    /// Ausgewählte ganze Körper leicht getönt statt deckend orange, damit die Oberfläche sichtbar bleibt
+    private let tintPipeline: MTLRenderPipelineState?
     private let behindDepthState: MTLDepthStencilState?
     /// Raster mit weichem Rand (fragment_grid); ohne sie das bisherige Raster mit hartem Rand
     private let gridPipeline: MTLRenderPipelineState?
@@ -173,6 +175,8 @@ final class Renderer: NSObject, MTKViewDelegate {
     private var indexCount = 0
     private var selectionBuffer: MTLBuffer?
     private var selectionCount = 0
+    /// Auswahl besteht aus ganzen Körpern (getönt zeichnen)
+    private var selectionTinted = false
     private var edgeBuffer: MTLBuffer?
     private var edgeCount = 0
     /// Körperkanten als zusammenhängende Linienzüge (für die breite Darstellung)
@@ -249,6 +253,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         hiddenEdgePipeline = pipeline(vertex: "vertex_overlay", fragment: "fragment_dashed_clip", blended: true)
         zebraPipeline = pipeline(vertex: "vertex_main", fragment: "fragment_zebra")
         glassPipeline = pipeline(vertex: "vertex_main", fragment: "fragment_glass", blended: true)
+        tintPipeline = pipeline(vertex: "vertex_overlay", fragment: "fragment_flat_clip", blended: true)
         behindDepthState = depth(.greater, write: false)
         gridPipeline = pipeline(vertex: "vertex_main", fragment: "fragment_grid", blended: true)
         gridOverlayPipeline = pipeline(vertex: "vertex_overlay", fragment: "fragment_grid", blended: true)
@@ -299,9 +304,10 @@ final class Renderer: NSObject, MTKViewDelegate {
         }
     }
 
-    func updateSelection(indices: [UInt32], edges: [SIMD3<Float>]) {
+    func updateSelection(indices: [UInt32], edges: [SIMD3<Float>], tinted: Bool = false) {
         selectionBuffer = makeBuffer(indices)
         selectionCount = indices.count
+        selectionTinted = tinted
         edgeHighlight = edges
     }
 
@@ -701,11 +707,15 @@ final class Renderer: NSObject, MTKViewDelegate {
 
             // Ausgewählte Flächen bzw. Körper
             if let selectionBuffer, selectionCount > 0 {
-                encoder.setRenderPipelineState(overlayPipeline)
-                encoder.setDepthStencilState(displayMode.isSolid ? depthState : alwaysDepthState)
+                // Ganze Körper (deckend gezeichnet): halbdurchsichtig orange, die Oberfläche scheint durch;
+                // ohne Tiefe zu schreiben, sonst verdeckte die Tönung später gezeichnete Kanten
+                let tint: MTLRenderPipelineState? = selectionTinted && displayMode.isSolid ? tintPipeline : nil
+                encoder.setRenderPipelineState(tint ?? overlayPipeline)
+                encoder.setDepthStencilState(displayMode.isSolid ? (tint == nil ? depthState : readOnlyDepthState)
+                                                                 : alwaysDepthState)
                 encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
                 setUniforms(&uniforms)
-                setColor(0.98, 0.62, 0.18, 1)
+                setColor(0.98, 0.62, 0.18, tint == nil ? 1 : 0.32)
                 encoder.drawIndexedPrimitives(type: .triangle, indexCount: selectionCount, indexType: .uint32,
                                               indexBuffer: selectionBuffer, indexBufferOffset: 0)
             }

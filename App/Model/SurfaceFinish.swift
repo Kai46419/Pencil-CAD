@@ -172,12 +172,20 @@ struct SurfaceFinish: Identifiable, Hashable {
     private static let metals: [SurfaceFinish] = [
         metal("Chrom", "Chrom", [0.62, 0.63, 0.65], 0.04),
         metal("Spiegel", "Spiegel (verspiegelt)", [0.95, 0.95, 0.93], 0.0),
-        metal("Gold", "Gold", [0.98, 0.76, 0.34], 0.12),
-        metal("Kupfer", "Kupfer", [0.95, 0.62, 0.50], 0.2),
-        metal("Messing", "Messing", [0.90, 0.76, 0.40], 0.2),
+        // Basisfarben nach gemessenen F0-Werten (linear): Silber, Gold, Kupfer, Aluminium
+        metal("Silber", "Silber poliert", [0.972, 0.960, 0.915], 0.12),
+        metal("Silber satiniert", "Silber satiniert (matt)", [0.972, 0.960, 0.915], 0.55),
+        metal("Gold", "Gold glänzend", [1.0, 0.766, 0.336], 0.15),
+        metal("Gold matt", "Gold matt", [1.0, 0.766, 0.336], 0.55),
+        metal("Kupfer", "Kupfer glänzend", [0.955, 0.638, 0.538], 0.18),
+        metal("Kupfer matt", "Kupfer matt", [0.955, 0.638, 0.538], 0.58),
+        metal("Messing", "Messing glänzend", [0.910, 0.778, 0.423], 0.18),
+        metal("Messing matt", "Messing matt", [0.910, 0.778, 0.423], 0.55),
+        metal("Schwarzchrom", "Schwarzchrom", [0.20, 0.20, 0.21], 0.08),
         metal("Bronze", "Bronze", [0.78, 0.53, 0.33], 0.32),
         metal("Edelstahl gebürstet", "Edelstahl gebürstet", [0.66, 0.66, 0.65], 0.32, pattern: .brushed),
         metal("Edelstahl", "Edelstahl poliert", [0.68, 0.68, 0.67], 0.1),
+        metal("Aluminium poliert", "Aluminium poliert", [0.913, 0.922, 0.924], 0.15),
         metal("Aluminium", "Aluminium natur", [0.90, 0.91, 0.92], 0.38),
         metal("Aluminium gebürstet", "Aluminium gebürstet", [0.88, 0.89, 0.90], 0.3, pattern: .brushed),
         metal("Stahl", "Stahl blank", [0.55, 0.56, 0.57], 0.36),
@@ -200,7 +208,7 @@ struct SurfaceFinish: Identifiable, Hashable {
 
     private static let paints: [SurfaceFinish] = [
         paint("Schwarz matt", "Schwarz matt", [0.022, 0.022, 0.024], 0.85),
-        paint("Schwarz glänzend", "Schwarz glänzend", [0.018, 0.018, 0.02], 0.1, coat: true),
+        paint("Schwarz glänzend", "Schwarz glänzend (Klavierlack)", [0.018, 0.018, 0.02], 0.08, coat: true),
         paint("Weiß matt", "Weiß matt", [0.85, 0.85, 0.84], 0.85),
         paint("Weiß glänzend", "Weiß glänzend", [0.86, 0.86, 0.85], 0.1, coat: true),
         paint("Marineblau", "Marineblau (Saphirblau RAL 5003)", [0.014, 0.040, 0.090], 0.4),
@@ -269,6 +277,41 @@ struct SurfaceFinish: Identifiable, Hashable {
     ]
 
     static let all: [SurfaceFinish] = metals + anodized + paints + nature + plastics + special
+}
+
+/// Schnellwahl im rechten Fenster: häufige Oberflächen je als Paar glänzend/matt (Kai: Kupfer, Gold, Silber
+/// glänzend und matt, Schwarz glänzend und matt).
+struct SurfaceQuickFamily: Identifiable {
+    let id: String
+    let name: String
+    /// Kurzname der glänzenden Variante
+    let glossy: String
+    /// Kurzname der matten Variante
+    let matte: String
+
+    func finishID(glossy wantsGloss: Bool) -> String { wantsGloss ? glossy : matte }
+
+    func finish(glossy wantsGloss: Bool) -> SurfaceFinish? { SurfaceFinish.named(finishID(glossy: wantsGloss)) }
+
+    func contains(_ id: String?) -> Bool { id == glossy || id == matte }
+
+    static let all: [SurfaceQuickFamily] = [
+        SurfaceQuickFamily(id: "silber", name: "Silber", glossy: "Silber", matte: "Silber satiniert"),
+        SurfaceQuickFamily(id: "gold", name: "Gold", glossy: "Gold", matte: "Gold matt"),
+        SurfaceQuickFamily(id: "kupfer", name: "Kupfer", glossy: "Kupfer", matte: "Kupfer matt"),
+        SurfaceQuickFamily(id: "messing", name: "Messing", glossy: "Messing", matte: "Messing matt"),
+        SurfaceQuickFamily(id: "edelstahl", name: "Edelstahl", glossy: "Edelstahl", matte: "Edelstahl gebürstet"),
+        SurfaceQuickFamily(id: "alu", name: "Alu", glossy: "Aluminium poliert", matte: "Eloxal silber"),
+        SurfaceQuickFamily(id: "schwarz", name: "Schwarz", glossy: "Schwarz glänzend", matte: "Schwarz matt"),
+        SurfaceQuickFamily(id: "weiss", name: "Weiß", glossy: "Weiß glänzend", matte: "Weiß matt"),
+        SurfaceQuickFamily(id: "schwarzmetall", name: "Schwarzchrom", glossy: "Schwarzchrom", matte: "Eloxal schwarz"),
+    ]
+
+    /// Familie, zu der eine Oberfläche gehört
+    static func family(of id: String?) -> SurfaceQuickFamily? {
+        guard let id else { return nil }
+        return all.first { $0.contains(id) }
+    }
 }
 
 extension BodyMaterial {

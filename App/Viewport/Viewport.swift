@@ -44,7 +44,8 @@ struct Viewport: UIViewRepresentable {
         }
         if coordinator.selectionRevision != model.selectionRevision {
             coordinator.selectionRevision = model.selectionRevision
-            renderer?.updateSelection(indices: model.selectionIndices, edges: model.edgeHighlight)
+            renderer?.updateSelection(indices: model.selectionIndices, edges: model.edgeHighlight,
+                                      tinted: model.selectionTintsBodies)
         }
         renderer?.displayMode = workspace.displayMode
         // Im Skizzenmodus flach: Parallelprojektion, kein Drehen

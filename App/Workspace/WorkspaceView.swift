@@ -120,6 +120,12 @@ private struct WorkspaceContent: View {
                                 .padding(.bottom, 84)
                                 .transition(.opacity.combined(with: .move(edge: .trailing)))
                         } else {
+                            // Körper gewählt: Schnellwahl „Oberfläche“ links neben der Leiste (SurfaceQuickPalette.swift);
+                            // bei offenem Eigenschaften-Fenster steht sie dort
+                            if panel == nil, workspace.tool == .select {
+                                BodySurfacePalette(model: model)
+                                    .transition(.opacity.combined(with: .move(edge: .trailing)))
+                            }
                             RightRail(workspace: workspace, sketch: sketch, panel: $panel, screenshot: takeScreenshot)
                         }
                     }

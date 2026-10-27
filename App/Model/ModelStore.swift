@@ -267,6 +267,16 @@ final class ModelStore: ObservableObject {
     @Published private(set) var selectionIndices: [UInt32] = []
     @Published private(set) var edgeHighlight: [SIMD3<Float>] = []
     @Published private(set) var selectionRevision = 0
+    /// Ganze Körper hervorgehoben (nicht einzelne Flächen): dann nur leicht getönt, damit die Oberfläche
+    /// (Chrom, Gold, Lack …) sichtbar bleibt (Renderer.updateSelection)
+    @Published private(set) var selectionTintsBodies = false
+    /// Vorschau „Oberfläche für alle Körper“ (Sichtbarkeit): Kurzname aus SurfaceFinish.all, nil = aus.
+    /// Nur Darstellung, wird nicht gespeichert; die Oberflächen der Körper bleiben unverändert.
+    @Published var previewFinishAll: String? = nil {
+        didSet {
+            if previewFinishAll != oldValue { remesh() }
+        }
+    }
 
     // Ziehpfeile
     @Published var edgeOperation: EdgeOperation = .fillet {
@@ -1619,14 +1629,18 @@ final class ModelStore: ObservableObject {
         } else {
             selectionIndices = selectedBodies.flatMap { mesh.triangleIndices(ofBody: $0) }
         }
+        selectionTintsBodies = !(previewBodies == nil && selection != nil)
         edgeHighlight = previewBodies == nil ? mesh.edgeSegments(of: selectedEdges) : []
         selectionRevision += 1
     }
 
     private func remesh() {
         var combined = Mesh()
+        // Vorschau „Oberfläche für alle Körper“ überdeckt die eigene Oberfläche nur in der Darstellung
+        let override: SIMD3<Float>? = previewFinishAll.flatMap { SurfaceFinish.named($0)?.appearance.encoded }
         for (index, body) in (previewBodies ?? bodies).enumerated() where !body.isHidden {
-            combined.append(Mesh(body.shape.triangulate(deflection: 0.05), body: index, color: body.renderColor))
+            combined.append(Mesh(body.shape.triangulate(deflection: 0.05), body: index,
+                                 color: override ?? body.renderColor))
         }
         mesh = combined
         revision += 1

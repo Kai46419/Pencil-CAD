@@ -51,11 +51,14 @@ struct FinishSwatch: View {
     private var baseFill: AnyShapeStyle {
         let albedo = appearance.albedo
         if appearance.metallic {
-            // Metall: Spiegelung eines Horizonts (heller Himmel, dunkler Boden)
+            // Metall: Spiegelung eines Horizonts (heller Himmel, dunkler Boden); matt = weicher, flauer Horizont
+            let rough: Float = min(max(appearance.roughness, 0), 1)
+            let half: Double = 0.05 + Double(rough) * 0.3
+            let groundScale: Float = 0.22 + rough * 0.4
             let stops: [Gradient.Stop] = [
-                .init(color: FinishColors.color(albedo, scale: 1, lift: 0.15), location: 0),
-                .init(color: FinishColors.color(albedo, scale: 0.9), location: 0.44),
-                .init(color: FinishColors.color(albedo, scale: 0.22), location: 0.54),
+                .init(color: FinishColors.color(albedo, scale: 1 - rough * 0.15, lift: 0.15 * (1 - rough)), location: 0),
+                .init(color: FinishColors.color(albedo, scale: 0.9 - rough * 0.1), location: 0.49 - half),
+                .init(color: FinishColors.color(albedo, scale: groundScale), location: 0.49 + half),
                 .init(color: FinishColors.color(albedo, scale: 0.55), location: 1),
             ]
             return AnyShapeStyle(LinearGradient(stops: stops, startPoint: .top, endPoint: .bottom))
@@ -128,6 +131,8 @@ struct FinishSwatch: View {
 struct SurfaceFinishSection: View {
     @ObservedObject var model: ModelStore
     let bodyIndex: Int
+    /// Gleich aufgeklappt (Liste „Mehr …“ aus dem rechten Fenster)
+    var initiallyExpanded = false
 
     @State private var expanded = false
     @State private var customColor = Color.gray
@@ -149,6 +154,9 @@ struct SurfaceFinishSection: View {
                     Divider().padding(.vertical, 2)
                     customControls(item)
                 }
+            }
+            .onAppear {
+                if initiallyExpanded { expanded = true }
             }
         }
     }
