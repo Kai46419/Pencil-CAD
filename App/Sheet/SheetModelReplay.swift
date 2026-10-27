@@ -420,7 +420,7 @@ extension ModelStore {
             stored.resultBox = Self.sheetFingerprint(shape)
             let number = result.count
             var body = SceneBody(shape: shape, name: data.bodyName ?? "Blech \(number + 1)",
-                                 color: SceneBody.palette[number % SceneBody.palette.count])
+                                 color: SceneBody.defaultColor)
             body.sheetMetal = stored
             body.sketchID = data.sketchID
             result.append(body)

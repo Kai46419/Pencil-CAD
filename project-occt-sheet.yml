@@ -13,5 +13,5 @@ targets:
       base:
         # Schaltet App/Sheet/SheetKernel.swift auf die echten C-Aufrufe um
         SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) PENCIL_SHEETKIT"
-        # Rust-Standardbibliothek: Zufallszahlen über Security.framework; libc++ für C++-Teile der Abhängigkeiten
-        OTHER_LDFLAGS: "$(inherited) -framework Security -lc++"
+        # Laut `--print native-static-libs`: CoreFoundation (Zeitzonen in truck-stepio), libiconv; Security für Zufallszahlen, libc++ zur Sicherheit
+        OTHER_LDFLAGS: "$(inherited) -framework CoreFoundation -framework Security -liconv -lc++"

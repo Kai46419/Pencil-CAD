@@ -353,3 +353,63 @@ schon ignorierten `build/`), `SheetKit/target/` neu in .gitignore. SolidCraft is
 46. **scripts/build-sheet-ios.sh:~45-48** – bei zu alter Toolchain `rustup default stable`: ändert die **globale** Standard-
     Toolchain des Benutzers. Schonender: `rustup update stable` und dann `cargo +stable …` bzw. `RUSTUP_TOOLCHAIN=stable`
     nur für dieses Skript. Schwere: NIEDRIG. Status: offen.
+
+## Runde Rebase – 18:18 UTC (Commit 76b7542 auf b0f3a31; Upstream `b0f3a31~10..b0f3a31` gegen unsere Einhängepunkte)
+
+Upstream hat in diesem Bereich nur **ModelStore.swift, FeatureHistory.swift, ToolRail.swift** angefasst (ModelRibbon, ModelCommand,
+Viewport, WorkspaceView, CommandSearch, ModelStartBridge: keine Änderung). Geprüft:
+
+**Kritisch: keine.**
+- **Neue erschöpfende `switch`es:** keine über `ToolGroup`, `ModelCommandID` oder `FeatureKind`. Die neuen `switch`es in
+  ShapeLibrary/ShapeGenerator/DrawingAngles laufen über eigene Enums. Unsere Fälle (`ToolGroup.sheetMetal`, 11 `sheet*`-IDs,
+  `FeatureKind.sheetMetal`) sind in allen vorhandenen `switch`es enthalten (ToolRail 3×, ModelRibbon, ModelStartBridge,
+  FeatureHistory `systemImage` und `applyFeature`).
+- **Signaturen/Initialisierer:** `SceneBody` hat keine neuen Pflichtfelder (nur `static defaultColor`, `legacyDefaultColor`,
+  `isLegacyDefault`). `SnapshotBodyMeta`/`BodyMeta` unverändert, unsere Zusätze (`sheetMetal:`) sitzen nach dem Rebase
+  noch an der richtigen Stelle (FeatureHistory.swift Snapshot-Init, ModelStore.swift Speichern/Laden).
+  `carryingBodyDetails` übernimmt `body.sheetMetal` weiterhin im Zweig „gleiche Körperzahl“ (FeatureHistory.swift:801).
+  `LineGroup`/`FillGroup`, `Mesh.trianglePoints`/`centroid`, `SketchPlane`, `StoredSketch` unverändert. ToolRail: nur
+  Formgenerator-Einträge, unsere `case .sheetMetal`-Zeilen sind unberührt.
+
+47. **App/Sheet/SheetModelReplay.swift:422-423** – neue Blechkörper (Modus `create`) bekommen
+    `SceneBody.palette[number % count]`. Upstream (dc7d933, Kai Punkt 9) gibt **jedem neuen Körper** die SolidCraft-Standardfarbe
+    `SceneBody.defaultColor` (mattes Grau); die Palette ist nur noch für getrennte Teile. Folge: der 2., 3. … Blechkörper wird
+    blau/orange/grün statt grau. Vorschlag: `color: SceneBody.defaultColor` (oder `newBody(_:name:)` benutzen).
+    Schwere: MITTEL (sichtbare Abweichung von Kais Vorgabe). Status: offen.
+48. **FeatureHistory.swift:784-792 (Upstream 16d105c) × Blech-Modus `copy`** – ändert sich die Körperzahl beim Nachbau,
+    übernimmt `carryingBodyDetails` nur noch Farbe und Oberfläche, **nicht** Name, Sichtbarkeit, Ordner. Unser Blech-`copy`
+    (Kopieren/Spiegeln eines Blechkörpers) hängt einen Körper an; wird ein solches Feature im Verlauf umgestellt/abgeschaltet,
+    verlieren alle Körper ihre Namen/Ordner. Kein Fehler unseres Codes, aber wir lösen den Pfad häufiger aus. Hinweis an den
+    Upstream-Thread. Schwere: NIEDRIG. Status: Hinweis.
+
+### Abgleich aller früher offenen Befunde (Stand 18:18, gegen Commit 76b7542)
+
+| Nr. | Thema | Status |
+|---|---|---|
+| 1 | run_script Fehlerpräfix doppelt | **erledigt** (lib.rs:56 gibt nur `e` weiter) |
+| 2 | Header ohne Nullability | offen, NIEDRIG (nur Hinweis) |
+| 3 | importBody `name` | erledigt (Modell nutzt Alias `$src`, nicht den Namen) |
+| 8, 28 | Grundflansch mehrere Bereiche | **erledigt** (genau ein Bereich, Hinweis an den Benutzer, SheetUIFlange.swift:218-225) |
+| 9 | periodischer Spline abgetastet | offen, NIEDRIG (akzeptiert) |
+| 10 | `sheetRun` übernimmt fremde Vorschau | offen, NIEDRIG |
+| 13 | Generator überschreibt COMMANDS.md | **erledigt** (examples/commands.rs → `COMMANDS-RAW.md`, Warnhinweis) |
+| 24 | Falten: `fixed`-Rückfall Flächenschwerpunkt | **erledigt** (kein `centroid` mehr); `points` statt `sketch+curve` bleibt als Hinweis |
+| 27 | alte Vorschau bei Fehlwert | **erledigt** (`dropPreview()` vor den Fehlertexten) |
+| 29, 43 | Perforationslöcher | **erledigt** (psk.rs:88-92 `psk.perforation_holes` → `{holes:[{center,radius,field}]}`, FlatPatternView zeichnet ab 1 px) |
+| 30 | helle Biegefarben ungenutzt | offen, NIEDRIG (`dark: true` fest; Hintergrund fest dunkel → derzeit korrekt) |
+| 33 | Biegeradius feste Zahl | **erledigt** (`bendRadius: Double?`, nil = „Thickness“) |
+| 34 | Regelname bei vorhandener Regel editierbar | **teilweise erledigt** (Name nur bei „Neue Regel…“); „Regel löschen“ weiter nur bei > 1 Regel – NIEDRIG |
+| 38 | Innenhaut-Kanten als „offen“ | **erledigt** (`skinCandidates`, SheetUIConvert.swift) |
+| 39 | modellierte Biegung nur über eine Kante antippbar | **erledigt** (Biegefläche/Übergangskanten → `bendFace`, SheetUIConvert.swift:255/328) |
+| 40 | Dicken-Heuristik 0,2·√A | offen, NIEDRIG (Hinweis) |
+| 41 | doppelte Plattenerkennung / Dokument-Spaltregel | **erledigt** (`detectsPlate` → `ModelStore.sheetIsPlate`, `gap:` an Modell, `gapRule` entfernt) |
+| 42 | Bearbeiten aus der Zeitleiste | **erledigt** (`SheetEditableDriver`: `featureKinds [.sheetMetal]`, `load` je Befehl, `rows`/`commit`/`cancel`; `preview` liefert beim Bearbeiten `nil` (CommandSupport.swift:62-66) → keine Zusatz-Perforation; Workspace.swift:2425 probiert alle Treiber per `continue`) |
+| 44 | 15-s-Zeitlimit auch beim Nachbau des Verlaufs | **offen, MITTEL** (SheetWorker.timeLimit gilt weiter überall) |
+| 45 | „In Blech umwandeln“ fehlt unter Ändern | offen, NIEDRIG |
+| 46 | `rustup default stable` global | offen, NIEDRIG |
+| 47 | Farbe neuer Blechkörper | **offen, MITTEL** (neu) |
+
+## Runde 11 – 18:24 UTC (App/Sheet/SheetModelReplay.swift, nicht committet)
+
+- **47 erledigt (18:24)** – neue Blechkörper bekommen `SceneBody.defaultColor` (SheetModelReplay.swift:423). Keine weitere
+  `palette[...]`-Verwendung in App/Sheet.
