@@ -364,7 +364,9 @@ final class ModelStore: ObservableObject {
     @Published private(set) var history: [HistoryEntry] = []
     @Published private(set) var future: [HistoryEntry] = []
     private var previewBodies: [SceneBody]?
-    /// Vorschau ohne flächige Hervorhebung der gewählten Körper (Boolesch: Ergebnis bleibt erkennbar)
+    /// Vorschau ohne flächige Hervorhebung der gewählten Körper (Boolesch: Ergebnis bleibt erkennbar). Eine solche
+    /// Vorschau wird nie mit commitPreview übernommen (Werkzeuge nur ausgeblendet, kein Verlaufseintrag), sondern
+    /// mit applyBoolean (MoldTools.swift)
     private var plainPreview = false
     /// Parametrischer Verlauf: Features in Reihenfolge, Zeitleiste unten (FeatureHistory.swift, TimelineBar.swift)
     @Published var features: [Feature] = []
@@ -994,6 +996,12 @@ final class ModelStore: ObservableObject {
     }
 
     func commitPreview() {
+        // Boolesche Vorschau (plain): verwerfen statt mit ausgeblendeten Werkzeugen und ohne Verlauf übernehmen
+        // (z. B. beim Schließen des Projekts); „Fertig“ rechnet sie mit applyBoolean neu
+        if plainPreview, previewBodies != nil {
+            dropPreview()
+            return
+        }
         guard let preview = previewBodies, let name = previewName else { return }
         previewBodies = nil
         previewName = nil
