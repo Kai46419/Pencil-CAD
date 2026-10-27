@@ -572,7 +572,8 @@ enum PatternRectDriver: MainCommandDriver {
     static func mainValueKey(_ cmd: ModelCommand) -> String? { "spacing" }
 
     @MainActor static func panel(_ cmd: ModelCommand, _ ws: Workspace) -> AnyView {
-        AnyView(PatternRectRows(cmd: cmd, workspace: ws))
+        // Abstand, Anzahl, Winkel: kompakter Ziffernblock statt Bildschirmtastatur
+        AnyView(PatternRectRows(cmd: cmd, workspace: ws).environment(\.usesCompactKeypad, true))
     }
 }
 
@@ -655,7 +656,8 @@ enum PatternCircularDriver: MainCommandDriver {
     static func mainValueKey(_ cmd: ModelCommand) -> String? { "angle" }
 
     @MainActor static func panel(_ cmd: ModelCommand, _ ws: Workspace) -> AnyView {
-        AnyView(PatternCircularRows(cmd: cmd, workspace: ws))
+        // Abstand, Anzahl, Winkel: kompakter Ziffernblock statt Bildschirmtastatur
+        AnyView(PatternCircularRows(cmd: cmd, workspace: ws).environment(\.usesCompactKeypad, true))
     }
 }
 

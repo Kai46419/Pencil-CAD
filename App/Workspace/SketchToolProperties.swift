@@ -207,8 +207,8 @@ private struct SketchToolFields: View {
         case .offset: OffsetFields(sketch: sketch, options: options)
         case .scale: scaleFields
         case .mirror: mirrorFields
-        case .rectPattern: RectPatternFields(sketch: sketch)
-        case .circPattern: circPatternFields
+        case .rectPattern: RectPatternFields(sketch: sketch).environment(\.usesCompactKeypad, true)
+        case .circPattern: circPatternFields.environment(\.usesCompactKeypad, true)
         case .measure: measureFields
         default: EmptyView()
         }

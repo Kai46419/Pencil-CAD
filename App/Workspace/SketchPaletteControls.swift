@@ -314,28 +314,23 @@ struct PaletteNumberRow: View {
     let set: (Double) -> Void
 
     @Environment(\.variableValues) private var variables
+    @Environment(\.usesCompactKeypad) private var usesKeypad
     @State private var text = ""
     @State private var error: String?
     @FocusState private var isFocused: Bool
+    /// Ziffernblock offen (nur mit `usesCompactKeypad`)
+    @State private var showsPad = false
+    /// Nach „abc“: echtes Textfeld mit Bildschirmtastatur (Formeln, Variablen)
+    @State private var typesWithKeyboard = false
 
     var body: some View {
         PaletteLabeled(title: title) {
             PaletteFieldBox(isLocked: false, hasError: error != nil) {
-                TextField(title, text: $text)
-                    .focused($isFocused)
-                    .keyboardType(.numbersAndPunctuation)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                    .multilineTextAlignment(.trailing)
-                    .monospacedDigit()
-                    .onSubmit(commit)
-                    .onChange(of: isFocused) { _, focused in
-                        if !focused { commit() }
-                    }
-                    .onChange(of: value) { _, newValue in
-                        if !isFocused { text = PaletteExpression.shown(newValue, unit: unit) }
-                    }
-                    .onAppear { text = PaletteExpression.shown(value, unit: unit) }
+                if usesKeypad && !typesWithKeyboard {
+                    padField
+                } else {
+                    textField
+                }
                 if !unit.isEmpty {
                     Text(PaletteExpression.unitSymbol(unit))
                         .font(.caption)
@@ -345,6 +340,68 @@ struct PaletteNumberRow: View {
             }
         }
         .help(error ?? "")
+        .onChange(of: value) { _, newValue in
+            if !isFocused && !showsPad { text = PaletteExpression.shown(newValue, unit: unit) }
+        }
+        .onAppear { text = PaletteExpression.shown(value, unit: unit) }
+    }
+
+    private var textField: some View {
+        TextField(title, text: $text)
+            .focused($isFocused)
+            .keyboardType(.numbersAndPunctuation)
+            .autocorrectionDisabled()
+            .textInputAutocapitalization(.never)
+            .multilineTextAlignment(.trailing)
+            .monospacedDigit()
+            .onSubmit(commit)
+            .onChange(of: isFocused) { _, focused in
+                if !focused {
+                    commit()
+                    typesWithKeyboard = false
+                }
+            }
+    }
+
+    /// Feld als Knopf: öffnet den Ziffernblock daneben, das Feld zeigt dabei die Eingabe mit
+    private var padField: some View {
+        Button {
+            showsPad = true
+        } label: {
+            Text(text.isEmpty ? " " : text)
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .frame(maxWidth: .infinity, minHeight: PaletteStyle.iconButton - 4, alignment: .trailing)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityValue(text)
+        .popover(isPresented: $showsPad, arrowEdge: .trailing) {
+            CompactKeypad(title: title, text: $text, unitSymbol: PaletteExpression.unitSymbol(unit),
+                          step: stepped, onDone: { showsPad = false }, onKeyboard: switchToKeyboard)
+        }
+        .onChange(of: showsPad) { _, shown in
+            if !shown && !typesWithKeyboard { commit() }
+        }
+    }
+
+    /// Schritt um eine Einheit (Länge: eine Projekteinheit) vom aktuell eingegebenen Wert aus
+    private func stepped(_ direction: Int) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        let current: Double? = trimmed.isEmpty ? value
+            : (try? PaletteExpression.evaluate(trimmed, unit: unit, variables: variables))
+        guard let current else { return nil }
+        let size = unit == "mm" ? LengthUnit.current.millimeters : 1
+        return PaletteExpression.shown(current + Double(direction) * size, unit: unit)
+    }
+
+    private func switchToKeyboard() {
+        typesWithKeyboard = true
+        showsPad = false
+        // Erst nach dem Schließen des Popovers fokussieren, sonst bleibt die Tastatur zu
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { isFocused = true }
     }
 
     private func commit() {
@@ -532,15 +589,20 @@ struct CountRow: View {
     @Binding var value: Int
     let range: ClosedRange<Int>
 
+    @Environment(\.usesCompactKeypad) private var usesKeypad
+    /// Ziffernblock offen (nur mit `usesCompactKeypad`) und seine Eingabe
+    @State private var showsPad = false
+    @State private var padText = ""
+
     var body: some View {
         PaletteLabeled(title: title) {
             HStack(spacing: PaletteStyle.spacing) {
                 stepButton("minus", enabled: value > range.lowerBound) { value = max(range.lowerBound, value - 1) }
-                Text("\(value)")
-                    .font(.callout.weight(.semibold).monospacedDigit())
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                    .frame(maxWidth: .infinity)
+                if usesKeypad {
+                    padValue
+                } else {
+                    valueText
+                }
                 stepButton("plus", enabled: value < range.upperBound) { value = min(range.upperBound, value + 1) }
             }
         }
@@ -554,6 +616,44 @@ struct CountRow: View {
             @unknown default: break
             }
         }
+    }
+
+    private var valueText: some View {
+        Text("\(value)")
+            .font(.callout.weight(.semibold).monospacedDigit())
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+            .frame(maxWidth: .infinity)
+    }
+
+    /// Wert antippen: Ziffernblock daneben (statt nur Minus/Plus)
+    private var padValue: some View {
+        Button {
+            padText = "\(value)"
+            showsPad = true
+        } label: {
+            Text(showsPad ? (padText.isEmpty ? " " : padText) : "\(value)")
+                .font(.callout.weight(.semibold).monospacedDigit())
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .frame(maxWidth: .infinity, minHeight: PaletteStyle.iconButton)
+                .background(PaletteStyle.field,
+                            in: RoundedRectangle(cornerRadius: PaletteStyle.controlRadius, style: .continuous))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $showsPad, arrowEdge: .trailing) {
+            CompactKeypad(title: title, text: $padText, isInteger: true, step: steppedCount,
+                          onDone: { showsPad = false })
+        }
+        .onChange(of: showsPad) { _, shown in
+            if !shown, let typed = Int(padText) { value = min(range.upperBound, max(range.lowerBound, typed)) }
+        }
+    }
+
+    private func steppedCount(_ direction: Int) -> String? {
+        let current = Int(padText) ?? value
+        return "\(min(range.upperBound, max(range.lowerBound, current + direction)))"
     }
 
     private func stepButton(_ systemImage: String, enabled: Bool, action: @escaping () -> Void) -> some View {
