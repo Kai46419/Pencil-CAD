@@ -122,9 +122,26 @@ struct SceneBody {
         return body
     }
 
+    /// Standardfarbe neuer Körper wie bei SolidCraft (Kai, Punkt 9): mittleres Grau sRGB (152, 156, 162) aus
+    /// dem dunklen Design von SolidCraft (assets/styles/ui/palettes.rs, Tokens::dark, t.body), linear für Metal.
+    /// Matt (Rauheit 1, ohne Spiegelung) über SceneBody.appearance, solange keine Oberfläche gewählt ist.
+    static let defaultColor: SIMD3<Float> = SketchTheme.Metal.body
+
+    /// Bisherige Standardfarbe (fast Weiß). Körper ohne Oberfläche und Werkstoff in dieser Farbe zeigen
+    /// stattdessen die neue Standardfarbe (SceneBody.appearance), selbst gewählte Farben bleiben.
+    static let legacyDefaultColor: SIMD3<Float> = [0.86, 0.87, 0.89]
+
+    /// Farbe noch die alte Standardfarbe (gespeicherte Werte mit Rundung)?
+    static func isLegacyDefault(_ color: SIMD3<Float>) -> Bool {
+        let d: SIMD3<Float> = simd_abs(color - legacyDefaultColor)
+        return d.max() < 0.003
+    }
+
+    /// Farben für getrennte Teile (Teilen, Einzelkörper, Import), damit die Stücke unterscheidbar sind;
+    /// das erste Stück in der Standardfarbe.
     static let palette: [SIMD3<Float>] = [
-        [0.86, 0.87, 0.89], [0.36, 0.55, 0.85], [0.85, 0.52, 0.30], [0.40, 0.70, 0.45],
-        [0.80, 0.38, 0.45], [0.62, 0.48, 0.80], [0.85, 0.75, 0.35], [0.30, 0.30, 0.33],
+        defaultColor, [0.36, 0.55, 0.85], [0.85, 0.52, 0.30], [0.40, 0.70, 0.45],
+        [0.80, 0.38, 0.45], [0.62, 0.48, 0.80], [0.85, 0.75, 0.35], [0.25, 0.60, 0.62],
     ]
 }
 
@@ -1396,7 +1413,7 @@ final class ModelStore: ObservableObject {
             let parts: [PCKShape] = joinTouching ? solid.separatedSolids() : solid.separatedParts()
             for part in parts {
                 result.append(SceneBody(shape: part, name: "Körper \(result.count + 1)",
-                                        color: SceneBody.palette[result.count % SceneBody.palette.count], sketchID: sketch))
+                                        color: SceneBody.defaultColor, sketchID: sketch))
             }
             return result
         case .union:
@@ -1559,7 +1576,7 @@ final class ModelStore: ObservableObject {
     func newBody(_ shape: PCKShape, name: String, sketch: UUID? = nil) -> SceneBody {
         let number = bodies.count + 1
         return SceneBody(shape: shape, name: "\(name) \(number)",
-                         color: SceneBody.palette[bodies.count % SceneBody.palette.count], sketchID: sketch)
+                         color: SceneBody.defaultColor, sketchID: sketch)
     }
 
     func requireKernel() -> Bool {
@@ -2165,7 +2182,7 @@ final class ModelStore: ObservableObject {
                 body.textLabel = meta.textLabel
                 return body
             }
-            return SceneBody(shape: shape, name: "Körper \(index + 1)", color: SceneBody.palette[index % SceneBody.palette.count])
+            return SceneBody(shape: shape, name: "Körper \(index + 1)", color: SceneBody.defaultColor)
         }
     }
 

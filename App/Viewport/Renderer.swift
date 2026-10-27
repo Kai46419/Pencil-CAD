@@ -583,7 +583,9 @@ final class Renderer: NSObject, MTKViewDelegate {
         // Kanten wie bei Shapr3D als feine dunkle Linien mit fester Bildschirmbreite. Direkt auf dem Hintergrund
         // (Drahtgitter, Röntgen) im dunklen Design hell, sonst wären sie auf Anthrazit unsichtbar.
         let dark = AppTheme.isDark
-        let edgeOnBody = SIMD3<Float>(0.07, 0.075, 0.09)
+        // Auf Körpern wie bei SolidCraft fast schwarz (body_edge sRGB 16, 16, 18), damit die Kanten auf der grauen
+        // Standardfarbe (SceneBody.defaultColor) auch auf Schattenseiten klar lesbar bleiben
+        let edgeOnBody: SIMD3<Float> = SketchTheme.Metal.bodyEdge
         let edgeOnBackground: SIMD3<Float> = dark ? SketchTheme.Metal.edgeOnBackground : edgeOnBody
         func drawEdges(depth: MTLDepthStencilState, onBackground: Bool = false) {
             let edgeColor: SIMD3<Float> = onBackground ? edgeOnBackground : edgeOnBody

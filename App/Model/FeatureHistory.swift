@@ -1057,7 +1057,7 @@ extension ModelStore {
             var result = state
             let parts: [PCKShape] = separate ? solid.separatedParts() : solid.separatedSolids()
             for part in parts {
-                let color = SceneBody.palette[result.count % SceneBody.palette.count]
+                let color = SceneBody.defaultColor
                 result.append(SceneBody(shape: part, name: "Körper \(result.count + 1)", color: color, sketchID: sketch))
             }
             return result
@@ -1065,7 +1065,7 @@ extension ModelStore {
             var chosen = state.indices.last
             if let target, state.indices.contains(target) { chosen = target }
             guard let index = chosen else {
-                let color = SceneBody.palette[state.count % SceneBody.palette.count]
+                let color = SceneBody.defaultColor
                 let body = SceneBody(shape: solid, name: "Körper \(state.count + 1)", color: color, sketchID: sketch)
                 return state + [body]
             }
@@ -1123,7 +1123,7 @@ extension ModelStore {
             shape = z < x ? PCKShape.torus(center: center, axis: [0, 0, 1], majorRadius: x / 2, minorRadius: z / 2) : nil
         }
         guard let shape else { throw FeatureError("Maße ungültig.") }
-        let color = SceneBody.palette[state.count % SceneBody.palette.count]
+        let color = SceneBody.defaultColor
         let body = SceneBody(shape: shape, name: "\(primitive.rawValue) \(state.count + 1)", color: color)
         return state + [body]
     }
@@ -1401,7 +1401,7 @@ extension ModelStore {
 
     private static func snapshotBody(_ shape: PCKShape, meta: SnapshotBodyMeta, number: Int) -> SceneBody {
         guard meta.color.count == 3 else {
-            let color = SceneBody.palette[number % SceneBody.palette.count]
+            let color = SceneBody.defaultColor
             return SceneBody(shape: shape, name: meta.name, color: color)
         }
         let color = SIMD3<Float>(meta.color[0], meta.color[1], meta.color[2])

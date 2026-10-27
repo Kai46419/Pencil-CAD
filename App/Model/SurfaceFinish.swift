@@ -358,11 +358,14 @@ extension SceneBody {
                 return SurfaceFinish.customAppearance(color: color, gloss: custom.gloss, metallic: custom.metallic)
             }
         }
+        // Ohne Oberfläche und Werkstoff: die alte Standardfarbe (fast Weiß) als neue Standardfarbe zeigen
+        let legacy: Bool = finish == nil && material == nil && SceneBody.isLegacyDefault(color)
+        let base: SIMD3<Float> = legacy ? SceneBody.defaultColor : color
         switch bodyMaterial?.gloss ?? 0 {
-        case 1: return SurfaceAppearance(albedo: color, roughness: 0.45)
-        case 2: return SurfaceAppearance(albedo: color, roughness: 0.32, metallic: true)
+        case 1: return SurfaceAppearance(albedo: base, roughness: 0.45)
+        case 2: return SurfaceAppearance(albedo: base, roughness: 0.32, metallic: true)
         // Matt wie bisher (Glanzstufe 0 = Rauheit 1)
-        default: return SurfaceAppearance(albedo: color, roughness: 1)
+        default: return SurfaceAppearance(albedo: base, roughness: 1)
         }
     }
 

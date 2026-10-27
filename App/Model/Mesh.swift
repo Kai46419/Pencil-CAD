@@ -6,7 +6,7 @@ import simd
 struct Vertex {
     var position: SIMD3<Float>
     var normal: SIMD3<Float>
-    var color: SIMD3<Float> = SIMD3(0.62, 0.66, 0.72)
+    var color: SIMD3<Float> = SceneBody.defaultColor
 }
 
 /// Eine Fläche eines Körpers in der Szene.
@@ -37,7 +37,7 @@ struct Mesh {
 
     init() {}
 
-    init(_ kernelMesh: PCKMesh, body: Int, color: SIMD3<Float> = SIMD3(0.62, 0.66, 0.72)) {
+    init(_ kernelMesh: PCKMesh, body: Int, color: SIMD3<Float> = SceneBody.defaultColor) {
         let floats: [Float] = kernelMesh.vertexData.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
         vertices = stride(from: 0, to: floats.count - 5, by: 6).map { i in
             Vertex(position: SIMD3(floats[i], floats[i + 1], floats[i + 2]),
