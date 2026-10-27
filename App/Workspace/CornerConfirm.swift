@@ -11,7 +11,7 @@ struct CornerConfirm: View {
     @ObservedObject var workspace: Workspace
     @ObservedObject var model: ModelStore
     @ObservedObject var command: ModelCommand
-    @AppStorage(storageKey) private var isOn = true
+    @AppStorage(Self.storageKey) private var isOn = true
 
     var body: some View {
         if isOn {

@@ -5,6 +5,8 @@ import SwiftUI
 // Akzentrand und getöntem Grund. Antippen macht das Feld aktiv (das nächste Antippen im Viewport füllt es),
 // „×“ leert es. Alle Treffer ≥ 44 pt.
 
+// label ruft PickNames (Main Actor) auch außerhalb von body auf: unter Xcode 15 ist View sonst nicht isoliert
+@MainActor
 struct PickChip: View {
     let input: PickInput
     let isActive: Bool

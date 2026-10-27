@@ -77,7 +77,7 @@ enum CombineDriver: MainCommandDriver {
 
     @MainActor static func refresh(_ cmd: ModelCommand, _ ws: Workspace) -> String? {
         let model = ws.model
-        let kind = kind(cmd)
+        let kind = Self.kind(cmd)
         if ws.tool != .boolean(kind) { ws.tool = .boolean(kind) }
         ws.booleanKeepsTools = cmd.isOn("keepTools", default: false)
         let target = CommandPicks.bodies(cmd, "target", model: model)

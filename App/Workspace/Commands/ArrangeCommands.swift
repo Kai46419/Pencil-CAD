@@ -70,7 +70,7 @@ enum MoveCommand {
     static func refresh(_ cmd: ModelCommand, _ ws: Workspace) -> String? {
         let model = ws.model
         if cmd.isOn("sketch", default: false) {
-            let offset = offset(cmd)
+            let offset = Self.offset(cmd)
             if offset != model.moveOffset { model.setMoveOffset(offset) }
             return nil
         }
@@ -113,7 +113,7 @@ enum MoveCommand {
             putOffset(to - from, cmd)
             model.setMoveOffset(to - from)
         default:
-            let offset = offset(cmd)
+            let offset = Self.offset(cmd)
             guard offset != .zero else {
                 model.setMoveOffset(.zero)
                 return "An einem Pfeil ziehen oder X/Y/Z eingeben."
@@ -153,7 +153,7 @@ enum MoveCommand {
             guard let found = CommandCache.anchors[ObjectIdentifier(cmd)]?.origin else { return [] }
             center = found
         }
-        let offset = offset(cmd)
+        let offset = Self.offset(cmd)
         let axes: [(SIMD3<Double>, SIMD3<Float>)] = [
             ([1, 0, 0], SIMD3(0.9, 0.25, 0.25)), ([0, 1, 0], SIMD3(0.25, 0.7, 0.3)), ([0, 0, 1], SIMD3(0.2, 0.4, 0.95)),
         ]
@@ -165,7 +165,7 @@ enum MoveCommand {
 
     static func drag(_ kind: HandleKind, _ value: Double, _ cmd: ModelCommand, _ ws: Workspace) {
         guard case .move(let axis) = kind, (0..<3).contains(axis) else { return }
-        var offset = offset(cmd)
+        var offset = Self.offset(cmd)
         guard offset[axis] != value else { return }
         offset[axis] = value
         putOffset(offset, cmd)
