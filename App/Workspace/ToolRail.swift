@@ -301,7 +301,10 @@ struct ToolRail: View {
         return HStack(alignment: .top, spacing: 12) {
             ViewThatFits(in: .vertical) {
                 list
+                // Nur so breit wie die Leiste: sonst nimmt die ScrollView die ganze Bildschirmbreite ein und fängt
+                // jeden Strich auf der Zeichenfläche als Scrollen ab
                 ScrollView(showsIndicators: false) { list }
+                    .fixedSize(horizontal: true, vertical: false)
             }
             if let openEntry, let index = entries.firstIndex(where: { $0.id == openEntry }),
                let items = entries[index].flyout {
@@ -786,6 +789,7 @@ struct ToolRail: View {
             ribbonColumn(sizes[1])
             ribbonColumn(smallest)
             ScrollView(showsIndicators: false) { ribbonColumn(smallest) }
+                .fixedSize(horizontal: true, vertical: false)
         }
         .coordinateSpace(name: "ribbon")
         // Größe der Leiste samt Beschriftungen messen: das Untermenü beginnt rechts daneben

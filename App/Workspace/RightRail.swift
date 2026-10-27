@@ -178,6 +178,7 @@ struct RightRail: View {
             ViewThatFits(in: .vertical) {
                 sketchColumn
                 ScrollView(showsIndicators: false) { sketchColumn }
+                    .fixedSize(horizontal: true, vertical: false)
             }
         } else {
             // Passt die Säule nicht in die Höhe (iPad 11" quer): enger, sonst scrollen (dann ohne Schilder,
@@ -186,6 +187,7 @@ struct RightRail: View {
                 mainColumn(spacing: 10, showsLabels: true)
                 mainColumn(spacing: 6, showsLabels: true)
                 ScrollView(showsIndicators: false) { mainColumn(spacing: 6, showsLabels: false) }
+                    .fixedSize(horizontal: true, vertical: false)
             }
         }
     }
