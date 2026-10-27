@@ -138,8 +138,6 @@ final class ViewportView: MTKView {
     private var hoverPick: HoverPick?
     /// Ebenenwahl: Standardebene unter dem schwebenden Stift (hervorgehoben)
     private var hoveredBasePlane: Int?
-    /// Hüllquader aller Körper für die Lage der Ebenenfelder (je Modellstand zwischengespeichert)
-    private var squareBoundsCache: (revision: Int, bounds: (min: SIMD3<Float>, max: SIMD3<Float>)?)?
     /// Messen „Punkt zu Punkt“: Leitlinie zum schwebenden Stift, wenn der zweite Punkt einrastet
     private var measureHoverGuide: MeasureGuide?
     /// Ebene der zuletzt überfahrenen Fläche (der Kernel wird nicht bei jeder Stiftbewegung gefragt)
@@ -541,9 +539,9 @@ final class ViewportView: MTKView {
                 let h = square.half
                 let corners = [square.center - square.u * h - square.v * h, square.center + square.u * h - square.v * h,
                                square.center + square.u * h + square.v * h, square.center - square.u * h + square.v * h]
-                // Kai: deutlich sichtbar; unter dem Stift blau hervorgehoben
+                // Unter dem Stift blau hervorgehoben
                 let color: SIMD4<Float> = hoveredBasePlane == square.index
-                    ? SIMD4(0.2, 0.5, 0.98, 0.55) : SIMD4(0.28, 0.33, 0.42, 0.42)
+                    ? SIMD4(0.2, 0.5, 0.98, 0.55) : SIMD4(0.28, 0.28, 0.29, 0.38)
                 fills.append(FillGroup(triangles: [0, 1, 2, 0, 2, 3].map { corners[$0] }, color: color))
             }
         }
@@ -1675,44 +1673,17 @@ final class ViewportView: MTKView {
     /// Antippbare Felder der Standardebenen bei der Ebenenwahl, wie bei Shapr3D klein und neben dem Ursprung:
     /// XY vorn rechts, XZ rechts oben, YZ vorn oben (Mittelpunkt, Richtungen, halbe Kantenlänge).
     /// Die Größe richtet sich nach dem Bildschirm (etwa 80 Punkte), damit die Felder bei jedem Zoom gut zu treffen sind.
-    /// Sind schon Körper da (Kai), werden die Felder größer und liegen neben den Körpern statt verdeckt am Ursprung.
+    /// Kai: immer klein und mittig am Ursprung, ohne Beschriftung – auch wenn schon Körper da sind.
     private var basePlaneSquares: [(index: Int, center: SIMD3<Float>, u: SIMD3<Float>, v: SIMD3<Float>, half: Float)] {
         let perPoint = renderer?.camera.worldUnitsPerPoint(at: .zero, viewHeight: Float(max(bounds.height, 1))) ?? 0.3
+        let half = 40 * perPoint
+        let offset = half * 1.8
         let sides: [SIMD2<Float>] = [[1, -1], [1, 1], [-1, 1]]
-        let box = squareBodyBounds
-        var half: Float = 40 * perPoint
-        if let box {
-            let extent: Float = simd_reduce_max(box.max - box.min)
-            half = max(half, extent * 0.35)
-        }
-        let size = half
         return Self.basePlanes.indices.map { index -> (index: Int, center: SIMD3<Float>, u: SIMD3<Float>, v: SIMD3<Float>, half: Float) in
             let plane = Self.basePlanes[index]
-            let side = sides[index]
-            var a: Float = side.x * size * 1.8
-            var b: Float = side.y * size * 1.8
-            if let box {
-                // Ausdehnung der Körper in dieser Ebene: Feld schräg daneben, außerhalb des Körperumrisses
-                let low: SIMD3<Float> = box.min, high: SIMD3<Float> = box.max
-                let uLow: Float = min(simd_dot(low, plane.u), simd_dot(high, plane.u), 0)
-                let uHigh: Float = max(simd_dot(low, plane.u), simd_dot(high, plane.u), 0)
-                let vLow: Float = min(simd_dot(low, plane.v), simd_dot(high, plane.v), 0)
-                let vHigh: Float = max(simd_dot(low, plane.v), simd_dot(high, plane.v), 0)
-                a = side.x > 0 ? uHigh + size * 1.15 : uLow - size * 1.15
-                b = side.y > 0 ? vHigh + size * 1.15 : vLow - size * 1.15
-            }
-            let center: SIMD3<Float> = plane.u * a + plane.v * b
-            return (index, center, plane.u, plane.v, size)
+            let center = plane.u * sides[index].x * offset + plane.v * sides[index].y * offset
+            return (index, center, plane.u, plane.v, half)
         }
-    }
-
-    /// Hüllquader der sichtbaren Körper (nil = keine Körper).
-    private var squareBodyBounds: (min: SIMD3<Float>, max: SIMD3<Float>)? {
-        guard let model else { return nil }
-        if let cache = squareBoundsCache, cache.revision == model.revision { return cache.bounds }
-        let box = model.mesh.bounds
-        squareBoundsCache = (model.revision, box)
-        return box
     }
 
     /// Konstruktionsebenen zum Antippen; die Standardebenen zeichnet updateLines als Felder.
@@ -1729,13 +1700,6 @@ final class ViewportView: MTKView {
                                              v: SIMD3<Float>(frame.v), halfSize: half * 0.6,
                                              color: SIMD3(0.95, 0.6, 0.2)))
                 labels.append((item.name, SIMD3<Float>(item.origin + (frame.u + frame.v) * Double(half) * 0.5)))
-            }
-        }
-        // Ebenenwahl: Felder der Standardebenen beschriften (Oben, Vorne, Rechts – je nach Blickrichtung)
-        if sketch.isActive, sketch.isChoosingPlane {
-            for square in basePlaneSquares {
-                let corner: SIMD3<Float> = square.center + (square.u + square.v) * (square.half * 0.62)
-                labels.append((facingSide(ofBasePlane: square.index).rawValue, corner))
             }
         }
         // Vorschau der Konstruktionsebene, die „Fertig“ erstellt

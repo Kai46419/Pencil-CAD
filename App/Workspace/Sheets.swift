@@ -308,7 +308,7 @@ enum HelpTopic: String, CaseIterable, Identifiable {
                     + "(Vorlagen FDM 0,2 · Harz 0,1) dickt das Werkzeug vor dem Abziehen auf.",
                 "Kombinieren › Negativform: Körper antippen – ein Block mit Rand (Standard 10 mm) entsteht um ihn, der Körper "
                     + "wird mit Spiel herausgeschnitten, auf Wunsch in zwei Hälften geteilt. Der Körper bleibt erhalten.",
-                "Neue Skizze: Die Ebenen Oben, Vorne, Rechts liegen beschriftet und größer neben den Körpern, unten gibt "
+                "Neue Skizze: Die Ebenenfelder liegen klein und mittig am Ursprung, unten gibt "
                     + "es Kacheln dafür (auch für eigene Konstruktionsebenen). Ebene Körperflächen leuchten unter dem "
                     + "Stift auf – antippen und darauf skizzieren.",
                 "Gewinde: Kernloch jetzt nach Bohrertabelle (ISO 2306, z. B. M6 → Ø 5,0; UNC/UNF/G/NPT nach üblichen "
