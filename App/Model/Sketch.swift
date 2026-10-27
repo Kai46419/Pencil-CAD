@@ -1389,7 +1389,8 @@ final class SketchController: ObservableObject {
     /// Stift drücken bzw. doppeltippen beim Schweben: liegt ein Fangpunkt (Ende, Mitte, Zentrum, Schnittpunkt,
     /// Hilfspunkt) unter dem Stift, wird er gemerkt. false = nichts in der Nähe.
     func captureHovered(at p: Point2, tolerance: Double) -> Bool {
-        let kinds: Set<SnapKind> = [.endpoint, .midpoint, .center, .intersection]
+        // Auch Körperecken und Kantenmitten (3D-Leitpunkte): auf einer Körperfläche gibt es anfangs nur diese
+        let kinds: Set<SnapKind> = [.endpoint, .midpoint, .center, .intersection, .modelPoint]
         guard snapIndex.snap(p, tolerance: tolerance * 1.5, kinds: kinds, extra: marks, gridStep: 0).kind != nil else {
             return false
         }
@@ -1400,7 +1401,7 @@ final class SketchController: ObservableObject {
     /// Stift über einem Punkt drücken: Fangpunkt (Ende, Mitte, Zentrum, Schnittpunkt, Hilfspunkt) merken.
     /// Zwei gemerkte Punkte ergeben ihre Mitte als neuen Hilfspunkt (Dreieck), der selbst wieder fangbar ist.
     func capturePoint(at p: Point2, tolerance: Double) {
-        let kinds: Set<SnapKind> = [.endpoint, .midpoint, .center, .intersection, .onCurve]
+        let kinds: Set<SnapKind> = [.endpoint, .midpoint, .center, .intersection, .onCurve, .modelPoint]
         let point = snapIndex.snap(p, tolerance: tolerance * 1.5, kinds: kinds, extra: marks, gridStep: 0).point
         if let index = capturedPoints.firstIndex(where: { simd_distance($0, point) < 1e-6 }) {
             capturedPoints.remove(at: index)
