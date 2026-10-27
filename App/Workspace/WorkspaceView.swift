@@ -105,10 +105,18 @@ private struct WorkspaceContent: View {
                         case nil:
                             EmptyView()
                         }
+                        // Skizzenpalette (SolidCraft): Eigenschaften des Werkzeugs bzw. der Auswahl rechts;
+                        // unten bleibt Platz für Hinweise und Rückgängig
+                        if sketch.isActive {
+                            SketchPalette(workspace: workspace, model: model, sketch: sketch)
+                                .padding(.bottom, 84)
+                                .transition(.opacity.combined(with: .move(edge: .trailing)))
+                        }
                         RightRail(workspace: workspace, sketch: sketch, panel: $panel, screenshot: takeScreenshot)
                     }
                     .padding(.trailing, 16)
                     .padding(.top, 76)
+                    .animation(Theme.spring, value: sketch.isActive)
                 }
                 .overlay(alignment: .bottom) { bottomArea }
                 .overlay(alignment: .bottomLeading) { undoRedo }
@@ -411,7 +419,10 @@ private struct WorkspaceContent: View {
             if sketch.isActive, let calibration = workspace.canvasCalibration {
                 CanvasTraceCard(workspace: workspace, model: model, canvasID: calibration.canvas)
             }
-            ParameterCard(workspace: workspace, model: model, sketch: sketch)
+            // Im Skizzenmodus stehen die Werkzeug-Eigenschaften rechts in der Skizzenpalette
+            if !sketch.isActive {
+                ParameterCard(workspace: workspace, model: model, sketch: sketch)
+            }
             if workspace.showsDoneBar {
                 doneBar
             }

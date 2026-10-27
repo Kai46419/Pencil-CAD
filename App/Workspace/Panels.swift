@@ -122,7 +122,9 @@ struct ParameterCard: View {
 
     var body: some View {
         if sketch.isActive {
-            sketchCard
+            // Skizzenmodus: Ebenenwahl und Werkzeug-Einstellungen stehen rechts in der Skizzenpalette
+            // (SketchPalette.swift). sketchCard/toolOptions bleiben bis zum Abgleich als Quelle stehen.
+            EmptyView()
         } else {
             switch workspace.tool {
             case .select:
@@ -302,7 +304,8 @@ struct ParameterCard: View {
         .fixedSize()
     }
 
-    /// Einstellungen des aktiven Skizzenwerkzeugs.
+    /// Einstellungen des aktiven Skizzenwerkzeugs (früher waagerecht unten; jetzt senkrecht in
+    /// SketchToolProperties.swift). Wird gelöscht, sobald die Palette alles abdeckt.
     @ViewBuilder
     private var toolOptions: some View {
         switch sketch.tool {
