@@ -162,6 +162,10 @@ final class ViewportView: MTKView {
     private var strokeEndedAt: TimeInterval = 0
     /// Beginn des laufenden Skizzenstrichs (festes Zugreifen beim Ansetzen zählt nicht als Drücken)
     private var strokeBeganAt: TimeInterval = 0
+    /// Letzte Bewegung durch Zoomen bzw. Verschieben mit zwei Fingern (Zeit seit Systemstart). Ein Zwei-Finger-Tippen
+    /// kurz danach ist das Ende bzw. ein Nachgreifen der Geste, kein Rückgängig: Beim Hin- und Herzoomen machte das
+    /// Tippen sonst „STEP importieren“ rückgängig, der importierte Körper verschwand (Kai)
+    private var navigationMovedAt: TimeInterval = 0
 
     private func updateHeldFingers(began: Set<UITouch> = [], ended: Set<UITouch> = []) {
         guard let sketch else { return }
@@ -293,6 +297,12 @@ final class ViewportView: MTKView {
         redoTap.allowedTouchTypes = fingersOnly
         undoGesture = undoTap
         redoGesture = redoTap
+        // Rückgängig/Wiederholen nur, wenn weder gezoomt noch verschoben wurde: Bewegen sich die Finger, scheitert das
+        // Tippen. Früher liefen Tippen und Pinch gleichzeitig, ein kurzes Hin- und Herzoomen galt als Zwei-Finger-Tippen.
+        for navigation in [pan, pinch] as [UIGestureRecognizer] {
+            undoTap.require(toFail: navigation)
+            redoTap.require(toFail: navigation)
+        }
 
         for recognizer in [orbit, pan, pinch, tap, hover, doubleTap, undoTap, redoTap] as [UIGestureRecognizer] {
             recognizer.delegate = self
@@ -3197,14 +3207,21 @@ final class ViewportView: MTKView {
         return super.gestureRecognizerShouldBegin(gestureRecognizer)
     }
 
+    /// Zoomen bzw. Verschieben lief gerade (oder eben erst): dann kein Rückgängig/Wiederholen per Tippen.
+    private var navigatedRecently: Bool {
+        ProcessInfo.processInfo.systemUptime - navigationMovedAt < 0.6
+            || pinchGesture?.state == .began || pinchGesture?.state == .changed
+            || panGesture?.state == .began || panGesture?.state == .changed
+    }
+
     @objc private func handleUndoTap(_ gesture: UITapGestureRecognizer) {
-        guard handleDrag == nil, ringDrag == nil else { return }
+        guard handleDrag == nil, ringDrag == nil, !navigatedRecently else { return }
         workspace?.undo()
         refresh()
     }
 
     @objc private func handleRedoTap(_ gesture: UITapGestureRecognizer) {
-        guard handleDrag == nil, ringDrag == nil else { return }
+        guard handleDrag == nil, ringDrag == nil, !navigatedRecently else { return }
         workspace?.redo()
         refresh()
     }
@@ -3249,12 +3266,14 @@ final class ViewportView: MTKView {
 
     @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
         let t = gesture.translation(in: self)
+        navigationMovedAt = ProcessInfo.processInfo.systemUptime
         renderer?.camera.pan(dx: Float(t.x), dy: Float(t.y), viewHeight: Float(bounds.height))
         gesture.setTranslation(.zero, in: self)
         refresh()
     }
 
     @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
+        navigationMovedAt = ProcessInfo.processInfo.systemUptime
         renderer?.camera.zoom(by: Float(gesture.scale))
         gesture.scale = 1
         refresh()
@@ -3295,7 +3314,13 @@ extension ViewportView {
 extension ViewportView: UIGestureRecognizerDelegate {
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                            shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
-        true
+        // Rückgängig/Wiederholen (Zwei-/Drei-Finger-Tippen) nie zugleich mit Zoomen bzw. Verschieben
+        let taps: [UIGestureRecognizer?] = [undoGesture, redoGesture]
+        let navigation: [UIGestureRecognizer?] = [pinchGesture, panGesture]
+        let pair: [UIGestureRecognizer] = [gestureRecognizer, other]
+        let hasTap = pair.contains { g in taps.contains { $0 === g } }
+        let hasNavigation = pair.contains { g in navigation.contains { $0 === g } }
+        return !(hasTap && hasNavigation)
     }
 
     /// Antippen eines Maßfelds öffnet nur das Feld.

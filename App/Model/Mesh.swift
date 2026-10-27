@@ -81,11 +81,19 @@ struct Mesh {
     }
 
     /// Achsenparalleler Hüllquader (min, max).
+    /// Punkte mit NaN/∞ (fehlerhafte Importnetze) zählen nicht mit, sonst stimmen Einpassen und Nah-/Fernebene nicht.
     var bounds: (min: SIMD3<Float>, max: SIMD3<Float>)? {
-        guard let first = vertices.first?.position else { return nil }
-        return vertices.reduce((first, first)) { acc, v in
-            (simd_min(acc.0, v.position), simd_max(acc.1, v.position))
+        var result: (min: SIMD3<Float>, max: SIMD3<Float>)?
+        for vertex in vertices {
+            let p = vertex.position
+            guard p.x.isFinite, p.y.isFinite, p.z.isFinite else { continue }
+            if let current = result {
+                result = (min: simd_min(current.min, p), max: simd_max(current.max, p))
+            } else {
+                result = (min: p, max: p)
+            }
         }
+        return result
     }
 
     /// Indizes aller Dreiecke einer Fläche (für die Hervorhebung).
