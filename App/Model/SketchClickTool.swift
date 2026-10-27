@@ -270,7 +270,17 @@ extension SketchController {
         let metrics = snapMetrics(tolerance)
         let lineTool = clickKind == .line
         let snapped = solidCraftSnap(raw, tolerance: tolerance, prev: click.points.last?.point, lineTool: lineTool)
+        // Mittelpunkt-Bogen: den Bogenwinkel mit dem Stiftpunkt mitzählen, bevor clickEffective den Punkt auf den
+        // Kreis beim bisherigen Winkel legt – sonst zählte trackSweep den schon gelegten Punkt, der Winkel blieb 0
+        // und nach Mitte und Start erschien nur die Radiuslinie, nie ein Bogen (Kai)
+        trackSweep(snapped.point)
         var result = clickPlaced(snapped, metrics: metrics)
+        // 3-Punkt-Bogen bzw. -Kreis: ein Fang (z. B. waagerecht zum Ende B einer waagerechten Sehne), der den dritten
+        // Punkt auf die Gerade A–B legt, ergäbe keinen Bogen – dann gilt der freie Stiftpunkt
+        if click.points.count == 2, clickKind == .arcThreePoint || clickKind == .circleThreePoint, !hasLockedBox {
+            let a = click.points[0].point, b = click.points[1].point
+            if circleThrough(a, result.point, b) == nil, circleThrough(a, raw, b) != nil { result = .free(raw) }
+        }
         click.circleInference = nil
         // PencilCAD-Mehrwert: Radius rastet tangential bzw. auf gleichen Radius ein, solange der Randpunkt keinen
         // Punktfang hat und nichts getippt ist
@@ -283,7 +293,6 @@ extension SketchController {
         }
         click.pointer = result.point
         click.raw = raw
-        trackSweep(result.point)
         return result
     }
 

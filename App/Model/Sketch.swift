@@ -716,8 +716,11 @@ final class SketchController: ObservableObject {
         hoverSnap = nil
         hoverNodes = []
         if tool == .select {
-            if beginSplineHandleDrag(at: point, tolerance: tolerance) { return }  // Spline-Tangentengriffe
-            if beginRadiusHandleDrag(at: point, tolerance: tolerance) { return }  // Radiusgriff Bogen/Kreis
+            // Wartet eine Bedingung, wählt der Stift nur (Griffe ziehen erst danach wieder)
+            if pendingAction == nil {
+                if beginSplineHandleDrag(at: point, tolerance: tolerance) { return }  // Spline-Tangentengriffe
+                if beginRadiusHandleDrag(at: point, tolerance: tolerance) { return }  // Radiusgriff Bogen/Kreis
+            }
             beginSelectDrag(at: point, tolerance: tolerance)
             return
         }
@@ -1641,6 +1644,10 @@ final class SketchController: ObservableObject {
     private func beginSelectDrag(at p: Point2, tolerance: Double) {
         selectStart = (point: p, tolerance: tolerance)
         selectDrag = nil
+        // Wartende Bedingung (Mittelpunkt, parallel …): Antippen wählt nur. Kai: mit dem Stift ging „Punkt + Linie“
+        // nicht – schon ein paar Punkte Zittern beim Andrücken machten aus dem Tippen ein Ziehen, der Punkt
+        // verrutschte und wurde nicht gewählt (der Finger tippt über die Tipp-Geste und kannte das nicht)
+        guard pendingAction == nil else { return }
         guard let ref = pick(at: p, tolerance: tolerance, includeText: true), entities.indices.contains(ref.entity) else {
             return
         }
@@ -3326,8 +3333,9 @@ final class SketchController: ObservableObject {
         let ref = pick(at: p, tolerance: tolerance, includeText: pendingAction == nil)
         var pointRef = false
         if case .point? = ref { pointRef = true }
-        // Hilfspunkte vor Kurven, Elementpunkte vor Hilfspunkten
-        let mark: Int? = pointRef ? nil : markIndex(at: p, tolerance: tolerance, curveHit: ref != nil)
+        // Hilfspunkte vor Kurven, Elementpunkte vor Hilfspunkten. Wartet eine Bedingung, zählen nur Elemente:
+        // ein (z. B. per Schweben gemerkter) Hilfspunkt in der Linienmitte fing sonst das Antippen der Linie ab
+        let mark: Int? = pointRef || pendingAction != nil ? nil : markIndex(at: p, tolerance: tolerance, curveHit: ref != nil)
         if let mark {
             if let index = selectedMarks.firstIndex(of: mark) {
                 selectedMarks.remove(at: index)
