@@ -2188,6 +2188,8 @@ final class Workspace: ObservableObject {
             return sketchOnBody ? "Ebene Fläche des Körpers antippen – darauf wird skizziert"
                 : "Skizzenebene antippen – oder eine ebene Fläche eines Körpers"
         }
+        // SolidCraft-Klickfolge: Hinweis je Werkzeug und Stufe (SketchClickTool.swift)
+        if sketch.clickKind != nil { return sketch.currentHint }
         switch sketch.tool {
         case .select:
             if !sketch.selection.isEmpty {

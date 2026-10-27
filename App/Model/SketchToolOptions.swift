@@ -58,6 +58,8 @@ final class SketchToolOptions: ObservableObject {
     @Published var gridAuto = true
     /// Zuletzt gewählte Variante je Werkzeugfamilie
     @Published var familyChoice: [String: String] = [:]
+    /// SolidCraft „Mitte“ (Taste M): der nächste Punkt fängt nur Linienmitten, mit größerem Radius; gilt für einen Punkt
+    @Published var midpointOnly = false
 
     init() {
         let stored = UserDefaults.standard.string(forKey: "sketch.inputStyle")

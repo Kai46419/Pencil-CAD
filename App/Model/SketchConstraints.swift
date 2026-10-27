@@ -588,6 +588,68 @@ enum ConstraintSolver {
         return result
     }
 
+    /// Rang der Einschränkungen (unabhängige Gleichungen) und ob alle erfüllt sind – für die Freiheitsgrade
+    /// (SolidCraft „DOF“). Die Bogen-Eichung zählt nicht mit. nil bei sehr großen Skizzen (> 600 Unbekannte).
+    static func constraintRank(_ original: [SketchEntity], constraints all: [SketchConstraint]) -> (rank: Int, satisfied: Bool)? {
+        let constraints = all.filter { !$0.isSuspended }
+        guard !constraints.isEmpty else { return (0, true) }
+        let entities = original.map(balancedArc)
+        let involved = Set(constraints.flatMap(\.entities)).filter { entities.indices.contains($0) }.sorted()
+        var offsets: [Int: Int] = [:]
+        var x: [Double] = []
+        for index in involved {
+            offsets[index] = x.count
+            x += entities[index].parameters
+        }
+        let n = x.count
+        guard n > 0 else { return (0, true) }
+        guard n <= 600 else { return nil }
+        func build(_ x: [Double]) -> [SketchEntity] {
+            var result = entities
+            for index in involved {
+                guard let start = offsets[index] else { continue }
+                let count = entities[index].parameters.count
+                result[index] = entities[index].with(parameters: Array(x[start..<(start + count)]))
+            }
+            return result
+        }
+        func equations(_ x: [Double]) -> (constraint: [Double], gauge: [Double]) {
+            let current = build(x)
+            return (constraints.flatMap { residual($0, current) }, arcGauge(current, involved))
+        }
+        let base = equations(x)
+        let satisfied = base.constraint.allSatisfy { abs($0) < 1e-5 }
+        let mc = base.constraint.count, mg = base.gauge.count
+        guard mc > 0 else { return (0, satisfied) }
+        var constraintRows = [[Double]](repeating: [Double](repeating: 0, count: n), count: mc)
+        var gaugeRows = [[Double]](repeating: [Double](repeating: 0, count: n), count: mg)
+        for column in 0..<n {
+            let h = 1e-6 * max(1, abs(x[column]))
+            var shifted = x
+            shifted[column] += h
+            let rs = equations(shifted)
+            guard rs.constraint.count == mc, rs.gauge.count == mg else { return nil }
+            for row in 0..<mc { constraintRows[row][column] = (rs.constraint[row] - base.constraint[row]) / h }
+            for row in 0..<mg { gaugeRows[row][column] = (rs.gauge[row] - base.gauge[row]) / h }
+        }
+        // Erst die Eichung der Bögen, dann die Einschränkungen: nur deren neue Richtungen zählen
+        var basis: [[Double]] = []
+        var rank = 0
+        for (k, source) in (gaugeRows + constraintRows).enumerated() {
+            var row = source
+            for q in basis {
+                var dot = 0.0
+                for i in 0..<n { dot += row[i] * q[i] }
+                for i in 0..<n { row[i] -= dot * q[i] }
+            }
+            let length = row.reduce(0) { $0 + $1 * $1 }.squareRoot()
+            guard length > 1e-7 else { continue }
+            basis.append(row.map { $0 / length })
+            if k >= mg { rank += 1 }
+        }
+        return (rank, satisfied)
+    }
+
     /// Bogen mit der Mitte genau zwischen Anfang und Ende (gleiche Form). Kai (Langloch): Der freie
     /// Mittelpunkt rutschte im Löser über ein Bogenende hinaus – der Bogen klappte zum großen Gegenbogen um.
     static func balancedArc(_ entity: SketchEntity) -> SketchEntity {

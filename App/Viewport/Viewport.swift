@@ -82,6 +82,10 @@ final class ViewportView: MTKView {
     private let valueLabel = PaddedLabel()
     /// Einrasthinweis am Stift (Endpunkt, Mittelpunkt …)
     private let snapHintLabel = PaddedLabel()
+    /// SolidCraft: „H“/„V“ an der Mitte des Gummibands, wenn es genau waagerecht bzw. senkrecht liegt
+    private let axisHintLabel = PaddedLabel()
+    /// Zuletzt gesehene Zahl gesetzter Klickpunkte (leichter Klick je neuem Punkt)
+    private var lastPlacedPointCount = 0
     private var lastSnapKey: String?
     private lazy var selectionFeedback = UISelectionFeedbackGenerator()
     private var canvasFeedbackStorage: UIFeedbackGenerator?
@@ -405,6 +409,18 @@ final class ViewportView: MTKView {
         tapGesture?.allowedTouchTypes = sketching ? fingersOnly : fingersAndPencil
 
         let plane = sketch.plane
+        if sketching {
+            // SolidCraft-Fang: feines Raster nach Bildhöhe, getippte Formeln mit Projektvariablen
+            let perPoint = Double(renderer.camera.worldUnitsPerPoint(viewHeight: Float(bounds.height)))
+            sketch.viewHalfHeight = perPoint * Double(bounds.height) / 2
+            if !sketch.options.locked.isEmpty { sketch.variableValues = model?.variableValues ?? [:] }
+            if sketch.placedPointCount != lastPlacedPointCount {
+                if sketch.placedPointCount > lastPlacedPointCount, sketch.snapHaptics {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred(intensity: 0.6)
+                }
+                lastPlacedPointCount = sketch.placedPointCount
+            }
+        }
         renderer.gridTransform = sketching && !sketch.showsGrid ? nil : sketching
             ? float4x4(origin: SIMD3<Float>(plane.origin), u: SIMD3<Float>(plane.u),
                        v: SIMD3<Float>(plane.v), n: SIMD3<Float>(plane.normal))
@@ -434,6 +450,11 @@ final class ViewportView: MTKView {
     /// Shapr3D „Einrasthinweise“: Art des Fangs als kleines Schild neben dem Stift.
     private func updateSnapHint() {
         snapFeedback()
+        if let sketch, sketch.options.isSolidCraft, sketch.isActive, !sketch.isChoosingPlane {
+            updateSolidCraftHint(sketch)
+            return
+        }
+        axisHintLabel.isHidden = true
         guard let renderer, let sketch, sketch.isActive, !sketch.isChoosingPlane, sketch.showsSnapHints,
               let snap = sketch.currentSnap, let kind = snap.kind, kind != .grid,
               let point = renderer.camera.project(SIMD3<Float>(sketch.plane.world(snap.point)), viewSize: bounds.size) else {
@@ -449,6 +470,12 @@ final class ViewportView: MTKView {
             snapHintLabel.isUserInteractionEnabled = false
             addSubview(snapHintLabel)
         }
+        if snapHintLabel.font.pointSize != 12 {
+            snapHintLabel.font = .systemFont(ofSize: 12, weight: .semibold)
+            snapHintLabel.insets = UIEdgeInsets(top: 4, left: 9, bottom: 4, right: 9)
+            snapHintLabel.layer.cornerRadius = 8
+            snapHintLabel.text = nil
+        }
         if snapHintLabel.text != kind.hint {
             snapHintLabel.text = kind.hint
             snapHintLabel.sizeToFit()
@@ -458,8 +485,86 @@ final class ViewportView: MTKView {
         snapHintLabel.isHidden = false
     }
 
+    /// SolidCraft: Kürzel des Fangs (Pt, X, Mid, T, Ctr, On, H, V, //, ⊥, Ext) klein neben dem Fangring, dazu „H“/„V“
+    /// an der Mitte eines genau waagerechten bzw. senkrechten Gummibands.
+    private func updateSolidCraftHint(_ sketch: SketchController) {
+        guard let renderer else { return }
+        let plane = sketch.plane
+        if sketch.showsSnapHints, let candidate = sketch.currentCandidate, !candidate.label.isEmpty,
+           let point = renderer.camera.project(SIMD3<Float>(plane.world(candidate.point)), viewSize: bounds.size) {
+            styleSolidCraftLabel(snapHintLabel)
+            if snapHintLabel.text != candidate.label {
+                snapHintLabel.text = candidate.label
+                fitSolidCraftLabel(snapHintLabel)
+            }
+            snapHintLabel.center = CGPoint(x: point.x + 12 + snapHintLabel.bounds.width / 2,
+                                           y: point.y - 24 + snapHintLabel.bounds.height / 2)
+            snapHintLabel.isHidden = false
+        } else {
+            snapHintLabel.isHidden = true
+        }
+        // Gummiband genau waagerecht/senkrecht und das Linienende hat keinen anderen Fang: „H“ bzw. „V“ an der Mitte
+        let ownLabel = sketch.currentCandidate?.label ?? ""
+        if sketch.showsSnapHints, let axis = sketch.rubberBandAxis, ownLabel != "H", ownLabel != "V",
+           let mid = renderer.camera.project(SIMD3<Float>(plane.world(axis.mid)), viewSize: bounds.size) {
+            styleSolidCraftLabel(axisHintLabel)
+            let text = axis.horizontal ? "H" : "V"
+            if axisHintLabel.text != text {
+                axisHintLabel.text = text
+                fitSolidCraftLabel(axisHintLabel)
+            }
+            axisHintLabel.center = axis.horizontal
+                ? CGPoint(x: mid.x, y: mid.y - 6 - axisHintLabel.bounds.height / 2)
+                : CGPoint(x: mid.x + 6 + axisHintLabel.bounds.width / 2, y: mid.y)
+            axisHintLabel.isHidden = false
+        } else {
+            axisHintLabel.isHidden = true
+        }
+    }
+
+    /// Kleines Schild in der Fangfarbe (10 pt), einmal eingerichtet.
+    private func styleSolidCraftLabel(_ label: PaddedLabel) {
+        if label.superview == nil {
+            label.textColor = .white
+            label.backgroundColor = UIColor(red: 0.98, green: 0.45, blue: 0.05, alpha: 0.92)
+            label.layer.cornerRadius = 5
+            label.layer.masksToBounds = true
+            label.isUserInteractionEnabled = false
+            label.textAlignment = .center
+            addSubview(label)
+        }
+        if label.font.pointSize != 10 {
+            label.font = .systemFont(ofSize: 10, weight: .semibold)
+            label.insets = UIEdgeInsets(top: 1, left: 5, bottom: 1, right: 5)
+            label.layer.cornerRadius = 5
+            label.text = nil
+        }
+    }
+
+    private func fitSolidCraftLabel(_ label: PaddedLabel) {
+        label.sizeToFit()
+        label.bounds.size = CGSize(width: max(label.bounds.width, 24), height: max(label.bounds.height, 14))
+    }
+
     /// Haptik beim Einrasten: einmal je neuem Fangpunkt (nicht beim Raster, nicht wiederholt am selben Punkt).
     private func snapFeedback() {
+        // SolidCraft-Fang: gleiche Haptik, Schlüssel aus Fangart und Stelle
+        if let sketch, sketch.isActive, !sketch.isChoosingPlane, sketch.options.isSolidCraft,
+           let candidate = sketch.currentCandidate, let target = candidate.target, target != .grid {
+            let ticks = target.isPointSnap || sketch.drawHaptics || sketchTouch == nil
+            let name = candidate.label.isEmpty ? "Pt" : candidate.label
+            let key = ticks
+                ? "sc|\(name)|\((candidate.point.x * 100).rounded())|\((candidate.point.y * 100).rounded())" : "sc|\(name)"
+            guard key != lastSnapKey else { return }
+            lastSnapKey = key
+            guard sketch.snapHaptics else { return }
+            if #available(iOS 17.5, *) {
+                canvasFeedback.alignmentOccurred(at: snapHintAnchor(candidate.point))
+            } else {
+                selectionFeedback.selectionChanged()
+            }
+            return
+        }
         guard let sketch, sketch.isActive, !sketch.isChoosingPlane,
               let snap = sketch.currentSnap, let kind = snap.kind, kind != .grid else {
             lastSnapKey = nil
@@ -728,7 +833,7 @@ final class ViewportView: MTKView {
                 groups.append(LineGroup(polylines: crosses.map { $0.map(world) }, color: Self.selectionOrange, width: 2.4))
             }
             // Schwebender Stift: Fadenkreuz am (gefangenen) Punkt, damit man sieht, wo der Strich ansetzt
-            if let hoverSnap = sketch.hoverSnap {
+            if let hoverSnap = sketch.hoverSnap, sketch.currentCandidate == nil {
                 let hover = hoverSnap.point
                 // Kai: Größe wie gehabt, Strich so fein wie die rote/grüne Skizzenachse; orange, sobald ein Fangpunkt greift
                 let arm = 15 * perPoint, gap = 3.5 * perPoint
@@ -758,12 +863,38 @@ final class ViewportView: MTKView {
                 groups.append(LineGroup(polylines: snapMarker(kind, at: snap.point, size: 6 * perPoint).map { $0.map(world) },
                                         color: Self.snapOrange, width: 2.2))
             }
+            addSolidCraftSnap(to: &groups, sketch: sketch, perPoint: perPoint, world: world)
         } else {
             sketchFillRevision = -1
             sketchFills = []
         }
         renderer.lineGroups = groups
         renderer.fills = fills
+    }
+
+    /// SolidCraft-Fang: Ring am Fangpunkt (Punktfang r 6 pt, sonst r 3 pt), gestrichelte Hilfslinie der Inferenz,
+    /// geweckte Kreismitte und die angetippten Kurven der Tangentenkreise.
+    private func addSolidCraftSnap(to groups: inout [LineGroup], sketch: SketchController, perPoint: Double,
+                                   world: (Point2) -> SIMD3<Float>) {
+        guard sketch.options.isSolidCraft else { return }
+        let picked = sketch.clickPickedPolylines
+        if !picked.isEmpty {
+            groups.append(LineGroup(polylines: picked.map { $0.map(world) }, color: Self.selectionOrange, width: 3.2))
+        }
+        if let woken = sketch.wokenCenter {
+            groups.append(LineGroup(polylines: [], color: Self.snapOrange, width: 0, dots: [world(woken)], dotRadius: 2.5))
+        }
+        guard let candidate = sketch.currentCandidate, let target = candidate.target, target != .grid else { return }
+        if let guide = candidate.guide, simd_distance(guide.0, guide.1) > 1e-9 {
+            let dashes = dashed([guide.0, guide.1], dash: 4 * perPoint)
+            groups.append(LineGroup(polylines: dashes.map { $0.map(world) }, color: Self.previewBlue, width: 1))
+        }
+        let radius = (target.isPointArgument ? 6 : 3) * perPoint
+        let ring: [Point2] = (0...24).map { k in
+            let angle = Double(k) / 24 * 2 * .pi
+            return candidate.point + Point2(cos(angle), sin(angle)) * radius
+        }
+        groups.append(LineGroup(polylines: [ring.map(world)], color: Self.snapOrange, width: 1.5))
     }
 
     // MARK: Messen
@@ -1524,7 +1655,7 @@ final class ViewportView: MTKView {
             let id = dimension.id
             // Kai: feste Maße schlank als kleines Schloss; antippen klappt das Maß auf und öffnet die Eingabe
             let collapses = sketch.collapsesLockedDimensions && dimension.lockState == true
-                && !field.isFirstResponder && !expandedDimensions.contains(id)
+                && !field.isFirstResponder && !expandedDimensions.contains(id) && !id.hasPrefix("box-")
             field.isCollapsed = collapses
             if collapses {
                 field.onLockTap = { [weak self, weak field] in
@@ -1624,6 +1755,10 @@ final class ViewportView: MTKView {
             field.resignFirstResponder()
         case .done:
             field.resignFirstResponder()
+            // SolidCraft: Enter setzt den Punkt mit den gesperrten Werten
+            if field.dimensionID.hasPrefix("box-") { sketch?.placeLocked() }
+            refresh()
+            return
         }
         field.sizeToFit()
         keypad.lockState = field.lockState
@@ -1642,6 +1777,13 @@ final class ViewportView: MTKView {
     /// bleibt das Maß mit ihnen verknüpft.
     private func apply(_ field: DimensionField) {
         let text = (field.text ?? "").trimmingCharacters(in: .whitespaces)
+        // SolidCraft-Wertfeld: Text sperren (leer = wieder frei), auch negative Bogenwinkel
+        if field.dimensionID.hasPrefix("box-"), let sketch {
+            let key = String(field.dimensionID.dropFirst(4))
+            sketch.lockLiveValue(key, text: text, variables: model?.variableValues ?? [:])
+            refresh()
+            return
+        }
         guard !text.isEmpty, let sketch else { return }
         let values = model?.variableValues ?? [:]
         do {
@@ -2206,10 +2348,12 @@ final class ViewportView: MTKView {
             gesture.isEnabled = true
         }
         // Ein offenes Maßfeld gehört zum vorigen Element: verwerfen statt auf das neue anwenden
+        // SolidCraft-Wertfeld: der getippte Wert gilt für den Punkt, der jetzt gesetzt wird
         for field in dimensionFields.values where field.isFirstResponder {
-            field.appliesOnEnd = false
+            field.appliesOnEnd = field.dimensionID.hasPrefix("box-")
             field.resignFirstResponder()
         }
+        sketch?.snapInput = touch.type == .direct ? .finger : .pencil
         sketch?.began(at: point, tolerance: snapTolerance)
         latchArcIfFingerDown(event)
         refresh()
@@ -2610,6 +2754,7 @@ final class ViewportView: MTKView {
                 // Haptik auch beim Schweben (Kai): Generator vorab bereitmachen, damit der erste Fang klickt
                 canvasFeedback.prepare()
             }
+            sketch.snapInput = .hover
             sketch.hover(at: point, tolerance: snapTolerance)
         default:
             lastHoverLocation = nil
@@ -2824,6 +2969,10 @@ extension ViewportView: UITextFieldDelegate {
 
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {
         textField.resignFirstResponder()
+        if let field = textField as? DimensionField, field.dimensionID.hasPrefix("box-") {
+            sketch?.placeLocked()
+            refresh()
+        }
         return false
     }
 
