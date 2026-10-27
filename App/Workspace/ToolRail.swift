@@ -1,36 +1,36 @@
 import SwiftUI
 
-/// Gruppen der linken Werkzeugleiste im 3D-Modus (Kai: kleinere, eindeutige Gruppen statt weniger großer Menüs).
-/// Reihenfolge wie der Arbeitsablauf: zeichnen, Körper erzeugen, bearbeiten, kombinieren, bewegen, prüfen.
-/// Schnittansicht, Isolieren und Löschen liegen als direkte Knöpfe in der rechten Leiste.
+/// Gruppen der linken Werkzeugleiste im 3D-Modus nach dem SolidCraft-Ribbon (B.1): Skizze · Erstellen · Ändern ·
+/// Anordnen · Konstruieren · Prüfen · Einfügen · Ansicht. Inhalt der Gruppen: ModelRibbon.swift.
+/// Schnittansicht, Isolieren und Löschen liegen zusätzlich als direkte Knöpfe in der rechten Leiste.
 enum ToolGroup: String, CaseIterable, Identifiable {
     case sketch = "Skizze"
-    case extrude = "Extrudieren"
-    case shapes = "Formen"
-    case fillets = "Abrundungen"
-    case holes = "Löcher"
-    case faces = "Flächen"
-    case combine = "Kombinieren"
-    case move = "Verschieben"
-    case pattern = "Vervielfältigen"
+    case create = "Erstellen"
+    case modify = "Ändern"
+    case arrange = "Anordnen"
     case construct = "Konstruieren"
     case inspect = "Prüfen"
     case insert = "Einfügen"
     case visualize = "Ansicht"
+
+    // Frühere Gruppen (PartTools, Befehlssuche, Karten): zeigen auf die neue Gruppe
+    static let extrude = ToolGroup.create
+    static let shapes = ToolGroup.create
+    static let holes = ToolGroup.create
+    static let fillets = ToolGroup.modify
+    static let faces = ToolGroup.modify
+    static let combine = ToolGroup.modify
+    static let move = ToolGroup.arrange
+    static let pattern = ToolGroup.arrange
 
     var id: Self { self }
 
     var systemImage: String {
         switch self {
         case .sketch: "sc.sketch"
-        case .extrude: "sc.extrude"
-        case .shapes: "sc.box"
-        case .fillets: "sc.fillet"
-        case .holes: "sc.hole"
-        case .faces: "sc.presspull"
-        case .combine: "sc.combine"
-        case .move: "sc.move"
-        case .pattern: "sc.pattern"
+        case .create: "sc.extrude"
+        case .modify: "sc.fillet"
+        case .arrange: "sc.move"
         case .construct: "sc.plane"
         case .inspect: "sc.measure"
         case .insert: "sc.import"
@@ -38,15 +38,12 @@ enum ToolGroup: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Farbfamilie: Erzeugen blau, Ändern orange, Bewegen violett
+    /// Farbfamilie: Erzeugen blau, Ändern orange, Anordnen violett
     var category: ToolCategory {
         switch self {
-        case .sketch, .extrude, .shapes: .create
-        case .holes: .hole
-        case .fillets, .faces: .modify
-        case .combine: .combine
-        case .move: .arrange
-        case .pattern: .pattern
+        case .sketch, .create: .create
+        case .modify: .modify
+        case .arrange: .arrange
         case .construct: .construct
         case .inspect: .inspect
         case .insert: .insert
@@ -58,22 +55,17 @@ enum ToolGroup: String, CaseIterable, Identifiable {
     var tip: String {
         switch self {
         case .sketch: "Neue Skizze beginnen: Ebene oder ebene Körperfläche antippen, dann mit dem Stift zeichnen."
-        case .extrude: "Extrudieren (Bereich oder ebene Fläche am Pfeil ziehen) und Dünn extrudieren (Linien als Wand)."
-        case .shapes: "Körper aus Skizzen formen – Achsendrehung, Sweep, Loft, Helix – oder Grundkörper wie Quader, Zylinder und Kugel einfügen."
-        case .fillets: "Kanten abrunden oder fasen."
-        case .holes: "Bohrung mit Senkung oder Senkkopf, Gewindebohrung und Gewinde an Bolzen, Bohrungen oder jeder Fläche."
-        case .faces: "Flächen versetzen, ersetzen oder neigen, Körper aushöhlen, Kanten versetzen oder abdrücken, Umhüllen und Prägen."
-        case .combine: "Körper vereinigen, abziehen, schneiden oder teilen, Negativform um einen Körper."
-        case .move: "Körper oder Skizzen verschieben, drehen, kopieren, von Punkt zu Punkt übersetzen, ausrichten oder skalieren."
-        case .pattern: "Körper spiegeln oder als Muster in Reihe bzw. im Kreis vervielfältigen."
+        case .create: "Körper erzeugen: Extrudieren, Drehen, Sweep, Loft, Bohrung und Gewinde, Grundkörper."
+        case .modify: "Kanten abrunden oder fasen, Flächen ziehen, versetzen, ersetzen oder neigen, Schale, Körper kombinieren, teilen oder skalieren."
+        case .arrange: "Körper verschieben, drehen, kopieren, ausrichten, spiegeln oder als Muster vervielfältigen."
         case .construct: "Hilfsebenen, -achsen und -punkte, z. B. eine versetzte Ebene zum Skizzieren."
-        case .inspect: "Messen und Druckprüfung (Überhang, dünne Wände). Schnittansicht und Isolieren liegen rechts."
+        case .inspect: "Messen, Schnittansicht, Druckprüfung (Überhang, dünne Wände) und Isolieren."
         case .insert: "Normteile (Schrauben, Muttern, Lager), Vorlagen (Gehäuse, Stirnrad), STEP-, STL- und 3MF-Dateien, Bild als Vorlage (aus Fotos, Dateien oder direkt mit der Kamera), Körper eines anderen Projekts, eine Variable, Netze bearbeiten."
-        case .visualize: "Anzeigemodus, orthografische Projektion, Körperfarbe und Zeichnung."
+        case .visualize: "Anzeigemodus, orthografische Projektion, Körperfarbe, Zeichnung und Kontextvorschläge."
         }
     }
 
-    /// Skizze ist eine direkte Aktion ohne Untermenü; jede andere Kachel öffnet ihre Werkzeuge.
+    /// Skizze ist eine direkte Aktion ohne Untermenü; jede andere Gruppe öffnet ihre vollständige Liste.
     var hasFlyout: Bool { self != .sketch }
 }
 
@@ -129,19 +121,26 @@ struct ToolItem: Identifiable {
     var isEnabled = true
     var isActive = false
     var action: () -> Void = {}
+    /// Zwischenüberschrift im Untermenü (ÄNDERN: KANTEN, FLÄCHEN, KÖRPER, SPEZIAL)
+    var heading: String?
+    /// Tastenkürzel rechts
+    var shortcut: String?
+    /// Stecknadel: Schlüssel zum Anheften in die Leiste (nil = nicht anheftbar)
+    var pinID: String?
 }
 
-/// Kachelgröße und Abstand der Werkzeuggruppen im 3D-Modus.
-private struct GroupSize: Equatable {
+/// Größe der senkrechten Ribbon-Leiste im 3D-Modus: Kachelgröße und Kacheln je Gruppe.
+private struct RibbonSize: Equatable {
     let tile: CGFloat
     let gap: CGFloat
+    /// Höchstens so viele Kacheln je Gruppe (hervorgehobene und angeheftete)
+    let tiles: Int
 
     /// Von groß nach klein; die Leiste nimmt die erste, die in die Höhe passt.
-    static let sizes: [GroupSize] = [
-        GroupSize(tile: 52, gap: 10),
-        GroupSize(tile: 46, gap: 8),
-        GroupSize(tile: 42, gap: 6),
-        GroupSize(tile: 38, gap: 5),
+    static let sizes: [RibbonSize] = [
+        RibbonSize(tile: 44, gap: 6, tiles: 4),
+        RibbonSize(tile: 40, gap: 5, tiles: 2),
+        RibbonSize(tile: 38, gap: 4, tiles: 1),
     ]
 }
 
@@ -195,11 +194,15 @@ struct ToolRail: View {
     @AppStorage(LassoSelection.key) private var lassoSelects = false
 
     private let headerHeight: CGFloat = 18
-    /// Kachelgröße der Werkzeuggruppen: die größte, mit der alle Gruppen in die Höhe passen
-    /// (iPad 11"/13", hoch und quer); die gewählte merkt sich die Leiste für die Lage des Untermenüs.
-    @State private var groupSize = GroupSize.sizes[0]
     /// Gemessene Breite der Gruppenleiste (Kacheln + Beschriftung), Ankerpunkt des Untermenüs
     @State private var railWidth: CGFloat = 0
+    /// Gemessene Höhe der Leiste und Lage jeder Gruppe darin (Koordinatenraum „ribbon“), für die Lage des Untermenüs
+    @State private var railHeight: CGFloat = 0
+    @State private var groupFrames: [ToolGroup: CGRect] = [:]
+    /// Angeheftete Befehle (Stecknadel im Gruppenmenü, ModelRibbon.pinsKey)
+    @AppStorage("ribbon.pins") private var pinsText = ""
+    /// Kontextvorschläge (Shapr3D): mit Auswahl Aktionen statt Gruppen links (Std. aus, ModelRibbon.contextKey)
+    @AppStorage("model.contextSuggestions") private var contextSuggestions = false
     /// Platz unten links für Rückgängig/Wiederholen
     private let bottomReserve: CGFloat = 70
 
@@ -562,8 +565,10 @@ struct ToolRail: View {
             || !model.selectedRegions.isEmpty
     }
 
+    /// Frühere Kontextleiste nur mit der Einstellung „Kontextvorschläge (Shapr3D)“; sonst stehen die Aktionen im
+    /// Kontextmenü bzw. Werkzeugrad (ModelRibbon.contextCommands).
     private var showsContext: Bool {
-        workspace.tool == .select && hasSelection && !workspace.showsAllTools
+        contextSuggestions && workspace.tool == .select && hasSelection && !workspace.showsAllTools
     }
 
     private var selectionSummary: String {
@@ -761,39 +766,43 @@ struct ToolRail: View {
         return entries
     }
 
-    // MARK: Werkzeuggruppen
+    // MARK: Werkzeuggruppen (senkrechtes Ribbon)
 
-    /// „Zurück“ (zur Auswahl) steht über den Gruppen
-    private var showsBackTile: Bool { workspace.showsAllTools && hasSelection }
+    /// „Zurück“ (zur Auswahl) steht über den Gruppen, wenn die Kontextvorschläge an sind
+    private var showsBackTile: Bool { contextSuggestions && workspace.showsAllTools && hasSelection }
 
-    /// Zahl der Kacheln über der Gruppe (mit „Zurück“, falls angezeigt)
-    private func row(of group: ToolGroup) -> Int {
-        let index = ToolGroup.allCases.firstIndex(of: group) ?? 0
-        return showsBackTile ? index + 1 : index
+    private var pins: Set<String> { ModelRibbon.pins(pinsText) }
+
+    private func ribbonCommands(_ group: ToolGroup) -> [RibbonCommand] {
+        ModelRibbon.commands(for: group, ws: workspace, importFile: importSTEP)
     }
 
     private var modelTools: some View {
-        let sizes = GroupSize.sizes
+        let sizes = RibbonSize.sizes
         let smallest = sizes[sizes.count - 1]
-        // Größte Kachel, mit der alles in die Höhe passt; sonst kleinste Kachel und scrollen
+        // Größte Form, mit der alles in die Höhe passt; sonst die kleinste und scrollen
         return ViewThatFits(in: .vertical) {
-            groupColumn(sizes[0])
-            groupColumn(sizes[1])
-            groupColumn(sizes[2])
-            groupColumn(smallest)
-            ScrollView(showsIndicators: false) { groupColumn(smallest) }
+            ribbonColumn(sizes[0])
+            ribbonColumn(sizes[1])
+            ribbonColumn(smallest)
+            ScrollView(showsIndicators: false) { ribbonColumn(smallest) }
         }
-        // Breite der Leiste samt Beschriftungen messen: das Untermenü beginnt rechts daneben
+        .coordinateSpace(name: "ribbon")
+        // Größe der Leiste samt Beschriftungen messen: das Untermenü beginnt rechts daneben
         .background {
             GeometryReader { proxy in
                 Color.clear
-                    .onAppear { railWidth = proxy.size.width }
-                    .onChange(of: proxy.size.width) { _, width in railWidth = width }
+                    .onAppear {
+                        railWidth = proxy.size.width
+                        railHeight = proxy.size.height
+                    }
+                    .onChange(of: proxy.size) { _, size in
+                        railWidth = size.width
+                        railHeight = size.height
+                    }
             }
         }
-        // Untermenü rechts neben der Leiste; es verbreitert die Leiste nicht.
-        // Fester Versatz statt Ausrichtungslinie: die wurde im Overlay ignoriert, das Fenster lag
-        // dann über der Leiste und links aus dem Bild (Build 134).
+        // Untermenü rechts neben der Leiste auf Höhe der Gruppe; es verbreitert die Leiste nicht.
         .overlay(alignment: .topLeading) {
             if let openGroup {
                 groupFlyout(openGroup)
@@ -805,25 +814,31 @@ struct ToolRail: View {
         .animation(Theme.spring, value: openGroup)
     }
 
-    /// Obere Gruppen: Untermenü beginnt auf Höhe der Kachel; untere: es endet dort und wächst nach oben,
-    /// damit es auch bei den letzten Gruppen genug Platz hat.
+    /// Obere Gruppen: Untermenü beginnt auf Höhe des Gruppenkopfs; untere: es endet dort und wächst nach oben.
     private func groupFlyout(_ group: ToolGroup) -> some View {
-        let rows: Int = ToolGroup.allCases.count + (showsBackTile ? 1 : 0)
-        let row: Int = self.row(of: group)
-        let step: CGFloat = groupSize.tile + groupSize.gap
-        let fromTop = row * 2 < rows
-        let top: CGFloat = fromTop ? CGFloat(row) * step : 0
-        let bottom: CGFloat = fromTop ? 0 : CGFloat(rows - 1 - row) * step
-        return Flyout(title: group.rawValue, category: group.category, items: items(for: group)) {
+        let frame = groupFrames[group] ?? .zero
+        let fromTop = frame.midY * 2 < max(railHeight, 1)
+        let top: CGFloat = fromTop ? max(frame.minY, 0) : 0
+        let bottom: CGFloat = fromTop ? 0 : max(railHeight - frame.maxY, 0)
+        let items = ribbonCommands(group).map { ribbonItem($0) }
+        return Flyout(title: group.rawValue, category: group.category, items: items, close: {
             self.openGroup = nil
-        }
+        }, pins: pins, togglePin: { id in
+            pinsText = ModelRibbon.toggled(id, in: pinsText)
+        })
         .padding(.top, top)
         .padding(.bottom, bottom)
         .frame(maxHeight: .infinity, alignment: fromTop ? .top : .bottom)
     }
 
-    private func groupColumn(_ size: GroupSize) -> some View {
-        VStack(alignment: .leading, spacing: size.gap) {
+    private func ribbonItem(_ command: RibbonCommand) -> ToolItem {
+        ToolItem(id: command.id, title: command.title, subtitle: command.subtitle, systemImage: command.icon,
+                 isEnabled: command.isEnabled, isActive: command.isActive, action: command.run,
+                 heading: command.heading, shortcut: command.shortcut, pinID: command.id)
+    }
+
+    private func ribbonColumn(_ size: RibbonSize) -> some View {
+        VStack(alignment: .leading, spacing: size.gap + 4) {
             if showsBackTile {
                 Button {
                     workspace.showsAllTools = false
@@ -833,18 +848,48 @@ struct ToolRail: View {
                 .buttonStyle(.plain)
             }
             ForEach(ToolGroup.allCases) { group in
-                Button {
-                    tapped(group)
-                } label: {
-                    RailTile(title: group.rawValue, systemImage: group.systemImage, category: group.category,
-                             isActive: isActive(group), isOpen: openGroup == group, size: size.tile)
-                }
-                .buttonStyle(.plain)
-                .hoverTip(group.rawValue, group.tip)
+                ribbonGroup(group, size: size)
+                    .background {
+                        GeometryReader { proxy in
+                            Color.clear
+                                .onAppear { groupFrames[group] = proxy.frame(in: .named("ribbon")) }
+                                .onChange(of: proxy.frame(in: .named("ribbon"))) { _, frame in
+                                    groupFrames[group] = frame
+                                }
+                        }
+                    }
             }
         }
-        // Nur die angezeigte Variante erscheint: ihre Größe gilt für die Lage des Untermenüs
-        .onAppear { groupSize = size }
+    }
+
+    /// Gruppe: Kopf „NAME ▾“ (öffnet die vollständige Liste) und darunter die hervorgehobenen bzw. angehefteten Befehle
+    /// als Kacheln (SolidCraft-Ribbon senkrecht für das iPad).
+    private func ribbonGroup(_ group: ToolGroup, size: RibbonSize) -> some View {
+        let commands = ribbonCommands(group)
+        let tiles = ModelRibbon.tiles(commands, pins: pins, limit: size.tiles)
+        return VStack(alignment: .leading, spacing: size.gap) {
+            RibbonGroupHeader(group: group, isOpen: openGroup == group,
+                              isActive: isActive(group) || commands.contains(where: \.isActive))
+                .contentShape(Rectangle())
+                .onTapGesture { tapped(group) }
+                .accessibilityAddTraits(.isButton)
+                .hoverTip(group.rawValue, group.tip)
+            ForEach(tiles) { command in
+                Button {
+                    openGroup = nil
+                    command.run()
+                } label: {
+                    RailTile(title: command.title, subtitle: nil, systemImage: command.icon,
+                             category: group.category, isActive: command.isActive, size: size.tile)
+                }
+                .buttonStyle(.plain)
+                .disabled(!command.isEnabled)
+                .opacity(command.isEnabled ? 1 : 0.45)
+                .accessibilityLabel(command.title)
+                .hoverTip(command.shortcut.map { "\(command.title) (\($0))" } ?? command.title,
+                          ToolTips.detail(for: command.title) ?? command.subtitle)
+            }
+        }
     }
 
     private func tapped(_ group: ToolGroup) {
@@ -858,226 +903,72 @@ struct ToolRail: View {
 
     private func isActive(_ group: ToolGroup) -> Bool {
         switch workspace.tool {
-        case .insert, .revolve, .sweep, .loft:
-            return group == .shapes
+        case .insert, .revolve, .sweep, .loft, .hole:
+            return group == .create
         case .part(let kind):
             return group == kind.group
-        case .hole:
-            return group == .holes
-        case .boolean, .split, .mold:
-            return group == .combine
-        case .shell, .offsetEdges, .offsetFace, .replaceFace, .wrap, .imprint:
-            return group == .faces
-        case .move, .translate, .scale, .align, .scaleSketch:
-            return group == .move
-        case .mirror, .pattern:
-            return group == .pattern
+        case .boolean, .split, .mold, .shell, .offsetEdges, .offsetFace, .replaceFace, .wrap, .imprint:
+            return group == .modify
+        case .scale:
+            return group == .modify
+        case .move, .translate, .align, .scaleSketch, .mirror, .pattern:
+            return group == .arrange
         case .construct:
             return group == .construct
-        case .measure, .printCheck:
+        case .measure, .printCheck, .section:
             return group == .inspect
         case .canvas, .meshSculpt:
             return group == .insert
         case .color:
             return group == .visualize
-        case .section:
-            // Schnittansicht liegt in der rechten Leiste
-            return false
         case .select:
             switch group {
             case .sketch: return sketch.isActive
-            case .fillets: return !model.selectedEdges.isEmpty
-            case .extrude: return !model.selectedRegions.isEmpty || model.faceHandle != nil
+            case .modify: return !model.selectedEdges.isEmpty
+            case .create: return !model.selectedRegions.isEmpty || model.faceHandle != nil
             default: return false
             }
         }
     }
 
-    /// Wie bei Shapr3D: Skizzenbereich oder ebene Fläche antippen, dann am Pfeil ziehen.
-    private func startExtrude() {
-        if workspace.tool != .select {
-            workspace.activate(.select)
-        }
-        if model.faceHandle == nil, model.selectedRegions.isEmpty {
-            model.message = model.sketches.isEmpty
-                ? "Erst eine Skizze mit geschlossenem Profil zeichnen, oder eine ebene Fläche antippen."
-                : "Skizzenbereich oder ebene Fläche antippen, dann am blauen Pfeil ziehen."
-        }
-    }
-
-    /// Verschieben ohne bzw. mit Kopie (Kai: „Kopieren kommt beim Verschieben rein“).
+    /// Verschieben ohne bzw. mit Kopie aus der Kontextleiste (Kai: „Kopieren kommt beim Verschieben rein“).
     private func startMove(copies: Bool) {
-        workspace.activate(.move)
-        // Skizzen werden nur verschoben, nie kopiert
-        model.moveCopies = copies && model.movingSketch == nil
+        workspace.startCommand(copies ? .copy : .move)
     }
+}
 
-    /// Bohrung ohne bzw. mit Gewinde (Schalter „Gewinde“ in der Bohrungskarte).
-    private func startHole(threaded: Bool) {
-        workspace.activate(.hole)
-        if threaded {
-            workspace.setHoleThread(workspace.holeSpec.thread ?? HoleThread())
-        } else if workspace.holeSpec.thread != nil {
-            workspace.setHoleThread(nil)
+/// Kopf einer Ribbon-Gruppe: Kategoriefarbe, Name in Großbuchstaben und ▾ (öffnet die vollständige Liste).
+private struct RibbonGroupHeader: View {
+    let group: ToolGroup
+    var isOpen = false
+    var isActive = false
+
+    var body: some View {
+        let color = group.category.color
+        HStack(spacing: 5) {
+            Circle()
+                .fill(color)
+                .frame(width: 6, height: 6)
+            Text(group.rawValue.uppercased())
+                .font(.system(size: 10, weight: .bold))
+                .tracking(0.7)
+                .foregroundStyle(isActive ? Color.primary : color)
+            if group.hasFlyout {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(color)
+                    .rotationEffect(.degrees(isOpen ? 180 : 0))
+            }
         }
-    }
-
-    // MARK: Einträge
-
-    private func item(_ tool: ModelTool, _ title: String, subtitle: String? = nil, _ systemImage: String) -> ToolItem {
-        ToolItem(id: "tool.\(title)", title: title, subtitle: subtitle, systemImage: systemImage,
-                 isActive: workspace.tool == tool) {
-            workspace.activate(tool)
+        .padding(.horizontal, 8)
+        .frame(minHeight: 22)
+        .floatingSurface(.regularMaterial, in: Capsule(), elevation: .flat)
+        .overlay {
+            if isOpen {
+                Capsule().strokeBorder(group.category.fill, lineWidth: 1.5)
+            }
         }
-    }
-
-    private func items(for group: ToolGroup) -> [ToolItem] {
-        switch group {
-        case .sketch:
-            return []
-        case .extrude:
-            let extruding = workspace.tool == .select && (!model.selectedRegions.isEmpty || model.faceHandle != nil)
-            return [
-                ToolItem(id: "extrude.extrude", title: "Extrudieren", subtitle: "Bereich oder Fläche, Pfeil ziehen",
-                         systemImage: "sc.extrude", isActive: extruding) {
-                    startExtrude()
-                },
-                item(.part(.thinLines), "Dünn extrudieren", subtitle: "Linien als Wand", PartTool.thinLines.systemImage),
-            ]
-        case .shapes:
-            var items: [ToolItem] = [
-                item(.revolve, "Achsendrehung", subtitle: "Bereich um Achse", "sc.revolve"),
-                item(.sweep, "Sweep", subtitle: "Bereich entlang Pfad", "sc.sweep"),
-                item(.loft, "Loft", subtitle: "Durch Querschnitte", "sc.loft"),
-                item(.part(.helix), "Helix", subtitle: "Feder, Spirale", PartTool.helix.systemImage),
-            ]
-            items += Primitive.allCases.map { primitive in
-                item(.insert(primitive), primitive.rawValue, subtitle: "Grundkörper", primitive.systemImage)
-            }
-            return items
-        case .fillets:
-            return EdgeOperation.allCases.map { operation in
-                ToolItem(id: "tools.\(operation.rawValue)", title: operation.rawValue, subtitle: "Kanten",
-                         systemImage: operation == .fillet ? "sc.fillet" : "sc.chamfer",
-                         isActive: workspace.tool == .select && !model.selectedEdges.isEmpty
-                             && model.edgeOperation == operation) {
-                    workspace.startEdgeOperation(operation)
-                }
-            }
-        case .holes:
-            let drilling = workspace.tool == .hole
-            let threaded = workspace.holeSpec.thread != nil
-            return [
-                ToolItem(id: "holes.hole", title: "Bohrung", subtitle: "Senkung, Senkkopf, Einsätze",
-                         systemImage: "sc.hole", isActive: drilling && !threaded) {
-                    startHole(threaded: false)
-                },
-                ToolItem(id: "holes.tapped", title: "Gewindebohrung", subtitle: "Kernloch mit Gewinde",
-                         systemImage: "sc.hole", isActive: drilling && threaded) {
-                    startHole(threaded: true)
-                },
-                item(.part(.thread), "Gewinde", subtitle: "Bolzen, Bohrung, jede Fläche", PartTool.thread.systemImage),
-            ]
-        case .faces:
-            return [
-                item(.offsetFace, "Fläche versetzen", subtitle: "Auch Bohrungen", "sc.offset_face"),
-                item(.replaceFace, "Fläche ersetzen", subtitle: "Bis Zielfläche", "sc.replace_face"),
-                item(.part(.draft), "Verjüngung", subtitle: "Flächen neigen", PartTool.draft.systemImage),
-                item(.shell, "Schale", subtitle: "Fläche öffnen", "sc.shell"),
-                item(.offsetEdges, "Kante versetzen", subtitle: "Fläche antippen", SketchTool.offset.systemImage),
-                item(.imprint, "Kante abdrücken", subtitle: "Skizze auf Fläche", "sc.project_surface"),
-                item(.wrap, "Umhüllen und Prägen", subtitle: "Auf Zylinder", "sc.emboss"),
-            ]
-        case .combine:
-            var items: [ToolItem] = BooleanKind.allCases.map { kind in
-                item(.boolean(kind), kind.rawValue, subtitle: "Körper", kind.systemImage)
-            }
-            items.append(item(.split, "Körper teilen", subtitle: "Ebene, Körper, Skizze", "sc.split_body"))
-            items.append(item(.mold, "Negativform", subtitle: "Form aus Block", "cube.transparent"))
-            return items
-        case .move:
-            let moving = workspace.tool == .move
-            return [
-                ToolItem(id: "move.move", title: "Verschieben/Rotieren", subtitle: "Körper oder Skizze",
-                         systemImage: "sc.move", isActive: moving && !model.moveCopies) {
-                    startMove(copies: false)
-                },
-                ToolItem(id: "move.copy", title: "Kopieren", subtitle: "Verschieben mit Kopie",
-                         systemImage: "sc.copy", isActive: moving && model.moveCopies) {
-                    startMove(copies: true)
-                },
-                item(.translate, "Übersetzen", subtitle: "Punkt zu Punkt", "point.topleft.down.to.point.bottomright.curvepath"),
-                item(.align, "Ausrichten", subtitle: "Körper", "sc.align"),
-                item(.scale, "Skalieren", subtitle: "Körper", "sc.scale"),
-                item(.scaleSketch, "Skizze skalieren", subtitle: "Bereich antippen", "sc.sketch_scale"),
-            ]
-        case .pattern:
-            return [
-                item(.mirror, "Spiegeln", subtitle: "Körper", "sc.mirror"),
-                item(.pattern(.linear), "Muster linear", subtitle: "Körper in Reihe", PatternKind.linear.systemImage),
-                item(.pattern(.circular), "Muster kreisförmig", subtitle: "Körper im Kreis", PatternKind.circular.systemImage),
-            ]
-        case .construct:
-            return ConstructionKind.allCases.map { kind in
-                item(.construct(kind), kind.rawValue, subtitle: "Konstruktion", kind.systemImage)
-            }
-        case .inspect:
-            return [
-                item(.measure, "Messen", subtitle: "Länge, Fläche, Abstand", "sc.measure"),
-                item(.printCheck, "Druckprüfung", subtitle: "Überhang, Wände", "printer"),
-            ]
-        case .insert:
-            return [
-                item(.part(.standard), "Normteile", subtitle: "Schrauben, Muttern, Lager", PartTool.standard.systemImage),
-                item(.part(.template), "Vorlagen", subtitle: "Gehäuse, Stirnrad", PartTool.template.systemImage),
-                ToolItem(id: "insert.step", title: "STEP-Datei", subtitle: ".step / .stp",
-                         systemImage: "sc.import", action: importSTEP),
-                ToolItem(id: "insert.mesh", title: "STL / 3MF", subtitle: "Netz als Körper (3D-Druck)",
-                         systemImage: "triangle", action: importSTEP),
-                ToolItem(id: "insert.vector", title: "SVG / DXF", subtitle: "Als Skizze (Laser, CNC, Logos)",
-                         systemImage: "sc.svg", action: importSTEP),
-                item(.meshSculpt, "Netz bearbeiten", subtitle: "Pinsel, STL/3MF", "paintbrush.pointed"),
-                // Bild als Vorlage aus drei Quellen; danach gleich kalibrieren (WorkspaceView.insertImage)
-                ToolItem(id: "insert.image", title: "Bild aus Fotos", subtitle: "Fotoalbum, als Vorlage",
-                         systemImage: "sc.canvas") {
-                    workspace.isPickingImage = true
-                },
-                ToolItem(id: "insert.imageFile", title: "Bild aus Dateien", subtitle: "PNG, JPEG, HEIC, PDF",
-                         systemImage: "folder") {
-                    workspace.isImportingImageFile = true
-                },
-                ToolItem(id: "insert.camera", title: "Foto aufnehmen",
-                         subtitle: CameraCapture.isAvailable ? "Kamera, als Vorlage" : "Keine Kamera verfügbar",
-                         systemImage: "camera", isEnabled: CameraCapture.isAvailable) {
-                    workspace.isTakingPhoto = true
-                },
-                ToolItem(id: "insert.project", title: "Projekt", subtitle: "Körper eines anderen Projekts",
-                         systemImage: "folder.badge.plus") {
-                    workspace.showsProjectPicker = true
-                },
-                ToolItem(id: "insert.variable", title: "Variable", subtitle: model.variables.isEmpty ? "Name = Wert"
-                             : "\(model.variables.count) im Projekt", systemImage: "sc.params") {
-                    workspace.showsVariables = true
-                },
-            ]
-        case .visualize:
-            var items = DisplayMode.allCases.map { mode in
-                ToolItem(id: "visualize.\(mode.rawValue)", title: mode.rawValue, systemImage: mode.systemImage,
-                         isActive: workspace.displayMode == mode) {
-                    workspace.displayMode = mode
-                }
-            }
-            items.append(ToolItem(id: "visualize.ortho", title: "Orthografisch", subtitle: "Projektion",
-                                  systemImage: "cube.transparent", isActive: workspace.isOrthographic) {
-                workspace.isOrthographic.toggle()
-            })
-            items.append(item(.color, "Farbe", subtitle: "Körper", "sc.appearance"))
-            items.append(ToolItem(id: "visualize.drawing", title: "Zeichnung", subtitle: "PDF, DXF",
-                                  systemImage: "doc.richtext") {
-                workspace.showsDrawing = true
-            })
-            return items
-        }
+        .animation(Theme.snappy, value: isOpen)
     }
 }
 
@@ -1283,6 +1174,9 @@ private struct Flyout: View {
     var category: ToolCategory = .neutral
     let items: [ToolItem]
     let close: () -> Void
+    /// Angeheftete Einträge (Stecknadel gefüllt); nil-Schalter = keine Stecknadeln (Skizzenmodus)
+    var pins: Set<String> = []
+    var togglePin: ((String) -> Void)? = nil
 
     var body: some View {
         // Lange Listen scrollen, wenn sie nicht auf den Bildschirm passen.
@@ -1290,7 +1184,7 @@ private struct Flyout: View {
             list
             ScrollView { list }
         }
-        .frame(width: 240)
+        .frame(width: 264)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.panel, style: .continuous))
         .overlay(alignment: .top) {
             // Farbstreifen der Kategorie oben
@@ -1312,35 +1206,87 @@ private struct Flyout: View {
                 .padding(.horizontal, 10)
                 .padding(.top, 4)
                 .padding(.bottom, 4)
-            ForEach(items) { item in
-                Button {
-                    item.action()
-                    close()
-                } label: {
-                    HStack(spacing: 12) {
-                        itemIcon(item)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(item.title)
-                                .font(.subheadline.weight(.medium))
-                            if let subtitle = item.subtitle {
-                                Text(subtitle)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 4)
-                    .contentShape(Rectangle())
+            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                if let heading = item.heading, index == 0 || items[index - 1].heading != heading {
+                    // Zwischenüberschrift (ÄNDERN: KANTEN, FLÄCHEN, KÖRPER, SPEZIAL)
+                    Text(heading)
+                        .font(.system(size: 9.5, weight: .bold))
+                        .tracking(0.6)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.top, index == 0 ? 0 : 6)
                 }
-                .buttonStyle(.plain)
-                .disabled(!item.isEnabled)
-                .opacity(item.isEnabled ? 1 : 0.4)
-                .hoverTip(item.title, ToolTips.detail(for: item.title) ?? item.subtitle)
+                row(item)
             }
         }
         .padding(10)
+    }
+
+    private func row(_ item: ToolItem) -> some View {
+        let pinned = item.pinID.map { pins.contains($0) } ?? false
+        return HStack(spacing: 4) {
+            Button {
+                item.action()
+                close()
+            } label: {
+                HStack(spacing: 12) {
+                    itemIcon(item)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(item.title)
+                            .font(.subheadline.weight(.medium))
+                        if let subtitle = item.subtitle {
+                            Text(subtitle)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                    if let shortcut = item.shortcut {
+                        Text(shortcut)
+                            .font(.caption.monospaced().weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                    .strokeBorder(Theme.hairline, lineWidth: 1)
+                            }
+                    }
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 4)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!item.isEnabled)
+            .opacity(item.isEnabled ? 1 : 0.4)
+            .hoverTip(item.shortcut.map { "\(item.title) (\($0))" } ?? item.title,
+                      ToolTips.detail(for: item.title) ?? item.subtitle)
+            .contextMenu {
+                if let togglePin, let id = item.pinID {
+                    Button(pinned ? "Von der Leiste lösen" : "An die Leiste heften",
+                           systemImage: pinned ? "pin.slash" : "pin") {
+                        togglePin(id)
+                    }
+                }
+            }
+            if let togglePin, let id = item.pinID {
+                // Stecknadel: Befehl als Kachel in die Leiste heften (auch lange drücken)
+                Button {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    togglePin(id)
+                } label: {
+                    Image(systemName: pinned ? "pin.fill" : "pin")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(pinned ? category.fill : Color.secondary.opacity(0.6))
+                        .rotationEffect(.degrees(45))
+                        .frame(width: 32, height: 36)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(pinned ? "Von der Leiste lösen" : "An die Leiste heften")
+            }
+        }
     }
 
     /// Symbol eines Eintrags: SF Symbol aktiv weiß auf Vollfarbe; SolidCraft-Bild aktiv auf hellem Grund mit Rahmen.
