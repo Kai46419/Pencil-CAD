@@ -128,6 +128,9 @@ final class ViewportView: MTKView {
     /// Punkt merken durch ruhiges Schweben (1 s)
     private var hoverDwell: DispatchWorkItem?
     private var hoverDwellOrigin: CGPoint?
+    /// Skizzenebene per Tippen auf eine Fläche wechseln – verzögert, damit ein Doppeltippen (Punkt merken) sie
+    /// nicht mit seinem ersten Tippen wechselt und dabei die Skizze leert
+    private var pendingPlaneSwitch: DispatchWorkItem?
     /// Was der schwebende Stift im Modell treffen würde (Hervorhebung vor dem Antippen, wie Shapr3D)
     private enum HoverPick: Equatable {
         case face(FaceRef)
@@ -406,6 +409,7 @@ final class ViewportView: MTKView {
                        v: SIMD3<Float>(plane.v), n: SIMD3<Float>(plane.normal))
             : matrix_identity_float4x4
         // Angezeigtes Raster = Fangraster (bzw. gröberes Vielfaches, wenn es im Bild zu eng wird)
+        renderer.gridOverFaces = sketching
         renderer.gridBase = sketching && sketch.snapEnabled && sketch.snapKinds.contains(.grid) ? Float(sketch.gridStep) : 0
         renderer.clipPlane = workspace.clipPlane.map {
             SIMD4<Float>(Float($0.normal.x), Float($0.normal.y), Float($0.normal.z), Float($0.distance))
@@ -872,7 +876,8 @@ final class ViewportView: MTKView {
                 let hit = model.pick(origin: ray.origin, direction: ray.direction)
                 let faceT: Float = hit.map { simd_dot($0.point - ray.origin, ray.direction) } ?? .infinity
                 let facePreferred = workspace?.sketchOnBody ?? false
-                if let face = hit?.face, faceT < (planeHit?.t ?? .infinity) || facePreferred, model.plane(of: face) != nil {
+                // Ebene zwischengespeichert: der Kernel wird nicht bei jeder Stiftbewegung gefragt
+                if let face = hit?.face, faceT < (planeHit?.t ?? .infinity) || facePreferred, measurePlane(of: face) != nil {
                     pick = .face(face)
                 } else {
                     plane = planeHit?.index
@@ -2376,7 +2381,7 @@ final class ViewportView: MTKView {
     // MARK: Gesten
 
     /// Tippen wählt Kanten (nah an einer Kante), Flächen oder Körper. Im Skizzenmodus wird eine ebene
-    /// Fläche zur Skizzenebene, Tippen ins Leere setzt die Skizze auf die Bodenebene zurück.
+    /// Fläche einer leeren Skizze zur Skizzenebene; Tippen ins Leere ändert die Ebene nicht.
     @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
         let location = gesture.location(in: self)
         guard handleHit(at: location) == nil,
@@ -2435,20 +2440,19 @@ final class ViewportView: MTKView {
                 refresh()
                 return
             }
-            // Ebene nur wechseln, solange noch nichts gezeichnet ist (der Wechsel leert die Skizze)
-            guard sketch.isEmpty else { return }
-            guard let hit else {
-                if sketch.plane.isOnFace { sketch.useBasePlane() }
+            // Ebene nur wechseln, solange noch nichts gezeichnet oder gemerkt ist (der Wechsel leert die Skizze).
+            // Kai (Skizze auf einer Körperfläche: kein Fadenkreuz, kein Fang): Tippen ins Leere wechselte hier still
+            // auf die Standardebene, ohne die Ansicht mitzudrehen – die neue Ebene lag dann oft genau in
+            // Blickrichtung, der Stift traf sie nicht mehr. Darum ändert Tippen ins Leere nichts mehr, und dieselbe
+            // Fläche noch einmal antippen (auch das erste Tippen eines Doppeltippens) leert die Skizze nicht.
+            guard sketch.isEmpty, sketch.capturedPoints.isEmpty, sketch.marks.isEmpty, let hit else { return }
+            guard let plane = model.plane(of: hit.face) else {
+                model.message = "Auf gekrümmten Flächen kann nicht skizziert werden."
                 refresh()
                 return
             }
-            if let plane = model.plane(of: hit.face) {
-                workspace.chooseSketchPlane(plane)
-                model.message = nil
-            } else {
-                model.message = "Auf gekrümmten Flächen kann nicht skizziert werden."
-            }
-            refresh()
+            guard !plane.coincides(with: sketch.plane) else { return }
+            schedulePlaneSwitch(to: plane)
             return
         }
         var edgeHit = pickEdge(at: location, ray: ray, faceHit: hit)
@@ -2632,6 +2636,9 @@ final class ViewportView: MTKView {
 
     /// Doppeltippen mit dem Finger auf einen Fangpunkt: Punkt merken (wie 1 s Schweben mit dem Stift).
     @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
+        // Das erste Tippen gehörte zum Doppeltippen: keinen Ebenenwechsel nachholen
+        pendingPlaneSwitch?.cancel()
+        pendingPlaneSwitch = nil
         if let sketch, !sketch.isActive {
             repeatLastExtrude(at: gesture.location(in: self))
             return
@@ -2639,9 +2646,25 @@ final class ViewportView: MTKView {
         guard let sketch, sketch.isActive, !sketch.isChoosingPlane,
               let point = sketchPoint(at: gesture.location(in: self)) else { return }
         if !sketch.captureHovered(at: point, tolerance: snapTolerance) {
-            sketch.notice = "Kein Punkt zum Merken – auf ein Ende, eine Mitte, ein Zentrum oder einen Schnittpunkt doppeltippen."
+            sketch.notice = "Kein Punkt zum Merken – auf ein Ende, eine Mitte, ein Zentrum, einen Schnittpunkt oder eine Körperecke doppeltippen."
         }
         refresh()
+    }
+
+    /// Leere Skizze: auf die angetippte Fläche wechseln, sobald klar ist, dass kein Doppeltippen folgt.
+    private func schedulePlaneSwitch(to plane: SketchPlane) {
+        pendingPlaneSwitch?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.pendingPlaneSwitch = nil
+            guard let sketch = self.sketch, let workspace = self.workspace, sketch.isActive, !sketch.isChoosingPlane,
+                  sketch.isEmpty, sketch.capturedPoints.isEmpty, sketch.marks.isEmpty else { return }
+            workspace.chooseSketchPlane(plane)
+            self.model?.message = nil
+            self.refresh()
+        }
+        pendingPlaneSwitch = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
     }
 
     /// Während ein Ziehpfeil gezogen wird, drehen und wählen die Finger nicht. Während der Stift zeichnet,

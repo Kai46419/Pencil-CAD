@@ -99,6 +99,9 @@ final class Renderer: NSObject, MTKViewDelegate {
     var gridTransform: float4x4? = matrix_identity_float4x4
     /// Fangraster der Skizze in mm (0 = keins): das angezeigte Raster folgt ihm bzw. einem Vielfachen davon
     var gridBase: Float = 0
+    /// Skizze: Raster minimal zur Kamera gezogen, damit es auf einer Körperfläche in der Skizzenebene sichtbar
+    /// bleibt (sonst deckte die gleich tiefe Fläche das Raster zu)
+    var gridOverFaces = false
     var displayMode: DisplayMode = .shaded
     var handles: [HandleGraphic] = []
     var planes: [PlaneGraphic] = []
@@ -523,7 +526,7 @@ final class Renderer: NSObject, MTKViewDelegate {
             let grid = gridLines(transform: gridTransform, viewWidth: viewHeight * aspect, viewHeight: viewHeight)
             var gridUniforms = uniforms
             gridUniforms.model = gridTransform
-            encoder.setRenderPipelineState(linePipeline)
+            encoder.setRenderPipelineState(gridOverFaces ? fillPipeline : linePipeline)
             encoder.setDepthStencilState(depthState)
             setUniforms(&gridUniforms)
             for (lines, shade) in [(grid.minor, Float(0.74)), (grid.major, Float(0.67))] {
