@@ -389,13 +389,28 @@ extension TechnicalDrawing {
                 }
             }
             let tolerance = 0.05
+            // Endpunkte in einem Raster (Zelle 0,1 mm > Toleranz), damit die Nachbarsuche nicht bei jedem
+            // schrägen Stück alle Linienstücke durchläuft (Netz-Ansichten mit vielen Bogen-Sehnen)
+            let cell = 0.1
+            func cellKey(_ p: Point2) -> SIMD2<Int> {
+                SIMD2<Int>(Int((p.x / cell).rounded(.down)), Int((p.y / cell).rounded(.down)))
+            }
+            var endpoints: [SIMD2<Int>: [(point: Point2, direction: Point2)]] = [:]
+            for s in segments {
+                endpoints[cellKey(s.0), default: []].append((s.0, s.1 - s.0))
+                endpoints[cellKey(s.1), default: []].append((s.1, s.0 - s.1))
+            }
             /// Stücke mit einem Endpunkt am Punkt, als Richtung vom Punkt weg
             func neighbours(_ p: Point2) -> [Point2] {
-                segments.compactMap { s in
-                    if simd_distance(s.0, p) < tolerance { return s.1 - s.0 }
-                    if simd_distance(s.1, p) < tolerance { return s.0 - s.1 }
-                    return nil
+                let key = cellKey(p)
+                var result: [Point2] = []
+                for dx in -1...1 {
+                    for dy in -1...1 {
+                        guard let list = endpoints[key &+ SIMD2<Int>(dx, dy)] else { continue }
+                        for entry in list where simd_distance(entry.point, p) < tolerance { result.append(entry.direction) }
+                    }
                 }
+                return result
             }
 
             var placed = 0

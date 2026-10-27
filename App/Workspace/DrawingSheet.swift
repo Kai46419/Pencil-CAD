@@ -29,6 +29,8 @@ struct DrawingSheet: View {
     @State private var draggedAngle: UUID?
     @State private var dragStartHandle = Point2.zero
     @State private var isDragging = false
+    /// Startstelle der laufenden Geste (erkennt eine neue Geste, falls eine abgebrochene kein onEnded lieferte)
+    @State private var dragStartLocation = CGPoint.zero
     @State private var angleOverlay: UIImage?
     @State private var angleHint: String?
 
@@ -215,6 +217,7 @@ struct DrawingSheet: View {
     }
 
     /// Eine Geste für Antippen (Kante wählen, Winkelmaß auswählen) und Ziehen (Winkelmaß verschieben).
+    @MainActor
     private func sheetGesture(size: CGSize) -> some Gesture {
         let k = max(Double(size.width), 1) / TechnicalDrawing.sheetWidth
         return DragGesture(minimumDistance: 0)
@@ -232,8 +235,9 @@ struct DrawingSheet: View {
 
     @MainActor
     private func dragChanged(_ value: DragGesture.Value, size: CGSize, k: Double) {
-        if !isDragging {
+        if !isDragging || value.startLocation != dragStartLocation {
             isDragging = true
+            dragStartLocation = value.startLocation
             let hit = manualAngle(at: sheetPoint(value.startLocation, size: size), tolerance: 16 / k)
             draggedAngle = hit?.id
             dragStartHandle = hit?.handle ?? .zero
