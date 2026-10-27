@@ -66,10 +66,10 @@ struct SketchTextPath: Codable, Equatable {
     /// Kurve als fein abgetasteter Linienzug in Skizzenkoordinaten (Stand der Quelle beim letzten Abgleich)
     var points: [Point2]
     var closed: Bool
-    /// Skizzenelement, dem der Pfad folgt (nil = feste Kurve, z. B. Körperkante)
+    /// Skizzenelement, dem der Pfad folgt (nil = feste Kurve, z. B. Körperkante). Beim Löschen bzw. Ersetzen von
+    /// Elementen schreibt die Skizze den Index mit um (SketchTextPathLink.swift).
     var source: Int?
-    /// Anzahl der Skizzenelemente beim letzten Abgleich: sind es weniger geworden, kann source auf ein anderes
-    /// Element zeigen (dann folgt der Text nicht mehr)
+    /// Anzahl der Skizzenelemente beim letzten Abgleich (nur noch zur Information, ältere Projekte lesen sie)
     var sourceCount: Int?
     /// Startversatz entlang des Pfads (mm, Startgriff)
     var offset: Double = 0

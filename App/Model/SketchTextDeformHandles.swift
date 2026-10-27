@@ -429,15 +429,8 @@ extension SketchController {
         if abs(sagitta) < least { sagitta = sagitta < 0 ? -least : least }
         sagitta = max(-length / 2, min(length / 2, sagitta))
         let arc = SketchEntity.arc(start: a, mid: middle + normal * sagitta, end: b)
+        // Text folgt dem Bogen schon beim Ziehen (setDraggedElement gleicht Text am Pfad ab)
         setDraggedElement(arc, at: source, begin: begin, final: final)
-        // Text folgt dem Bogen schon beim Ziehen (am Ende gleicht entitiesChanged ohnehin ab)
-        if !final, let curve = SketchTextPath.curve(of: arc), let text = sketchText(at: drag.entity),
-           var deform = text.deform, var path = deform.path {
-            path.points = curve.points
-            path.closed = curve.closed
-            deform.path = path
-            setDraggedElement(.text(text.with(deform: .some(deform))), at: drag.entity, begin: false, final: false)
-        }
         return true
     }
 
@@ -525,25 +518,24 @@ extension SketchController {
         updateText(at: index) { $0.with(deform: .some(deform)) }
     }
 
-    /// Texte, deren Pfad einer geänderten Skizzenkurve folgen muss (Haken in entitiesChanged). Wurde die Kurve
-    /// gelöscht oder sind Elemente davor weggefallen (Indizes verschoben), bleibt der Text, wo er ist, und folgt
-    /// keiner Kurve mehr.
+    /// Texte, deren Pfad einer geänderten Skizzenkurve folgen muss (Haken in entitiesChanged und beim Ziehen).
+    /// Der Index der Quelle bleibt beim Löschen und Ersetzen von Elementen gültig (removeEntities schreibt ihn um,
+    /// SketchTextPathLink.swift); ist die Kurve weg bzw. keine Kurve mehr, bleibt der Text, wo er ist.
     func textPathUpdates() -> [(index: Int, entity: SketchEntity)] {
         var updates: [(index: Int, entity: SketchEntity)] = []
         for index in entities.indices {
             guard case .text(let text) = entities[index], var deform = text.deform, var path = deform.path,
                   let source = path.source else { continue }
-            let shrank: Bool = (path.sourceCount ?? entities.count) > entities.count
             let curve = entities.indices.contains(source) && source != index
                 ? SketchTextPath.curve(of: entities[source]) : nil
-            if let curve, !shrank || Self.samePath(curve.points, path.points) {
+            if let curve {
                 let moved: Bool = !Self.samePath(curve.points, path.points) || curve.closed != path.closed
-                if !moved, path.sourceCount == entities.count { continue }
+                if !moved { continue }
                 path.points = curve.points
                 path.closed = curve.closed
                 path.sourceCount = entities.count
             } else {
-                // Kurve weg bzw. Index unsicher: Pfad als feste Kurve behalten
+                // Kurve weg: Pfad als feste Kurve behalten
                 path.source = nil
                 path.sourceCount = nil
             }

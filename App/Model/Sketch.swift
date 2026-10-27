@@ -1732,6 +1732,7 @@ final class SketchController: ObservableObject {
             notice = nil
             selectDrag = drag
             entities = result
+            followTextPaths()
             changed(publish: false)
             return
         }
@@ -1757,6 +1758,7 @@ final class SketchController: ObservableObject {
         notice = nil
         selectDrag = drag
         entities = result
+        followTextPaths()
         changed(publish: false)
     }
 
@@ -3239,7 +3241,8 @@ final class SketchController: ObservableObject {
     @discardableResult
     private func replaceEntity(_ index: Int, with replacement: [SketchEntity]) -> Int {
         let wasConstruction = construction.contains(index)
-        removeEntities([index])
+        // Text am Pfad bleibt an einer Kurve, die durch genau ein neues Element ersetzt wird (z. B. Verlängern)
+        removeEntities([index], relink: replacement.count == 1 ? [index: entities.count - 1] : [:])
         let first = entities.count
         for entity in replacement {
             entities.append(entity)
@@ -3250,14 +3253,16 @@ final class SketchController: ObservableObject {
     }
 
     /// Elemente entfernen; Einschränkungen, Konstruktionsart und Auswahl werden angepasst.
-    private func removeEntities(_ removed: Set<Int>) {
+    /// relink: entfernte Kurve → Index ihres Nachfolgers für Text am Pfad (nach dem Entfernen gezählt).
+    private func removeEntities(_ removed: Set<Int>, relink: [Int: Int] = [:]) {
         var map: [Int: Int] = [:]
         var kept: [SketchEntity] = []
         for (index, entity) in entities.enumerated() where !removed.contains(index) {
             map[index] = kept.count
             kept.append(entity)
         }
-        entities = kept
+        // Text am Pfad behält seine Kurve, auch wenn sich ihr Index verschiebt (SketchTextPathLink.swift)
+        entities = SketchTextPathLink.remapped(kept) { map[$0] ?? relink[$0] }
         constraints = constraints.compactMap { $0.remapped { map[$0] } }
         construction = Set(construction.compactMap { map[$0] })
         selection = []
@@ -3332,6 +3337,8 @@ final class SketchController: ObservableObject {
             }
         }
         if let bestPoint { return .point(bestPoint.ref) }
+        // Direkt auf einem Buchstaben von Text am Pfad: der Text geht der Kurve vor, auf der er sitzt
+        if includeText, let index = pathTextIndex(onGlyphAt: p) { return .curve(SketchCurveRef(entity: index, index: 0)) }
         var bestCurve: (distance: Double, ref: SketchCurveRef)?
         for (index, entity) in entities.enumerated() {
             for k in 0..<entity.curveCount {
@@ -4425,9 +4432,13 @@ final class SketchController: ObservableObject {
         }
     }
 
-    private func entitiesChanged() {
-        // Text am Pfad folgt der geänderten Kurve (SketchTextDeformHandles.swift)
+    /// Text am Pfad folgt der geänderten Kurve (SketchTextDeformHandles.swift), auch während des Ziehens.
+    private func followTextPaths() {
         for update in textPathUpdates() { entities[update.index] = update.entity }
+    }
+
+    private func entitiesChanged() {
+        followTextPaths()
         let profile = entities.indices.filter { !construction.contains($0) }.map { entities[$0] }
         let found = findRegions(in: profile)
         regions = found.regions
@@ -4505,7 +4516,12 @@ extension SketchController {
         guard entities.indices.contains(index) else { return }
         if begin { remember() }
         entities[index] = entity
-        if final { entitiesChanged() } else { changed(publish: false) }
+        if final {
+            entitiesChanged()
+        } else {
+            followTextPaths()
+            changed(publish: false)
+        }
     }
 
     /// Radiusgriff an Bogen und Kreis (SketchArcHandle.swift): Maß am Element beim Ziehen ändern wie beim Eintippen
@@ -4609,7 +4625,11 @@ extension SketchController {
     private func addGroup(_ shapes: [SketchEntity], keepConstruction source: [Int]? = nil) {
         guard !shapes.isEmpty else { return }
         remember()
-        for (k, shape) in shapes.enumerated() {
+        // Kopierter Text am Pfad folgt der mitkopierten Kurve, nicht dem Original (SketchTextPathLink.swift)
+        let linked: [SketchEntity] = source.map {
+            SketchTextPathLink.relinkedCopies(shapes, sources: $0, first: entities.count)
+        } ?? shapes
+        for (k, shape) in linked.enumerated() {
             entities.append(shape)
             let index = entities.count - 1
             let fromConstruction = source.map { construction.contains($0[k]) } ?? constructionMode

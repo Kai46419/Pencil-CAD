@@ -56,6 +56,8 @@ extension SketchText {
     /// Liegt p auf dem Text? Gezählt wird das (etwas vergrößerte) umgebende Rechteck, damit auch dünne Schrift
     /// und die Lücken zwischen den Buchstaben leicht zu treffen sind.
     func contains(_ p: Point2, tolerance: Double) -> Bool {
+        // Am Pfad über die gelegten Umrisse (das Rechteck deckt bei einem Bogen die ganze Fläche ab)
+        if deform?.path != nil { return pathOutlineContains(p, tolerance: tolerance) }
         guard let box = localBounds else { return false }
         let q = local(p)
         // Toleranz in Skizzenmaß, das System des Texts ist um transform.scale kleiner bzw. größer
