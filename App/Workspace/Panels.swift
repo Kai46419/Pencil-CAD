@@ -1746,8 +1746,8 @@ struct HistoryPanel: View {
 // MARK: Elemente
 
 /// Reiter „Ebenen“ links, aufgebaut wie der Browser in Fusion 360: Projekt, Dokumenteinstellungen,
-/// Ursprung, Ordner „Skizzen“ (jede Skizze ist eine Ebene, darunter die Skizze selbst und alle Körper,
-/// die aus ihr extrudiert wurden), weitere Körper, Konstruktion und Bilder – jeweils mit Auge.
+/// Ursprung, genau ein Ordner „Körper“ (alle Körper, Mehrfachauswahl und Kombinieren), genau ein Ordner
+/// „Skizzen“ (Skizze 1, 2 …), Konstruktion und Bilder – jeweils mit Auge.
 struct LayersPanel: View {
     @ObservedObject var workspace: Workspace
     @ObservedObject var model: ModelStore
@@ -1761,16 +1761,14 @@ struct LayersPanel: View {
         case sketch(Int)
     }
 
-    @State private var collapsed: Set<UUID> = []
     /// Zugeklappte Ordner (Dokumenteinstellungen anfangs zu, wie in Fusion 360)
     @State private var closedFolders: Set<String> = ["settings"]
     @State private var renaming: Renaming?
     @State private var newName = ""
     /// Filter wie bei Shapr3D: Alle, Körper, Skizzen, Konstruktion
     @State private var filter: LayerFilter = .all
-    /// Körper, die in einen neuen Ordner sollen (Name wird abgefragt)
-    @State private var folderBodies: [Int]?
-    @State private var folderName = ""
+    /// Auswählen-Modus des Ordners „Körper“: Häkchen vor jedem Körper, Antippen nimmt hinzu bzw. heraus
+    @State private var picksBodies = false
 
     enum LayerFilter: String, CaseIterable, Identifiable {
         case all = "Alle"
@@ -1809,21 +1807,10 @@ struct LayersPanel: View {
                     }
                 }
                 if filter == .all || filter == .bodies {
-                    ForEach(model.bodyFolders) { entry in
-                        userFolder(entry.name, bodies: entry.bodies)
-                    }
-                }
-                if filter == .all || filter == .bodies, !looseBodies.isEmpty {
-                    // Jeder Körper ein eigener Eintrag, auch mehrere aus einer Skizze (wie Fusion 360)
-                    let anyVisible = looseBodies.contains { !model.bodies[$0].isHidden }
-                    folder("solids", title: "Körper", systemImage: "folder", count: looseBodies.count,
-                           visible: anyVisible, toggle: { model.setBodiesHidden(anyVisible, bodies: looseBodies) }) {
-                        ForEach(looseBodies, id: \.self) { index in
-                            bodyRow(index)
-                        }
-                    }
+                    bodiesFolder
                 }
                 if filter == .all || filter == .sketches {
+                    // Genau ein Ordner „Skizzen“: Skizze 1, 2 … direkt darin (Kai, keine Ebenen-Zwischenstufe)
                     folder("sketches", title: "Skizzen", systemImage: "folder",
                            count: model.sketches.count, visible: model.sketches.isEmpty ? nil : model.showsSketches,
                            toggle: { model.setSketchesHidden(model.showsSketches) }) {
@@ -1831,7 +1818,7 @@ struct LayersPanel: View {
                             infoRow("Noch keine Skizze", systemImage: "pencil.and.outline")
                         }
                         ForEach(model.sketches.indices, id: \.self) { index in
-                            layer(index)
+                            sketchEntry(index)
                         }
                     }
                 }
@@ -1854,17 +1841,7 @@ struct LayersPanel: View {
                 }
             }
         }
-        .alert("Neuer Ordner", isPresented: Binding(get: { folderBodies != nil }, set: { if !$0 { folderBodies = nil } })) {
-            TextField("Name", text: $folderName)
-            Button("Abbrechen", role: .cancel) {}
-            Button("Anlegen") {
-                let name = folderName.trimmingCharacters(in: .whitespaces)
-                if !name.isEmpty, let chosen = folderBodies { model.setFolder(name, bodies: chosen) }
-            }
-        } message: {
-            Text("Die Körper kommen in den neuen Ordner im Browser.")
-        }
-        .alert(isRenamingSketch ? "Ebene umbenennen" : "Körper umbenennen",
+        .alert(isRenamingSketch ? "Skizze umbenennen" : "Körper umbenennen",
                isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("Name", text: $newName)
             Button("Abbrechen", role: .cancel) {}
@@ -1970,22 +1947,22 @@ struct LayersPanel: View {
         .frame(height: 30)
     }
 
-    /// Alle Körper, die in keinem eigenen Ordner liegen (aus Skizzen, Grundkörper, Importe).
-    private var looseBodies: [Int] { model.bodies.indices.filter { model.bodies[$0].folder == nil } }
-
-    /// Eigener Ordner mit Körpern (Kontextmenü: auflösen, exportieren).
-    private func userFolder(_ name: String, bodies: [Int]) -> some View {
-        let anyVisible = bodies.contains { !model.bodies[$0].isHidden }
-        return folder("user.\(name)", title: name, systemImage: "folder.fill", count: bodies.count, visible: anyVisible,
-                      toggle: { model.setBodiesHidden(anyVisible, bodies: bodies) }) {
-            ForEach(bodies, id: \.self) { index in
+    /// Genau ein Ordner „Körper“ mit allen Körpern (Kai: keine doppelten oder verschachtelten Ordner),
+    /// darüber „Auswählen“ und – ab zwei gewählten Körpern – Vereinigen, Subtrahieren, Schneiden.
+    private var bodiesFolder: some View {
+        let all = Array(model.bodies.indices)
+        let anyVisible = all.contains { !model.bodies[$0].isHidden }
+        return folder("solids", title: "Körper", systemImage: "folder", count: all.count,
+                      visible: all.isEmpty ? nil : anyVisible,
+                      toggle: { model.setBodiesHidden(anyVisible, bodies: all) }) {
+            if all.isEmpty {
+                infoRow("Noch kein Körper", systemImage: "cube")
+            } else {
+                BrowserBooleanBar(workspace: workspace, model: model, picking: $picksBodies)
+            }
+            ForEach(all, id: \.self) { index in
                 bodyRow(index)
             }
-        }
-        .contextMenu {
-            exportMenu(title: "Ordner exportieren", bodies: bodies, name: name)
-            Button("Alle wählen", systemImage: "checkmark.circle") { model.selectBodies(bodies) }
-            Button("Ordner auflösen", systemImage: "folder.badge.minus") { model.setFolder(nil, bodies: bodies) }
         }
     }
 
@@ -1999,75 +1976,17 @@ struct LayersPanel: View {
         return true
     }
 
-    // MARK: Ebene
+    // MARK: Skizze
 
-    /// Kopfzeile der Ebene (auf- und zuklappbar, Auge für alles) und darunter die Skizze;
-    /// die Körper stehen im Ordner „Volumenkörper“.
-    private func layer(_ index: Int) -> some View {
+    /// Eintrag im Ordner „Skizzen“: die Skizze selbst und darunter ihre Texte (ohne Ebenen-Zwischenstufe).
+    private func sketchEntry(_ index: Int) -> some View {
         let item = model.sketches[index]
-        let bodies = model.bodies(fromSketch: index)
-        let isOpen = !collapsed.contains(item.id)
-        let isVisible = model.isLayerVisible(index)
         return VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 6) {
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.secondary)
-                    .rotationEffect(.degrees(isOpen ? 90 : 0))
-                    .frame(width: 16, height: 30)
-                eye(isVisible) { model.setLayerHidden(isVisible, sketch: index) }
-                Image(systemName: "square.3.layers.3d")
-                    .foregroundStyle(isVisible ? Color.accentColor : Color.secondary)
-                    .frame(width: 20)
-                Text(Self.layerName(item.name))
-                    .fontWeight(.semibold)
-                    .lineLimit(1)
-                    .foregroundStyle(isVisible ? Color.primary : Color.secondary)
-                if !bodies.isEmpty {
-                    Text(bodies.count == 1 ? "1 Körper" : "\(bodies.count) Körper")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 2)
-            .contentShape(Rectangle())
-            // Doppeltippen öffnet die Skizze (SolidCraft-Browser), einfaches Tippen klappt auf bzw. zu
-            .onTapGesture(count: 2) { workspace.editSketch(index) }
-            .onTapGesture {
-                withAnimation(.easeOut(duration: 0.15)) {
-                    if isOpen { collapsed.insert(item.id) } else { collapsed.remove(item.id) }
-                }
-            }
-            .contextMenu {
-                Button("Umbenennen", systemImage: "pencil") {
-                    newName = item.name
-                    renaming = .sketch(index)
-                }
-                Button("Skizze bearbeiten", systemImage: "pencil.and.outline") { workspace.editSketch(index) }
-                Menu {
-                    Button("SVG – Laser, Plotter, Grafik", systemImage: "scribble") { workspace.exportSketch(index, svg: true) }
-                    Button("DXF – CAD, CNC", systemImage: "doc.plaintext") { workspace.exportSketch(index, svg: false) }
-                } label: {
-                    Label("Skizze exportieren", systemImage: "square.and.arrow.up")
-                }
-                if !bodies.isEmpty {
-                    exportMenu(title: "Körper der Ebene exportieren", bodies: bodies, name: Self.layerName(item.name))
-                }
-                Button(isVisible ? "Ebene ausblenden" : "Ebene einblenden", systemImage: isVisible ? "eye.slash" : "eye") {
-                    model.setLayerHidden(isVisible, sketch: index)
-                }
-                Button("Skizze löschen", systemImage: "trash", role: .destructive) { model.deleteSketch(index) }
-            }
-            if isOpen {
-                sketchRow(index)
-                    .padding(.leading, 18)
-                // Texte der Skizze als eigene Einträge (SketchTextPanel.swift)
-                SketchTextLayerList(workspace: workspace, sketch: workspace.sketch, sketchIndex: index, stored: item)
-                    .padding(.leading, 36)
-            }
+            sketchRow(index)
+            // Texte der Skizze als eigene Einträge (SketchTextPanel.swift)
+            SketchTextLayerList(workspace: workspace, sketch: workspace.sketch, sketchIndex: index, stored: item)
+                .padding(.leading, 18)
         }
-        .padding(.vertical, 2)
     }
 
     /// Lange drücken auf Körper bzw. Ebene: Export als 3MF, STL, OBJ oder STEP.
@@ -2100,6 +2019,9 @@ struct LayersPanel: View {
         let item = model.bodies[index]
         let isSelected = model.selectedBodies.contains(index) || model.selectedBody == index
         return HStack(spacing: 6) {
+            if picksBodies {
+                pickMark(index)
+            }
             eye(!item.isHidden) { model.setHidden(!item.isHidden, body: index) }
             // Komponente (verknüpfte Kopien) mit eigenem Symbol
             // Textkörper mit Textsymbol (SketchTextEdit.swift)
@@ -2109,6 +2031,11 @@ struct LayersPanel: View {
             Text(item.name)
                 .lineLimit(1)
                 .foregroundStyle(item.isHidden ? Color.secondary : Color.primary)
+            if isBooleanTarget(index) {
+                Text("Ziel")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.orange)
+            }
             Spacer(minLength: 0)
             // Stift neben dem Körper (Kai): Export als 3MF oder STL mit einem Tippen
             Menu {
@@ -2133,7 +2060,10 @@ struct LayersPanel: View {
         .background(isSelected ? Color.accentColor.opacity(0.15) : Color.clear,
                     in: RoundedRectangle(cornerRadius: 8))
         .contentShape(Rectangle())
-        .onTapGesture { select(index) }
+        .onTapGesture {
+            // Auswählen-Modus: Antippen nimmt den Körper hinzu bzw. heraus (wie das Häkchen)
+            if picksBodies { model.toggleBody(index) } else { select(index) }
+        }
         // Schweben (Stift, Zeiger): Name und Maße des Körpers
         .hoverTip(item.name, workspace.bodySizeText(index))
         .contextMenu {
@@ -2143,21 +2073,9 @@ struct LayersPanel: View {
                 newName = item.name
                 renaming = .body(index)
             }
-            Menu {
-                ForEach(model.bodyFolders.map(\.name).filter { $0 != item.folder }, id: \.self) { name in
-                    Button(name, systemImage: "folder") { model.setFolder(name, bodies: folderTargets(index)) }
-                }
-                Button("Neuer Ordner …", systemImage: "folder.badge.plus") {
-                    folderName = ""
-                    folderBodies = folderTargets(index)
-                }
-                if item.folder != nil {
-                    Button("Aus Ordner nehmen", systemImage: "folder.badge.minus") {
-                        model.setFolder(nil, bodies: folderTargets(index))
-                    }
-                }
-            } label: {
-                Label("In Ordner", systemImage: "folder")
+            Button(picksBodies ? "Auswählen beenden" : "Auswählen", systemImage: "checkmark.circle") {
+                if !picksBodies, !model.selectedBodies.contains(index) { model.toggleBody(index) }
+                picksBodies.toggle()
             }
             Button("In Einzelkörper trennen", systemImage: "square.split.2x1") { model.separateBody(index) }
             ComponentMenuItems(model: model, index: index)
@@ -2168,6 +2086,25 @@ struct LayersPanel: View {
                 model.deleteSelected()
             }
         }
+    }
+
+    /// Häkchen im Auswählen-Modus: gefüllt = gewählt (gleiche Auswahl wie im Viewport).
+    private func pickMark(_ index: Int) -> some View {
+        let chosen = model.selectedBodies.contains(index)
+        return Button {
+            model.toggleBody(index)
+        } label: {
+            Image(systemName: chosen ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(chosen ? Color.accentColor : Color.secondary)
+                .frame(width: 26, height: 30)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Der zuerst gewählte Körper ist bei Subtrahieren das Ziel (nur im Auswählen-Modus markiert).
+    private func isBooleanTarget(_ index: Int) -> Bool {
+        picksBodies && model.selectedBodies.count > 1 && model.selectedBodies.first == index
     }
 
     private func sectionTitle(_ title: String) -> some View {
@@ -2208,10 +2145,29 @@ struct LayersPanel: View {
         // Doppeltippen öffnet sie (SolidCraft)
         .onTapGesture(count: 2) { workspace.editSketch(index) }
         .onTapGesture { model.selectSketch(index) }
-        .contextMenu {
-            Button("Bearbeiten", systemImage: "pencil") { workspace.editSketch(index) }
-            Button("Löschen", systemImage: "trash", role: .destructive) { model.deleteSketch(index) }
+        .contextMenu { sketchMenu(index) }
+    }
+
+    /// Lange drücken auf eine Skizze: umbenennen, bearbeiten, exportieren, löschen.
+    @ViewBuilder
+    private func sketchMenu(_ index: Int) -> some View {
+        let item = model.sketches[index]
+        let bodies = model.bodies(fromSketch: index)
+        Button("Umbenennen", systemImage: "pencil") {
+            newName = item.name
+            renaming = .sketch(index)
         }
+        Button("Skizze bearbeiten", systemImage: "pencil.and.outline") { workspace.editSketch(index) }
+        Menu {
+            Button("SVG – Laser, Plotter, Grafik", systemImage: "scribble") { workspace.exportSketch(index, svg: true) }
+            Button("DXF – CAD, CNC", systemImage: "doc.plaintext") { workspace.exportSketch(index, svg: false) }
+        } label: {
+            Label("Skizze exportieren", systemImage: "square.and.arrow.up")
+        }
+        if !bodies.isEmpty {
+            exportMenu(title: "Körper der Skizze exportieren", bodies: bodies, name: item.name)
+        }
+        Button("Skizze löschen", systemImage: "trash", role: .destructive) { model.deleteSketch(index) }
     }
 
     /// Konstruktionsebene, -achse oder -punkt: Ebenen lassen sich direkt als Skizzenebene nutzen.
