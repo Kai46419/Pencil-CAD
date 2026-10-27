@@ -35,12 +35,16 @@ extension SketchController {
             if kind == .slot, slotMode == .centerPoint { from = a - v }
             return Self.linearBox(.length, value: value, from, h)
         case "Winkel":
-            let length = simd_length(v)
-            guard length > 1e-9 else { return nil }
-            var sweep = atan2(v.y, v.x)
-            if sweep < 0 { sweep += 2 * .pi }
+            // Winkel zur Waagerechten mit Vorzeichen (−180…180°): eine Linie schräg nach unten zeigt −30° mit kleinem
+            // Bogen im Uhrzeigersinn statt 330° mit fast vollem Kreis. Bogen und Feld legt der Viewport in festem
+            // Bildschirmabstand an (dimensionGeometry), unabhängig von der Linienlänge.
+            guard simd_length(v) > 1e-9 else { return nil }
+            let sweep = atan2(v.y, v.x)
+            var degrees = value.truncatingRemainder(dividingBy: 360)
+            if degrees > 180 { degrees -= 360 }
+            if degrees <= -180 { degrees += 360 }
             let bisector = Point2(cos(sweep / 2), sin(sweep / 2))
-            var dimension = SketchDimension(kind: .angle, value: value, position: a + bisector * length * 0.45,
+            var dimension = SketchDimension(kind: .angle, value: degrees, position: a + bisector,
                                             direction: bisector, isEditable: true, span: [a, h])
             dimension.reference = Point2(1, 0)
             dimension.sweep = sweep
@@ -89,7 +93,7 @@ extension SketchController {
             let sweep = value * .pi / 180
             let half = a0 + sweep / 2
             let bisector = Point2(cos(half), sin(half))
-            var dimension = SketchDimension(kind: .angle, value: value, position: first + bisector * r * 0.45,
+            var dimension = SketchDimension(kind: .angle, value: value, position: first + bisector,
                                             direction: bisector, isEditable: true, span: [first, a])
             dimension.reference = radial / r
             dimension.sweep = sweep

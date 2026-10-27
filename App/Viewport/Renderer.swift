@@ -123,6 +123,9 @@ final class Renderer: NSObject, MTKViewDelegate {
     /// Skizze: Raster minimal zur Kamera gezogen, damit es auf einer Körperfläche in der Skizzenebene sichtbar
     /// bleibt (sonst deckte die gleich tiefe Fläche das Raster zu)
     var gridOverFaces = false
+    /// Skizze mit sichtbaren Achsen: die Rasterlinien durch den Weltursprung weglassen, sonst lägen sie gleich tief
+    /// unter der Achse und der Tiefentest ließe die Achse stückweise verschwinden (wirkte gestrichelt, Kai)
+    var gridSkipsOriginLines = false
     var displayMode: DisplayMode = .shaded
     var handles: [HandleGraphic] = []
     var planes: [PlaneGraphic] = []
@@ -325,13 +328,18 @@ final class Renderer: NSObject, MTKViewDelegate {
         let half = min(reach, step * 160)
         let lo = ((center - half) / step).rounded(.down), hi = ((center + half) / step).rounded(.up)
         let up = SIMD3<Float>(0, 0, 1)
+        // Weltursprung in Rasterkoordinaten: Linien dort zeichnen die Achsen (gridSkipsOriginLines)
+        let originLocal = SIMD2<Float>(simd_dot(-origin, u), simd_dot(-origin, v))
+        let skipTolerance = step * 0.01
         var minor: [Vertex] = [], major: [Vertex] = []
         for i in stride(from: lo.x, through: hi.x, by: 1) {
+            if gridSkipsOriginLines, abs(i * step - originLocal.x) < skipTolerance { continue }
             let line = [Vertex(position: SIMD3(i * step, lo.y * step, 0), normal: up),
                         Vertex(position: SIMD3(i * step, hi.y * step, 0), normal: up)]
             if Int(i) % majorEvery == 0 { major += line } else { minor += line }
         }
         for j in stride(from: lo.y, through: hi.y, by: 1) {
+            if gridSkipsOriginLines, abs(j * step - originLocal.y) < skipTolerance { continue }
             let line = [Vertex(position: SIMD3(lo.x * step, j * step, 0), normal: up),
                         Vertex(position: SIMD3(hi.x * step, j * step, 0), normal: up)]
             if Int(j) % majorEvery == 0 { major += line } else { minor += line }

@@ -662,6 +662,13 @@ final class ViewportView: MTKView {
         ([0, 1, 0], [0.17, 0.52, 0.2]),
         ([0, 0, 1], [0.1, 0.36, 0.88]),
     ]
+    /// Achsen in der Skizze: gleiche Helligkeit (Leuchtdichte ≈ 0,42 linear) für Rot, Grün und Blau, damit keine
+    /// Achse kräftiger wirkt als die andere (Kai)
+    private static let sketchAxes: [(SIMD3<Float>, SIMD3<Float>)] = [
+        ([1, 0, 0], [0.9, 0.3, 0.22]),
+        ([0, 1, 0], [0.17, 0.52, 0.2]),
+        ([0, 0, 1], [0.14, 0.45, 1.0]),
+    ]
 
     /// Skizzenlinien (dick, immer sichtbar), gespeicherte Skizzen, Konstruktionsgeometrie, Auswahl,
     /// Maßlinien, Fangsymbole, Knoten und Bereichsfüllungen.
@@ -679,17 +686,24 @@ final class ViewportView: MTKView {
                 groups.append(LineGroup(polylines: [[.zero, axis * reach]], color: color, width: 1, onTop: false))
             }
         }
-        // Skizze (Kai): Achsen, die in der Skizzenebene liegen, dezent durchgehend – X rot, Y grün, Z blau
+        // Skizze (Kai): Achsen, die in der Skizzenebene liegen, dezent durchgehend – X rot, Y grün, Z blau.
+        // Kai sah die Achse „gestrichelt“ (abwechselnd dick/hell und dünn): Das Raster ist in der Skizze genauso weit
+        // zur Kamera gezogen (gridOverFaces) wie die Achse, seine Linie durch den Ursprung lag also gleich tief unter
+        // ihr, und der Tiefentest entschied stückweise mal für die Achse, mal für die Rasterlinie. Jetzt lässt das
+        // Raster die Linien durch den Ursprung weg, und die Achsen sind durchgehend dünn in gleicher Helligkeit.
+        var gridSkipsOrigin = false
         if sketching, workspace.showsOrigin {
             let reach = max(renderer.camera.distance * 10, planeHalfSize * 20)
             let normal = SIMD3<Float>(sketch.plane.normal)
             let origin = SIMD3<Float>(sketch.plane.origin)
-            for (axis, color) in Self.axes where abs(simd_dot(axis, normal)) < 1e-4 && abs(simd_dot(origin, normal)) < 1e-3 {
+            for (axis, color) in Self.sketchAxes where abs(simd_dot(axis, normal)) < 1e-4 && abs(simd_dot(origin, normal)) < 1e-3 {
                 // Aufgehellt zum Hintergrund hin, damit die Linien nicht mit Skizzenlinien verwechselt werden
                 let soft = AppTheme.towardBackground(color, 0.45)
-                groups.append(LineGroup(polylines: [[-axis * reach, axis * reach]], color: soft, width: 1, onTop: false))
+                groups.append(LineGroup(polylines: [[-axis * reach, axis * reach]], color: soft, width: 0.75, onTop: false))
+                gridSkipsOrigin = true
             }
         }
+        renderer.gridSkipsOriginLines = gridSkipsOrigin
         // Ebenenwahl: drei kleine graue Felder neben dem Ursprung
         if sketch.isActive, sketch.isChoosingPlane {
             for square in basePlaneSquares {
@@ -876,15 +890,31 @@ final class ViewportView: MTKView {
                 groups.append(LineGroup(polylines: crosses.map { $0.map(world) }, color: Self.selectionOrange, width: 2.4))
             }
             // Schwebender Stift: Fadenkreuz am (gefangenen) Punkt, damit man sieht, wo der Strich ansetzt
-            if let hoverSnap = sketch.hoverSnap, sketch.currentCandidate == nil {
-                let hover = hoverSnap.point
+            // SolidCraft-Pfad: hoverSnap bleibt dort beim Klickwerkzeug leer und currentCandidate ist beim Schweben immer
+            // gesetzt – das Fadenkreuz fehlte deshalb. Dort gilt der Schwebefang (hoverCandidate), solange kein Strich läuft.
+            let crosshair: (point: Point2, snapped: Bool)?
+            if sketch.options.isSolidCraft {
+                if sketch.activeCandidate == nil, let hover = sketch.hoverCandidate {
+                    crosshair = (hover.point, hover.target != nil && hover.target != .grid)
+                } else if sketch.activeCandidate == nil, let hoverSnap = sketch.hoverSnap {
+                    crosshair = (hoverSnap.point, hoverSnap.kind != nil && hoverSnap.kind != .grid)
+                } else {
+                    crosshair = nil
+                }
+            } else if let hoverSnap = sketch.hoverSnap, sketch.currentCandidate == nil {
+                crosshair = (hoverSnap.point, hoverSnap.kind != nil && hoverSnap.kind != .grid)
+            } else {
+                crosshair = nil
+            }
+            if let crosshair {
+                let hover = crosshair.point
                 // Kai: Größe wie gehabt, Strich so fein wie die rote/grüne Skizzenachse; orange, sobald ein Fangpunkt greift
                 let arm = 15 * perPoint, gap = 3.5 * perPoint
                 let cross: [[Point2]] = [
                     [hover + Point2(gap, 0), hover + Point2(arm, 0)], [hover - Point2(gap, 0), hover - Point2(arm, 0)],
                     [hover + Point2(0, gap), hover + Point2(0, arm)], [hover - Point2(0, gap), hover - Point2(0, arm)],
                 ]
-                let snapped = hoverSnap.kind != nil && hoverSnap.kind != .grid
+                let snapped = crosshair.snapped
                 groups.append(LineGroup(polylines: cross.map { $0.map(world) }, color: snapped ? Self.snapOrange : Self.sketchInk,
                                         width: 1, dots: [world(hover)], dotRadius: 1.2))
             }
@@ -915,8 +945,10 @@ final class ViewportView: MTKView {
         renderer.fills = fills
     }
 
-    /// SolidCraft-Fang: Ring am Fangpunkt (Punktfang r 6 pt, sonst r 3 pt), gestrichelte Hilfslinie der Inferenz,
-    /// geweckte Kreismitte und die angetippten Kurven der Tangentenkreise.
+    /// SolidCraft-Fang: alle Hilfslinien der Inferenz gestrichelt (Leitlinie orange, weitere Ausrichtungen und
+    /// Winkelstrahl etwas dezenter), die gemerkten Fangpunkte nahe dem Stift klein in Blau, am Fangpunkt das Zeichen
+    /// seiner Art (Ende Quadrat, Mitte Dreieck, Schnitt X, Zentrum Kreis …) in Orange, dazu die geweckte Kreismitte
+    /// und die angetippten Kurven der Tangentenkreise. Das Kürzel daneben setzt updateSolidCraftHint.
     private func addSolidCraftSnap(to groups: inout [LineGroup], sketch: SketchController, perPoint: Double,
                                    world: (Point2) -> SIMD3<Float>) {
         guard sketch.options.isSolidCraft else { return }
@@ -927,17 +959,72 @@ final class ViewportView: MTKView {
         if let woken = sketch.wokenCenter {
             groups.append(LineGroup(polylines: [], color: Self.snapOrange, width: 0, dots: [world(woken)], dotRadius: 2.5))
         }
-        guard let candidate = sketch.currentCandidate, let target = candidate.target, target != .grid else { return }
+        let candidate = sketch.currentCandidate
+        // Gemerkte Fangpunkte (Enden, Mitten, Schnitte, Zentren) dezent, damit man sieht, wo es einrasten kann;
+        // der gerade gefangene Punkt kommt unten groß in Orange (höchstens 64 Zeichen je Bild)
+        let snappedPoint = candidate?.target != nil && candidate?.target != .grid ? candidate?.point : nil
+        let tracked = sketch.clickTrackedPoints.prefix(64).filter { item in
+            guard let snappedPoint else { return true }
+            return simd_distance(item.point, snappedPoint) > 2 * perPoint
+        }
+        if !tracked.isEmpty {
+            let markers = tracked.flatMap { snapMarker($0.kind, at: $0.point, size: 3.5 * perPoint) }
+            groups.append(LineGroup(polylines: markers.map { $0.map(world) }, color: Self.previewBlue, width: 1.2))
+        }
+        guard let candidate else { return }
+        // Hilfslinien: Leitlinie (guide) wie früher orange 1,3 pt, weitere (guides) etwas dünner
         if let guide = candidate.guide, simd_distance(guide.0, guide.1) > 1e-9 {
-            let dashes = dashed([guide.0, guide.1], dash: 4 * perPoint)
-            groups.append(LineGroup(polylines: dashes.map { $0.map(world) }, color: Self.previewBlue, width: 1))
+            let dashes = dashed([guide.0, guide.1], dash: 5 * perPoint)
+            groups.append(LineGroup(polylines: dashes.map { $0.map(world) }, color: Self.snapOrange, width: 1.3))
         }
-        let radius = (target.isPointArgument ? 6 : 3) * perPoint
-        let ring: [Point2] = (0...24).map { k in
+        let extra = candidate.guides.filter { simd_distance($0.0, $0.1) > 1e-9 }
+            .flatMap { dashed([$0.0, $0.1], dash: 4 * perPoint) }
+        if !extra.isEmpty {
+            groups.append(LineGroup(polylines: extra.map { $0.map(world) }, color: Self.snapOrange, width: 1))
+        }
+        // Zeichen am Fangpunkt: Punktfänge mit dem Zeichen ihrer Art, Leitlinienfänge (H, V, Ext, //, ⊥) als kleiner Ring
+        if let target = candidate.target {
+            guard target != .grid else { return }
+            let marker = Self.solidCraftMarker(target, at: candidate.point, size: 6 * perPoint)
+            groups.append(LineGroup(polylines: marker.map { $0.map(world) }, color: Self.snapOrange, width: 2,
+                                    dots: [world(candidate.point)], dotRadius: 1.6))
+        } else if !candidate.label.isEmpty {
+            // Ohne Ziel, aber mit Bedeutung (z. B. gleicher Radius „=“, tangential „T“): kleiner Ring
+            groups.append(LineGroup(polylines: [Self.snapRing(at: candidate.point, radius: 3 * perPoint).map(world)],
+                                    color: Self.snapOrange, width: 1.5))
+        }
+    }
+
+    /// Zeichen des SolidCraft-Fangs je Art (wie die früheren Fangzeichen aus snapMarker).
+    private static func solidCraftMarker(_ target: SnapTarget, at p: Point2, size s: Double) -> [[Point2]] {
+        switch target {
+        case .point:
+            return snapMarker(.endpoint, at: p, size: s)
+        case .modelVertex:
+            return snapMarker(.modelPoint, at: p, size: s)
+        case .crossing:
+            return snapMarker(.intersection, at: p, size: s)
+        case .midpoint:
+            return snapMarker(.midpoint, at: p, size: s)
+        case .onCurve:
+            return snapMarker(.onCurve, at: p, size: s)
+        case .throughCenter(_, rim: _, atCenter: let atCenter):
+            return snapMarker(atCenter ? .center : .onCurve, at: p, size: s)
+        case .tangent:
+            // Kreis mit Tangente obendrauf
+            let r = s * 0.6
+            return [snapRing(at: p, radius: r), [p + Point2(-s, r), p + Point2(s, r)]]
+        case .horizontal, .vertical, .parallel, .perpendicular, .lineExtension, .grid:
+            return [snapRing(at: p, radius: s * 0.5)]
+        }
+    }
+
+    /// Kreis aus 24 Teilstücken (lokal).
+    private static func snapRing(at p: Point2, radius: Double) -> [Point2] {
+        (0...24).map { k in
             let angle = Double(k) / 24 * 2 * .pi
-            return candidate.point + Point2(cos(angle), sin(angle)) * radius
+            return p + Point2(cos(angle), sin(angle)) * radius
         }
-        groups.append(LineGroup(polylines: [ring.map(world)], color: Self.snapOrange, width: 1.5))
     }
 
     // MARK: Messen
@@ -1583,6 +1670,8 @@ final class ViewportView: MTKView {
                     outB, false)
         case .radius:
             return ([[a, b], arrowHead(at: b, from: a)], b + dimension.direction * 6 * perPoint, false)
+        case .angle where dimension.id.hasPrefix("box-"):
+            return liveAngleGeometry(dimension, perPoint: perPoint)
         case .angle:
             // Winkel beim Zeichnen: auf der Winkelhalbierenden, mindestens 70 pt vom Linienanfang entfernt
             // (bei kurzen Linien lag das Etikett sonst auf der Linie)
@@ -1610,6 +1699,104 @@ final class ViewportView: MTKView {
             }
             return (lines, a + simd_normalize(bisector) * radius, true)
         }
+    }
+
+    /// Bogenradius der Winkelfelder beim Zeichnen in Bildschirmpunkten: fest, damit der Bogen bei langen Linien nicht
+    /// riesig und bei kurzen nicht winzig wird (Kai: „Wirrwarr“).
+    private static let liveAngleRadius: Double = 44
+
+    /// SolidCraft-Wertfelder „Winkel“ und „Bogenwinkel“: Bogen mit festem Bildschirmradius vom Bezugsschenkel zur
+    /// neuen Linie (Drehsinn wie sweep), bei genau 90° das Quadrat im Scheitel; beim Linienwinkel dazu ein kurzer
+    /// gestrichelter waagerechter Bezugsschenkel. Das Feld sitzt außen am Bogen (Feinlage: placeLiveAngleField).
+    private func liveAngleGeometry(_ dimension: SketchDimension, perPoint: Double)
+        -> (lines: [[Point2]], label: Point2, onLine: Bool) {
+        let vertex = dimension.span[0]
+        let radius = Self.liveAngleRadius * perPoint
+        let start = atan2(dimension.reference.y, dimension.reference.x)
+        let sweep = max(min(dimension.sweep, 2 * .pi), -2 * .pi)
+        let u = Point2(cos(start), sin(start))
+        var lines: [[Point2]] = []
+        if dimension.id == "box-Winkel" {
+            lines += dashed([vertex, vertex + u * (radius + 14 * perPoint)], dash: 3 * perPoint)
+        }
+        if abs(abs(sweep) - .pi / 2) < 0.05 * .pi / 180 {
+            let v = Point2(cos(start + sweep), sin(start + sweep))
+            let size = 12 * perPoint
+            lines.append([vertex + u * size, vertex + (u + v) * size, vertex + v * size])
+        } else if abs(sweep) > 1e-6 {
+            let steps = min(max(8, Int(abs(sweep) / (.pi / 36))), 72)
+            lines.append((0...steps).map { k in
+                let angle = start + sweep * Double(k) / Double(steps)
+                return vertex + Point2(cos(angle), sin(angle)) * radius
+            })
+        }
+        let half = start + sweep / 2
+        return (lines, vertex + Point2(cos(half), sin(half)) * radius, false)
+    }
+
+    /// Anzeige der SolidCraft-Winkelfelder: ganze Grad, eine Nachkommastelle nur bei getipptem Wert wie 22,5.
+    private static func liveAngleText(_ value: Double, locked: Bool) -> String {
+        guard value.isFinite, abs(value) < 1e6 else { return "" }
+        let tenth = (value * 10).rounded() / 10
+        if locked, abs(tenth - tenth.rounded()) > 1e-9 {
+            return tenth.formatted(.number.precision(.fractionLength(1)).grouping(.never))
+        }
+        return "\(Int(value.rounded()))"
+    }
+
+    /// Winkelfeld beim Zeichnen außen an den Bogen legen, ohne die neue Linie, den Bezugsschenkel oder ein anderes
+    /// Wertfeld (Länge) zu überdecken: zuerst auf der Winkelhalbierenden, sonst jenseits der Linie bzw. unter dem
+    /// Bezugsschenkel (feste Liste von vier Lagen, keine offene Schleife).
+    private func placeLiveAngleField(_ field: DimensionField, _ dimension: SketchDimension, perPoint: Double,
+                                     avoiding others: [CGRect]) {
+        guard let renderer, let sketch, dimension.span.count == 2 else { return }
+        let plane = sketch.plane
+        let viewSize = bounds.size
+        let project = { (p: Point2) -> CGPoint? in
+            renderer.camera.project(SIMD3<Float>(plane.world(p)), viewSize: viewSize)
+        }
+        let vertex = dimension.span[0]
+        let radius = Self.liveAngleRadius * perPoint
+        let start = atan2(dimension.reference.y, dimension.reference.x)
+        let sweep = max(min(dimension.sweep, 2 * .pi), -2 * .pi)
+        let side: Double = sweep < 0 ? -1 : 1
+        guard let vertexS = project(vertex), let endS = project(dimension.span[1]),
+              let refS = project(vertex + Point2(cos(start), sin(start)) * (radius + 14 * perPoint)) else { return }
+        let segments: [(CGPoint, CGPoint)] = [(vertexS, endS), (vertexS, refS)]
+        let size = field.bounds.size
+        func blocked(_ center: CGPoint) -> Bool {
+            let rect = CGRect(x: center.x - size.width / 2, y: center.y - size.height / 2,
+                              width: size.width, height: size.height).insetBy(dx: -3, dy: -3)
+            if others.contains(where: { $0.intersects(rect) }) { return true }
+            for (a, b) in segments {
+                for k in 0...24 {
+                    let t = CGFloat(k) / 24
+                    if rect.contains(CGPoint(x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t)) { return true }
+                }
+            }
+            return false
+        }
+        let degree = Double.pi / 180
+        let angles: [Double] = [start + sweep / 2, start + sweep + side * 30 * degree,
+                                start + sweep + side * 60 * degree, start - side * 30 * degree]
+        var fallback: CGPoint?
+        for angle in angles {
+            let direction = Point2(cos(angle), sin(angle))
+            guard let anchor = project(vertex + direction * radius),
+                  let tip = project(vertex + direction * (radius + 10 * perPoint)) else { continue }
+            var dx = tip.x - anchor.x, dy = tip.y - anchor.y
+            let length = max((dx * dx + dy * dy).squareRoot(), 1e-6)
+            dx /= length
+            dy /= length
+            let distance = abs(dx) * size.width / 2 + abs(dy) * size.height / 2 + 6
+            let center = CGPoint(x: anchor.x + dx * distance, y: anchor.y + dy * distance)
+            if fallback == nil { fallback = center }
+            if !blocked(center) {
+                field.center = center
+                return
+            }
+        }
+        if let fallback { field.center = fallback }
     }
 
     // MARK: Lupe beim Kalibrieren
@@ -1666,6 +1853,7 @@ final class ViewportView: MTKView {
         let plane = sketch.plane
         let perPoint = Double(renderer.camera.worldUnitsPerPoint(viewHeight: Float(bounds.height)))
         var shown = Set<String>()
+        var liveAngles: [(DimensionField, SketchDimension)] = []
         for dimension in dimensions {
             let field = dimensionFields[dimension.id] ?? makeDimensionField(dimension.id)
             let geometry = dimensionGeometry(dimension, perPoint: perPoint)
@@ -1680,7 +1868,9 @@ final class ViewportView: MTKView {
             // Mit einer Variable verknüpft: ƒ vor dem Wert (wie Fusion 360 „fx“)
             field.prefix = field.expression == nil ? dimension.prefix : "ƒ " + dimension.prefix
             if !field.isFirstResponder {
-                if dimension.kind == .angle {
+                if dimension.kind == .angle, dimension.id.hasPrefix("box-") {
+                    field.text = Self.liveAngleText(dimension.value, locked: dimension.lockState == true)
+                } else if dimension.kind == .angle {
                     // Winkel nur in ganzen Grad (Kai)
                     let degrees = Int(dimension.value.rounded())
                     field.text = dimension.isEditable ? "\(degrees)" : "\(degrees)°"
@@ -1734,6 +1924,13 @@ final class ViewportView: MTKView {
             }
             field.center = CGPoint(x: anchor.x + dx * distance, y: anchor.y + dy * distance)
             field.isHidden = false
+            if dimension.kind == .angle, dimension.id.hasPrefix("box-") { liveAngles.append((field, dimension)) }
+        }
+        // SolidCraft-Winkelfelder zuletzt legen, damit sie dem Längenfeld ausweichen können
+        for (field, dimension) in liveAngles {
+            let others = dimensionFields.filter { $0.key != dimension.id && $0.key.hasPrefix("box-") && shown.contains($0.key) }
+                .map { $0.value.frame }
+            placeLiveAngleField(field, dimension, perPoint: perPoint, avoiding: others)
         }
         for (id, field) in dimensionFields where !shown.contains(id) {
             if field.isFirstResponder {
