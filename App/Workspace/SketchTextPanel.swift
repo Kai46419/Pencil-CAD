@@ -9,6 +9,10 @@ struct SketchTextEditor: View {
     let index: Int
 
     @State private var content = ""
+    /// Stand, zu dem content gehört: Inhalt des Texts und Anzahl der Elemente beim Laden. Nur wenn beides noch
+    /// passt, wird getippter Inhalt übernommen (sonst wurde der Text gelöscht bzw. steht ein anderer an index).
+    @State private var loadedString = ""
+    @State private var loadedCount = -1
     @FocusState private var isFocused: Bool
 
     var body: some View {
@@ -21,9 +25,9 @@ struct SketchTextEditor: View {
                     .textFieldStyle(.roundedBorder)
                     .autocorrectionDisabled()
                     .frame(width: 140)
-                    .onSubmit(commitContent)
+                    .onSubmit { commitContent(at: index) }
                     .onChange(of: isFocused) { _, focused in
-                        if !focused { commitContent() }
+                        if !focused { commitContent(at: index) }
                     }
                 Picker("Schrift", selection: fontBinding) {
                     ForEach(SketchText.fonts) { Text($0.title).tag($0.name) }
@@ -43,22 +47,40 @@ struct SketchTextEditor: View {
                 .pickerStyle(.segmented)
                 .fixedSize()
             }
-            .onAppear { content = text.string }
-            .onChange(of: index) { _, _ in content = currentString }
-            // Rückgängig bzw. anderer Text gewählt: Feld nachziehen, solange nicht getippt wird
-            .onChange(of: currentString) { _, newValue in
-                if !isFocused { content = newValue }
+            .onAppear { load(index) }
+            // Anderer Text gewählt: Getipptes erst beim bisherigen Text übernehmen (Kai tippt oft gleich weiter)
+            .onChange(of: index) { old, new in
+                commitContent(at: old)
+                load(new)
+            }
+            // Antippen in den Viewport schließt die Leiste, ohne dass das Feld den Fokus verliert
+            .onDisappear { commitContent(at: index) }
+            // Rückgängig: Feld nachziehen, solange nicht getippt wird
+            .onChange(of: currentString) { _, _ in
+                if !isFocused { load(index) }
             }
         }
     }
 
     private var currentString: String { sketch.sketchText(at: index)?.string ?? "" }
 
-    private func commitContent() {
-        guard content != currentString else { return }
-        sketch.updateText(at: index) { $0.with(string: content) }
-        // Abgelehnt (leer): wieder den gültigen Inhalt zeigen
-        if content != currentString { content = currentString }
+    private func load(_ at: Int) {
+        let string = sketch.sketchText(at: at)?.string ?? ""
+        content = string
+        loadedString = string
+        loadedCount = sketch.entities.count
+    }
+
+    /// Getippten Inhalt beim Text an Stelle at übernehmen – nur einmal (danach gleich, also kein zweiter
+    /// Rückgängig-Schritt) und nur, wenn dort noch derselbe Text steht.
+    private func commitContent(at: Int) {
+        guard let current = sketch.sketchText(at: at), sketch.entities.count == loadedCount,
+              current.string == loadedString, content != current.string else { return }
+        sketch.updateText(at: at) { $0.with(string: content) }
+        // Übernommen bzw. abgelehnt (leer): das Feld zeigt den gültigen Inhalt
+        let string = sketch.sketchText(at: at)?.string ?? current.string
+        loadedString = string
+        if at == index { content = string }
     }
 
     private var fontBinding: Binding<String> {
@@ -69,6 +91,28 @@ struct SketchTextEditor: View {
     private var alignmentBinding: Binding<TextAlignmentOption> {
         Binding(get: { sketch.sketchText(at: index)?.alignment ?? .left },
                 set: { alignment in sketch.updateText(at: index) { $0.with(alignment: alignment) } })
+    }
+}
+
+/// Texte einer Skizze im Browser „Ebenen“. Ist genau diese Skizze offen, zählen ihre aktuellen Elemente (sonst
+/// passten die Indizes nach Änderungen nicht mehr), sonst die gespeicherten.
+struct SketchTextLayerList: View {
+    @ObservedObject var workspace: Workspace
+    @ObservedObject var sketch: SketchController
+    let sketchIndex: Int
+    let stored: StoredSketch
+
+    var body: some View {
+        ForEach(items) { item in
+            SketchTextLayerRow(workspace: workspace, sketch: sketch, sketchIndex: sketchIndex, item: item)
+        }
+    }
+
+    private var items: [SketchTextItem] {
+        if sketch.isActive && workspace.editingSketchIndex == sketchIndex {
+            return SketchTextItem.items(sketch.entities, construction: sketch.construction)
+        }
+        return stored.textItems
     }
 }
 

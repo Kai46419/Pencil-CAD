@@ -1584,7 +1584,9 @@ final class SketchController: ObservableObject {
     private func beginSelectDrag(at p: Point2, tolerance: Double) {
         selectStart = (point: p, tolerance: tolerance)
         selectDrag = nil
-        guard let ref = pick(at: p, tolerance: tolerance), entities.indices.contains(ref.entity) else { return }
+        guard let ref = pick(at: p, tolerance: tolerance, includeText: true), entities.indices.contains(ref.entity) else {
+            return
+        }
         let index = ref.entity
         let kind: SelectDrag.Kind
         var grab = p
@@ -3179,7 +3181,8 @@ final class SketchController: ObservableObject {
     var selectedEntities: Set<Int> { Set(selection.map(\.entity)) }
 
     /// Punkt (Ende, Ecke, Mitte) oder Kurve unter dem Finger; Punkte haben Vorrang.
-    func pick(at p: Point2, tolerance: Double) -> SketchRef? {
+    /// includeText: Text als Ganzes treffen (nur Auswahl und Verschieben, nicht Messen oder Einschränkungen).
+    func pick(at p: Point2, tolerance: Double, includeText: Bool = false) -> SketchRef? {
         var bestPoint: (distance: Double, ref: SketchPointRef)?
         for (index, entity) in entities.enumerated() {
             if case .text = entity { continue }
@@ -3202,6 +3205,7 @@ final class SketchController: ObservableObject {
             }
         }
         if let bestCurve { return .curve(bestCurve.ref) }
+        guard includeText else { return nil }
         // Text als Ganzes: irgendwo auf der Schrift antippen (SketchTextEdit.swift)
         return textIndex(at: p, tolerance: tolerance).map { .curve(SketchCurveRef(entity: $0, index: 0)) }
     }
@@ -3221,7 +3225,8 @@ final class SketchController: ObservableObject {
 
     /// Finger antippen: Element zur Auswahl hinzufügen bzw. entfernen; ins Leere tippen leert die Auswahl.
     func select(at p: Point2, tolerance: Double) {
-        let ref = pick(at: p, tolerance: tolerance)
+        // Wartet eine Einschränkung, zählt Text nicht (er hat keine Kurven dafür)
+        let ref = pick(at: p, tolerance: tolerance, includeText: pendingAction == nil)
         var pointRef = false
         if case .point? = ref { pointRef = true }
         // Hilfspunkte vor Kurven, Elementpunkte vor Hilfspunkten

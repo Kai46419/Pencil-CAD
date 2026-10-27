@@ -137,6 +137,8 @@ struct SnapshotBodyMeta: Codable, Hashable {
     var threads: [ThreadNote]? = nil
     /// Oberfläche (SurfaceFinish.swift); fehlt in älteren Ständen
     var finish: String? = nil
+    /// Inhalt des Texts bei Textkörpern (SketchTextEdit.swift); fehlt in älteren Ständen
+    var textLabel: String? = nil
 }
 
 /// Fester Stand: full = alle Körper, sonst nur die geänderten (changed, in dieser Reihenfolge) und die neuen.
@@ -708,6 +710,8 @@ extension ModelStore {
                 body.sketchID = result[index].sketchID
                 body.componentID = result[index].componentID
                 body.placement = result[index].placement
+                // Text nach dem Extrudieren geändert: Textkörper neu benennen (SketchTextEdit.swift)
+                body = body.takingTextLabel(from: result[index])
                 result[index] = body
             }
         }
@@ -890,8 +894,13 @@ extension ModelStore {
                                    secondDistance: second, taper: feature.value("taper") ?? 0)
         }
         guard let solid else { throw FeatureError("Bereich lässt sich nicht extrudieren.") }
-        return try Self.combine(solid, into: state, target: feature.data.target, mode: mode, sketch: sketch.id,
-                                separate: separate)
+        var result = try Self.combine(solid, into: state, target: feature.data.target, mode: mode, sketch: sketch.id,
+                                      separate: separate)
+        // Textkörper mit dem aktuellen Inhalt benennen (SketchTextEdit.swift)
+        if mode == .newBody, let content = sketch.textContent(of: filled) {
+            SceneBody.labelText(&result, from: state.count, content: content)
+        }
+        return result
     }
 
     /// Wie thinExtrudeRegions, mit festen Werten statt der Werkzeugeinstellungen.
@@ -1300,7 +1309,7 @@ extension ModelStore {
         SnapshotBodyMeta(name: body.name, color: [body.color.x, body.color.y, body.color.z], isHidden: body.isHidden,
                          sketchID: body.sketchID, folder: body.folder, componentID: body.componentID,
                          placement: body.componentID == nil ? nil : body.placementValues, material: body.material,
-                         threads: body.threads, finish: body.finish)
+                         threads: body.threads, finish: body.finish, textLabel: body.textLabel)
     }
 
     private static func snapshotBody(_ shape: PCKShape, meta: SnapshotBodyMeta, number: Int) -> SceneBody {
@@ -1314,6 +1323,7 @@ extension ModelStore {
         body.material = meta.material
         body.threads = meta.threads
         body.finish = meta.finish
+        body.textLabel = meta.textLabel
         return body.restoringComponent(meta.componentID, placement: meta.placement)
     }
 

@@ -2024,10 +2024,8 @@ struct LayersPanel: View {
                 sketchRow(index)
                     .padding(.leading, 18)
                 // Texte der Skizze als eigene Einträge (SketchTextPanel.swift)
-                ForEach(item.textItems) { text in
-                    SketchTextLayerRow(workspace: workspace, sketch: workspace.sketch, sketchIndex: index, item: text)
-                }
-                .padding(.leading, 36)
+                SketchTextLayerList(workspace: workspace, sketch: workspace.sketch, sketchIndex: index, stored: item)
+                    .padding(.leading, 36)
             }
         }
         .padding(.vertical, 2)

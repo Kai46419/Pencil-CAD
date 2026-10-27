@@ -108,13 +108,20 @@ struct SketchTextItem: Identifiable {
     var id: Int { entity }
 }
 
-extension StoredSketch {
-    /// Alle Texte der Skizze in Zeichenreihenfolge.
-    var textItems: [SketchTextItem] {
+extension SketchTextItem {
+    /// Alle Texte der Elemente in Zeichenreihenfolge.
+    static func items(_ entities: [SketchEntity], construction: Set<Int>) -> [SketchTextItem] {
         entities.indices.compactMap { index -> SketchTextItem? in
             guard case .text(let text) = entities[index] else { return nil }
             return SketchTextItem(entity: index, text: text, isConstruction: construction.contains(index))
         }
+    }
+}
+
+extension StoredSketch {
+    /// Alle Texte der gespeicherten Skizze in Zeichenreihenfolge.
+    var textItems: [SketchTextItem] {
+        SketchTextItem.items(entities, construction: construction)
     }
 
     /// Inhalt der Texte, aus denen alle gewählten Bereiche stammen (jede Außenkontur liegt auf Buchstabenumrissen);
@@ -183,16 +190,38 @@ extension ModelStore {
     /// Jeder Buchstabe bleibt wie jeder Bereich ein eigener Körper (dann nummeriert).
     func labelTextBodies(_ result: inout [SceneBody], regions: [SketchRegion], sketch: StoredSketch, mode: ExtrudeMode) {
         guard mode == .newBody, result.count > bodies.count, let content = sketch.textContent(of: regions) else { return }
-        let added = Array(bodies.count..<result.count)
+        SceneBody.labelText(&result, from: bodies.count, content: content)
+    }
+}
+
+extension SceneBody {
+    /// Körper ab start (neu angehängt) als Textkörper benennen: „Text „ABC““, mehrere nummeriert.
+    static func labelText(_ result: inout [SceneBody], from start: Int, content: String) {
+        guard start >= 0, start < result.count else { return }
+        let added = Array(start..<result.count)
         let base = "Text „\(content)“"
         for (k, index) in added.enumerated() {
             result[index].name = added.count == 1 ? base : "\(base) \(k + 1)"
             result[index].textLabel = content
         }
     }
-}
 
-extension SceneBody {
+    /// Name vom Programm vergeben („Körper 3“ bzw. „Text „ABC““, ggf. nummeriert), nicht vom Nutzer.
+    var hasAutomaticName: Bool {
+        if let textLabel { return name.hasPrefix("Text „\(textLabel)“") }
+        return name.hasPrefix("Körper ")
+    }
+
+    /// Nach dem Nachbau des Verlaufs: Textbenennung des neu gerechneten Körpers übernehmen (Text wurde geändert).
+    /// Ein selbst vergebener Name bleibt, nur die Kennung wird nachgezogen.
+    func takingTextLabel(from rebuilt: SceneBody) -> SceneBody {
+        guard rebuilt.textLabel != textLabel else { return self }
+        var body = self
+        if hasAutomaticName { body.name = rebuilt.name }
+        body.textLabel = rebuilt.textLabel
+        return body
+    }
+
     /// Symbol im Browser: Textkörper, Komponente bzw. gewöhnlicher Körper.
     var browserSymbol: String {
         if textLabel != nil { return "textformat" }
