@@ -412,6 +412,8 @@ final class SketchController: ObservableObject {
     @Published var circularAngle: Double = 360 { didSet { changed() } }
     /// Neue Elemente als Konstruktionsgeometrie (zählen nicht als Profil).
     @Published var constructionMode = false
+    /// Werkzeug-Eigenschaften und Eingabestil (SolidCraft-Palette)
+    let options = SketchToolOptions()
     // Skizzenpalette (wie in Fusion 360): was beim Skizzieren angezeigt wird
     @Published var showsGrid = true
     @Published var showsProfiles = true
