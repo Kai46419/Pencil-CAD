@@ -24,6 +24,7 @@
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepOffset_MakeOffset.hxx>
 #include <BRepBuilderAPI_GTransform.hxx>
+#include <BRepBuilderAPI_Copy.hxx>
 #include <BRepGProp.hxx>
 #include <BRepTools.hxx>
 #include <BRepOffsetAPI_MakePipe.hxx>
@@ -2406,6 +2407,28 @@ static TopoDS_Shape variableFilletOnce(const TopoDS_Shape &shape, const std::vec
     return TopoDS_Shape();
 }
 
+- (nullable PCKShape *)independentCopy {
+    try {
+        // Geometrie mitkopieren, Netz nicht: die Kopie teilt nichts mehr mit diesem Körper (Vernetzen im
+        // Vordergrund schreibt sonst gleichzeitig in dieselben Flächen und Kanten, während der Hintergrund rechnet)
+        BRepBuilderAPI_Copy copier(_shape, Standard_True, Standard_False);
+        const TopoDS_Shape copied = copier.Shape();
+        if (copied.IsNull()) return nil;
+        PCKShape *copy = [[PCKShape alloc] initWithShape:copied];
+        if (copy->_edges.Extent() != _edges.Extent() || copy->_faces.Extent() != _faces.Extent()) return nil;
+        // Nummern müssen übereinstimmen (Kante i der Kopie = Kopie der Kante i)
+        for (int i = 1; i <= _edges.Extent(); ++i) {
+            if (!copier.ModifiedShape(_edges(i)).IsSame(copy->_edges(i))) return nil;
+        }
+        for (int i = 1; i <= _faces.Extent(); ++i) {
+            if (!copier.ModifiedShape(_faces(i)).IsSame(copy->_faces(i))) return nil;
+        }
+        return copy;
+    } catch (...) {
+        return nil;
+    }
+}
+
 - (nullable PCKShape *)filletingEdges:(NSArray<NSNumber *> *)numbers radius:(double)radius endRadius:(double)endRadius {
     if (radius <= 0 || endRadius <= 0) return nil;
     if (std::abs(radius - endRadius) < 1e-9) return [self filletingEdges:numbers radius:radius];
@@ -2523,10 +2546,14 @@ static TopoDS_Shape variableFilletOnce(const TopoDS_Shape &shape, const std::vec
         const std::vector<TopoDS_Edge> mergedEdges = matchEdges(edges, merged);
         const bool useMerged = !mergedEdges.empty();
         double lo = 0, hi = limit;
-        for (int i = 0; i < 9 && hi - lo > limit * 0.01; ++i) {
+        // Hart begrenzt: höchstens 8 Rundungsversuche insgesamt (jeder kann bei schwierigen Ecken lange dauern).
+        // Mit zusammengefasster Form nur diese (sie geht mindestens so weit wie die zerteilte)
+        int attempts = 0;
+        while (attempts < 8 && hi - lo > limit * 0.02) {
             const double mid = 0.5 * (lo + hi);
-            const bool ok = !blendOnce(_shape, edges, mid, chamfer).IsNull()
-                || (useMerged && !blendOnce(merged, mergedEdges, mid, chamfer).IsNull());
+            attempts += 1;
+            const bool ok = useMerged ? !blendOnce(merged, mergedEdges, mid, chamfer).IsNull()
+                                      : !blendOnce(_shape, edges, mid, chamfer).IsNull();
             if (ok) lo = mid; else hi = mid;
         }
         return lo;
@@ -3198,6 +3225,10 @@ static bool isSoftMeshEdge(const TopTools_ListOfShape &faces) {
 }
 
 - (nullable PCKShape *)validatedSolid {
+    return self;
+}
+
+- (nullable PCKShape *)independentCopy {
     return self;
 }
 

@@ -555,7 +555,7 @@ struct ParameterCard: View {
                         NumberField(title: "Ende", value: end) { model.setEdgeEndValue($0) }
                         Button("Tauschen", systemImage: "arrow.left.arrow.right") {
                             let start = model.edgeValue
-                            model.setEdgeEndValue(max(start, 0.01))
+                            model.setEdgeEndValue(max(start, 0.01), update: false)
                             model.setEdgeValue(end)
                         }
                         .labelStyle(.iconOnly)

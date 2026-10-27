@@ -290,6 +290,10 @@ final class ModelStore: ObservableObject {
     @Published private(set) var edgeSecondValue: Double?
     /// Variable Rundung: Radius am Kantenende (edgeValue gilt am Anfang); nil = gleichbleibender Radius
     @Published private(set) var edgeEndValue: Double?
+    /// Eine Rundung bzw. Fase rechnet im Hintergrund (BlendJobs.swift); „Fertig“ wartet so lange
+    @Published var isBlendComputing = false
+    /// Hintergrund-Rundung: laufende/wartende Anfrage, gemerkte Ergebnisse (BlendJobs.swift)
+    let blendJobs = BlendJobs()
     /// Kantenmitte und Richtung ins Material.
     @Published private(set) var edgeHandle: (origin: SIMD3<Double>, direction: SIMD3<Double>)?
     /// Flächenmitte und Normale der gewählten ebenen Fläche (Extrudieren per Pfeil).
@@ -629,21 +633,27 @@ final class ModelStore: ObservableObject {
     // MARK: Ziehpfeile
 
     /// Fase mit zwei Abständen ein- (Wert) bzw. ausschalten (nil) und die Vorschau erneuern.
-    func setEdgeSecondValue(_ value: Double?) {
+    /// update false: nur setzen (gleich folgt setEdgeValue – nicht zweimal rechnen).
+    func setEdgeSecondValue(_ value: Double?, update: Bool = true) {
         edgeSecondValue = value.map { max(0.01, $0) }
-        if edgeValue > 0 { setEdgeValue(edgeValue) }
+        if update, edgeValue > 0 { setEdgeValue(edgeValue) }
     }
 
     /// Variable Rundung ein- (Endradius) bzw. ausschalten (nil) und die Vorschau erneuern.
-    func setEdgeEndValue(_ value: Double?) {
+    /// update false: nur setzen (gleich folgt setEdgeValue – nicht zweimal rechnen).
+    func setEdgeEndValue(_ value: Double?, update: Bool = true) {
         edgeEndValue = value.map { max(0.01, $0) }
-        if edgeValue > 0 { setEdgeValue(edgeValue) }
+        if update, edgeValue > 0 { setEdgeValue(edgeValue) }
     }
 
     /// Radius bzw. Fasenbreite der gewählten Kanten setzen und als Vorschau zeigen.
+    /// Der Kernel rechnet im Hintergrund (BlendJobs.swift): die App bleibt bedienbar, gemerkte Werte erscheinen
+    /// sofort, bis zum Ergebnis bleibt die vorige Vorschau stehen.
     func setEdgeValue(_ newValue: Double) {
         let value = max(0, newValue)
         edgeValue = value
+        // Neue Anfrage: ältere Ergebnisse aus dem Hintergrund gelten nicht mehr
+        beginBlendRequest()
         guard let body = selectedEdges.first?.body, bodies.indices.contains(body) else { return }
         guard value > 0 else {
             dropPreview()
@@ -652,78 +662,12 @@ final class ModelStore: ObservableObject {
         guard requireKernel() else { return }
         // Rundung vor Schnitt (BlendBeforeCuts.swift): Wurde die Kante erst durch einen späteren Schnitt (z. B.
         // eine Text-Tasche) zerteilt, wird sie im Verlauf vor diesem Schnitt ganz verrundet und der Schnitt
-        // schneidet danach wieder hinein
+        // schneidet danach wieder hinein (gemerkt sofort, sonst entprellt nach kurzer Ruhe)
         if previewBlendBeforeCuts(value: value) { return }
-        // Sonst direkt am Körper, mit allen Teilstücken derselben geraden Kante (keine Stückelung)
+        // Sonst direkt am Körper, mit allen Teilstücken derselben geraden Kante (keine Stückelung); grenzt die
+        // Kante an die vorige Rundung, beide zusammen
         let blendEdges = completedEdgeChain(selectedEdges, body: body)
-        let numbers = blendEdges.map { NSNumber(value: $0.edge) }
-        let shape = bodies[body].shape
-        let operation = edgeOperation
-        // Fase mit zwei Abständen (Fusion 360 „Zwei Abstände“); nil = gleich breit
-        let second = operation == .chamfer ? edgeSecondValue : nil
-        func blend(_ amount: Double) -> PCKShape? {
-            if operation == .fillet { return shape.filleting(edges: numbers, radius: amount) }
-            if let second { return shape.chamfering(edges: numbers, distance: amount, distance2: second) }
-            return shape.chamfering(edges: numbers, distance: amount)
-        }
-        // Variable Rundung (Fusion 360): Anfangsradius value, Endradius edgeEndValue
-        if operation == .fillet, let end = edgeEndValue {
-            guard let result = shape.filleting(edges: numbers, radius: value, endRadius: end) else {
-                message = "Rundung \(value.formatted()) → \(end.formatted()) mm an dieser Kante nicht möglich."
-                dropPreview()
-                return
-            }
-            message = nil
-            var preview = bodies
-            preview[body] = preview[body].with(result)
-            previewHiddenSketch = bodies[body].sketchID
-            showPreview(preview, name: "Variabel abrunden")
-            noteBlend(.fillet, value: value, end: end, edges: blendEdges)
-            return
-        }
-        if second != nil {
-            guard let result = blend(value) else {
-                message = "Fase \(value.formatted()) × \((second ?? 0).formatted()) mm an dieser Kante nicht möglich."
-                dropPreview()
-                return
-            }
-            message = nil
-            var preview = bodies
-            preview[body] = preview[body].with(result)
-            previewHiddenSketch = bodies[body].sketchID
-            showPreview(preview, name: operation.rawValue)
-            noteBlend(operation, value: value, second: second, edges: blendEdges)
-            return
-        }
-        // Zu groß: nicht einfach nichts zeigen, sondern den größten möglichen Wert (einmal je Auswahl gesucht)
-        let key = EdgeLimitKey(edges: blendEdges, operation: operation, shape: ObjectIdentifier(shape))
-        var amount = value
-        var result: PCKShape?
-        if let limit = edgeLimit, limit.key == key, value > limit.value {
-            amount = limit.value
-        } else {
-            result = blend(value)
-        }
-        if result == nil {
-            if edgeLimit?.key != key || value <= (edgeLimit?.value ?? 0) {
-                let found = shape.maximumBlend(edges: numbers, upTo: value, chamfer: operation == .chamfer)
-                edgeLimit = (key, (found * 100).rounded(.down) / 100)
-            }
-            amount = edgeLimit?.value ?? 0
-            result = amount > 0 ? blend(amount) : nil
-        }
-        guard let result else {
-            message = "\(operation.rawValue) an dieser Kante nicht möglich."
-            dropPreview()
-            return
-        }
-        message = amount < value - 1e-9
-            ? "\(operation.rawValue): größter möglicher Wert hier \(amount.formatted()) mm." : nil
-        var preview = bodies
-        preview[body] = preview[body].with(result)
-        previewHiddenSketch = bodies[body].sketchID
-        showPreview(preview, name: operation.rawValue)
-        noteBlend(operation, value: amount, edges: blendEdges)
+        requestBlend(body: body, value: value, blendEdges: blendEdges)
     }
 
     /// Wie in Fusion 360: Während Kanten zum Abrunden bzw. Fasen gewählt sind, übernimmt das Antippen einer
@@ -745,13 +689,14 @@ final class ModelStore: ObservableObject {
         return true
     }
 
-    /// Größter möglicher Radius bzw. Fasenbreite für die aktuelle Kantenauswahl (Halbierungssuche, gemerkt)
-    private struct EdgeLimitKey: Equatable {
+    /// Größter möglicher Radius bzw. Fasenbreite für die aktuelle Kantenauswahl (Halbierungssuche, gemerkt;
+    /// gesetzt in BlendJobs.swift)
+    struct EdgeLimitKey: Equatable {
         var edges: [EdgeRef]
         var operation: EdgeOperation
         var shape: ObjectIdentifier
     }
-    private var edgeLimit: (key: EdgeLimitKey, value: Double)?
+    var edgeLimit: (key: EdgeLimitKey, value: Double)?
 
     /// Gewählte ebene Fläche um value mm herausziehen (> 0) oder hineindrücken (< 0).
     func setFaceValue(_ value: Double) {
@@ -1209,6 +1154,7 @@ final class ModelStore: ObservableObject {
     }
 
     func cancelPreview() {
+        cancelBlendJobs()
         dropPreview()
         edgeValue = 0
         // Variable Rundung gilt nur für die eine Rundung, nicht für die nächste Auswahl bzw. das nächste Werkzeug
@@ -1700,6 +1646,8 @@ final class ModelStore: ObservableObject {
     }
 
     private func clearSelectionState() {
+        // Rechnet noch eine Rundung im Hintergrund: ihr Ergebnis gilt nicht mehr
+        cancelBlendJobs()
         selection = nil
         extraFaces = []
         selectedEdges = []

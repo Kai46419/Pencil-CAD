@@ -271,6 +271,8 @@ final class FeatureRecorder {
     var orderedPreview: OrderedBlendPreview?
     /// Gemerkte Suche nach der ursprünglichen Kante (je Kantenauswahl und Körper, BlendBeforeCuts.swift)
     var blendPlacement: BlendPlacement?
+    /// Gemerkte Suche nach einer angrenzenden vorigen Rundung (ineinanderlaufende Rundungen, BlendBeforeCuts.swift)
+    var blendMerge: BlendMergeMemo?
 }
 
 /// Inhalt von features.json.
@@ -695,6 +697,7 @@ extension ModelStore {
         featureRecorder.preview = nil
         featureRecorder.orderedPreview = nil
         featureRecorder.blendPlacement = nil
+        featureRecorder.blendMerge = nil
         if let last = features.last { featureRecorder.cache[last.id] = bodies }
     }
 }
@@ -1421,7 +1424,7 @@ extension ModelStore {
     }
 
     /// Nächstgelegene Kante gleicher Ausrichtung (Richtung ins Material) je Signatur.
-    private static func matchEdges(_ signatures: [EdgeSignature], in shape: PCKShape) throws -> [Int] {
+    static func matchEdges(_ signatures: [EdgeSignature], in shape: PCKShape) throws -> [Int] {
         let mesh = Mesh(shape.triangulate(deflection: 0.05), body: 0)
         var numbers: [Int] = []
         for ref in mesh.edgeRefs where ref.edge > 0 && !numbers.contains(ref.edge) {

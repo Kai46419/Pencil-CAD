@@ -2432,6 +2432,11 @@ extension Workspace {
             refreshCommandPreview()
         }
         guard driver.canCommit(cmd, self) else {
+            // Rundung bzw. Fase rechnet noch im Hintergrund (BlendJobs.swift)
+            if model.isBlendComputing {
+                model.message = "Wird noch berechnet – gleich noch einmal bestätigen."
+                return
+            }
             if cmd.error == nil {
                 if let missing = cmd.inputs.first(where: { !$0.isOptional && $0.items.isEmpty }) {
                     cmd.error = "Erst „\(missing.title)“ wählen: \(missing.hint)"

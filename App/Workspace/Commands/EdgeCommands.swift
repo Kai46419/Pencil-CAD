@@ -80,9 +80,19 @@ enum EdgeBlendCommand {
         }
         let value = cmd.number(valueKey(operation), default: 1)
         guard value > 0 else { return "Der Wert muss größer als 0 sein." }
+        // Ergebnis aus dem Hintergrund (BlendJobs.swift): Fehlertext im Panel nachtragen
+        model.blendJobs.finished = { [weak ws, weak cmd] in
+            guard let ws, let cmd, let open = ws.command, open === cmd, open.editing == nil else { return }
+            let model = ws.model
+            let error: String? = model.hasPreview || model.isBlendComputing ? nil
+                : (model.message ?? "\(operation.rawValue) an diesen Kanten nicht möglich.")
+            open.error = error
+            CommandCache.mark(open, error: error)
+        }
         if operation == .fillet {
             let end: Double? = cmd.isOn("variable", default: false) ? cmd.number("end", default: value * 2) : nil
-            if model.edgeEndValue != end { model.setEdgeEndValue(end) }
+            // Nur setzen: gerechnet wird einmal mit setEdgeValue (vorher zweimal)
+            if model.edgeEndValue != end { model.setEdgeEndValue(end, update: false) }
             model.setEdgeValue(value)
         } else {
             var first = value
@@ -101,12 +111,14 @@ enum EdgeBlendCommand {
                 second = first
                 first = other
             }
-            if model.edgeSecondValue != second { model.setEdgeSecondValue(second) }
+            if model.edgeSecondValue != second { model.setEdgeSecondValue(second, update: false) }
             model.setEdgeValue(first)
         }
         if sameBody.count < edges.count, model.hasPreview {
             model.message = "Kanten eines Körpers zugleich – die übrigen bleiben unverändert."
         }
+        // Rechnet noch im Hintergrund: (noch) kein Fehler
+        if model.isBlendComputing { return nil }
         return model.hasPreview ? nil : (model.message ?? "\(operation.rawValue) an diesen Kanten nicht möglich.")
     }
 
@@ -136,6 +148,12 @@ enum EdgeBlendCommand {
 }
 
 enum FilletDriver: MainCommandDriver {
+    /// Während die Rundung im Hintergrund rechnet, gilt die angezeigte Vorschau noch nicht (BlendJobs.swift)
+    static func canCommit(_ cmd: ModelCommand, _ ws: Workspace) -> Bool {
+        if cmd.editing != nil { return cmd.error == nil }
+        return cmd.isReady && cmd.error == nil && ws.model.hasPreview && !ws.model.isBlendComputing
+    }
+
     static let id = ModelCommandID.fillet
     static let title = "Abrunden"
     static let icon = "sc.fillet"
@@ -169,6 +187,12 @@ enum FilletDriver: MainCommandDriver {
 }
 
 enum ChamferDriver: MainCommandDriver {
+    /// Während die Rundung im Hintergrund rechnet, gilt die angezeigte Vorschau noch nicht (BlendJobs.swift)
+    static func canCommit(_ cmd: ModelCommand, _ ws: Workspace) -> Bool {
+        if cmd.editing != nil { return cmd.error == nil }
+        return cmd.isReady && cmd.error == nil && ws.model.hasPreview && !ws.model.isBlendComputing
+    }
+
     static let id = ModelCommandID.chamfer
     static let title = "Fasen"
     static let icon = "sc.chamfer"

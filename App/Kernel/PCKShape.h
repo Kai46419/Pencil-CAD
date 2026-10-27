@@ -282,6 +282,10 @@ NS_ASSUME_NONNULL_BEGIN
 - (nullable PCKShape *)chamferingEdges:(NSArray<NSNumber *> *)edges distance:(double)distance
                              distance2:(double)distance2 NS_SWIFT_NAME(chamfering(edges:distance:distance2:));
 
+/// Unabhängige Kopie (Geometrie kopiert, gleiche Flächen- und Kantennummern) für Rechnungen im Hintergrund,
+/// während der Vordergrund diesen Körper weiter benutzt (vernetzt). nil bei Fehler bzw. abweichender Nummerierung.
+- (nullable PCKShape *)independentCopy NS_SWIFT_NAME(independentCopy());
+
 /// Variable Rundung (Fusion 360 „Variabler Radius“): Radius radius am Anfang, endRadius am Ende jeder Kante
 /// bzw. tangentialen Kantenkette. nil bei Fehler.
 - (nullable PCKShape *)filletingEdges:(NSArray<NSNumber *> *)edges radius:(double)radius endRadius:(double)endRadius
@@ -299,8 +303,8 @@ NS_ASSUME_NONNULL_BEGIN
                        neutralOrigin:(simd_double3)neutralOrigin angle:(double)degrees
     NS_SWIFT_NAME(drafting(faces:pull:neutralOrigin:angle:));
 
-/// Größter Radius bzw. größte Fasenbreite bis limit, die für diese Kanten noch geht (Halbierungssuche,
-/// auf 1 % genau). 0, wenn gar nichts geht.
+/// Größter Radius bzw. größte Fasenbreite bis limit, die für diese Kanten noch geht (Halbierungssuche mit
+/// höchstens 8 Versuchen, auf etwa 2 % genau). 0, wenn gar nichts geht.
 - (double)maximumBlendForEdges:(NSArray<NSNumber *> *)edges upTo:(double)limit chamfer:(BOOL)chamfer
     NS_SWIFT_NAME(maximumBlend(edges:upTo:chamfer:));
 
