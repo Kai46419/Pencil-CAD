@@ -278,6 +278,10 @@ enum HelpTopic: String, CaseIterable, Identifiable {
                     + "ab dem Ansatz, überstrichener Winkel als Segment und Grad-Etikett.",
                 "Schnittansicht mit Pfeil: blauer Ziehpfeil senkrecht zur Schnittebene – ziehen führt den Schnitt "
                     + "live durch den Körper, der Versatz steht am Pfeil und in der Karte.",
+                "Neuer Körper: jeder angetippte Skizzenbereich wird ein eigener Körper, auch wenn Bereiche sich berühren.",
+                "In Einzelkörper trennen löst jetzt auch sich berührende, noch nicht verschmolzene Teile eines Körpers.",
+                "Fläche nach innen ziehen: Bohrungen und Senkungen in der Fläche werden mit gekürzt statt als Röhre "
+                    + "stehen zu bleiben.",
                 "Skizze: Radius eines Bogens ändern (Maß oder Ziehen an der Wölbung) bewegt nur den Bogen – seine Enden "
                     + "gleiten auf den Nachbarlinien, der Rest bleibt stehen. Gewählte Bögen und Kreise haben einen blauen "
                     + "Griff zum Ziehen des Radius.",

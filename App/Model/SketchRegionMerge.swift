@@ -10,7 +10,35 @@ import simd
 // Ziehen am Pfeil neu. Hier werden gemeinsame Kanten der gewählten Bereiche gestrichen und die übrigen Kanten
 // zu neuen Konturen verkettet: aus 81 Bereichen wird ein Profil, das der Kernel in einem Schritt extrudiert.
 
+//
+// Kai (später): „Jeder Volumenkörper ist ein eigener Körper, auch wenn es aus einer Skizze entstanden ist.“ Beim
+// Modus „Neuer Körper“ wird darum nicht mehr zusammengefasst: jeder angetippte Bereich wird ein eigenes Prisma und
+// ein eigener Körper (ModelStore.extrusionResult trennt per separatedParts, ohne zu vereinigen – der absturzgefährdete
+// Fuse vieler Prismen entfällt dort ganz). Nur ab separateBodyLimit Bereichen (Zähne einer gezeichneten
+// Gewindestange, Muster) werden angrenzende Bereiche wie bisher zu einem Profil zusammengefasst: Dutzende
+// Einzelkörper wären dort nicht gemeint und machten Netz und Browser schwer. Beim Vereinigen, Abziehen und
+// Schneiden bleibt das Zusammenfassen immer aktiv (das Werkzeug ist dort ohnehin ein einziger Körper).
+
 enum SketchRegionMerge {
+    /// Ab so vielen gewählten Bereichen werden auch bei „Neuer Körper“ angrenzende Bereiche zusammengefasst.
+    static let separateBodyLimit = 24
+
+    /// Bereiche, wie sie extrudiert werden: bei „Neuer Körper“ (bis separateBodyLimit) jeder einzeln, sonst
+    /// angrenzende zusammengefasst. Für Vorschau und Verlauf gleich, damit dieselben Körper entstehen.
+    static func forExtrusion(_ regions: [SketchRegion], mode: ExtrudeMode) -> [SketchRegion] {
+        if mode == .newBody, regions.count <= separateBodyLimit { return regions }
+        return merged(regions)
+    }
+
+    /// Hinweis, wenn bei „Neuer Körper“ wegen vieler Bereiche zusammengefasst wurde (sonst nil).
+    static func newBodyNote(_ regions: [SketchRegion], mode: ExtrudeMode) -> String? {
+        guard mode == .newBody, regions.count > separateBodyLimit else { return nil }
+        let count = merged(regions).count
+        guard count < regions.count else { return nil }
+        return "\(regions.count) Bereiche: angrenzende zu \(count) Körper\(count == 1 ? "" : "n") zusammengefasst – "
+            + "für Einzelkörper höchstens \(separateBodyLimit) Bereiche wählen."
+    }
+
     /// Gewählte Bereiche mit gemeinsamen Kanten zu größeren Bereichen vereinigt. Ohne gemeinsame Kanten oder wenn
     /// sich die Konturen nicht sauber schließen, kommen die Bereiche unverändert zurück.
     static func merged(_ regions: [SketchRegion]) -> [SketchRegion] {

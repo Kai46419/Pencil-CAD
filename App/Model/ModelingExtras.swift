@@ -162,7 +162,8 @@ extension ModelStore {
             shapes.append(shape)
         }
         guard let solid = shapes.count == 1 ? shapes.first : PCKShape.compound(shapes),
-              let result = extrusionResult(solid, sourceBody: plane.sourceBody, mode: mode, sketch: sketch.id) else {
+              let result = extrusionResult(solid, sourceBody: plane.sourceBody, mode: mode, sketch: sketch.id,
+                                           joinTouching: true) else {
             dropPreview()
             return
         }

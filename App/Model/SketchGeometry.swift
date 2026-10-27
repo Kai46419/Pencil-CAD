@@ -894,8 +894,9 @@ enum ExtrudeDirection: String, CaseIterable, Identifiable {
 func extrudeRegions(_ chosen: [SketchRegion], plane: SketchPlane, distance: Double, mode: ExtrudeMode,
                     direction: ExtrudeDirection = .oneSide, secondDistance: Double = 0, taper: Double = 0) -> PCKShape? {
     guard !chosen.isEmpty, distance != 0, distance.isFinite else { return nil }
-    // Angrenzende Bereiche (z. B. Zähne einer Gewindestange) als ein Profil: keine Vereinigung vieler Prismen
-    let regions = SketchRegionMerge.merged(chosen)
+    // Neuer Körper: jeder Bereich einzeln (eigener Körper). Sonst bzw. bei sehr vielen Bereichen angrenzende
+    // (z. B. Zähne einer Gewindestange) als ein Profil: keine Vereinigung vieler Prismen
+    let regions = SketchRegionMerge.forExtrusion(chosen, mode: mode)
     let sign = plane.extrusionSign(mode: mode)
     let main = sign * distance
     let from: Double
