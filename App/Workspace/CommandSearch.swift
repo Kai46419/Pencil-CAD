@@ -29,6 +29,24 @@ extension Workspace {
                 self?.model.message = "Skizzenbereich oder ebene Fläche antippen, dann am blauen Pfeil ziehen."
             },
         ]
+        // Reihenfolge wie die Leiste (Fusion-360-Logik): Erstellen, Ändern, Transformieren
+        // ERSTELLEN
+        items += [
+            toolItem(.revolve, "Bereich um Achse drehen", "arrow.triangle.2.circlepath", "revolve drehen"),
+            toolItem(.sweep, "Bereich entlang Pfad", "point.3.connected.trianglepath.dotted", "sweep"),
+            toolItem(.loft, "Durch Querschnitte", "square.3.layers.3d", "loft"),
+            toolItem(.part(.thinLines), "Linien einer Skizze als Wand", PartTool.thinLines.systemImage, "thin dünn wand linie"),
+            toolItem(.part(.helix), "Feder, Gewinde", PartTool.helix.systemImage, "helix spirale feder gewinde thread spring"),
+            toolItem(.hole, "Schrauben, Gewindeeinsätze, Senkungen", "circle.circle", "hole bohren gewinde ruthex"),
+            toolItem(.part(.thread), "Metrisch, UNC, G, Trapez … an Bolzen, Bohrung oder als Gewindebohrung", PartTool.thread.systemImage,
+                     "gewinde thread schraube mutter metrisch m6 m8 unc unf trapez whitworth npt rohrgewinde"),
+            toolItem(.mirror, "Körper spiegeln", "arrow.left.and.right.righttriangle.left.righttriangle.right", "mirror"),
+            toolItem(.pattern(.linear), "Körper in Reihe", PatternKind.linear.systemImage, "pattern array"),
+            toolItem(.pattern(.circular), "Körper im Kreis", PatternKind.circular.systemImage, "pattern circular"),
+            toolItem(.mold, "Form aus Block, mit Spiel, zweiteilig", "cube.transparent",
+                     "mold negativ form gussform abformen block würfel spiel"),
+        ]
+        // ÄNDERN
         items += EdgeOperation.allCases.map { operation in
             CommandItem(id: "edge.\(operation.rawValue)", title: operation.rawValue, subtitle: "Kanten",
                         systemImage: operation == .fillet ? "app" : "octagon",
@@ -37,35 +55,28 @@ extension Workspace {
             }
         }
         items += [
-            toolItem(.hole, "Schrauben, Gewindeeinsätze, Senkungen", "circle.circle", "hole bohren gewinde ruthex"),
             toolItem(.shell, "Hohl machen, Wandstärke", "shippingbox", "shell aushöhlen"),
+            toolItem(.part(.draft), "Flächen neigen, Entformungsschräge", PartTool.draft.systemImage, "draft verjüngung schräge"),
             toolItem(.offsetFace, "Fläche verschieben, Bohrung weiten", "arrow.up.and.down.square", "offset face"),
             toolItem(.replaceFace, "Bis Zielfläche", "rectangle.portrait.and.arrow.forward", "replace face"),
             toolItem(.offsetEdges, "Kanten einer Fläche versetzen", "square.dashed.inset.filled", "offset edge"),
             toolItem(.wrap, "Text oder Logo auf Zylinder", "cylinder.split.1x2", "wrap emboss gravieren"),
             toolItem(.imprint, "Skizze auf Fläche übertragen", "square.on.square.dashed", "imprint"),
-            toolItem(.split, "Mit Ebene, Körper oder Skizze", "rectangle.split.2x1", "split teilen schneiden"),
         ]
         items += BooleanKind.allCases.map { toolItem(.boolean($0), "Körper kombinieren", $0.systemImage, "boolean combine") }
-        items.append(toolItem(.mold, "Form aus Block, mit Spiel, zweiteilig", "cube.transparent",
-                              "mold negativ form gussform abformen block würfel spiel"))
+        items += [
+            toolItem(.split, "Mit Ebene, Körper oder Skizze", "rectangle.split.2x1", "split teilen schneiden"),
+            toolItem(.meshSculpt, "Pinsel für Netze (STL, 3MF)", "paintbrush.pointed", "mesh netz sculpt pinsel stl 3mf glätten"),
+        ]
+        // TRANSFORMIEREN
         items += [
             toolItem(.move, "Körper oder Skizze, mit Kopien", "move.3d", "move rotate drehen kopieren"),
             toolItem(.translate, "Punkt zu Punkt", "point.topleft.down.to.point.bottomright.curvepath", "translate"),
-            toolItem(.mirror, "Körper spiegeln", "arrow.left.and.right.righttriangle.left.righttriangle.right", "mirror"),
-            toolItem(.pattern(.linear), "Körper in Reihe", PatternKind.linear.systemImage, "pattern array"),
-            toolItem(.pattern(.circular), "Körper im Kreis", PatternKind.circular.systemImage, "pattern circular"),
             toolItem(.scale, "Körper skalieren", "arrow.up.left.and.arrow.down.right", "scale größe"),
             toolItem(.align, "Körper ausrichten", "align.horizontal.center", "align"),
-            toolItem(.revolve, "Bereich um Achse drehen", "arrow.triangle.2.circlepath", "revolve drehen"),
-            toolItem(.sweep, "Bereich entlang Pfad", "point.3.connected.trianglepath.dotted", "sweep"),
-            toolItem(.loft, "Durch Querschnitte", "square.3.layers.3d", "loft"),
-            toolItem(.part(.helix), "Feder, Gewinde", PartTool.helix.systemImage, "helix spirale feder gewinde thread spring"),
-            toolItem(.part(.thread), "Metrisch, UNC, G, Trapez … an Bolzen, Bohrung oder als Gewindebohrung", PartTool.thread.systemImage,
-                     "gewinde thread schraube mutter metrisch m6 m8 unc unf trapez whitworth npt rohrgewinde"),
-            toolItem(.part(.thinLines), "Linien einer Skizze als Wand", PartTool.thinLines.systemImage, "thin dünn wand linie"),
-            toolItem(.part(.draft), "Flächen neigen, Entformungsschräge", PartTool.draft.systemImage, "draft verjüngung schräge"),
-            toolItem(.meshSculpt, "Pinsel für Netze (STL, 3MF)", "paintbrush.pointed", "mesh netz sculpt pinsel stl 3mf glätten"),
+        ]
+        // EINFÜGEN
+        items += [
             toolItem(.part(.standard), "Schrauben, Muttern, Scheiben, Kugellager", PartTool.standard.systemImage,
                      "normteil schraube mutter iso din lager bearing"),
             toolItem(.part(.template), "Gehäuse, Stirnrad", PartTool.template.systemImage, "vorlage gehäuse box zahnrad gear"),
@@ -84,8 +95,22 @@ extension Workspace {
                         keywords: "browser layers") { [weak self] in self?.showsLayers = true },
             CommandItem(id: "variables", title: "Variablen", subtitle: "Name = Wert", systemImage: "x.squareroot",
                         keywords: "parameter variable") { [weak self] in self?.showsVariables = true },
-            CommandItem(id: "image", title: "Bild einfügen", subtitle: "Foto als Vorlage", systemImage: "photo",
-                        keywords: "canvas foto") { [weak self] in self?.isPickingImage = true },
+            CommandItem(id: "image", title: "Bild aus Fotos", subtitle: "Foto aus dem Album als Vorlage",
+                        systemImage: "photo.on.rectangle", keywords: "bild einfügen canvas foto album vorlage") { [weak self] in
+                self?.isPickingImage = true
+            },
+            CommandItem(id: "imageFile", title: "Bild aus Dateien", subtitle: "PNG, JPEG, HEIC oder PDF als Vorlage",
+                        systemImage: "folder", keywords: "bild einfügen canvas datei pdf png jpeg heic vorlage") { [weak self] in
+                self?.isImportingImageFile = true
+            },
+            CommandItem(id: "camera", title: "Foto aufnehmen", subtitle: "Mit der Kamera, als Vorlage",
+                        systemImage: "camera", keywords: "bild einfügen kamera camera foto vorlage") { [weak self] in
+                if CameraCapture.isAvailable {
+                    self?.isTakingPhoto = true
+                } else {
+                    self?.model.message = "Keine Kamera verfügbar."
+                }
+            },
             CommandItem(id: "project", title: "Projekt einfügen", subtitle: "Körper eines anderen Projekts",
                         systemImage: "folder.badge.plus", keywords: "insert") { [weak self] in self?.showsProjectPicker = true },
             CommandItem(id: "isolate", title: "Isolieren", subtitle: "Nur den gewählten Körper zeigen", systemImage: "scope",
