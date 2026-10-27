@@ -75,7 +75,7 @@ private struct SelectionDimensionRows: View {
         return sketch.dimensions.filter { dimension in
             guard dimension.isEditable else { return false }
             switch dimension.target {
-            case .display:
+            case .display, .live:
                 return false
             case .constraint(let index):
                 return constraints.indices.contains(index) && !chosen.isDisjoint(with: constraints[index].entities)
