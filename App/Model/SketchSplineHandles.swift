@@ -33,7 +33,8 @@ struct SplineTangentHandle {
     /// Armende vorwärts (Richtung der Kurve) und rückwärts
     var forward: Point2
     var backward: Point2
-    /// Tangente in Hermite-Form (mm); die Pole der Bézierkette liegen bei point ± tangent / 3
+    /// Tangente in Hermite-Form (mm); an Enden liegt der Pol bei point ± tangent / 3, innen gewichtet nach den
+    /// Längen der Nachbarstücke (siehe SketchSplineInterpolation)
     var tangent: Point2
     /// true = eigene Tangente, false = automatisch
     var isCustom: Bool
@@ -70,8 +71,9 @@ extension SketchController {
         var result: [SplineTangentHandle] = []
         for entity in tangentHandleSplines {
             guard case .spline(let points, _, let closed, let tangents) = entities[entity] else { continue }
-            for index in points.indices {
-                let tangent: Point2 = fitSplineTangent(points, closed: closed, index: index, tangents: tangents)
+            let effective: [Point2] = fitSplineTangents(points, closed: closed, tangents: tangents)
+            for index in points.indices where effective.indices.contains(index) {
+                let tangent: Point2 = effective[index]
                 let length: Double = simd_length(tangent) / 3
                 guard length > 1e-9 else { continue }
                 let direction: Point2 = tangent / simd_length(tangent)

@@ -155,7 +155,7 @@ enum SplineFit {
     }
 
     /// Fit-Punkte für den Strich: möglichst wenige, mit höchstens etwa epsilon Abweichung. Die Fit-Spline der App
-    /// (Catmull-Rom) mag gleichmäßig verteilte Punkte, Douglas-Peucker trifft Ecken und Wendestellen – darum
+    /// (natürliche kubische Spline) mag gleichmäßig verteilte Punkte, Douglas-Peucker trifft Ecken und Wendestellen – darum
     /// werden mehrere Vorschläge geprüft und der mit den wenigsten Punkten genommen.
     static func fit(_ points: [Point2], closed: Bool, epsilon: Double) -> [Point2] {
         guard points.count > 2 else { return points }
