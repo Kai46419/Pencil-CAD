@@ -563,7 +563,7 @@ struct ConstraintColumn: View {
             kinds,
             [Row(id: "Trennen", systemImage: "link.badge.plus", action: .detach,
                  applicable: hasSelection && sketch.selectionHasConstraints)],
-            [Row(id: "Konstruktion erstellen", systemImage: "square.dashed", action: .construction, applicable: hasSelection)],
+            [Row(id: "Konstruktion erstellen", systemImage: "sc.construction", action: .construction, applicable: hasSelection)],
         ]
     }
 
@@ -604,6 +604,32 @@ struct ConstraintColumn: View {
         .disabled(!isEnabled)
     }
 
+    /// SF Symbol: aktiv weiß auf Akzentfarbe, passend blau, sonst grau. SolidCraft-Bild: aktiv heller Grund mit
+    /// Rahmen, nicht passend grau und blass.
+    @ViewBuilder private func rowIcon(_ row: Row, pending: Bool, active: Bool) -> some View {
+        let shape = RoundedRectangle(cornerRadius: Theme.Radius.label, style: .continuous)
+        if ToolIcon.isCustom(row.systemImage) {
+            ToolIcon(row.systemImage, size: 24)
+                .saturation(active ? 1 : 0)
+                .opacity(active ? 1 : (isEnabled ? 0.55 : 0.3))
+                .frame(width: 38, height: 34)
+                .background(pending ? Color.accentColor.opacity(0.22) : Color.clear, in: shape)
+                .overlay {
+                    if pending {
+                        shape.strokeBorder(Color.accentColor, lineWidth: 2)
+                    }
+                }
+        } else {
+            Image(systemName: row.systemImage)
+                .symbolRenderingMode(.hierarchical)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(pending ? Color.white
+                                 : active ? Color.accentColor : Color.primary.opacity(isEnabled ? 0.75 : 0.35))
+                .frame(width: 38, height: 34)
+                .background(pending ? Color.accentColor : Color.clear, in: shape)
+        }
+    }
+
     private func rowView(_ row: Row) -> some View {
         let pending = sketch.pendingAction == row.action
         let active = isEnabled && (row.applicable || pending)
@@ -612,14 +638,7 @@ struct ConstraintColumn: View {
         } label: {
             HStack(spacing: 8) {
                 RailLabel(title: row.id, dimmed: !active && !isEnabled)
-                Image(systemName: row.systemImage)
-                    .symbolRenderingMode(.hierarchical)
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(pending ? Color.white
-                                     : active ? Color.accentColor : Color.primary.opacity(isEnabled ? 0.75 : 0.35))
-                    .frame(width: 38, height: 34)
-                    .background(pending ? Color.accentColor : Color.clear,
-                                in: RoundedRectangle(cornerRadius: Theme.Radius.label, style: .continuous))
+                rowIcon(row, pending: pending, active: active)
                     .frame(width: 44, height: 38)
             }
             .contentShape(Rectangle())

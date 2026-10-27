@@ -43,30 +43,30 @@ enum SketchTool: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
-        case .select: "cursorarrow"
-        case .polyline: "line.diagonal"
-        case .rectangle: "rectangle"
-        case .circle: "circle.circle"
-        case .ellipse: "oval"
-        case .polygon: "pentagon"
-        case .arc: "point.topleft.down.curvedto.point.bottomright.up"
-        case .spline: "scribble.variable"
-        case .point: "smallcircle.filled.circle"
-        case .text: "textformat"
-        case .offset: "square.on.square.dashed"
-        case .project: "square.and.arrow.down.on.square"
-        case .trim: "scissors"
-        case .fillet: "app"
-        case .scale: "arrow.up.left.and.arrow.down.right"
-        case .slot: "capsule"
-        case .chamfer: "octagon"
-        case .extend: "arrow.right.to.line"
-        case .breakCurve: "divide"
+        case .select: "sc.select"
+        case .polyline: "sc.line"
+        case .rectangle: "sc.rect"
+        case .circle: "sc.circle"
+        case .ellipse: "sc.ellipse"
+        case .polygon: "sc.polygon"
+        case .arc: "sc.arc3"
+        case .spline: "sc.spline"
+        case .point: "sc.point"
+        case .text: "sc.sketch_text"
+        case .offset: "sc.offset"
+        case .project: "sc.project"
+        case .trim: "sc.trim"
+        case .fillet: "sc.sketch_fillet"
+        case .scale: "sc.sketch_scale"
+        case .slot: "sc.slot"
+        case .chamfer: "sc.sketch_chamfer"
+        case .extend: "sc.extend"
+        case .breakCurve: "sc.sketch_break"
         case .splitAtPoint: "scissors.badge.ellipsis"
-        case .mirror: "arrow.left.and.right.righttriangle.left.righttriangle.right"
-        case .rectPattern: "square.grid.3x3"
-        case .circPattern: "circle.grid.cross"
-        case .measure: "ruler"
+        case .mirror: "sc.sketch_mirror"
+        case .rectPattern: "sc.sketch_rect_pattern"
+        case .circPattern: "sc.sketch_circ_pattern"
+        case .measure: "sc.measure"
         }
     }
 
@@ -104,9 +104,9 @@ enum RectangleMode: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
-        case .center: "rectangle.center.inset.filled"
-        case .diagonal: "rectangle"
-        case .threePoint: "rectangle.portrait.rotate"
+        case .center: "sc.rect_center"
+        case .diagonal: "sc.rect"
+        case .threePoint: "sc.rect3"
         }
     }
 }

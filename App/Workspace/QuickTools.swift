@@ -31,11 +31,7 @@ struct QuickToolsPalette: View {
                         item.action()
                         close()
                     } label: {
-                        Image(systemName: item.systemImage)
-                            .font(.system(size: 19, weight: .medium))
-                            .frame(width: 50, height: 50)
-                            .foregroundStyle(item.isActive ? Color.white : Color.primary)
-                            .floatingSurface(item.isActive ? Color.accentColor : Theme.surface, in: Circle())
+                        icon(item)
                     }
                     .buttonStyle(.pressable)
                     .accessibilityLabel(item.id)
@@ -54,6 +50,27 @@ struct QuickToolsPalette: View {
             }
         }
         .transition(.scale(scale: 0.6).combined(with: .opacity))
+    }
+
+    /// SF Symbol aktiv weiß auf Akzentfarbe; SolidCraft-Bild aktiv auf hellem Akzentgrund mit Ring.
+    @ViewBuilder private func icon(_ item: Item) -> some View {
+        if ToolIcon.isCustom(item.systemImage) {
+            ToolIcon(item.systemImage, size: 30)
+                .frame(width: 50, height: 50)
+                .background(item.isActive ? Color.accentColor.opacity(0.22) : Color.clear, in: Circle())
+                .floatingSurface(Theme.surface, in: Circle())
+                .overlay {
+                    if item.isActive {
+                        Circle().strokeBorder(Color.accentColor, lineWidth: 2)
+                    }
+                }
+        } else {
+            Image(systemName: item.systemImage)
+                .font(.system(size: 19, weight: .medium))
+                .frame(width: 50, height: 50)
+                .foregroundStyle(item.isActive ? Color.white : Color.primary)
+                .floatingSurface(item.isActive ? Color.accentColor : Theme.surface, in: Circle())
+        }
     }
 
     private func close() {
@@ -92,13 +109,13 @@ struct QuickToolsPalette: View {
             ]
         }
         return [
-            Item(id: "Skizze", systemImage: "pencil.and.outline") { workspace.startSketch() },
-            Item(id: "Abrunden", systemImage: "app") { workspace.startEdgeOperation(.fillet) },
-            Item(id: "Fase", systemImage: "octagon") { workspace.startEdgeOperation(.chamfer) },
-            Item(id: "Verschieben", systemImage: "move.3d", isActive: workspace.tool == .move) {
+            Item(id: "Skizze", systemImage: ToolGroup.sketch.systemImage) { workspace.startSketch() },
+            Item(id: "Abrunden", systemImage: "sc.fillet") { workspace.startEdgeOperation(.fillet) },
+            Item(id: "Fase", systemImage: "sc.chamfer") { workspace.startEdgeOperation(.chamfer) },
+            Item(id: "Verschieben", systemImage: "sc.move", isActive: workspace.tool == .move) {
                 workspace.activate(.move)
             },
-            Item(id: "Spiegeln", systemImage: "arrow.left.and.right.righttriangle.left.righttriangle.right",
+            Item(id: "Spiegeln", systemImage: "sc.mirror",
                  isActive: workspace.tool == .mirror) {
                 workspace.activate(.mirror)
             },

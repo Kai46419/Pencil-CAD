@@ -1,0 +1,43 @@
+{
+  "images": [
+    {
+      "filename": "box@2x.png",
+      "idiom": "universal",
+      "scale": "2x"
+    },
+    {
+      "appearances": [
+        {
+          "appearance": "luminosity",
+          "value": "dark"
+        }
+      ],
+      "filename": "box-dark@2x.png",
+      "idiom": "universal",
+      "scale": "2x"
+    },
+    {
+      "filename": "box@3x.png",
+      "idiom": "universal",
+      "scale": "3x"
+    },
+    {
+      "appearances": [
+        {
+          "appearance": "luminosity",
+          "value": "dark"
+        }
+      ],
+      "filename": "box-dark@3x.png",
+      "idiom": "universal",
+      "scale": "3x"
+    }
+  ],
+  "info": {
+    "author": "xcode",
+    "version": 1
+  },
+  "properties": {
+    "template-rendering-intent": "original"
+  }
+}

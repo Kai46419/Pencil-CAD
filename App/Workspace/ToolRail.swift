@@ -22,19 +22,19 @@ enum ToolGroup: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
-        case .sketch: "square.and.pencil"
-        case .extrude: "square.stack.3d.up.fill"
-        case .shapes: "cube.fill"
-        case .fillets: "rectangle.roundedtop.fill"
-        case .holes: "circle.circle.fill"
-        case .faces: "arrow.up.and.down.square.fill"
-        case .combine: "square.fill.on.circle.fill"
-        case .move: "move.3d"
-        case .pattern: "circle.grid.3x3.fill"
-        case .construct: "square.dashed"
-        case .inspect: "ruler"
-        case .insert: "square.and.arrow.down"
-        case .visualize: "eye"
+        case .sketch: "sc.sketch"
+        case .extrude: "sc.extrude"
+        case .shapes: "sc.box"
+        case .fillets: "sc.fillet"
+        case .holes: "sc.hole"
+        case .faces: "sc.presspull"
+        case .combine: "sc.combine"
+        case .move: "sc.move"
+        case .pattern: "sc.pattern"
+        case .construct: "sc.plane"
+        case .inspect: "sc.measure"
+        case .insert: "sc.import"
+        case .visualize: "sc.appearance"
         }
     }
 
@@ -316,10 +316,10 @@ struct ToolRail: View {
         })
     }
 
-    private func toolItem(_ tool: SketchTool, title: String? = nil, subtitle: String? = nil,
+    private func toolItem(_ tool: SketchTool, title: String? = nil, subtitle: String? = nil, icon: String? = nil,
                           isActive: Bool? = nil, then: @escaping () -> Void = {}) -> ToolItem {
         ToolItem(id: "item.\(tool.rawValue).\(title ?? "")", title: title ?? tool.rawValue,
-                 subtitle: subtitle ?? tool.subtitle, systemImage: tool.systemImage,
+                 subtitle: subtitle ?? tool.subtitle, systemImage: icon ?? tool.systemImage,
                  isActive: isActive ?? (sketch.tool == tool)) {
             sketch.tool = tool
             then()
@@ -399,9 +399,10 @@ struct ToolRail: View {
         let shownCut: SketchTool = cutTools.contains(sketch.tool) ? sketch.tool : cutTool
         let moreTools: [SketchTool] = [.project, .mirror, .rectPattern, .circPattern, .point, .text]
         // Spline: Fit-/Kontrollpunkte setzen, Freihand, Punkt einfügen
-        let splineKindItems: [ToolItem] = SplineKind.allCases.map { kind in
-            toolItem(.spline, title: kind.rawValue, subtitle: "Spline",
-                     isActive: sketch.tool == .spline && sketch.splineInput == .points && sketch.splineKind == kind) {
+        let splineKindItems: [ToolItem] = SplineKind.allCases.map { kind -> ToolItem in
+            let icon: String? = kind == .control ? "sc.spline_cv" : nil
+            return toolItem(.spline, title: kind.rawValue, subtitle: "Spline", icon: icon,
+                            isActive: sketch.tool == .spline && sketch.splineInput == .points && sketch.splineKind == kind) {
                 sketch.splineInput = .points
                 sketch.splineKind = kind
             }
@@ -477,7 +478,7 @@ struct ToolRail: View {
                       flyout: moreTools.map { tool in toolItem(tool) { moreTool = tool } },
                       primary: { sketch.tool = moreTool }),
             RailEntry(id: "sketch.construction", title: "Konstruktion", subtitle: sketch.constructionMode ? "Ein" : "Aus",
-                      systemImage: "line.diagonal.arrow", category: .create, isActive: sketch.constructionMode, action: {
+                      systemImage: "sc.construction", category: .create, isActive: sketch.constructionMode, action: {
                 sketch.constructionMode.toggle()
             }),
             // ÄNDERN
@@ -494,13 +495,13 @@ struct ToolRail: View {
                       flyout: modifyTools.map { tool in toolItem(tool) { modifyTool = tool } },
                       primary: { sketch.tool = modifyTool }),
             RailEntry(id: "sketch.delete", title: "Löschen", subtitle: sketch.selection.isEmpty ? nil : "Auswahl",
-                      systemImage: "trash", category: .modify, isEnabled: !sketch.selection.isEmpty, action: {
+                      systemImage: "sc.delete", category: .modify, isEnabled: !sketch.selection.isEmpty, action: {
                 sketch.deleteSelection()
             }),
             // PRÜFEN
             toolEntry(.measure, category: .inspect),
             RailEntry(id: "sketch.section", title: "Schnittansicht", subtitle: workspace.sketchSection ? "Ein" : "Aus",
-                      systemImage: "square.split.diagonal.2x2", category: .inspect, isActive: workspace.sketchSection, action: {
+                      systemImage: "sc.section", category: .inspect, isActive: workspace.sketchSection, action: {
                 workspace.sketchSection.toggle()
             }),
         ]
@@ -558,15 +559,15 @@ struct ToolRail: View {
         }
         if hasRegions {
             entries.append(RailEntry(id: "context.revolve", title: "Achsendrehung",
-                                     systemImage: "arrow.triangle.2.circlepath", category: .create, action: {
+                                     systemImage: "sc.revolve", category: .create, action: {
                 workspace.activate(.revolve)
             }))
             // Wie Shapr3D nach beendeter Skizze: Profil weiterverarbeiten oder die Skizze öffnen
             entries.append(RailEntry(id: "context.sweep", title: "Sweep",
-                                     systemImage: "point.3.connected.trianglepath.dotted", category: .create, action: {
+                                     systemImage: "sc.sweep", category: .create, action: {
                 workspace.activate(.sweep)
             }))
-            entries.append(RailEntry(id: "context.loft", title: "Loft", systemImage: "square.3.layers.3d",
+            entries.append(RailEntry(id: "context.loft", title: "Loft", systemImage: "sc.loft",
                                      category: .create, action: {
                 workspace.activate(.loft)
             }))
@@ -576,7 +577,7 @@ struct ToolRail: View {
             workspace.startSketch()
         }))
         if hasRegions || planarFace {
-            entries.append(RailEntry(id: "context.text", title: "Text", systemImage: "textformat", category: .create, action: {
+            entries.append(RailEntry(id: "context.text", title: "Text", systemImage: "sc.text", category: .create, action: {
                 if let region = model.selectedRegions.first, model.sketches.indices.contains(region.sketch) {
                     workspace.startSketch(on: model.sketches[region.sketch].plane)
                 } else {
@@ -601,13 +602,13 @@ struct ToolRail: View {
         if face != nil {
             entries.append(RailEntry(id: "context.offsetFace", title: "Fläche versetzen",
                                      subtitle: model.selectedFaces.count > 1 ? "\(model.selectedFaces.count) Flächen" : nil,
-                                     systemImage: "arrow.up.and.down.square", category: .modify, action: {
+                                     systemImage: "sc.offset_face", category: .modify, action: {
                 workspace.activate(.offsetFace)
             }))
         }
         if planarFace {
             entries.append(RailEntry(id: "context.replaceFace", title: "Fläche ersetzen",
-                                     systemImage: "rectangle.portrait.and.arrow.forward", category: .modify, action: {
+                                     systemImage: "sc.replace_face", category: .modify, action: {
                 workspace.activate(.replaceFace)
             }))
             entries.append(RailEntry(id: "context.offsetEdges", title: "Kante versetzen",
@@ -617,23 +618,23 @@ struct ToolRail: View {
         }
         if hasRegions {
             entries.append(RailEntry(id: "context.wrap", title: "Umhüllen und Prägen",
-                                     systemImage: "cylinder.split.1x2", category: .modify, action: {
+                                     systemImage: "sc.emboss", category: .modify, action: {
                 workspace.activate(.wrap)
             }))
             entries.append(RailEntry(id: "context.imprint", title: "Kante abdrücken",
-                                     systemImage: "square.on.square.dashed", category: .modify, action: {
+                                     systemImage: "sc.project_surface", category: .modify, action: {
                 workspace.activate(.imprint)
             }))
         }
 
         // VERSCHIEBEN (mit Kopieren)
-        entries.append(RailEntry(id: "context.move", title: "Verschieben/Rotieren", systemImage: "move.3d",
+        entries.append(RailEntry(id: "context.move", title: "Verschieben/Rotieren", systemImage: "sc.move",
                                  category: .arrange, action: {
             startMove(copies: false)
         }))
         if model.selectedBody != nil, !hasRegions {
             entries.append(RailEntry(id: "context.copy", title: "Kopieren", subtitle: "Verschieben mit Kopie",
-                                     systemImage: "plus.square.on.square", category: .arrange, action: {
+                                     systemImage: "sc.copy", category: .arrange, action: {
                 startMove(copies: true)
             }))
         }
@@ -646,12 +647,12 @@ struct ToolRail: View {
         }
         if hasRegions {
             entries.append(RailEntry(id: "context.scaleSketch", title: "Skizze skalieren",
-                                     systemImage: "arrow.up.left.and.arrow.down.right", category: .arrange, action: {
+                                     systemImage: "sc.sketch_scale", category: .arrange, action: {
                 workspace.activate(.scaleSketch)
             }))
         } else {
             entries.append(RailEntry(id: "context.scale", title: "Skalieren",
-                                     systemImage: "arrow.up.left.and.arrow.down.right", category: .arrange, action: {
+                                     systemImage: "sc.scale", category: .arrange, action: {
                 workspace.activate(.scale)
             }))
         }
@@ -666,11 +667,11 @@ struct ToolRail: View {
 
         // KONSTRUIEREN
         if planarFace {
-            entries.append(RailEntry(id: "context.axis", title: "Achse senkrecht", systemImage: "line.diagonal.arrow",
+            entries.append(RailEntry(id: "context.axis", title: "Achse senkrecht", systemImage: "sc.axis_normal_to_face",
                                      category: .construct, action: {
                 workspace.createNormalAxis()
             }))
-            entries.append(RailEntry(id: "context.plane", title: "Ebene Versatz", systemImage: "square.dashed",
+            entries.append(RailEntry(id: "context.plane", title: "Ebene Versatz", systemImage: ConstructionKind.plane.systemImage,
                                      category: .construct, action: {
                 workspace.activate(.construct(.plane))
             }))
@@ -678,11 +679,11 @@ struct ToolRail: View {
 
         // PRÜFEN
         entries += [
-            RailEntry(id: "context.measure", title: "Messen", systemImage: "ruler", category: .inspect, action: {
+            RailEntry(id: "context.measure", title: "Messen", systemImage: "sc.measure", category: .inspect, action: {
                 workspace.activate(.measure)
             }),
             RailEntry(id: "context.section", title: "Schnittansicht", subtitle: workspace.section == nil ? "Aus" : "Ein",
-                      systemImage: "square.split.diagonal.2x2", category: .inspect, isActive: workspace.section != nil, action: {
+                      systemImage: "sc.section", category: .inspect, isActive: workspace.section != nil, action: {
                 workspace.activate(.section)
             }),
             RailEntry(id: "context.isolate", title: "Isolieren", subtitle: model.isIsolated ? "Ein" : "Aus",
@@ -701,7 +702,7 @@ struct ToolRail: View {
             RailEntry(id: "context.more", title: "Alle Werkzeuge", systemImage: "square.grid.2x2", action: {
                 workspace.showsAllTools = true
             }),
-            RailEntry(id: "context.delete", title: "Löschen", systemImage: "trash", action: {
+            RailEntry(id: "context.delete", title: "Löschen", systemImage: "sc.delete", action: {
                 if let region = model.selectedRegions.first {
                     model.deleteSketch(region.sketch)
                 } else {
@@ -890,16 +891,16 @@ struct ToolRail: View {
             let extruding = workspace.tool == .select && (!model.selectedRegions.isEmpty || model.faceHandle != nil)
             return [
                 ToolItem(id: "extrude.extrude", title: "Extrudieren", subtitle: "Bereich oder Fläche, Pfeil ziehen",
-                         systemImage: "square.stack.3d.up", isActive: extruding) {
+                         systemImage: "sc.extrude", isActive: extruding) {
                     startExtrude()
                 },
                 item(.part(.thinLines), "Dünn extrudieren", subtitle: "Linien als Wand", PartTool.thinLines.systemImage),
             ]
         case .shapes:
             var items: [ToolItem] = [
-                item(.revolve, "Achsendrehung", subtitle: "Bereich um Achse", "arrow.triangle.2.circlepath"),
-                item(.sweep, "Sweep", subtitle: "Bereich entlang Pfad", "point.3.connected.trianglepath.dotted"),
-                item(.loft, "Loft", subtitle: "Durch Querschnitte", "square.3.layers.3d"),
+                item(.revolve, "Achsendrehung", subtitle: "Bereich um Achse", "sc.revolve"),
+                item(.sweep, "Sweep", subtitle: "Bereich entlang Pfad", "sc.sweep"),
+                item(.loft, "Loft", subtitle: "Durch Querschnitte", "sc.loft"),
                 item(.part(.helix), "Helix", subtitle: "Feder, Spirale", PartTool.helix.systemImage),
             ]
             items += Primitive.allCases.map { primitive in
@@ -909,7 +910,7 @@ struct ToolRail: View {
         case .fillets:
             return EdgeOperation.allCases.map { operation in
                 ToolItem(id: "tools.\(operation.rawValue)", title: operation.rawValue, subtitle: "Kanten",
-                         systemImage: operation == .fillet ? "app" : "octagon",
+                         systemImage: operation == .fillet ? "sc.fillet" : "sc.chamfer",
                          isActive: workspace.tool == .select && !model.selectedEdges.isEmpty
                              && model.edgeOperation == operation) {
                     workspace.startEdgeOperation(operation)
@@ -920,51 +921,51 @@ struct ToolRail: View {
             let threaded = workspace.holeSpec.thread != nil
             return [
                 ToolItem(id: "holes.hole", title: "Bohrung", subtitle: "Senkung, Senkkopf, Einsätze",
-                         systemImage: "circle.circle", isActive: drilling && !threaded) {
+                         systemImage: "sc.hole", isActive: drilling && !threaded) {
                     startHole(threaded: false)
                 },
                 ToolItem(id: "holes.tapped", title: "Gewindebohrung", subtitle: "Kernloch mit Gewinde",
-                         systemImage: "circle.dashed.inset.filled", isActive: drilling && threaded) {
+                         systemImage: "sc.hole", isActive: drilling && threaded) {
                     startHole(threaded: true)
                 },
                 item(.part(.thread), "Gewinde", subtitle: "Bolzen, Bohrung, jede Fläche", PartTool.thread.systemImage),
             ]
         case .faces:
             return [
-                item(.offsetFace, "Fläche versetzen", subtitle: "Auch Bohrungen", "arrow.up.and.down.square"),
-                item(.replaceFace, "Fläche ersetzen", subtitle: "Bis Zielfläche", "rectangle.portrait.and.arrow.forward"),
+                item(.offsetFace, "Fläche versetzen", subtitle: "Auch Bohrungen", "sc.offset_face"),
+                item(.replaceFace, "Fläche ersetzen", subtitle: "Bis Zielfläche", "sc.replace_face"),
                 item(.part(.draft), "Verjüngung", subtitle: "Flächen neigen", PartTool.draft.systemImage),
-                item(.shell, "Schale", subtitle: "Fläche öffnen", "shippingbox"),
-                item(.offsetEdges, "Kante versetzen", subtitle: "Fläche antippen", "square.dashed.inset.filled"),
-                item(.imprint, "Kante abdrücken", subtitle: "Skizze auf Fläche", "square.on.square.dashed"),
-                item(.wrap, "Umhüllen und Prägen", subtitle: "Auf Zylinder", "cylinder.split.1x2"),
+                item(.shell, "Schale", subtitle: "Fläche öffnen", "sc.shell"),
+                item(.offsetEdges, "Kante versetzen", subtitle: "Fläche antippen", SketchTool.offset.systemImage),
+                item(.imprint, "Kante abdrücken", subtitle: "Skizze auf Fläche", "sc.project_surface"),
+                item(.wrap, "Umhüllen und Prägen", subtitle: "Auf Zylinder", "sc.emboss"),
             ]
         case .combine:
             var items: [ToolItem] = BooleanKind.allCases.map { kind in
                 item(.boolean(kind), kind.rawValue, subtitle: "Körper", kind.systemImage)
             }
-            items.append(item(.split, "Körper teilen", subtitle: "Ebene, Körper, Skizze", "rectangle.split.2x1"))
+            items.append(item(.split, "Körper teilen", subtitle: "Ebene, Körper, Skizze", "sc.split_body"))
             items.append(item(.mold, "Negativform", subtitle: "Form aus Block", "cube.transparent"))
             return items
         case .move:
             let moving = workspace.tool == .move
             return [
                 ToolItem(id: "move.move", title: "Verschieben/Rotieren", subtitle: "Körper oder Skizze",
-                         systemImage: "move.3d", isActive: moving && !model.moveCopies) {
+                         systemImage: "sc.move", isActive: moving && !model.moveCopies) {
                     startMove(copies: false)
                 },
                 ToolItem(id: "move.copy", title: "Kopieren", subtitle: "Verschieben mit Kopie",
-                         systemImage: "plus.square.on.square", isActive: moving && model.moveCopies) {
+                         systemImage: "sc.copy", isActive: moving && model.moveCopies) {
                     startMove(copies: true)
                 },
                 item(.translate, "Übersetzen", subtitle: "Punkt zu Punkt", "point.topleft.down.to.point.bottomright.curvepath"),
-                item(.align, "Ausrichten", subtitle: "Körper", "align.horizontal.center"),
-                item(.scale, "Skalieren", subtitle: "Körper", "arrow.up.left.and.arrow.down.right"),
-                item(.scaleSketch, "Skizze skalieren", subtitle: "Bereich antippen", "arrow.up.left.and.arrow.down.right"),
+                item(.align, "Ausrichten", subtitle: "Körper", "sc.align"),
+                item(.scale, "Skalieren", subtitle: "Körper", "sc.scale"),
+                item(.scaleSketch, "Skizze skalieren", subtitle: "Bereich antippen", "sc.sketch_scale"),
             ]
         case .pattern:
             return [
-                item(.mirror, "Spiegeln", subtitle: "Körper", "arrow.left.and.right.righttriangle.left.righttriangle.right"),
+                item(.mirror, "Spiegeln", subtitle: "Körper", "sc.mirror"),
                 item(.pattern(.linear), "Muster linear", subtitle: "Körper in Reihe", PatternKind.linear.systemImage),
                 item(.pattern(.circular), "Muster kreisförmig", subtitle: "Körper im Kreis", PatternKind.circular.systemImage),
             ]
@@ -974,7 +975,7 @@ struct ToolRail: View {
             }
         case .inspect:
             return [
-                item(.measure, "Messen", subtitle: "Länge, Fläche, Abstand", "ruler"),
+                item(.measure, "Messen", subtitle: "Länge, Fläche, Abstand", "sc.measure"),
                 item(.printCheck, "Druckprüfung", subtitle: "Überhang, Wände", "printer"),
             ]
         case .insert:
@@ -982,15 +983,15 @@ struct ToolRail: View {
                 item(.part(.standard), "Normteile", subtitle: "Schrauben, Muttern, Lager", PartTool.standard.systemImage),
                 item(.part(.template), "Vorlagen", subtitle: "Gehäuse, Stirnrad", PartTool.template.systemImage),
                 ToolItem(id: "insert.step", title: "STEP-Datei", subtitle: ".step / .stp",
-                         systemImage: "square.and.arrow.down", action: importSTEP),
+                         systemImage: "sc.import", action: importSTEP),
                 ToolItem(id: "insert.mesh", title: "STL / 3MF", subtitle: "Netz als Körper (3D-Druck)",
                          systemImage: "triangle", action: importSTEP),
                 ToolItem(id: "insert.vector", title: "SVG / DXF", subtitle: "Als Skizze (Laser, CNC, Logos)",
-                         systemImage: "scribble.variable", action: importSTEP),
+                         systemImage: "sc.svg", action: importSTEP),
                 item(.meshSculpt, "Netz bearbeiten", subtitle: "Pinsel, STL/3MF", "paintbrush.pointed"),
                 // Bild als Vorlage aus drei Quellen; danach gleich kalibrieren (WorkspaceView.insertImage)
                 ToolItem(id: "insert.image", title: "Bild aus Fotos", subtitle: "Fotoalbum, als Vorlage",
-                         systemImage: "photo.on.rectangle") {
+                         systemImage: "sc.canvas") {
                     workspace.isPickingImage = true
                 },
                 ToolItem(id: "insert.imageFile", title: "Bild aus Dateien", subtitle: "PNG, JPEG, HEIC, PDF",
@@ -1007,7 +1008,7 @@ struct ToolRail: View {
                     workspace.showsProjectPicker = true
                 },
                 ToolItem(id: "insert.variable", title: "Variable", subtitle: model.variables.isEmpty ? "Name = Wert"
-                             : "\(model.variables.count) im Projekt", systemImage: "x.squareroot") {
+                             : "\(model.variables.count) im Projekt", systemImage: "sc.params") {
                     workspace.showsVariables = true
                 },
             ]
@@ -1022,7 +1023,7 @@ struct ToolRail: View {
                                   systemImage: "cube.transparent", isActive: workspace.isOrthographic) {
                 workspace.isOrthographic.toggle()
             })
-            items.append(item(.color, "Farbe", subtitle: "Körper", "paintpalette"))
+            items.append(item(.color, "Farbe", subtitle: "Körper", "sc.appearance"))
             items.append(ToolItem(id: "visualize.drawing", title: "Zeichnung", subtitle: "PDF, DXF",
                                   systemImage: "doc.richtext") {
                 workspace.showsDrawing = true
@@ -1061,7 +1062,8 @@ private struct SectionHeader: View {
 }
 
 /// Kachel der Werkzeugleiste mit Beschriftung daneben.
-/// Symbole zweifarbig in der Kategoriefarbe (wie die Werkzeugsymbole in Fusion 360), aktiv farbig gefüllt.
+/// SF Symbols zweifarbig in der Kategoriefarbe (wie die Werkzeugsymbole in Fusion 360), aktiv farbig gefüllt;
+/// mehrfarbige SolidCraft-Bilder („sc.“) aktiv auf hellem Grund in Kategoriefarbe mit Rahmen, damit sie lesbar bleiben.
 struct RailTile: View {
     let title: String
     var subtitle: String?
@@ -1073,47 +1075,19 @@ struct RailTile: View {
     /// Kleines Dreieck unten rechts: lange drücken zeigt weitere Varianten (wie Shapr3D/Fusion 360)
     var hasVariants = false
 
-    /// „Skizzieren beenden“ ist wie in Fusion 360 immer ein grüner Haken
-    private var filled: Bool { isActive || category == .finish }
+    private var isCustom: Bool { ToolIcon.isCustom(systemImage) }
+
+    /// Vollfarbe mit weißem Symbol: aktives SF Symbol bzw. „Skizzieren beenden“ (wie in Fusion 360 immer ein grüner Haken)
+    private var filled: Bool { category == .finish || (isActive && !isCustom) }
+
+    /// Aktives SolidCraft-Bild: heller Grund in Kategoriefarbe und kräftiger Rahmen
+    private var tinted: Bool { isActive && isCustom && category != .finish }
+
+    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: size * 0.27, style: .continuous) }
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: size * 0.27, style: .continuous)
         HStack(spacing: 8) {
-            Image(systemName: systemImage)
-                .symbolRenderingMode(.hierarchical)
-                .font(.system(size: size * 0.4, weight: category == .finish ? .bold : .medium))
-                .frame(width: size, height: size)
-                .foregroundStyle(filled ? Color.white : category.color)
-                .background {
-                    if filled {
-                        shape.fill(LinearGradient(colors: [category.fill.opacity(0.82), category.fill],
-                                                  startPoint: .top, endPoint: .bottom))
-                    } else {
-                        shape.fill(Color(.systemBackground))
-                            .overlay(shape.fill(LinearGradient(colors: [category.color.opacity(0.0),
-                                                                        category.color.opacity(0.10)],
-                                                               startPoint: .top, endPoint: .bottom)))
-                    }
-                }
-                .overlay(alignment: .bottomTrailing) {
-                    if hasVariants {
-                        Image(systemName: "arrowtriangle.down.fill")
-                            .font(.system(size: 6, weight: .bold))
-                            .rotationEffect(.degrees(-45))
-                            .foregroundStyle(filled ? Color.white.opacity(0.85) : category.color.opacity(0.8))
-                            .padding(5)
-                    }
-                }
-                .overlay {
-                    if isOpen {
-                        shape.strokeBorder(category.fill, lineWidth: 2)
-                    } else if !filled, category != .neutral {
-                        shape.strokeBorder(category.color.opacity(0.18), lineWidth: 1)
-                    } else if !filled {
-                        shape.strokeBorder(Theme.hairline, lineWidth: Theme.hairlineWidth)
-                    }
-                }
-                .tileShadow(filled ? category.fill : nil)
+            tile
             VStack(alignment: .leading, spacing: 0) {
                 Text(title)
                     .font(Theme.labelFont)
@@ -1130,7 +1104,61 @@ struct RailTile: View {
                              elevation: .flat)
         }
         .contentShape(Rectangle())
-        .animation(Theme.snappy, value: filled)
+        .animation(Theme.snappy, value: isActive)
+    }
+
+    private var tile: some View {
+        glyph
+            .frame(width: size, height: size)
+            .background { tileBackground }
+            .overlay(alignment: .bottomTrailing) { variantMark }
+            .overlay { border }
+            .tileShadow(filled || tinted ? category.fill : nil)
+    }
+
+    @ViewBuilder private var glyph: some View {
+        if isCustom {
+            ToolIcon(systemImage, size: size * 0.62)
+        } else {
+            Image(systemName: systemImage)
+                .symbolRenderingMode(.hierarchical)
+                .font(.system(size: size * 0.4, weight: category == .finish ? .bold : .medium))
+                .foregroundStyle(filled ? Color.white : category.color)
+        }
+    }
+
+    @ViewBuilder private var tileBackground: some View {
+        if filled {
+            shape.fill(LinearGradient(colors: [category.fill.opacity(0.82), category.fill],
+                                      startPoint: .top, endPoint: .bottom))
+        } else if tinted {
+            shape.fill(Color(.systemBackground))
+                .overlay(shape.fill(category.fill.opacity(0.22)))
+        } else {
+            shape.fill(Color(.systemBackground))
+                .overlay(shape.fill(LinearGradient(colors: [category.color.opacity(0.0), category.color.opacity(0.10)],
+                                                   startPoint: .top, endPoint: .bottom)))
+        }
+    }
+
+    @ViewBuilder private var variantMark: some View {
+        if hasVariants {
+            Image(systemName: "arrowtriangle.down.fill")
+                .font(.system(size: 6, weight: .bold))
+                .rotationEffect(.degrees(-45))
+                .foregroundStyle(filled ? Color.white.opacity(0.85) : category.color.opacity(0.8))
+                .padding(5)
+        }
+    }
+
+    @ViewBuilder private var border: some View {
+        if isOpen || tinted {
+            shape.strokeBorder(category.fill, lineWidth: 2)
+        } else if !filled, category != .neutral {
+            shape.strokeBorder(category.color.opacity(0.18), lineWidth: 1)
+        } else if !filled {
+            shape.strokeBorder(Theme.hairline, lineWidth: Theme.hairlineWidth)
+        }
     }
 }
 
@@ -1175,13 +1203,7 @@ private struct Flyout: View {
                     close()
                 } label: {
                     HStack(spacing: 12) {
-                        Image(systemName: item.systemImage)
-                            .symbolRenderingMode(.hierarchical)
-                            .font(.system(size: 17, weight: .medium))
-                            .frame(width: 36, height: 36)
-                            .foregroundStyle(item.isActive ? Color.white : category.color)
-                            .background(item.isActive ? category.fill : category.color.opacity(category == .neutral ? 0.06 : 0.1),
-                                        in: RoundedRectangle(cornerRadius: Theme.Radius.label, style: .continuous))
+                        itemIcon(item)
                         VStack(alignment: .leading, spacing: 1) {
                             Text(item.title)
                                 .font(.subheadline.weight(.medium))
@@ -1204,5 +1226,28 @@ private struct Flyout: View {
             }
         }
         .padding(10)
+    }
+
+    /// Symbol eines Eintrags: SF Symbol aktiv weiß auf Vollfarbe; SolidCraft-Bild aktiv auf hellem Grund mit Rahmen.
+    @ViewBuilder private func itemIcon(_ item: ToolItem) -> some View {
+        let shape = RoundedRectangle(cornerRadius: Theme.Radius.label, style: .continuous)
+        let idle: Color = category.color.opacity(category == .neutral ? 0.06 : 0.1)
+        if ToolIcon.isCustom(item.systemImage) {
+            ToolIcon(item.systemImage, size: 26)
+                .frame(width: 36, height: 36)
+                .background(item.isActive ? category.fill.opacity(0.22) : idle, in: shape)
+                .overlay {
+                    if item.isActive {
+                        shape.strokeBorder(category.fill, lineWidth: 2)
+                    }
+                }
+        } else {
+            Image(systemName: item.systemImage)
+                .symbolRenderingMode(.hierarchical)
+                .font(.system(size: 17, weight: .medium))
+                .frame(width: 36, height: 36)
+                .foregroundStyle(item.isActive ? Color.white : category.color)
+                .background(item.isActive ? category.fill : idle, in: shape)
+        }
     }
 }

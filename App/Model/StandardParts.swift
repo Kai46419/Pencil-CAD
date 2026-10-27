@@ -17,7 +17,7 @@ enum StandardPartKind: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
-        case .socketScrew, .hexScrew: "screwdriver"
+        case .socketScrew, .hexScrew: "sc.fastener"
         case .nut: "hexagon"
         case .washer: "circle.circle"
         case .bearing: "circle.dotted.circle"

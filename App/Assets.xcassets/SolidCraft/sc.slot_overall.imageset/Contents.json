@@ -1,0 +1,43 @@
+{
+  "images": [
+    {
+      "filename": "slot_overall@2x.png",
+      "idiom": "universal",
+      "scale": "2x"
+    },
+    {
+      "appearances": [
+        {
+          "appearance": "luminosity",
+          "value": "dark"
+        }
+      ],
+      "filename": "slot_overall-dark@2x.png",
+      "idiom": "universal",
+      "scale": "2x"
+    },
+    {
+      "filename": "slot_overall@3x.png",
+      "idiom": "universal",
+      "scale": "3x"
+    },
+    {
+      "appearances": [
+        {
+          "appearance": "luminosity",
+          "value": "dark"
+        }
+      ],
+      "filename": "slot_overall-dark@3x.png",
+      "idiom": "universal",
+      "scale": "3x"
+    }
+  ],
+  "info": {
+    "author": "xcode",
+    "version": 1
+  },
+  "properties": {
+    "template-rendering-intent": "original"
+  }
+}

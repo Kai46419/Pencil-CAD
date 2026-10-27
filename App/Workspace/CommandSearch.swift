@@ -21,10 +21,10 @@ extension Workspace {
                         keywords: keywords) { [weak self] in self?.activate(tool) }
         }
         var items: [CommandItem] = [
-            CommandItem(id: "sketch", title: "Skizze", subtitle: "Neue Skizze", systemImage: "pencil.and.outline",
+            CommandItem(id: "sketch", title: "Skizze", subtitle: "Neue Skizze", systemImage: ToolGroup.sketch.systemImage,
                         keywords: "sketch zeichnen") { [weak self] in self?.startSketch() },
             CommandItem(id: "extrude", title: "Extrudieren", subtitle: "Bereich oder Fläche antippen, am Pfeil ziehen",
-                        systemImage: "square.stack.3d.up", keywords: "extrude push pull") { [weak self] in
+                        systemImage: ToolGroup.extrude.systemImage, keywords: "extrude push pull") { [weak self] in
                 self?.activate(.select)
                 self?.model.message = "Skizzenbereich oder ebene Fläche antippen, dann am blauen Pfeil ziehen."
             },
@@ -32,21 +32,21 @@ extension Workspace {
         // Reihenfolge ungefähr wie die Gruppen der Leiste: Formen, Löcher, Vervielfältigen, Abrundungen, Flächen,
         // Kombinieren, Verschieben, Einfügen …
         items += [
-            toolItem(.revolve, "Bereich um Achse drehen", "arrow.triangle.2.circlepath", "revolve drehen"),
-            toolItem(.sweep, "Bereich entlang Pfad", "point.3.connected.trianglepath.dotted", "sweep"),
-            toolItem(.loft, "Durch Querschnitte", "square.3.layers.3d", "loft"),
+            toolItem(.revolve, "Bereich um Achse drehen", "sc.revolve", "revolve drehen"),
+            toolItem(.sweep, "Bereich entlang Pfad", "sc.sweep", "sweep"),
+            toolItem(.loft, "Durch Querschnitte", "sc.loft", "loft"),
             toolItem(.part(.thinLines), "Linien einer Skizze als Wand", PartTool.thinLines.systemImage, "thin dünn wand linie"),
             toolItem(.part(.helix), "Feder, Gewinde", PartTool.helix.systemImage, "helix spirale feder gewinde thread spring"),
-            toolItem(.hole, "Schrauben, Gewindeeinsätze, Senkungen", "circle.circle", "hole bohren gewinde ruthex"),
+            toolItem(.hole, "Schrauben, Gewindeeinsätze, Senkungen", "sc.hole", "hole bohren gewinde ruthex"),
             CommandItem(id: "tappedHole", title: "Gewindebohrung", subtitle: "Bohrung mit Gewinde, Kernloch nach Tabelle",
-                        systemImage: "circle.dashed.inset.filled", keywords: "tapped hole gewinde bohrung m3 m4 m5 m6") { [weak self] in
+                        systemImage: "sc.hole", keywords: "tapped hole gewinde bohrung m3 m4 m5 m6") { [weak self] in
                 guard let self else { return }
                 self.activate(.hole)
                 self.setHoleThread(self.holeSpec.thread ?? HoleThread())
             },
             toolItem(.part(.thread), "Metrisch, UNC, G, Trapez … an Bolzen, Bohrung oder als Gewindebohrung", PartTool.thread.systemImage,
                      "gewinde thread schraube mutter metrisch m6 m8 unc unf trapez whitworth npt rohrgewinde"),
-            toolItem(.mirror, "Körper spiegeln", "arrow.left.and.right.righttriangle.left.righttriangle.right", "mirror"),
+            toolItem(.mirror, "Körper spiegeln", "sc.mirror", "mirror"),
             toolItem(.pattern(.linear), "Körper in Reihe", PatternKind.linear.systemImage, "pattern array"),
             toolItem(.pattern(.circular), "Körper im Kreis", PatternKind.circular.systemImage, "pattern circular"),
             toolItem(.mold, "Form aus Block, mit Spiel, zweiteilig", "cube.transparent",
@@ -55,37 +55,37 @@ extension Workspace {
         // ABRUNDUNGEN, FLÄCHEN, KOMBINIEREN
         items += EdgeOperation.allCases.map { operation in
             CommandItem(id: "edge.\(operation.rawValue)", title: operation.rawValue, subtitle: "Kanten",
-                        systemImage: operation == .fillet ? "app" : "octagon",
+                        systemImage: operation == .fillet ? "sc.fillet" : "sc.chamfer",
                         keywords: operation == .fillet ? "fillet round radius" : "chamfer") { [weak self] in
                 self?.startEdgeOperation(operation)
             }
         }
         items += [
-            toolItem(.shell, "Hohl machen, Wandstärke", "shippingbox", "shell aushöhlen"),
+            toolItem(.shell, "Hohl machen, Wandstärke", "sc.shell", "shell aushöhlen"),
             toolItem(.part(.draft), "Flächen neigen, Entformungsschräge", PartTool.draft.systemImage, "draft verjüngung schräge"),
-            toolItem(.offsetFace, "Fläche verschieben, Bohrung weiten", "arrow.up.and.down.square", "offset face"),
-            toolItem(.replaceFace, "Bis Zielfläche", "rectangle.portrait.and.arrow.forward", "replace face"),
-            toolItem(.offsetEdges, "Kanten einer Fläche versetzen", "square.dashed.inset.filled", "offset edge"),
-            toolItem(.wrap, "Text oder Logo auf Zylinder", "cylinder.split.1x2", "wrap emboss gravieren"),
-            toolItem(.imprint, "Skizze auf Fläche übertragen", "square.on.square.dashed", "imprint"),
+            toolItem(.offsetFace, "Fläche verschieben, Bohrung weiten", "sc.offset_face", "offset face"),
+            toolItem(.replaceFace, "Bis Zielfläche", "sc.replace_face", "replace face"),
+            toolItem(.offsetEdges, "Kanten einer Fläche versetzen", SketchTool.offset.systemImage, "offset edge"),
+            toolItem(.wrap, "Text oder Logo auf Zylinder", "sc.emboss", "wrap emboss gravieren"),
+            toolItem(.imprint, "Skizze auf Fläche übertragen", "sc.project_surface", "imprint"),
         ]
         items += BooleanKind.allCases.map { toolItem(.boolean($0), "Körper kombinieren", $0.systemImage, "boolean combine") }
         items += [
-            toolItem(.split, "Mit Ebene, Körper oder Skizze", "rectangle.split.2x1", "split teilen schneiden"),
+            toolItem(.split, "Mit Ebene, Körper oder Skizze", "sc.split_body", "split teilen schneiden"),
             toolItem(.meshSculpt, "Pinsel für Netze (STL, 3MF)", "paintbrush.pointed", "mesh netz sculpt pinsel stl 3mf glätten"),
         ]
         // VERSCHIEBEN
         items += [
-            toolItem(.move, "Körper oder Skizze, mit Kopien", "move.3d", "move rotate drehen kopieren"),
-            CommandItem(id: "copy", title: "Kopieren", subtitle: "Verschieben mit Kopie", systemImage: "plus.square.on.square",
+            toolItem(.move, "Körper oder Skizze, mit Kopien", "sc.move", "move rotate drehen kopieren"),
+            CommandItem(id: "copy", title: "Kopieren", subtitle: "Verschieben mit Kopie", systemImage: "sc.copy",
                         keywords: "copy kopie duplizieren duplicate") { [weak self] in
                 guard let self else { return }
                 self.activate(.move)
                 self.model.moveCopies = self.model.movingSketch == nil
             },
             toolItem(.translate, "Punkt zu Punkt", "point.topleft.down.to.point.bottomright.curvepath", "translate"),
-            toolItem(.scale, "Körper skalieren", "arrow.up.left.and.arrow.down.right", "scale größe"),
-            toolItem(.align, "Körper ausrichten", "align.horizontal.center", "align"),
+            toolItem(.scale, "Körper skalieren", "sc.scale", "scale größe"),
+            toolItem(.align, "Körper ausrichten", "sc.align", "align"),
         ]
         // EINFÜGEN
         items += [
@@ -96,19 +96,19 @@ extension Workspace {
         items += Primitive.allCases.map { toolItem(.insert($0), "Grundkörper", $0.systemImage, "primitive insert") }
         items += ConstructionKind.allCases.map { toolItem(.construct($0), "Konstruktion", $0.systemImage, "construct plane axis point") }
         items += [
-            toolItem(.measure, "Länge, Fläche, Winkel, Radius, Abstand", "ruler", "measure"),
+            toolItem(.measure, "Länge, Fläche, Winkel, Radius, Abstand", "sc.measure", "measure"),
             toolItem(.printCheck, "Überhang, Wände, beste Ausrichtung", "printer", "print 3d druck slicer"),
-            toolItem(.section, "Schnitt durch das Modell", "square.split.diagonal.2x2", "section cut"),
+            toolItem(.section, "Schnitt durch das Modell", "sc.section", "section cut"),
             CommandItem(id: "fit", title: "Einpassen", subtitle: "Alles zeigen", systemImage: "arrow.up.left.and.arrow.down.right",
                         keywords: "fit zoom") { [weak self] in self?.send(.fitAll) },
             CommandItem(id: "saveView", title: "Ansicht speichern", subtitle: "Blickwinkel merken", systemImage: "camera.viewfinder",
                         keywords: "view kamera") { [weak self] in self?.saveCurrentView() },
             CommandItem(id: "layers", title: "Ebenen", subtitle: "Browser mit Körpern und Skizzen", systemImage: "square.3.layers.3d",
                         keywords: "browser layers") { [weak self] in self?.showsLayers = true },
-            CommandItem(id: "variables", title: "Variablen", subtitle: "Name = Wert", systemImage: "x.squareroot",
+            CommandItem(id: "variables", title: "Variablen", subtitle: "Name = Wert", systemImage: "sc.params",
                         keywords: "parameter variable") { [weak self] in self?.showsVariables = true },
             CommandItem(id: "image", title: "Bild aus Fotos", subtitle: "Foto aus dem Album als Vorlage",
-                        systemImage: "photo.on.rectangle", keywords: "bild einfügen canvas foto album vorlage") { [weak self] in
+                        systemImage: "sc.canvas", keywords: "bild einfügen canvas foto album vorlage") { [weak self] in
                 self?.isPickingImage = true
             },
             CommandItem(id: "imageFile", title: "Bild aus Dateien", subtitle: "PNG, JPEG, HEIC oder PDF als Vorlage",
@@ -188,7 +188,7 @@ struct CommandSearchSheet: View {
                                 .foregroundStyle(.secondary)
                         }
                     } icon: {
-                        Image(systemName: item.systemImage)
+                        ToolIcon(item.systemImage, size: 24)
                             .symbolRenderingMode(.hierarchical)
                             .foregroundStyle(Color.accentColor)
                     }

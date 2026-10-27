@@ -127,7 +127,7 @@ struct BooleanCard: View {
         Card {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 14) {
-                    Label(kind.rawValue, systemImage: kind.systemImage)
+                    ToolLabel(kind.rawValue, icon: kind.systemImage)
                         .font(.callout.weight(.semibold))
                     if kind == .subtract {
                         ClearanceField(value: settings.subtractClearance) { value in

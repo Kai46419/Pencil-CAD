@@ -10,8 +10,8 @@ enum PatternKind: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
-        case .linear: "square.grid.3x1.below.line.grid.1x2"
-        case .circular: "circle.grid.cross"
+        case .linear: "sc.pattern_rect"
+        case .circular: "sc.pattern_circ"
         }
     }
 }

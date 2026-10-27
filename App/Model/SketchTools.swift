@@ -15,9 +15,9 @@ enum CircleMode: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
-        case .center: "circle.circle"
-        case .twoPoint: "circle.and.line.horizontal"
-        case .threePoint: "circle.dotted"
+        case .center: "sc.circle"
+        case .twoPoint: "sc.circle2"
+        case .threePoint: "sc.circle3"
         }
     }
 }
@@ -31,8 +31,8 @@ enum ArcMode: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
-        case .threePoint: "point.topleft.down.curvedto.point.bottomright.up"
-        case .center: "circle.bottomhalf.filled"
+        case .threePoint: "sc.arc3"
+        case .center: "sc.arc_center"
         }
     }
 }
@@ -55,9 +55,9 @@ enum SlotMode: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
-        case .centerToCenter: "capsule"
-        case .overall: "capsule.portrait"
-        case .centerPoint: "capsule.inset.filled"
+        case .centerToCenter: "sc.slot"
+        case .overall: "sc.slot_overall"
+        case .centerPoint: "sc.slot_center"
         }
     }
 }

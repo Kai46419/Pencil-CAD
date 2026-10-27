@@ -32,12 +32,12 @@ enum PartTool: Equatable {
 
     var systemImage: String {
         switch self {
-        case .standard: "screwdriver"
-        case .template: "gearshape.2"
-        case .helix: "tornado"
-        case .thread: "barcode"
-        case .thinLines: "square.dashed"
-        case .draft: "trapezoid.and.line.vertical"
+        case .standard: "sc.fastener"
+        case .template: "sc.library"
+        case .helix: "sc.coil"
+        case .thread: "sc.thread"
+        case .thinLines: "sc.rib"
+        case .draft: "sc.draft"
         }
     }
 
@@ -268,7 +268,7 @@ struct PartCard: View {
     }
 
     private func title(_ text: String, _ systemImage: String) -> some View {
-        Label(text, systemImage: systemImage)
+        ToolLabel(text, icon: systemImage)
             .font(.callout.weight(.semibold))
             .fixedSize()
     }
@@ -381,7 +381,7 @@ struct PartCard: View {
     private var helixCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
-                title("Helix", "tornado")
+                title("Helix", PartTool.helix.systemImage)
                 Picker("Profil", selection: binding(\.helix.profile)) {
                     ForEach(HelixProfile.allCases) { Text($0.rawValue).tag($0) }
                 }
@@ -429,7 +429,7 @@ struct PartCard: View {
     private var thinLinesCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
-                title("Dünn extrudieren", "square.dashed")
+                title("Dünn extrudieren", PartTool.thinLines.systemImage)
                 Picker("Skizze", selection: binding(\.thinSketch)) {
                     Text("Skizze wählen").tag(Int?.none)
                     ForEach(model.pathSketches, id: \.self) { index in
@@ -468,7 +468,7 @@ struct PartCard: View {
 
     private var draftCard: some View {
         HStack(spacing: 12) {
-            title("Verjüngung", "trapezoid.and.line.vertical")
+            title("Verjüngung", PartTool.draft.systemImage)
             NumberField(title: "Winkel", value: parts.draftAngle, unit: "°", width: 48) { value in
                 guard abs(value) < 89 else { return }
                 parts.draftAngle = value

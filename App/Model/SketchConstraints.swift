@@ -92,19 +92,19 @@ enum ConstraintKind: String, CaseIterable, Identifiable, Codable {
 
     var systemImage: String {
         switch self {
-        case .parallel: "line.diagonal"
-        case .collinear: "line.3.horizontal"
-        case .perpendicular: "angle"
-        case .tangent: "circle.and.line.horizontal"
-        case .coincident: "smallcircle.filled.circle"
-        case .midpoint: "line.3.horizontal.decrease"
-        case .concentric: "circle.circle"
-        case .horizontalVertical: "arrow.up.and.down.and.arrow.left.and.right"
-        case .equal: "equal"
+        case .parallel: "sc.c_parallel"
+        case .collinear: "sc.c_collinear"
+        case .perpendicular: "sc.c_perpendicular"
+        case .tangent: "sc.c_tangent"
+        case .coincident: "sc.c_coincident"
+        case .midpoint: "sc.c_midpoint"
+        case .concentric: "sc.c_concentric"
+        case .horizontalVertical: "sc.c_hv"
+        case .equal: "sc.c_equal"
         case .equalAngle: "chevron.up"
-        case .symmetric: "arrow.left.and.right.righttriangle.left.righttriangle.right"
-        case .lock: "lock"
-        case .dimension: "ruler"
+        case .symmetric: "sc.c_symmetry"
+        case .lock: "sc.c_fix"
+        case .dimension: "sc.dimension"
         }
     }
 }

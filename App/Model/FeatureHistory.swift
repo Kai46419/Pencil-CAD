@@ -35,19 +35,19 @@ enum FeatureKind: String, Codable, CaseIterable {
     var systemImage: String {
         switch self {
         case .snapshot: "cube.transparent"
-        case .extrude: "square.stack.3d.up"
-        case .revolve: "arrow.triangle.2.circlepath"
-        case .primitive: "cube"
-        case .fillet: "app"
-        case .chamfer: "octagon"
-        case .faceExtrude: "arrow.up.and.down.square"
-        case .shell: "shippingbox"
-        case .boolean: "square.on.square.dashed"
-        case .move: "move.3d"
+        case .extrude: "sc.extrude"
+        case .revolve: "sc.revolve"
+        case .primitive: "sc.box"
+        case .fillet: "sc.fillet"
+        case .chamfer: "sc.chamfer"
+        case .faceExtrude: "sc.presspull"
+        case .shell: "sc.shell"
+        case .boolean: "sc.combine"
+        case .move: "sc.move"
         case .rotate: "rotate.3d"
-        case .mirror: "arrow.left.and.right.righttriangle.left.righttriangle.right"
-        case .pattern: "square.grid.3x1.below.line.grid.1x2"
-        case .delete: "trash"
+        case .mirror: "sc.mirror"
+        case .pattern: "sc.pattern_rect"
+        case .delete: "sc.delete"
         }
     }
 }
@@ -213,7 +213,7 @@ struct Feature: Codable, Identifiable {
         if kind == .boolean, let boolean = data.mode.flatMap(BooleanKind.init(rawValue:)) {
             return boolean.systemImage
         }
-        if kind == .pattern, data.mode == "kreis" { return "circle.grid.cross" }
+        if kind == .pattern, data.mode == "kreis" { return "sc.pattern_circ" }
         return kind.systemImage
     }
 

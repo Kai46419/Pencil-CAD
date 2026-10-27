@@ -449,7 +449,7 @@ struct ParameterCard: View {
             HStack(spacing: 14) {
                 // Bogen ohne Finger: der nächste Strich wird ein tangentialer Bogen
                 Toggle(isOn: $sketch.arcNext) {
-                    Label("Bogen", systemImage: SketchTool.arc.systemImage)
+                    ToolLabel("Bogen", icon: SketchTool.arc.systemImage)
                 }
                 .toggleStyle(.button)
                 .hoverTip("Bogen", "Der nächste Strich wird ein tangentialer Bogen am Linienende – ohne Finger. Danach geht es mit Linien weiter. Auch im Werkzeugrad (Stift drücken).")
@@ -588,7 +588,7 @@ struct ParameterCard: View {
         Card {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 12) {
-                    Label("Extrudieren", systemImage: "square.stack.3d.up")
+                    ToolLabel("Extrudieren", icon: ToolGroup.extrude.systemImage)
                         .font(.callout.weight(.semibold))
                         .fixedSize()
                     Picker("Modus", selection: $model.regionMode) {
@@ -658,7 +658,7 @@ struct ParameterCard: View {
     private var faceCard: some View {
         Card {
             HStack(spacing: 16) {
-                Label("Extrudieren", systemImage: "square.stack.3d.up")
+                ToolLabel("Extrudieren", icon: ToolGroup.extrude.systemImage)
                     .font(.callout.weight(.semibold))
                 NumberField(title: "Abstand", value: model.faceValue) { model.setFaceValue($0) }
                 lastValueButton { model.setFaceValue($0) }
@@ -686,8 +686,10 @@ struct ParameterCard: View {
                       systemImage: "cube")
                     .font(.callout.weight(.semibold))
                 ForEach(BooleanKind.allCases) { kind in
-                    Button(kind.rawValue, systemImage: kind.systemImage) {
+                    Button {
                         workspace.combineSelectedBodies(kind)
+                    } label: {
+                        ToolLabel(kind.rawValue, icon: kind.systemImage)
                     }
                     .buttonStyle(.bordered)
                     .tint(kind == .union ? .accentColor : .secondary)
@@ -703,7 +705,7 @@ struct ParameterCard: View {
     private func insertCard(_ primitive: Primitive) -> some View {
         Card {
             HStack(spacing: 16) {
-                Label(primitive.rawValue, systemImage: primitive.systemImage)
+                ToolLabel(primitive.rawValue, icon: primitive.systemImage)
                     .font(.callout.weight(.semibold))
                 switch primitive {
                 case .box:
@@ -781,7 +783,7 @@ struct ParameterCard: View {
         Card {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 16) {
-                    Label("Fläche versetzen", systemImage: "arrow.up.and.down.square")
+                    ToolLabel("Fläche versetzen", icon: "sc.offset_face")
                         .font(.callout.weight(.semibold))
                     Picker("Art", selection: Binding(get: { workspace.offsetFaceMode }, set: { mode in
                         workspace.offsetFaceMode = mode
@@ -830,7 +832,7 @@ struct ParameterCard: View {
     private var replaceFaceCard: some View {
         Card {
             HStack(spacing: 16) {
-                Label("Fläche ersetzen", systemImage: "rectangle.portrait.and.arrow.forward")
+                ToolLabel("Fläche ersetzen", icon: "sc.replace_face")
                     .font(.callout.weight(.semibold))
                 Picker("Wählen", selection: $workspace.pickingReplaceTarget) {
                     Text("Flächen (\(model.selectedFaces.count))").tag(false)
@@ -846,7 +848,7 @@ struct ParameterCard: View {
         Card {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 16) {
-                    Label("Umhüllen und Prägen", systemImage: "cylinder.split.1x2")
+                    ToolLabel("Umhüllen und Prägen", icon: "sc.emboss")
                         .font(.callout.weight(.semibold))
                     Picker("Art", selection: Binding(get: { workspace.wrapDepth >= 0 }, set: { emboss in
                         workspace.wrapDepth = emboss ? abs(workspace.wrapDepth) : -abs(workspace.wrapDepth)
@@ -925,7 +927,7 @@ struct ParameterCard: View {
         Card {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 14) {
-                    Label("Bohrung", systemImage: "circle.circle")
+                    ToolLabel("Bohrung", icon: "sc.hole")
                         .font(.callout.weight(.semibold))
                     Picker("Art", selection: holeBinding(\.kind)) {
                         ForEach(HoleKind.allCases) { Text($0.rawValue).tag($0) }
@@ -1093,7 +1095,7 @@ struct ParameterCard: View {
     private var mirrorCard: some View {
         Card {
             HStack(spacing: 16) {
-                Label("Spiegeln", systemImage: "arrow.left.and.right.righttriangle.left.righttriangle.right")
+                ToolLabel("Spiegeln", icon: "sc.mirror")
                     .font(.callout.weight(.semibold))
                 if let name = workspace.mirrorReferenceName {
                     Label("An \(name)", systemImage: "square.split.diagonal")
@@ -1147,7 +1149,7 @@ struct ParameterCard: View {
     private var shellCard: some View {
         Card {
             HStack(spacing: 16) {
-                Label("Schale", systemImage: "shippingbox")
+                ToolLabel("Schale", icon: "sc.shell")
                     .font(.callout.weight(.semibold))
                 NumberField(title: "Wandstärke", value: workspace.shellThickness) { value in
                     guard value > 0 else { return }
@@ -1172,7 +1174,7 @@ struct ParameterCard: View {
     private var colorCard: some View {
         Card {
             HStack(spacing: 10) {
-                Label("Farbe", systemImage: "paintpalette")
+                ToolLabel("Farbe", icon: "sc.appearance")
                     .font(.callout.weight(.semibold))
                     .padding(.trailing, 6)
                 ForEach(SceneBody.palette.indices, id: \.self) { index in
@@ -1256,7 +1258,7 @@ extension ParameterCard {
     func patternCard(_ kind: PatternKind) -> some View {
         Card {
             HStack(spacing: 14) {
-                Label(kind.rawValue, systemImage: kind.systemImage)
+                ToolLabel(kind.rawValue, icon: kind.systemImage)
                     .font(.callout.weight(.semibold))
                 if kind == .linear {
                     // Zwei Richtungen (Kai: X und Y); Anzahl 1 in Richtung 2 = einfache Reihe
@@ -1298,7 +1300,7 @@ extension ParameterCard {
     var scaleCard: some View {
         Card {
             HStack(spacing: 14) {
-                Label("Skalieren", systemImage: "arrow.up.left.and.arrow.down.right")
+                ToolLabel("Skalieren", icon: "sc.scale")
                     .font(.callout.weight(.semibold))
                 // Immer gleichmäßig (Kai); Ziehpfeil am Körper oder Faktor eintippen
                 if workspace.scaleUniform {
@@ -1325,7 +1327,7 @@ extension ParameterCard {
     var alignCard: some View {
         Card {
             HStack(spacing: 14) {
-                Label("Ausrichten", systemImage: "align.horizontal.center")
+                ToolLabel("Ausrichten", icon: "sc.align")
                     .font(.callout.weight(.semibold))
                 ForEach(0..<3, id: \.self) { axis in
                     Picker(Self.axisNames[axis], selection: Binding(get: { workspace.alignModes[axis] }, set: { mode in
@@ -1362,7 +1364,7 @@ extension ParameterCard {
     var revolveCard: some View {
         Card {
             HStack(spacing: 14) {
-                Label("Achsendrehung", systemImage: "arrow.triangle.2.circlepath")
+                ToolLabel("Achsendrehung", icon: "sc.revolve")
                     .font(.callout.weight(.semibold))
                 axisPicker("Achse", selection: preview(\.revolveAxis), sketchIndex: model.selectedRegions.first?.sketch)
                 NumberField(title: "Winkel", value: workspace.revolveAngle, unit: "°", width: 56) { value in
@@ -1378,7 +1380,7 @@ extension ParameterCard {
     var sweepCard: some View {
         Card {
             HStack(spacing: 14) {
-                Label("Sweep", systemImage: "point.3.connected.trianglepath.dotted")
+                ToolLabel("Sweep", icon: "sc.sweep")
                     .font(.callout.weight(.semibold))
                 Picker("Pfad", selection: preview(\.sweepPath)) {
                     Text("Pfad wählen").tag(Int?.none)
@@ -1405,7 +1407,7 @@ extension ParameterCard {
         Card {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 14) {
-                    Label("Loft", systemImage: "square.3.layers.3d")
+                    ToolLabel("Loft", icon: "sc.loft")
                         .font(.callout.weight(.semibold))
                     Text(model.selectedRegions.isEmpty ? "Querschnitte nacheinander antippen"
                          : "\(model.selectedRegions.count) Querschnitte")
@@ -1427,7 +1429,7 @@ extension ParameterCard {
     var splitCard: some View {
         Card {
             HStack(spacing: 14) {
-                Label("Körper teilen", systemImage: "rectangle.split.2x1")
+                ToolLabel("Körper teilen", icon: "sc.split_body")
                     .font(.callout.weight(.semibold))
                 Picker("Mit", selection: Binding(get: { workspace.splitMode }, set: { workspace.setSplitMode($0) })) {
                     ForEach(SplitMode.allCases) { Text($0.rawValue).tag($0) }
@@ -1468,7 +1470,7 @@ extension ParameterCard {
     var sectionCard: some View {
         Card {
             HStack(spacing: 14) {
-                Label("Schnittansicht", systemImage: "square.split.diagonal.2x2")
+                ToolLabel("Schnittansicht", icon: "sc.section")
                     .font(.callout.weight(.semibold))
                 planePicker("Ebene", selection: Binding(get: { workspace.section?.plane ?? .world(1) },
                                                          set: { workspace.section?.plane = $0 }))
@@ -1490,7 +1492,7 @@ extension ParameterCard {
         Card {
             HStack(alignment: .top, spacing: 14) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Label("Messen", systemImage: "ruler")
+                    ToolLabel("Messen", icon: "sc.measure")
                         .font(.callout.weight(.semibold))
                     Picker("Art", selection: $workspace.measureMode) {
                         ForEach(MeasureMode.allCases) { Text($0.rawValue).tag($0) }
@@ -1524,7 +1526,7 @@ extension ParameterCard {
     func constructCard(_ kind: ConstructionKind) -> some View {
         Card {
             HStack(spacing: 14) {
-                Label("\(kind.rawValue) erstellen", systemImage: kind.systemImage)
+                ToolLabel("\(kind.rawValue) erstellen", icon: kind.systemImage)
                     .font(.callout.weight(.semibold))
                 switch kind {
                 case .plane:
@@ -1669,7 +1671,7 @@ extension ParameterCard {
     var sketchScaleCard: some View {
         Card {
             HStack(spacing: 14) {
-                Label("Skizze skalieren", systemImage: "arrow.up.left.and.arrow.down.right")
+                ToolLabel("Skizze skalieren", icon: "sc.sketch_scale")
                     .font(.callout.weight(.semibold))
                 NumberField(title: "Faktor", value: workspace.sketchScaleFactor, unit: "×", width: 56) { value in
                     if value > 0 { workspace.sketchScaleFactor = value }
@@ -2175,7 +2177,7 @@ struct LayersPanel: View {
     private func constructionRow(_ item: ConstructionItem) -> some View {
         HStack(spacing: 6) {
             eye(!item.isHidden) { model.setConstructionHidden(!item.isHidden, id: item.id) }
-            Image(systemName: item.kind.systemImage)
+            ToolIcon(item.kind.systemImage, size: 20)
                 .foregroundStyle(.orange)
                 .frame(width: 20)
             Text(item.name)

@@ -41,11 +41,11 @@ enum Primitive: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
-        case .box: "cube"
-        case .cylinder: "cylinder"
-        case .sphere: "circle.circle"
-        case .cone: "cone"
-        case .torus: "circle.dashed"
+        case .box: "sc.box"
+        case .cylinder: "sc.cylinder"
+        case .sphere: "sc.sphere"
+        case .cone: "sc.cone"
+        case .torus: "sc.torus"
         }
     }
 
@@ -70,9 +70,9 @@ enum BooleanKind: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
-        case .union: "square.on.square.squareshape.controlhandles"
+        case .union: "sc.combine"
         case .subtract: "square.on.square.dashed"
-        case .intersect: "square.on.square.intersection.dashed"
+        case .intersect: "sc.intersect"
         }
     }
 }
@@ -2082,9 +2082,9 @@ enum ConstructionKind: String, CaseIterable, Identifiable, Codable {
 
     var systemImage: String {
         switch self {
-        case .plane: "square.dashed"
-        case .axis: "line.diagonal.arrow"
-        case .point: "smallcircle.filled.circle"
+        case .plane: "sc.plane"
+        case .axis: "sc.axis"
+        case .point: "sc.point"
         }
     }
 }

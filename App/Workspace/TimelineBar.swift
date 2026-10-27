@@ -70,9 +70,12 @@ struct TimelineBar: View {
         } label: {
             VStack(spacing: 2) {
                 ZStack(alignment: .topTrailing) {
-                    Image(systemName: feature.systemImage)
+                    ToolIcon(feature.systemImage, size: 22)
                         .font(.system(size: 16, weight: .medium))
                         .frame(width: 30, height: 26)
+                        // Unterdrückt: farbiges Bild grau und blass (SF Symbols färbt chipColor)
+                        .saturation(feature.isSuppressed ? 0 : 1)
+                        .opacity(feature.isSuppressed && ToolIcon.isCustom(feature.systemImage) ? 0.5 : 1)
                     if feature.failed {
                         Image(systemName: "exclamationmark.circle.fill")
                             .font(.system(size: 10, weight: .bold))
@@ -140,7 +143,7 @@ struct FeatureEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
-                Image(systemName: feature.systemImage)
+                ToolIcon(feature.systemImage, size: 22)
                     .foregroundStyle(feature.failed ? Color.red : Color.accentColor)
                 Text(feature.name)
                     .font(.headline)
