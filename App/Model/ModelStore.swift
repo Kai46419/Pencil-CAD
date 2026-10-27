@@ -364,6 +364,8 @@ final class ModelStore: ObservableObject {
     @Published private(set) var history: [HistoryEntry] = []
     @Published private(set) var future: [HistoryEntry] = []
     private var previewBodies: [SceneBody]?
+    /// Vorschau ohne flächige Hervorhebung der gewählten Körper (Boolesch: Ergebnis bleibt erkennbar)
+    private var plainPreview = false
     /// Parametrischer Verlauf: Features in Reihenfolge, Zeitleiste unten (FeatureHistory.swift, TimelineBar.swift)
     @Published var features: [Feature] = []
     let featureRecorder = FeatureRecorder()
@@ -959,12 +961,16 @@ final class ModelStore: ObservableObject {
     }
 
     /// Boolesche Operation: target bleibt, die anderen Körper werden verbraucht (keepTools: bleiben stehen).
-    func applyBoolean(_ kind: BooleanKind, target: Int, tools: [Int], keepTools: Bool = false) {
+    /// clearance: Spiel in mm, um das die Werkzeuge beim Abziehen aufgedickt werden (MoldTools.swift).
+    func applyBoolean(_ kind: BooleanKind, target: Int, tools: [Int], keepTools: Bool = false, clearance: Double = 0) {
         guard requireKernel(), bodies.indices.contains(target), !tools.isEmpty else { return }
         commitPreview()
         var shape = bodies[target].shape
         for tool in tools where bodies.indices.contains(tool) && tool != target {
-            let other = bodies[tool].shape
+            guard let other = Self.booleanTool(bodies[tool].shape, kind: kind, clearance: clearance) else {
+                message = Self.clearanceFailure(clearance)
+                return
+            }
             let result = switch kind {
             case .union: shape.fusing(other)
             case .subtract: shape.cutting(other)
@@ -983,7 +989,7 @@ final class ModelStore: ObservableObject {
                 result.remove(at: tool)
             }
         }
-        noteBoolean(kind, target: target, tools: tools, keepTools: keepTools)
+        noteBoolean(kind, target: target, tools: tools, keepTools: keepTools, clearance: clearance)
         commit(result, name: kind.rawValue)
     }
 
@@ -1419,10 +1425,11 @@ final class ModelStore: ObservableObject {
         return PCKShape.kernelAvailable
     }
 
-    func showPreview(_ preview: [SceneBody], name: String) {
+    func showPreview(_ preview: [SceneBody], name: String, plain: Bool = false) {
         featureRecorder.preview = nil
         previewBodies = preview
         previewName = name
+        plainPreview = plain
         remesh()
         refreshHighlight()
     }
@@ -1513,6 +1520,8 @@ final class ModelStore: ObservableObject {
     private func refreshHighlight() {
         if previewBodies == nil, selection != nil {
             selectionIndices = selectedFaces.flatMap { mesh.triangleIndices(of: $0) }
+        } else if previewBodies != nil, plainPreview {
+            selectionIndices = []
         } else {
             selectionIndices = selectedBodies.flatMap { mesh.triangleIndices(ofBody: $0) }
         }

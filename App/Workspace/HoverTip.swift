@@ -243,6 +243,7 @@ enum ToolTips {
         "Schneiden": "Behält nur den Bereich, in dem sich die gewählten Körper überlappen.",
         "Rahmenauswahl": "Finger zieht einen Rahmen statt zu drehen. Nach rechts: nur ganz umschlossene Körper, nach links: auch angeschnittene. Mit dem Stift geht der Rahmen immer – einfach ins Leere ziehen. Lange drücken: Lasso statt Rahmen.",
         "Lassoauswahl": "Frei um Körper herumfahren: alles ganz Umschlossene wird gewählt. Lange drücken: zurück zum Rahmen.",
-        "Abziehen": "Schneidet heraus: beim Extrudieren aus vorhandenen Körpern, in der Auswahl die übrigen Körper aus dem zuerst gewählten.",
+        "Abziehen": "Schneidet heraus: beim Extrudieren aus vorhandenen Körpern, in der Auswahl die übrigen Körper aus dem zuerst gewählten. Als Werkzeug: erst das Ziel, dann die Werkzeuge antippen – Vorschau zeigt das Ergebnis, Spiel macht die Aussparung etwas größer.",
+        "Negativform": "Block mit Rand um einen Körper, der Körper wird mit Spiel herausgeschnitten – wahlweise in zwei Formhälften geteilt (Trennebene durch die Mitte). Der Körper bleibt erhalten.",
     ]
 }

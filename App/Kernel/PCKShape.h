@@ -203,6 +203,11 @@ NS_ASSUME_NONNULL_BEGIN
 - (nullable PCKShape *)shellingRemovingFaces:(NSArray<NSNumber *> *)faces thickness:(double)thickness
     NS_SWIFT_NAME(shelling(removingFaces:thickness:));
 
+/// Ganzen Körper aufdicken (distance > 0) bzw. verjüngen (< 0): alle Flächen um distance versetzt, Kanten bleiben
+/// scharf (Schnitt der Nachbarflächen), sonst gerundet. Für das Spiel beim Abziehen und die Negativform.
+/// nil, wenn der Versatz scheitert oder kein gültiger Körper entsteht (bzw. ohne Kernel).
+- (nullable PCKShape *)offsetSolidBy:(double)distance NS_SWIFT_NAME(offsetSolid(distance:));
+
 /// Lageänderungen; liefern jeweils einen neuen Körper.
 - (nullable PCKShape *)translatedBy:(simd_double3)offset NS_SWIFT_NAME(translated(by:));
 - (nullable PCKShape *)rotatedAroundOrigin:(simd_double3)origin axis:(simd_double3)axis angle:(double)radians
@@ -237,6 +242,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readonly) NSInteger faceCount;
 /// Schwerpunkt [x, y, z] (gleichmäßige Dichte); nil ohne Kernel.
 @property (nonatomic, readonly, nullable) NSArray<NSNumber *> *centerOfMass;
+/// Hüllquader aus der Geometrie (nicht aus dem Anzeigenetz): [xmin, ymin, zmin, xmax, ymax, zmax]; nil ohne Kernel.
+@property (nonatomic, readonly, nullable) NSArray<NSNumber *> *boundingBox;
 /// Kürzester Abstand zu einem anderen Körper: [Abstand, x1, y1, z1, x2, y2, z2]; nil bei Fehler.
 - (nullable NSArray<NSNumber *> *)minimumDistanceTo:(PCKShape *)other NS_SWIFT_NAME(minimumDistance(to:));
 - (double)lengthOfEdge:(NSInteger)edge NS_SWIFT_NAME(length(ofEdge:));
