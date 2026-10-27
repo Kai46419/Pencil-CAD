@@ -14,7 +14,7 @@ struct BodyMaterial: Identifiable, Hashable {
     let density: Double
     /// Darstellungsfarbe (wird beim Zuweisen übernommen, danach frei änderbar)
     let color: SIMD3<Float>
-    /// Glanz im Viewport: 0 = matt, 1 = leicht glänzend (Kunststoff), 2 = metallisch
+    /// Glanz im Viewport ohne eigene Oberfläche: 0 = matt, 1 = leicht glänzend (Kunststoff), 2 = metallisch
     let gloss: Int
     let category: Category
 
@@ -79,16 +79,12 @@ extension SceneBody {
         material.flatMap { BodyMaterial.named($0) }
     }
 
-    /// Farbe für den Renderer: Glanzstufe als +2 je Stufe kodiert (siehe shade in Shaders.metal).
-    var renderColor: SIMD3<Float> {
-        guard let gloss = bodyMaterial?.gloss, gloss > 0 else { return color }
-        let clamped: SIMD3<Float> = simd_clamp(color, SIMD3<Float>(repeating: 0), SIMD3<Float>(repeating: 1))
-        return clamped + SIMD3<Float>(repeating: 2 * Float(gloss))
-    }
+    // Darstellung (renderColor) mit Oberfläche bzw. Glanzstufe: SurfaceFinish.swift
 }
 
 extension ModelStore {
-    /// Material der Körper setzen (nil = entfernen). Die Darstellungsfarbe folgt dem Material.
+    /// Material der Körper setzen (nil = entfernen). Die Darstellungsfarbe folgt dem Material, eine passende
+    /// Oberfläche wird vorbelegt (SurfaceFinish.swift).
     func setMaterial(_ id: String?, of indices: [Int]) {
         commitPreview()
         let chosen = indices.filter { bodies.indices.contains($0) }
@@ -97,7 +93,10 @@ extension ModelStore {
         var result = bodies
         for index in chosen {
             result[index].material = material?.id
-            if let material { result[index].color = material.color }
+            if let material {
+                result[index].color = material.color
+                result[index].finish = material.defaultFinish
+            }
         }
         commit(result, name: material.map { "Material \($0.name)" } ?? "Material entfernen")
         selectBodies(chosen)

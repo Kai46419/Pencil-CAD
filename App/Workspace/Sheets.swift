@@ -282,6 +282,12 @@ enum HelpTopic: String, CaseIterable, Identifiable {
                 "In Einzelkörper trennen löst jetzt auch sich berührende, noch nicht verschmolzene Teile eines Körpers.",
                 "Fläche nach innen ziehen: Bohrungen und Senkungen in der Fläche werden mit gekürzt statt als Röhre "
                     + "stehen zu bleiben.",
+                "Oberflächen als Feinschliff: Eigenschaften-Fenster › Oberfläche (oder Kontextmenü des Körpers im "
+                    + "Ebenen-Browser) mit Vorschau-Kugeln – Chrom, Spiegel, Gold, Kupfer, Messing, Edelstahl gebürstet, "
+                    + "Aluminium eloxiert, Holz (Eiche, Nussbaum …), Beton, Carbon, Glas, Gummi, Lacke matt/glänzend und "
+                    + "RAL-Farben (Olivgrün 6003, Gelboliv 6014, Bronzegrün 6031 …), PLA-Farben. Eigene Farbe mit matt, "
+                    + "seidenmatt, glänzend und Metall. Spiegelnde Flächen zeigen eine Studio-Umgebung; das Gewicht "
+                    + "kommt weiter vom Werkstoff.",
                 "Skizze: Radius eines Bogens ändern (Maß oder Ziehen an der Wölbung) bewegt nur den Bogen – seine Enden "
                     + "gleiten auf den Nachbarlinien, der Rest bleibt stehen. Gewählte Bögen und Kreise haben einen blauen "
                     + "Griff zum Ziehen des Radius.",
