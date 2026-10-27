@@ -142,7 +142,10 @@ struct SketchTextPathSection: View {
                         .hoverTip("Pfad wählen", "Danach eine Linie, einen Bogen, Kreis, Spline, Linienzug oder eine projizierte Körperkante antippen.")
                         PrimaryWideButton(title: "Bogen-Vorlage", systemImage: "rainbow", isPrimary: false,
                                           showsTitle: false) {
+                            // „Abbrechen“ nimmt auch den Hilfsbogen wieder weg
+                            if sketch.textDeformMode == nil { sketch.beginTextDeformSession() }
                             sketch.addTextArcTemplate(at: index)
+                            sketch.dropTextDeformSessionIfIdle()
                         }
                         .hoverTip("Bogen-Vorlage", "Legt einen Hilfsbogen über den Text und richtet ihn daran aus. Der Griff im Scheitel zieht die Krümmung.")
                         if path != nil {

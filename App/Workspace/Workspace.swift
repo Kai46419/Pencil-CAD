@@ -1170,6 +1170,9 @@ final class Workspace: ObservableObject {
             // bis der grüne Haken „Skizzieren beenden“ getippt wird.
             if sketch.isChoosingPlane {
                 chooseSketchPlane(.top)
+            } else if sketch.textDeformMode != nil {
+                // Text verformen bzw. am Pfad ausrichten: übernehmen und Modus beenden
+                sketch.finishTextDeform()
             } else {
                 sketch.finishCurrentInput()
             }
@@ -1202,6 +1205,9 @@ final class Workspace: ObservableObject {
             // Vor der Ebenenwahl gibt es noch nichts zu verlieren: dann zurück ins Modell.
             if sketch.isChoosingPlane {
                 endSketch()
+            } else if sketch.textDeformMode != nil {
+                // Text verformen bzw. am Pfad ausrichten: Stand vor dem Modus wiederherstellen
+                sketch.cancelTextDeform()
             } else {
                 sketch.cancelCurrentInput()
             }

@@ -322,6 +322,8 @@ final class SketchController: ObservableObject {
     @Published var tool: SketchTool = .select {
         didSet {
             if tool == .polyline || tool == .arc { lineVariant = tool }
+            // Werkzeugwechsel beendet Verformen bzw. Pfad wählen (Änderungen bleiben)
+            if tool != .select, textDeformMode != nil { textDeformMode = nil }
             finishInput()
         }
     }
@@ -380,8 +382,13 @@ final class SketchController: ObservableObject {
     var textTransformDrag: TextTransformDrag?
     /// Verformen eines gewählten Texts (SketchTextDeformHandles.swift): aktiver Griffmodus (nil = keine
     /// Verformungsgriffe) und der Griff, der gerade gezogen wird
-    @Published var textDeformMode: SketchTextDeformMode?
+    @Published var textDeformMode: SketchTextDeformMode? {
+        didSet { textDeformModeChanged(from: oldValue) }
+    }
     var textDeformDrag: TextDeformDrag?
+    /// Stand der Skizze beim Einschalten eines Verformungs- bzw. Pfadmodus: „Abbrechen“ kehrt dorthin zurück
+    /// (Ende der Datei, „Verformen bzw. Pfad: Fertig und Abbrechen“)
+    private var textDeformSession: (snapshot: Snapshot, undoCount: Int, text: Int?)?
     @Published var rectangleMode: RectangleMode = .diagonal {
         didSet {
             rectangleBase = nil
@@ -4821,5 +4828,63 @@ extension SketchController {
         default:
             return LengthUnit.current.number(value)
         }
+    }
+}
+
+// MARK: - Verformen bzw. Pfad: Fertig und Abbrechen
+
+// Kai: „Beim Ausrichten am Pfad reagieren Abbrechen/Fertig nicht.“ Die Knöpfe unten schlossen nur die laufende
+// Zeicheneingabe ab und wussten nichts vom Verformungsmodus. Jetzt gilt bei aktivem Modus (Pfad wählen, Am Pfad,
+// Frei transformieren …): „Fertig“ übernimmt und beendet den Modus, „Abbrechen“ stellt den Stand beim Einschalten
+// wieder her (auch einen per Bogen-Vorlage angelegten Hilfsbogen) und beendet den Modus. Der Text bleibt gewählt.
+extension SketchController {
+    /// Haken in textDeformMode.didSet: Ausgangsstand merken bzw. verwerfen.
+    fileprivate func textDeformModeChanged(from old: SketchTextDeformMode?) {
+        if textDeformMode == nil {
+            textDeformSession = nil
+        } else if old == nil, textDeformSession == nil {
+            beginTextDeformSession()
+        }
+    }
+
+    /// Ausgangsstand für „Abbrechen“ merken (vor der Bogen-Vorlage schon vor dem Anlegen des Hilfsbogens).
+    func beginTextDeformSession() {
+        let snapshot = Snapshot(entities: entities, constraints: constraints, construction: construction,
+                                chainStart: chainStart, chainEnd: chainEnd)
+        textDeformSession = (snapshot, undoStack.count, selectedTextIndex)
+    }
+
+    /// Ausgangsstand verwerfen, wenn danach doch kein Modus aktiv wurde (Bogen-Vorlage nicht möglich).
+    func dropTextDeformSessionIfIdle() {
+        if textDeformMode == nil { textDeformSession = nil }
+    }
+
+    /// „Fertig“: Verformung bzw. Pfad-Ausrichtung übernehmen, Modus beenden, Text bleibt gewählt.
+    func finishTextDeform() {
+        let index = selectedTextIndex ?? textDeformSession?.text
+        cancelTextDeformDrag()
+        textDeformMode = nil
+        if let index, sketchText(at: index) != nil, selectedTextIndex != index { selectText(at: index) }
+        notice = nil
+        changed()
+    }
+
+    /// „Abbrechen“: alles seit dem Einschalten des Modus verwerfen (ohne Zwischenschritte im Rückgängig-Stapel),
+    /// Modus beenden, Text bleibt gewählt.
+    func cancelTextDeform() {
+        textDeformDrag = nil
+        guard let session = textDeformSession else {
+            textDeformMode = nil
+            changed()
+            return
+        }
+        let index = session.text ?? selectedTextIndex
+        textDeformSession = nil
+        textDeformMode = nil
+        if undoStack.count > session.undoCount { undoStack.removeLast(undoStack.count - session.undoCount) }
+        restore(session.snapshot)
+        if let index, sketchText(at: index) != nil { selectText(at: index) }
+        notice = nil
+        changed()
     }
 }
