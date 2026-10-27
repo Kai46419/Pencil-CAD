@@ -433,9 +433,10 @@ final class Workspace: ObservableObject {
     /// Gespeicherte Ansichten dieses Projekts
     @Published private(set) var savedViews: [SavedView] = []
 
-    init(project: Project) {
+    /// safeOpen: übrig gebliebene Hänger-Marke → sicherer Modus (HangGuard.swift)
+    init(project: Project, safeOpen: HangGuard.Marker? = nil) {
         self.project = project
-        model = ModelStore(folder: project.folder)
+        model = ModelStore(folder: project.folder, safeOpen: safeOpen)
         if let data = UserDefaults.standard.data(forKey: savedViewsKey),
            let views = try? JSONDecoder().decode([SavedView].self, from: data) {
             savedViews = views

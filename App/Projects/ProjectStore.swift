@@ -17,6 +17,8 @@ final class ProjectStore: ObservableObject {
     @Published private(set) var projects: [Project] = []
     /// Erhöht sich, wenn sich Vorschaubilder geändert haben.
     @Published private(set) var thumbnailRevision = 0
+    /// Erhöht sich, wenn sich Hänger-Marken geändert haben könnten (HangGuard.swift, Hinweis auf der Startseite)
+    @Published var markerRevision = 0
 
     nonisolated static var root: URL { URL.documentsDirectory.appending(path: "Projects", directoryHint: .isDirectory) }
 

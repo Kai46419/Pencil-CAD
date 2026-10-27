@@ -436,10 +436,18 @@ final class ModelStore: ObservableObject {
         return (sketch.plane.world(center), sketch.plane.normal * sketch.plane.extrusionSign(mode: regionMode))
     }
 
-    init(folder: URL?) {
+    /// safeOpen: übrig gebliebene Hänger-Marke (HangGuard.swift) – dann sicherer Modus: Verlauf ohne model.step
+    /// bis vor das hängende Feature nachbauen, dieses und alle folgenden unterdrücken.
+    init(folder: URL?, safeOpen: HangGuard.Marker? = nil) {
         self.folder = folder
-        load()
+        let plan = safeOpen.flatMap { self.safeOpenPlan(for: $0) }
+        load(skipModel: plan != nil)
         remesh()
+        if let plan {
+            openSafely(plan)
+            // Rückgängig darf nicht zum leeren Stand vor dem Nachbau zurück (würde model.step leeren)
+            history.removeAll()
+        }
     }
 
     // MARK: Auswahl
@@ -2172,9 +2180,10 @@ final class ModelStore: ObservableObject {
     private var canvasesURL: URL? { folder?.appending(path: "canvases.json") }
     private var variablesURL: URL? { folder?.appending(path: "variables.json") }
 
-    private func load() {
+    /// skipModel: sicherer Modus (HangGuard.swift) – model.step und Verlauf nicht laden, openSafely baut nach.
+    private func load(skipModel: Bool = false) {
         // Verlauf erst nach den Körpern lesen (FeatureHistory.swift)
-        defer { loadFeatures() }
+        defer { if !skipModel { loadFeatures() } }
         if let url = variablesURL, let data = try? Data(contentsOf: url),
            let stored = try? JSONDecoder().decode([ProjectVariable].self, from: data) {
             variables = stored
@@ -2191,7 +2200,7 @@ final class ModelStore: ObservableObject {
            let stored = try? JSONDecoder().decode([CanvasImage].self, from: data) {
             canvases = stored
         }
-        guard PCKShape.stepAvailable, let modelURL,
+        guard !skipModel, PCKShape.stepAvailable, let modelURL,
               FileManager.default.fileExists(atPath: modelURL.path(percentEncoded: false)),
               let shapes = PCKShape.readSTEP(path: modelURL.path(percentEncoded: false)) else { return }
         let metas = metaURL.flatMap { try? Data(contentsOf: $0) }

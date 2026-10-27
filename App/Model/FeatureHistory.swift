@@ -823,6 +823,8 @@ extension ModelStore {
                 list[index].problem = nil
             } else {
                 do {
+                    // Hänger-Marke (HangGuard.swift): bleibt sie nach einem Einfrieren liegen, öffnet das Projekt sicher
+                    HangGuard.willRun(list[index], in: folder)
                     state = try applyFeature(&list[index], to: state, sketches: sketchList, values: values)
                     list[index].failed = false
                     list[index].problem = nil
@@ -842,6 +844,7 @@ extension ModelStore {
             }
             index += 1
         }
+        HangGuard.didRun(in: folder)
         var note: String?
         if !failures.isEmpty {
             let names = failures.prefix(3).map { "„\($0)“" }.joined(separator: ", ")

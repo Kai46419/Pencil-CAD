@@ -6,6 +6,8 @@ struct HomeView: View {
     @EnvironmentObject private var projects: ProjectStore
     /// Öffnet ein Projekt; die URL ist eine STEP-Datei, die dabei importiert werden soll.
     let open: (Project, URL?) -> Void
+    /// Sicher öffnen (HangGuard.swift): Verlauf bis vor das hängende bzw. letzte Feature nachbauen
+    var openSafely: (Project) -> Void = { _ in }
 
     @State private var isImporting = false
     @State private var renaming: Project?
@@ -31,7 +33,7 @@ struct HomeView: View {
                         newProjectCard
                     }
                     ForEach(projects.projects) { project in
-                        ProjectCard(project: project, revision: projects.thumbnailRevision,
+                        ProjectCard(project: project, revision: projects.thumbnailRevision &+ projects.markerRevision,
                                     isSelected: isSelecting ? selected.contains(project.id) : nil)
                             .onTapGesture {
                                 if isSelecting {
@@ -218,6 +220,8 @@ struct HomeView: View {
     @ViewBuilder
     private func contextMenu(for project: Project) -> some View {
         Button("Öffnen", systemImage: "arrow.up.forward.app") { open(project, nil) }
+        // Hänger-Schutz: immer anbieten (auch ohne Marke, z. B. Projekte aus älteren Builds)
+        Button("Sicher öffnen (letztes Feature unterdrückt)", systemImage: "cross.case") { openSafely(project) }
         Button("Umbenennen", systemImage: "pencil") {
             newName = project.name
             renaming = project
@@ -252,6 +256,18 @@ private struct ProjectCard: View {
                     if isSelected == true {
                         shape
                             .strokeBorder(Color.red, lineWidth: 3)
+                    }
+                }
+                .overlay(alignment: .topLeading) {
+                    // Hänger-Marke (HangGuard.swift): der letzte Versuch hing – öffnet im sicheren Modus
+                    if HangGuard.hasMarker(in: project.folder) {
+                        Label("Hing beim letzten Mal – öffnet sicher", systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.orange, in: Capsule())
+                            .padding(8)
                     }
                 }
                 .overlay(alignment: .topTrailing) {
