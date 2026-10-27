@@ -263,15 +263,21 @@ extension ModelStore {
         let directory = FileManager.default.temporaryDirectory
         let file = "pencil-sheet-probe-\(UUID().uuidString).step"
         let url = directory.appending(path: file)
-        // Unabhängige Kopie: der Vordergrund vernetzt den Körper weiter; geschrieben wird auf der Warteschlange
-        let copy = shape.independentCopy() ?? shape
+        // Unabhängige Kopie: der Vordergrund vernetzt den Körper weiter; geschrieben wird auf der Warteschlange.
+        // Ohne Kopie im Vordergrund schreiben (das Original darf nie auf die Warteschlange, s. sheetWriteSTEP).
         let path = url.path(percentEncoded: false)
+        let copy: PCKShape? = shape.independentCopy().flatMap { $0 === shape ? nil : $0 }
+        if copy == nil {
+            guard PCKShape.writeSTEP([shape], path: path) else {
+                return ("Körper ließ sich nicht als STEP schreiben.", false)
+            }
+        }
         var info = SheetBodyInfo(steps: steps, kernelBody: "$sheet", rule: "")
         info.sourceFile = file
         do {
             let flat = try SheetWorker.run { () throws -> FlatPattern in
                 defer { try? FileManager.default.removeItem(at: url) }
-                guard PCKShape.writeSTEP([copy], path: path) else {
+                if let copy, !PCKShape.writeSTEP([copy], path: path) {
                     throw SheetKernelError("Körper ließ sich nicht als STEP schreiben.")
                 }
                 let result = try Self.sheetReplay(info, directory: directory)

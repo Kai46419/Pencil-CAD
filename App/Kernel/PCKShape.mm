@@ -118,6 +118,14 @@
 #include <Interface_Static.hxx>
 #include <STEPControl_Reader.hxx>
 #include <STEPControl_Writer.hxx>
+#include <mutex>
+// STEP-Lesen/-Schreiben nutzt globale Zustände von OCCT (Interface_Static, Steuerung der Schnittstelle) und ist nicht
+// threadsicher. Der Vordergrund (Speichern, Import, Verlauf) und die Warteschlange des Blechmoduls (SheetWorker; nach
+// einem Zeitlimit läuft deren Rechnung weiter) dürfen deshalb nie gleichzeitig STEP lesen oder schreiben.
+static std::recursive_mutex &pckSTEPMutex() {
+    static std::recursive_mutex mutex;
+    return mutex;
+}
 #else
 #define PCK_HAS_STEP 0
 #endif
@@ -3001,6 +3009,7 @@ static bool isSoftMeshEdge(const TopTools_ListOfShape &faces) {
 
 + (nullable NSArray<PCKShape *> *)shapesFromSTEPFile:(NSString *)path {
 #if PCK_HAS_STEP
+    std::lock_guard<std::recursive_mutex> stepLock(pckSTEPMutex());
     try {
         STEPControl_Reader reader;
         if (reader.ReadFile(path.fileSystemRepresentation) != IFSelect_RetDone) return nil;
@@ -3025,6 +3034,7 @@ static bool isSoftMeshEdge(const TopTools_ListOfShape &faces) {
 
 + (BOOL)writeShapes:(NSArray<PCKShape *> *)shapes toSTEPFile:(NSString *)path {
 #if PCK_HAS_STEP
+    std::lock_guard<std::recursive_mutex> stepLock(pckSTEPMutex());
     try {
         STEPControl_Writer writer;
         Interface_Static::SetCVal("write.step.unit", "MM");

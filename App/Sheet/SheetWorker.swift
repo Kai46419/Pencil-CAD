@@ -11,9 +11,16 @@ import Foundation
 // als STEP geschrieben wird.
 
 /// Körper als STEP schreiben – auf der Warteschlange des Blechmoduls, an einer unabhängigen Kopie.
+/// Scheitert die Kopie, wird im Vordergrund geschrieben: das Original darf nie auf die Warteschlange, denn nach einem
+/// Zeitlimit liefe die Rechnung dort weiter, während der Vordergrund denselben Körper vernetzt bzw. extrudiert.
 func sheetWriteSTEP(_ shape: PCKShape, to url: URL, limit: Double = SheetWorker.timeLimit) throws {
-    let copy = shape.independentCopy() ?? shape
     let path = url.path(percentEncoded: false)
+    guard let copy = shape.independentCopy(), copy !== shape else {
+        guard PCKShape.writeSTEP([shape], path: path) else {
+            throw SheetKernelError("Körper ließ sich nicht als STEP schreiben.")
+        }
+        return
+    }
     try SheetWorker.run(limit: limit) { () throws -> Void in
         guard PCKShape.writeSTEP([copy], path: path) else {
             throw SheetKernelError("Körper ließ sich nicht als STEP schreiben.")
@@ -57,6 +64,8 @@ enum SheetWorker {
     static let timeLimit: Double = 15
     /// Nachbau des Verlaufs (auch beim Öffnen eines Projekts): großzügig, damit große Rezepte nicht scheitern
     static let replayLimit: Double = 120
+    /// Stapelgröße des Arbeitsthreads (Vielfaches von 4 KB)
+    static let stackSize = 16 << 20
     private static let queue = DispatchQueue(label: "PencilCAD.sheet", qos: .userInitiated)
     private static let state = SheetWorkerState()
 
@@ -71,8 +80,20 @@ enum SheetWorker {
         let job = SheetJob(work)
         let done = DispatchSemaphore(value: 0)
         let state = self.state
+        let stackSize = self.stackSize
         queue.async {
-            job.result = Result { try job.work() }
+            // Eigener Thread mit großem Stapel: GCD-Threads haben nur 512 KB, tiefe Rekursion in der Rust-Engine bzw.
+            // im STEP-Austausch von OCCT liefe dort über (Absturz ohne Fehlermeldung, catch_unwind fängt das nicht)
+            let finished = DispatchSemaphore(value: 0)
+            let thread = Thread {
+                job.result = Result { try job.work() }
+                finished.signal()
+            }
+            thread.name = "PencilCAD.sheet.work"
+            thread.stackSize = stackSize
+            thread.qualityOfService = .userInitiated
+            thread.start()
+            finished.wait()
             state.end()
             done.signal()
         }
