@@ -922,7 +922,9 @@ func extrudeRegions(_ chosen: [SketchRegion], plane: SketchPlane, distance: Doub
     let length: Double
     switch direction {
     case .oneSide:
-        from = mode == .cut ? -sign * 0.01 : 0
+        // Werkzeug beginnt 0,01 mm entgegen der Schnittrichtung (vorher -sign: bei negativem Abstand lag der
+        // Überstand im Material und die koplanare Startfläche ließ eine Haut stehen)
+        from = mode == .cut ? (main >= 0 ? -0.01 : 0.01) : 0
         length = main - from
     case .symmetric:
         from = -main

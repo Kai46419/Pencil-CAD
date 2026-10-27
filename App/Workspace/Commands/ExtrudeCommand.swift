@@ -177,6 +177,11 @@ enum ExtrudeCommand: ModelCommandDriver {
             cmd.choices["operation"] = mode.rawValue
         }
         model.regionMode = mode
+        // Abziehen auf der Körperfläche (eine Seite): immer ins Material, egal welches Vorzeichen im Feld steht
+        // (Kai: „ins Negative“ mit „Abziehen“ schnitt vorher aus dem Körper heraus und ließ ihn geschlossen)
+        let faceCut = isFaceCut(plane: plane, mode: mode, direction: direction)
+        // Pfeilrichtung hängt vom Modus ab (Abziehen auf Fläche = hinein): nach dem Setzen neu lesen
+        let arrow = model.regionHandle ?? handle
         model.regionDirection = direction
         model.regionSecondValue = abs(cmd.number(Key.distance2, default: 10))
         model.regionTaper = direction == .oneSide && !thin ? cmd.number(Key.taper, default: 0) : 0
@@ -205,17 +210,18 @@ enum ExtrudeCommand: ModelCommandDriver {
         model.regionStartOffset = start
 
         // Abstand je Ausmaß, entlang des Pfeils (Pfeilrichtung = Skizzennormale, beim Schneiden auf Flächen hinein)
-        let axis: SIMD3<Double> = simd_normalize(handle.direction)
-        let base: SIMD3<Double> = handle.origin + plane.normal * start
+        let axis: SIMD3<Double> = simd_normalize(arrow.direction)
+        let base: SIMD3<Double> = arrow.origin + plane.normal * start
         let toPoint = point(cmd.items("toObject").first)
         var value: Double
         switch extent {
         case .distance:
             value = cmd.number(Key.distance, default: 10)
             if flip { value = -value }
+            if faceCut { value = abs(value) }
         case .all:
             model.dropPreview()
-            value = throughAll(model, origin: base, direction: axis, backwards: flip)
+            value = throughAll(model, origin: base, direction: axis, backwards: flip && !faceCut)
             guard value != 0 else { return "Kein Körper in Richtung des Profils." }
         case .toObject:
             guard let target = toPoint else {
@@ -252,13 +258,27 @@ enum ExtrudeCommand: ModelCommandDriver {
                 behind = min(behind, t)
             }
         }
+        // Toleranz 1e-3 (Float-Hüllquader): eine Skizze auf der Körperfläche liegt nicht um Rundungsreste „vor“ ihm
         let value: Double
         if backwards {
-            value = behind < -1e-6 ? behind - 1 : ahead > 1e-6 ? ahead + 1 : 0
+            value = behind < -1e-3 ? behind - 1 : ahead > 1e-3 ? ahead + 1 : 0
         } else {
-            value = ahead > 1e-6 ? ahead + 1 : behind < -1e-6 ? behind - 1 : 0
+            value = ahead > 1e-3 ? ahead + 1 : behind < -1e-3 ? behind - 1 : 0
         }
         return (value * 1000).rounded() / 1000
+    }
+
+    /// Abziehen in eine Seite auf einer Körperfläche: der Abstand zählt immer ins Material.
+    static func isFaceCut(plane: SketchPlane, mode: ExtrudeMode, direction: ExtrudeDirection) -> Bool {
+        plane.isOnFace && mode == .cut && direction == .oneSide
+    }
+
+    /// Läuft gerade ein Abziehen auf einer Körperfläche (Vorschau des Befehls)?
+    private static func faceCutActive(_ cmd: ModelCommand, _ model: ModelStore) -> Bool {
+        let regions = regionRefs(cmd)
+        guard let first = regions.first, model.sketches.indices.contains(first.sketch) else { return false }
+        return isFaceCut(plane: model.sketches[first.sketch].plane, mode: model.regionMode,
+                         direction: CommandDirection.direction(cmd))
     }
 
     // MARK: Operation-Automatik (SolidCraft smart_extrude.rs)
@@ -274,8 +294,9 @@ enum ExtrudeCommand: ModelCommandDriver {
         if model.bodies.isEmpty {
             mode = .newBody
         } else if plane.isOnFace {
-            // Auf einer Körperfläche: herausziehen verbindet, hineindrücken schneidet (ModelStore.setRegionValue)
-            mode = .union
+            // Auf einer Körperfläche: herausziehen verbindet, hineindrücken schneidet – das Panel zeigt dann auch
+            // „Abziehen“ (vorher stand dort „Verbinden“; wer daraufhin „Abziehen“ wählte, schnitt ins Leere)
+            mode = side < 0 && CommandDirection.direction(cmd) == .oneSide ? .cut : .union
         } else {
             // Ohne Vorschau prüfen (die Vorschau hätte andere Körper)
             model.dropPreview()
@@ -418,7 +439,13 @@ enum ExtrudeCommand: ModelCommandDriver {
         guard abs(raw) > 1e-4 else { return false }
         var value = raw
         if CommandDirection.direction(cmd) == .symmetric, cmd.flag("symmetricTotal") { value = raw * 2 }
-        if cmd.flag("flip") { value = -value }
+        if faceCutActive(cmd, model) {
+            // Pfeil zeigt ins Material: wie beim Ziehen ins Feld umrechnen (Automatik: negativ = hinein)
+            value = cmd.autoOperation ? (cmd.flag("flip") ? raw : -raw)
+                : (cmd.number(Key.distance, default: 10) < 0 ? -1 : 1) * abs(raw)
+        } else if cmd.flag("flip") {
+            value = -value
+        }
         cmd.choices["extent"] = ExtrudeExtent.distance.rawValue
         syncInputs(cmd)
         cmd.setNumber(Key.distance, value)
@@ -478,7 +505,17 @@ enum ExtrudeCommand: ModelCommandDriver {
             if !regionRefs(cmd).isEmpty, CommandDirection.direction(cmd) == .symmetric, cmd.flag("symmetricTotal") {
                 entered = value * 2
             }
-            if cmd.flag("flip") { entered = -entered }
+            if faceCutActive(cmd, model) {
+                // Pfeil zeigt ins Material, value = Tiefe. Automatik: im Feld negativ = hinein (umgekehrt positiv),
+                // herausgezogen (value < 0) wird es wieder Verbinden. Von Hand „Abziehen“: Vorzeichen bleibt.
+                if cmd.autoOperation {
+                    entered = cmd.flag("flip") ? value : -value
+                } else {
+                    entered = (cmd.number(Key.distance, default: 10) < 0 ? -1 : 1) * abs(value)
+                }
+            } else if cmd.flag("flip") {
+                entered = -entered
+            }
             if extent(cmd) != .distance {
                 // Ziehen heißt Abstand (wie SolidCraft: der Pfeil zeigt dann den Wert)
                 cmd.choices["extent"] = ExtrudeExtent.distance.rawValue
@@ -603,8 +640,18 @@ enum ExtrudeCommand: ModelCommandDriver {
         } else {
             let direction = CommandDirection.direction(cmd)
             let total = direction == .symmetric && cmd.flag("symmetricTotal")
-            let mode = CommandOperation.mode(cmd)
+            var mode = CommandOperation.mode(cmd)
             let thin = cmd.flag("thin")
+            if feature.data.onFace == true, direction == .oneSide {
+                // Wie in der Vorschau: auf der Körperfläche schneidet Abziehen immer ins Material, Verbinden mit
+                // negativem Abstand wird Abziehen (der Nachbau kennt diese Automatik nicht)
+                if mode == .union, entered < 0 {
+                    mode = .cut
+                    entered = -entered
+                } else if mode == .cut {
+                    entered = abs(entered)
+                }
+            }
             setParameter(&feature, .length("distance", "Abstand", total ? entered / 2 : entered))
             setParameter(&feature, direction == .twoSides
                          ? .length("second", "Zweite Seite", abs(cmd.number(Key.distance2, default: 10))) : nil, key: "second")

@@ -814,7 +814,9 @@ final class ModelStore: ObservableObject {
                 behind = min(behind, t)
             }
         }
-        let value = ahead > 1e-6 ? ahead + 1 : behind < -1e-6 ? behind - 1 : 0
+        // Toleranz 1e-3: Hüllquader kommen als Float aus dem Netz; eine Skizze auf der Körperfläche läge sonst um
+        // Rundungsreste „vor“ dem Körper und bekäme 1 mm Aufsatz statt Loch
+        let value = ahead > 1e-3 ? ahead + 1 : behind < -1e-3 ? behind - 1 : 0
         guard value != 0 else {
             message = "Kein Körper in Richtung des Profils."
             return
@@ -850,6 +852,14 @@ final class ModelStore: ObservableObject {
             plane.anchor += plane.normal * regionStartOffset
         }
         guard mode == .newBody || requireKernel() else { return }
+        // Kai: Loch „bis hinten“ – endet das Abziehen an (oder knapp vor/hinter) der Rückseite, durchgehend schneiden,
+        // statt eine hauchdünne Haut bzw. eine koplanare Bodenfläche stehen zu lassen
+        var throughNote: String?
+        if mode == .cut, regionDirection == .oneSide,
+           let through = cutThroughDistance(regions, plane: plane, distance: distance) {
+            distance = through
+            throughNote = "Durchgehend: das Loch reicht bis zur Rückseite."
+        }
         if regionThin {
             let thinSolid: PCKShape? = regionThinThickness2.map {
                 thinBothSides(regions, plane: plane, distance: distance, mode: mode, outer: $0)
@@ -873,10 +883,78 @@ final class ModelStore: ObservableObject {
             return
         }
         guard var result = extrusionResult(solid, sourceBody: sketch.plane.sourceBody, mode: mode, sketch: sketch.id) else { return }
+        // Abziehen ohne Wirkung (Werkzeug zeigt aus dem Material heraus): melden statt stillschweigend nichts zu tun
+        if mode == .cut, !cutChangedBodies(result) {
+            dropPreview()
+            message = "Abziehen trifft keinen Körper – Abstand ins Material (negativ) ziehen oder Richtung umkehren."
+            return
+        }
         labelTextBodies(&result, regions: regions, sketch: sketch, mode: mode)
-        message = SketchRegionMerge.newBodyNote(regions, mode: mode)
+        message = throughNote ?? SketchRegionMerge.newBodyNote(regions, mode: mode)
+        // Kai: nach dem Loch lag die halbtransparente Bereichsfüllung der Flächenskizze noch über der Öffnung
+        // („ich sehe den Kreis noch“). Sind alle Bereiche der Flächenskizze abgezogen, blendet OK sie aus
+        // (rückgängig machbar); mit weiteren Bereichen bleibt sie zum Weiterarbeiten sichtbar.
+        let consumed = Set(selectedRegions.filter { $0.sketch == first.sketch }.map(\.region))
+        previewHiddenSketch = mode == .cut && sketch.plane.isOnFace && !sketch.regions.isEmpty
+            && consumed.count >= sketch.regions.count ? sketch.id : nil
         showPreview(result, name: Self.regionPreviewName)
         noteExtrude(mode: mode, distance: distance)
+    }
+
+    /// Hat das Abziehen mindestens einen Körper verändert (Volumen)?
+    private func cutChangedBodies(_ result: [SceneBody]) -> Bool {
+        guard PCKShape.kernelAvailable, result.count == bodies.count else { return true }
+        for index in bodies.indices {
+            let before = bodies[index].shape.volume
+            let after = result[index].shape.volume
+            if abs(before - after) > max(1e-6, abs(before) * 1e-9) { return true }
+        }
+        return false
+    }
+
+    /// Abziehen „bis hinten“: liegt die Rückseite des Materials höchstens eine Toleranz vor bzw. hinter dem
+    /// Werkzeugende, wird der Abstand über die Rückseite hinaus verlängert (OpenCASCADE lässt sonst bei koplanarem
+    /// bzw. knapp verfehltem Ende eine Haut stehen). distance wie in setRegionValue; nil = nichts ändern.
+    private func cutThroughDistance(_ regions: [SketchRegion], plane: SketchPlane, distance: Double) -> Double? {
+        guard PCKShape.kernelAvailable, distance != 0, distance.isFinite else { return nil }
+        let shapes: [PCKShape] = bodies.filter { !$0.isHidden }.map(\.shape)
+        guard !shapes.isEmpty else { return nil }
+        let depth = abs(distance)
+        let main = plane.extrusionSign(mode: .cut) * distance
+        let axis: SIMD3<Double> = simd_normalize(plane.normal) * (main >= 0 ? 1.0 : -1.0)
+        // 2,5 % der Tiefe, mindestens 0,05 mm, höchstens 0,5 mm
+        let tolerance = min(0.5, max(0.05, depth * 0.025))
+        guard depth > tolerance else { return nil }
+        func inside(_ p: SIMD3<Double>) -> Bool { shapes.contains { $0.contains(point: p) } }
+        for region in regions {
+            for probe in Self.interiorProbes(region) {
+                let start: SIMD3<Double> = plane.world(probe)
+                let before: SIMD3<Double> = start + axis * (depth - tolerance)
+                let after: SIMD3<Double> = start + axis * (depth + tolerance)
+                // Kurz vor dem Ende noch Material, kurz dahinter keines: die Rückseite liegt am Werkzeugende
+                if inside(before), !inside(after) {
+                    let longer = depth + 2 * tolerance
+                    return distance >= 0 ? longer : -longer
+                }
+            }
+        }
+        return nil
+    }
+
+    /// Einige Punkte sicher im Inneren eines Bereichs (außerhalb seiner Löcher): Schwerpunkt und zur Mitte
+    /// gerückte Eckpunkte.
+    private static func interiorProbes(_ region: SketchRegion) -> [Point2] {
+        let polygon = region.polygon
+        guard polygon.count >= 3 else { return [] }
+        let center = polygon.reduce(Point2.zero, +) / Double(polygon.count)
+        var candidates: [Point2] = [center]
+        let step = max(1, polygon.count / 6)
+        for index in stride(from: 0, to: polygon.count, by: step) {
+            candidates.append(polygon[index] + (center - polygon[index]) * 0.1)
+        }
+        return candidates.filter { p in
+            polygonContains(polygon, p) && !region.holes.contains { polygonContains($0.polygon, p) }
+        }
     }
 
     /// Dünn „Zwei Seiten“ (SolidCraft): innen die Wandstärke, außen eine eigene Stärke – zwei Wände vereinigt.
