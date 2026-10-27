@@ -113,6 +113,8 @@ struct SceneBody {
     var threads: [ThreadNote]? = nil
     /// Oberfläche (Kurzname aus SurfaceFinish.all oder „Eigene:…“, SurfaceFinish.swift); nil = nach Werkstoff
     var finish: String? = nil
+    /// Aus Text extrudiert: dessen Inhalt (Textkörper im Browser, SketchTextEdit.swift); nil = kein Text
+    var textLabel: String? = nil
 
     func with(_ shape: PCKShape) -> SceneBody {
         var body = self
@@ -811,7 +813,8 @@ final class ModelStore: ObservableObject {
                 message = "Dünne Wand mit \(regionThinThickness.formatted()) mm hier nicht möglich."
                 return
             }
-            guard let result = extrusionResult(solid, sourceBody: sketch.plane.sourceBody, mode: mode, sketch: sketch.id) else { return }
+            guard var result = extrusionResult(solid, sourceBody: sketch.plane.sourceBody, mode: mode, sketch: sketch.id) else { return }
+            labelTextBodies(&result, regions: regions, sketch: sketch, mode: mode)
             message = nil
             showPreview(result, name: Self.regionPreviewName)
             noteExtrude(mode: mode, distance: distance)
@@ -824,7 +827,8 @@ final class ModelStore: ObservableObject {
                 : "Bereich lässt sich nicht extrudieren."
             return
         }
-        guard let result = extrusionResult(solid, sourceBody: sketch.plane.sourceBody, mode: mode, sketch: sketch.id) else { return }
+        guard var result = extrusionResult(solid, sourceBody: sketch.plane.sourceBody, mode: mode, sketch: sketch.id) else { return }
+        labelTextBodies(&result, regions: regions, sketch: sketch, mode: mode)
         message = SketchRegionMerge.newBodyNote(regions, mode: mode)
         showPreview(result, name: Self.regionPreviewName)
         noteExtrude(mode: mode, distance: distance)
@@ -1982,6 +1986,8 @@ final class ModelStore: ObservableObject {
         var threads: [ThreadNote]?
         /// Oberfläche (SurfaceFinish.swift); fehlt in älteren Projekten
         var finish: String?
+        /// Inhalt des Texts bei Textkörpern (SketchTextEdit.swift); fehlt in älteren Projekten
+        var textLabel: String?
     }
 
     private var modelURL: URL? { folder?.appending(path: "model.step") }
@@ -2024,6 +2030,7 @@ final class ModelStore: ObservableObject {
                 body.material = meta.material
                 body.threads = meta.threads
                 body.finish = meta.finish
+                body.textLabel = meta.textLabel
                 return body
             }
             return SceneBody(shape: shape, name: "Körper \(index + 1)", color: SceneBody.palette[index % SceneBody.palette.count])
@@ -2056,7 +2063,7 @@ final class ModelStore: ObservableObject {
             BodyMeta(name: $0.name, color: [$0.color.x, $0.color.y, $0.color.z], isHidden: $0.isHidden, sketchID: $0.sketchID,
                      folder: $0.folder, componentID: $0.componentID,
                      placement: $0.componentID == nil ? nil : $0.placementValues, material: $0.material,
-                     threads: $0.threads, finish: $0.finish)
+                     threads: $0.threads, finish: $0.finish, textLabel: $0.textLabel)
         }
         if let data = try? JSONEncoder().encode(metas) {
             try? data.write(to: metaURL)

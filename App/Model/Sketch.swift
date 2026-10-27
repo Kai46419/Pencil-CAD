@@ -1871,6 +1871,25 @@ final class SketchController: ObservableObject {
         add(.text(text))
     }
 
+    /// Text an Stelle index durch die geänderte Fassung ersetzen (Inhalt, Schrift, Höhe, Drehung; ein Schritt
+    /// Rückgängig). Die Karte dazu steht in SketchTextPanel.swift, die Logik in SketchTextEdit.swift.
+    func replaceText(at index: Int, with text: SketchText) {
+        guard entities.indices.contains(index), case .text = entities[index], !text.loops.isEmpty else { return }
+        remember()
+        entities[index] = .text(text)
+        entitiesChanged()
+    }
+
+    /// Text als Ganzes wählen (z. B. aus dem Browser „Ebenen“); wechselt zum Auswahlwerkzeug.
+    func selectText(at index: Int) {
+        guard entities.indices.contains(index), case .text = entities[index] else { return }
+        if tool != .select { tool = .select }
+        selection = [.curve(SketchCurveRef(entity: index, index: 0))]
+        selectedMarks = []
+        notice = nil
+        changed()
+    }
+
     // MARK: Schweben des Stifts
 
     /// Stift schwebt über der Ebene: Fangpunkt und Knoten in der Nähe zeigen.
@@ -3171,7 +3190,9 @@ final class SketchController: ObservableObject {
                 if d <= tolerance * 1.6, d < (bestCurve?.distance ?? .infinity) { bestCurve = (d, ref) }
             }
         }
-        return bestCurve.map { .curve($0.ref) }
+        if let bestCurve { return .curve(bestCurve.ref) }
+        // Text als Ganzes: irgendwo auf der Schrift antippen (SketchTextEdit.swift)
+        return textIndex(at: p, tolerance: tolerance).map { .curve(SketchCurveRef(entity: $0, index: 0)) }
     }
 
     /// Gemerkter Punkt (bzw. seine Mittellinie) unter dem Finger; Elementpunkte gehen vor, Kurven nicht.
@@ -3697,9 +3718,11 @@ final class SketchController: ObservableObject {
 
     /// Ausgewählte Kurven und Punkte zum Hervorheben.
     var selectionPolylines: [[Point2]] {
-        selection.compactMap { ref -> [Point2]? in
-            guard case .curve(let c) = ref else { return nil }
-            return curvePolyline(c)
+        selection.flatMap { ref -> [[Point2]] in
+            guard case .curve(let c) = ref else { return [] }
+            // Gewählter Text: alle Buchstabenumrisse hervorheben
+            if entities.indices.contains(c.entity), case .text = entities[c.entity] { return entities[c.entity].drawing }
+            return curvePolyline(c).map { [$0] } ?? []
         }
     }
 

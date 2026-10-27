@@ -75,7 +75,6 @@ enum RegionSelection {
         let plane = sketch.plane
         var refs: [SketchRef] = []
         for (index, entity) in sketch.entities.enumerated() {
-            if case .text = entity { continue }
             let lines = entity.drawing.map { line in
                 line.compactMap { camera.project(SIMD3<Float>(plane.world($0)), viewSize: viewSize) }
             }
@@ -96,6 +95,9 @@ enum RegionSelection {
             guard chosen else { continue }
             if case .point = entity {
                 refs.append(.point(SketchPointRef(entity: index, index: 0)))
+            } else if case .text = entity {
+                // Text als Ganzes (SketchTextEdit.swift)
+                refs.append(.curve(SketchCurveRef(entity: index, index: 0)))
             } else {
                 refs += (0..<entity.curveCount).map { SketchRef.curve(SketchCurveRef(entity: index, index: $0)) }
             }
