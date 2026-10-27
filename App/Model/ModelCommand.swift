@@ -67,6 +67,10 @@ final class ModelCommand: ObservableObject, Identifiable {
     @Published var expanded: Set<String> = []
     @Published var error: String?
     @Published var previewEnabled = true
+    /// Wertfeld, das den Fokus bekommen soll (Antippen des Werts am Pfeil im Viewport)
+    @Published var focusKey: String?
+    /// Dauer der letzten Vorschau in Sekunden (Hinweis „Rechnet …“ bei langen Vorschauen)
+    @Published var previewSeconds: Double = 0
     /// Bearbeiten: Feature-ID im Verlauf; nil = neu
     var editing: UUID?
     /// Automatik der Operation (Neu/Verbinden/Schneiden) aus, sobald der Nutzer selbst wählt
@@ -117,7 +121,18 @@ final class ModelCommand: ObservableObject, Identifiable {
     }
 }
 
-/// Jedes Modellwerkzeug implementiert das (je Paket in eigener Datei)
+/// Antippen im Viewport während eines offenen Befehls (Flächen bereits auf die echten Körper umgerechnet).
+struct CommandTap {
+    var face: FaceRef?
+    var edge: EdgeRef?
+    var region: RegionRef?
+    var point: SIMD3<Double>?
+
+    var isEmpty: Bool { face == nil && edge == nil && region == nil }
+}
+
+/// Jedes Modellwerkzeug implementiert das (je Paket in eigener Datei). Läuft auf dem Hauptthread wie Workspace.
+@MainActor
 protocol ModelCommandDriver {
     static var id: ModelCommandID { get }
     static var title: String { get }
@@ -137,6 +152,16 @@ protocol ModelCommandDriver {
     @MainActor static func rows(_ cmd: ModelCommand, _ ws: Workspace) -> AnyView
     /// Bearbeiten aus dem Verlauf
     static func load(_ feature: Feature, into ws: Workspace) -> ModelCommand?
+    /// Eigenes Antippen (true = erledigt); sonst geht der Pick ins aktive bzw. erste passende Feld
+    static func tapped(_ tap: CommandTap, _ cmd: ModelCommand, _ ws: Workspace) -> Bool
+    /// OK möglich (Standard: Pflichtfelder gefüllt, kein Fehler, Vorschau vorhanden)
+    static func canCommit(_ cmd: ModelCommand, _ ws: Workspace) -> Bool
+    /// Text am Pfeil im Viewport (nil = Länge des Pfeilwerts)
+    static func valueText(handle: HandleKind, value: Double, _ cmd: ModelCommand) -> String?
+    /// Kurze Erklärung für „ⓘ“ im Panel-Kopf
+    static var explanation: String? { get }
+    /// „Übernehmen“ (OK, Panel bleibt offen) anbieten
+    static var repeatable: Bool { get }
 }
 
 extension ModelCommandDriver {
@@ -145,15 +170,71 @@ extension ModelCommandDriver {
     static func apply(handle: HandleKind, value: Double, _ cmd: ModelCommand, _ ws: Workspace) {}
     static func primaryValueKey(_ cmd: ModelCommand) -> String? { nil }
     static func load(_ feature: Feature, into ws: Workspace) -> ModelCommand? { nil }
+    static func tapped(_ tap: CommandTap, _ cmd: ModelCommand, _ ws: Workspace) -> Bool { false }
+    static func canCommit(_ cmd: ModelCommand, _ ws: Workspace) -> Bool {
+        cmd.isReady && cmd.error == nil && ws.model.hasPreview
+    }
+    static func valueText(handle: HandleKind, value: Double, _ cmd: ModelCommand) -> String? { nil }
+    static var explanation: String? { nil }
+    static var repeatable: Bool { false }
+}
+
+extension ModelCommand {
+    /// Zahl unter key speichern (als Text, wie ihn number(_:default:) liest)
+    func setNumber(_ key: String, _ value: Double) {
+        values[key] = String(value)
+    }
+
+    func choice(_ key: String, default fallback: String) -> String {
+        choices[key] ?? fallback
+    }
+
+    func flag(_ key: String) -> Bool {
+        flags[key] ?? false
+    }
+
+    /// Index des Felds mit dieser ID
+    func inputIndex(_ inputID: String) -> Int? {
+        inputs.firstIndex { $0.id == inputID }
+    }
+
+    /// Feld ersetzen bzw. leeren (z. B. Auswahl aus einem Menü statt Antippen)
+    func setItems(_ inputID: String, _ items: [Pick]) {
+        guard let index = inputIndex(inputID) else { return }
+        inputs[index].items = items
+    }
+
+    /// Feld nur einmal anlegen (dynamische Felder wie „Bis Objekt“); entfernen mit removeInput
+    func ensureInput(_ input: PickInput, after previousID: String? = nil) {
+        guard inputIndex(input.id) == nil else { return }
+        if let previousID, let index = inputIndex(previousID) {
+            inputs.insert(input, at: index + 1)
+        } else {
+            inputs.append(input)
+        }
+    }
+
+    func removeInput(_ inputID: String) {
+        guard let index = inputIndex(inputID) else { return }
+        inputs.remove(at: index)
+        if activeInput >= inputs.count { activeInput = max(0, inputs.count - 1) }
+    }
 }
 
 /// Register der Treiber; Pakete tragen sich in `registerAll()` ein
+@MainActor
 enum ModelCommands {
     static var drivers: [ModelCommandID: ModelCommandDriver.Type] = [:]
 
     static func driver(_ id: ModelCommandID) -> ModelCommandDriver.Type? {
         if drivers.isEmpty { registerAll() }
         return drivers[id]
+    }
+
+    /// Alle eingetragenen Treiber (z. B. für Bearbeiten aus dem Verlauf)
+    static var all: [ModelCommandDriver.Type] {
+        if drivers.isEmpty { registerAll() }
+        return ModelCommandID.allCases.compactMap { drivers[$0] }
     }
 
     static func register(_ driver: ModelCommandDriver.Type) {
