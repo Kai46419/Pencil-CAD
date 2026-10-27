@@ -712,27 +712,40 @@ private struct ExtrudeRows: View {
     private var usesRegions: Bool { !ExtrudeCommand.regionRefs(cmd).isEmpty }
     private var editing: Bool { cmd.editing != nil }
 
+    /// Fläche, Körper und Gesamtlänge (ExtrudeInfo.swift); beim Bearbeiten aus dem Verlauf nicht (keine Vorschau)
+    private var summary: ExtrudeInfo.Summary? {
+        editing ? nil : ExtrudeInfo.summary(faces: ExtrudeCommand.faceRefs(cmd), regions: ExtrudeCommand.regionRefs(cmd),
+                                            model: model)
+    }
+
     var body: some View {
+        let summary = self.summary
         VStack(alignment: .leading, spacing: 10) {
+            if let summary {
+                ExtrudeInfoRows(summary: summary)
+            }
             if usesRegions || (editing && !cmd.flag("faceEdit")) {
-                regionRows
+                regionRows(summary)
             } else {
-                faceRows
+                faceRows(summary)
             }
         }
     }
 
     // MARK: Flächen (Press Pull)
 
-    @ViewBuilder private var faceRows: some View {
+    @ViewBuilder private func faceRows(_ summary: ExtrudeInfo.Summary?) -> some View {
         value("Abstand", Key.distance, default: 10)
+        if let summary {
+            ExtrudeTotalRow(total: summary.total)
+        }
         CheckRow(title: "Richtung umkehren", isOn: commandFlag("flip", cmd, ws))
         PaletteHint(text: "Ebene Flächen werden direkt verschoben (Press Pull). Weitere Flächen antippen zieht sie mit.")
     }
 
     // MARK: Profile
 
-    @ViewBuilder private var regionRows: some View {
+    @ViewBuilder private func regionRows(_ summary: ExtrudeInfo.Summary?) -> some View {
         let direction = CommandDirection.direction(cmd)
         let extent = ExtrudeCommand.extent(cmd)
         PanelSegmentRow(title: "Richtung", options: CommandDirection.options, selected: direction.rawValue) { id in
@@ -758,6 +771,10 @@ private struct ExtrudeRows: View {
         }
         if direction == .twoSides {
             value("Abstand 2", Key.distance2, default: 10)
+        }
+        if let summary {
+            // Kai: Würfel 20 mm, 10 mm aufgezogen → 30 mm (live aus der Vorschau)
+            ExtrudeTotalRow(total: summary.total)
         }
         operationRow
         CommandSection("Optionen", command: .extrude, section: "options") {

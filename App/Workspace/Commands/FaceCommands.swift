@@ -192,8 +192,16 @@ private struct PressPullRows: View {
     @ObservedObject var model: ModelStore
 
     var body: some View {
+        let summary = ExtrudeInfo.summary(faces: model.selectedFaces, regions: [], model: model)
         VStack(alignment: .leading, spacing: PaletteStyle.spacing) {
+            if let summary {
+                // Fläche, Körper und darunter die Gesamtlänge in Zugrichtung (ExtrudeInfo.swift)
+                ExtrudeInfoRows(summary: summary)
+            }
             CommandNumberRow(title: "Abstand", cmd: cmd, key: "distance", fallback: 0, workspace: workspace)
+            if let summary {
+                ExtrudeTotalRow(total: summary.total)
+            }
             // ★ Letzte Höhe wiederholen (auch Doppeltippen auf die Fläche)
             if let last = model.lastExtrudeValue {
                 PrimaryWideButton(title: "Letzte Höhe \(LengthUnit.current.format(last))",
