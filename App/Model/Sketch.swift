@@ -2738,7 +2738,11 @@ final class SketchController: ObservableObject {
         guard entities.indices.contains(index), value > 0 else { return [] }
         let focus: Set<Int> = [index]
         // Hält ein treibendes Maß den Wert fest, darf die Form selbst nachgeben
-        let held = fixedKinds(of: index).contains(kind)
+        // (ein gelöstes, rotes Maß hält nichts: der Löser lässt es weg – sonst fehlte die vorläufige Bedingung)
+        let held = constraints.contains { constraint in
+            guard !constraint.isSuspended, let owner = fixedEntityKind(of: constraint) else { return false }
+            return owner.entity == index && owner.kind == kind
+        }
         let current = entities
         func trial(_ shape: SketchEntity, pinned: Bool) -> DimensionTrial {
             var changed = current
