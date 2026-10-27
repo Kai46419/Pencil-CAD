@@ -190,7 +190,9 @@ extension ModelStore {
               edgeOperation == key.operation, currentOrderedKey(value: edgeValue) == key else { return }
         let operation = key.operation
         let value = key.value
-        let plain = key.second == nil && key.end == nil
+        // Rundung ohne Limit (BlendJobs.swift, Punkt 5): nur Fasen klemmen auf den größten möglichen Wert; eine zu
+        // große Rundung scheitert hier, die direkte Vorschau meldet dann „nicht möglich“ samt „max. X mm“
+        let plain = key.second == nil && key.end == nil && operation == .chamfer
         var amount = value
         if plain, let limit = plan.limits[operation], limit > 0, value > limit { amount = limit }
         var attempt = orderedBlend(plan, operation: operation, value: amount, second: key.second, end: key.end)

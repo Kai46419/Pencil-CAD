@@ -17,8 +17,11 @@ import simd
 // - Zeitlimit 8 s: Meldung „zu aufwendig“, Vorschau verworfen, Werte als Fehlschlag gemerkt. Der hängende Aufruf läuft
 //   weiter, bis OCCT zurückkehrt; bis dahin startet nichts Neues (nicht parallel stapeln), die App bleibt bedienbar.
 // - Ineinanderlaufende Rundungen (BlendBeforeCuts.swift blendMerge): mit der vorigen Rundung in EINEM Abrunden.
-// - Variable Rundung: Radien ≥ 0,01 mm, Anfang = Ende → gleichbleibende Rundung, Radius größer als die angrenzende
-//   Fläche breit ist → gleich abgelehnt (ohne OCCT).
+// - Variable Rundung: Radien ≥ 0,01 mm, Anfang = Ende → gleichbleibende Rundung.
+// - Rundung ohne Limit (Kai, Punkt 5): kein Ablehnen vorab (früher: breiter als die angrenzende Fläche), kein Klemmen
+//   auf den größten möglichen Radius, nichts springt zurück. Geht der Radius nicht, bleibt der eingegebene Wert stehen,
+//   die Vorschau zeigt den Körper unverändert, das Panel meldet „Rundung mit diesem Radius nicht möglich“ (bei
+//   gleichbleibender Rundung mit Hinweis „max. X mm“) und „OK“ übernimmt nicht. Fasen klemmen wie bisher.
 
 /// Ergebnis einer Rundung bzw. Fase aus dem Hintergrund.
 struct BlendJobResult {
@@ -87,8 +90,6 @@ final class BlendJobs {
     var queued: BlendJobRequest?
     /// Ergebnisse je Anfrage (auch Fehlschläge), die neuesten hinten
     var memo: [(key: BlendJobKey, source: PCKShape, result: BlendJobResult)] = []
-    /// Breite der angrenzenden Flächen (variable Rundung), gemerkt je Körper und Kanten
-    var width: (source: PCKShape, edges: [Int], value: Double?)?
     /// Entprellen „Rundung vor Schnitt“ (BlendBeforeCuts.swift)
     var orderedToken = 0
     /// Nach jedem angekommenen Ergebnis (offenes Abrunden-/Fasen-Panel aktualisieren)
@@ -128,6 +129,16 @@ enum BlendKernel {
         func blend(_ amount: Double) -> PCKShape? {
             chamfer ? shape.chamfering(edges: numbers, distance: amount) : shape.filleting(edges: numbers, radius: amount)
         }
+        if !chamfer {
+            // Rundung ohne Limit: genau den gewünschten Radius versuchen, nie auf den größten möglichen klemmen.
+            // Scheitert er, nur noch den größten möglichen Wert als Hinweis suchen (einmal je Auswahl, gemerkt)
+            if let result = blend(value) {
+                return BlendJobResult(shape: result, amount: value, limit: input.knownLimit)
+            }
+            let hint: Double = input.knownLimit
+                ?? (shape.maximumBlend(edges: numbers, upTo: value, chamfer: false) * 100).rounded(.down) / 100
+            return BlendJobResult(shape: nil, amount: value, limit: hint)
+        }
         // Zu groß: nicht einfach nichts zeigen, sondern den größten möglichen Wert (höchstens 8 Versuche)
         if let limit = input.knownLimit, value > limit {
             return BlendJobResult(shape: limit > 0 ? blend(limit) : nil, amount: limit, limit: limit)
@@ -139,16 +150,6 @@ enum BlendKernel {
         let limit = (found * 100).rounded(.down) / 100
         return BlendJobResult(shape: limit > 0 ? blend(limit) : nil, amount: limit, limit: limit)
     }
-}
-
-/// Abstand Punkt–Strecke.
-private func blendSegmentDistance(_ p: SIMD3<Double>, _ a: SIMD3<Double>, _ b: SIMD3<Double>) -> Double {
-    let ab: SIMD3<Double> = b - a
-    let lengthSquared = simd_length_squared(ab)
-    guard lengthSquared > 1e-18 else { return simd_distance(p, a) }
-    let t = max(0, min(1, simd_dot(p - a, ab) / lengthSquared))
-    let foot: SIMD3<Double> = a + ab * t
-    return simd_distance(p, foot)
 }
 
 extension ModelStore {
@@ -207,15 +208,6 @@ extension ModelStore {
         // Schon gerechnet (auch Fehlschlag bzw. Zeitlimit): sofort
         if let known = blendJobs.memo.last(where: { $0.key == key && $0.source === shape }) {
             applyBlendResult(known.result, request: request)
-            return
-        }
-        // Variable Rundung breiter als die angrenzende Fläche: OCCT gar nicht erst fragen (hängt dort oft)
-        if let end, merge == nil, let width = adjacentFaceWidth(shape, edges: numbers.map(\.intValue)),
-           max(value, end) > width * 1.02 + 0.01 {
-            message = "Variable Rundung: \(max(value, end).formatted()) mm ist breiter als die angrenzende Fläche "
-                + "(ca. \(((width * 10).rounded(.down) / 10).formatted()) mm) – Radius verkleinern."
-            dropPreview()
-            blendJobs.finished?()
             return
         }
         // Läuft schon dieselbe Rechnung: übernehmen statt noch einmal
@@ -341,7 +333,14 @@ extension ModelStore {
             if result.timedOut {
                 message = Self.blendTooHeavyMessage
             } else if let end = input.end {
-                message = "Rundung \(input.value.formatted()) → \(end.formatted()) mm an dieser Kante nicht möglich."
+                // Wert bleibt stehen (kein Zurückspringen), Körper unverändert, „OK“ übernimmt nicht
+                message = "Rundung mit diesem Radius nicht möglich (\(input.value.formatted()) → \(end.formatted()) mm)."
+            } else if operation == .fillet {
+                var text = "Rundung mit diesem Radius nicht möglich"
+                if let limit = result.limit, limit > 0, limit < input.value {
+                    text += " – max. \(limit.formatted()) mm"
+                }
+                message = text + "."
             } else if let second = input.second {
                 message = "Fase \(input.value.formatted()) × \(second.formatted()) mm an dieser Kante nicht möglich."
             } else {
@@ -368,51 +367,5 @@ extension ModelStore {
         message = result.amount < input.value - 1e-9
             ? "\(operation.rawValue): größter möglicher Wert hier \(result.amount.formatted()) mm." : nil
         noteBlend(operation, value: result.amount, second: input.second, end: input.end, edges: request.blendEdges)
-    }
-
-    /// Grobe Breite der schmalsten an die Kanten grenzenden Fläche (größter Abstand ihrer Netzpunkte zur Kante).
-    /// nil = unbekannt. Gemerkt je Körper und Kanten.
-    func adjacentFaceWidth(_ shape: PCKShape, edges: [Int]) -> Double? {
-        if let known = blendJobs.width, known.source === shape, known.edges == edges { return known.value }
-        let value = measureAdjacentFaceWidth(shape, edges: edges)
-        blendJobs.width = (shape, edges, value)
-        return value
-    }
-
-    private func measureAdjacentFaceWidth(_ shape: PCKShape, edges: [Int]) -> Double? {
-        let faceCount = shape.faceCount
-        guard !edges.isEmpty, faceCount > 0, faceCount < 3000 else { return nil }
-        let wanted = Set(edges)
-        var facesOfEdge: [Int: Set<Int>] = [:]
-        for face in 1...faceCount {
-            for number in shape.edgeNumbers(ofFace: face).map(\.intValue) where wanted.contains(number) {
-                facesOfEdge[number, default: []].insert(face)
-            }
-        }
-        let mesh = Mesh(shape.triangulate(deflection: 0.05), body: 0)
-        var segments: [Int: [(SIMD3<Double>, SIMD3<Double>)]] = [:]
-        for (i, ref) in mesh.edgeRefs.enumerated() where wanted.contains(ref.edge) && i * 2 + 1 < mesh.edges.count {
-            segments[ref.edge, default: []].append((SIMD3<Double>(mesh.edges[i * 2]), SIMD3<Double>(mesh.edges[i * 2 + 1])))
-        }
-        var narrowest: Double?
-        for edge in edges {
-            guard let list = segments[edge], !list.isEmpty, let faces = facesOfEdge[edge] else { continue }
-            for face in faces {
-                let points = mesh.trianglePoints(of: FaceRef(body: 0, face: face))
-                guard !points.isEmpty else { continue }
-                let step = max(1, points.count / 1500)
-                var widest = 0.0
-                var k = 0
-                while k < points.count {
-                    let p = SIMD3<Double>(points[k])
-                    var nearest = Double.infinity
-                    for segment in list { nearest = min(nearest, blendSegmentDistance(p, segment.0, segment.1)) }
-                    widest = max(widest, nearest)
-                    k += step
-                }
-                if widest > 1e-6 { narrowest = min(narrowest ?? .infinity, widest) }
-            }
-        }
-        return narrowest
     }
 }
