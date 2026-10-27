@@ -376,6 +376,8 @@ final class SketchController: ObservableObject {
     var splineHandleDrag: SplineHandleDrag?
     /// Radiusgriff an Bogen bzw. Kreis, der gerade gezogen wird (SketchArcHandle.swift)
     var radiusHandleDrag: RadiusHandleDrag?
+    /// Verschiebe-, Skalier- bzw. Drehgriff eines Texts, der gerade gezogen wird (SketchTextTransform.swift)
+    var textTransformDrag: TextTransformDrag?
     @Published var rectangleMode: RectangleMode = .diagonal {
         didSet {
             rectangleBase = nil
@@ -720,6 +722,7 @@ final class SketchController: ObservableObject {
         if tool == .select {
             // Wartet eine Bedingung, wählt der Stift nur (Griffe ziehen erst danach wieder)
             if pendingAction == nil {
+                if beginTextTransformDrag(at: point, tolerance: tolerance) { return }  // Textgriffe
                 if beginSplineHandleDrag(at: point, tolerance: tolerance) { return }  // Spline-Tangentengriffe
                 if beginRadiusHandleDrag(at: point, tolerance: tolerance) { return }  // Radiusgriff Bogen/Kreis
             }
@@ -755,6 +758,7 @@ final class SketchController: ObservableObject {
 
     func moved(to point: Point2, tolerance: Double) {
         if tool == .select {
+            if moveTextTransformDrag(to: point, tolerance: tolerance) { return }  // Textgriffe
             if moveSplineHandleDrag(to: point, tolerance: tolerance) { return }  // Spline-Tangentengriffe
             if moveRadiusHandleDrag(to: point, tolerance: tolerance) { return }  // Radiusgriff Bogen/Kreis
             moveSelectDrag(to: point, tolerance: tolerance)
@@ -799,6 +803,7 @@ final class SketchController: ObservableObject {
 
     func ended(at point: Point2, tolerance: Double) {
         if tool == .select {
+            if endTextTransformDrag(at: point, tolerance: tolerance) { return }  // Textgriffe
             if endSplineHandleDrag(at: point, tolerance: tolerance) { return }  // Spline-Tangentengriffe
             if endRadiusHandleDrag(at: point, tolerance: tolerance) { return }  // Radiusgriff Bogen/Kreis
             endSelectDrag(at: point, tolerance: tolerance)
@@ -1026,6 +1031,7 @@ final class SketchController: ObservableObject {
         selectStart = nil
         // Radiusgriff: bis dahin Gezogenes bleibt (ein Rückgängig-Schritt)
         radiusHandleDrag = nil
+        cancelTextTransformDrag()  // Textgriffe: Gezogenes bleibt
         dragStart = nil
         dragCurrent = nil
         strokeSamples = []
@@ -4005,7 +4011,7 @@ final class SketchController: ObservableObject {
 
     /// Aktueller Fang (Strich hat Vorrang vor Schweben).
     var currentSnap: SnapResult? {
-        activeSnap ?? hoverSnap
+        activeSnap ?? textTransformSnap ?? hoverSnap
     }
 
     private func shapePreview(from start: Point2, to current: Point2) -> SketchEntity? {

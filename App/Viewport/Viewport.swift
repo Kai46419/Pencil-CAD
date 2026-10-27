@@ -822,6 +822,8 @@ final class ViewportView: MTKView {
                 groups.append(LineGroup(polylines: radiusHandles.lines.map { $0.map(world) }, color: Self.previewBlue,
                                         width: 2, dots: radiusHandles.knobs.map(world), dotRadius: 3.5))
             }
+            // Verschieben, Skalieren, Drehen des gewählten Texts (SketchTextTransform.swift)
+            addTextTransformHandles(to: &groups, sketch: sketch, perPoint: perPoint, world: world)
             // Linie beim Zeichnen: Graphit wie die fertigen Linien, offene Enden als kleine Punkte
             let preview = sketch.previewPolylines
             if !preview.isEmpty {
@@ -1022,6 +1024,21 @@ final class ViewportView: MTKView {
             return [snapRing(at: p, radius: r), [p + Point2(-s, r), p + Point2(s, r)]]
         case .horizontal, .vertical, .parallel, .perpendicular, .lineExtension, .angle, .aligned, .grid:
             return [snapRing(at: p, radius: s * 0.5)]
+        }
+    }
+
+    /// Griffe des gewählten Texts (SketchTextTransform.swift): gestrichelter Rahmen, Verschiebe-Kreuz, Skalier-Pfeil
+    /// rechts oben und Drehgriff oberhalb in der Griff-Farbe, dazu der Ring des Verweilfangs in der Fangfarbe.
+    /// Einzige Aufrufstelle: Skizzenzeichnung nach den Radiusgriffen.
+    private func addTextTransformHandles(to groups: inout [LineGroup], sketch: SketchController, perPoint: Double,
+                                         world: (Point2) -> SIMD3<Float>) {
+        guard let geometry = sketch.textTransformHandleGeometry(unit: perPoint) else { return }
+        let frame = dashed(geometry.frame, dash: 4 * perPoint)
+        groups.append(LineGroup(polylines: frame.map { $0.map(world) }, color: Self.previewBlue, width: 1))
+        groups.append(LineGroup(polylines: geometry.lines.map { $0.map(world) }, color: Self.previewBlue, width: 1.6,
+                                dots: geometry.knobs.map(world), dotRadius: 3.5))
+        if !geometry.dwell.isEmpty {
+            groups.append(LineGroup(polylines: [geometry.dwell.map(world)], color: Self.snapOrange, width: 1.2))
         }
     }
 
@@ -2391,6 +2408,7 @@ final class ViewportView: MTKView {
         // Spline-Tangentengriffe
         guard !sketch.hitsSplineHandle(at: point, tolerance: snapTolerance) else { return false }
         guard !sketch.hitsRadiusHandle(at: point, tolerance: snapTolerance) else { return false }
+        guard !sketch.hitsTextTransformHandle(at: point, tolerance: snapTolerance) else { return false }
         return sketch.markIndex(at: point, tolerance: snapTolerance, curveHit: false) == nil
     }
 
@@ -2479,7 +2497,9 @@ final class ViewportView: MTKView {
     private func acceptsForRadiusHandle(_ touch: UITouch) -> Bool {
         guard touch.type == .direct, let sketch, sketch.isActive, !sketch.isChoosingPlane, sketch.tool == .select,
               let point = sketchPoint(for: touch) else { return false }
+        // Auch Rahmen und Griffe eines gewählten Texts (SketchTextTransform.swift)
         return sketch.hitsRadiusHandle(at: point, tolerance: snapTolerance)
+            || sketch.hitsTextTransformHandle(at: point, tolerance: snapTolerance)
     }
 
     /// Finger im Werkzeug „Beschneiden“: wischt wie der Stift über die Kurven (Power Trim), Antippen beschneidet ein Stück.

@@ -316,6 +316,11 @@ struct SketchText: Codable {
     var alignment: TextAlignmentOption
     /// Drehung um den Ankerpunkt (Bogenmaß, gegen den Uhrzeigersinn); fehlt in älteren Projekten (= 0)
     var rotation: Double
+    /// Verschieben, Skalieren, Drehen über die Auswahlgriffe (SketchTextTransform.swift); nil = unverändert.
+    /// Wirkt nach Anker und Drehung, Drehpunkt ist transformPivot.
+    var transform: SketchTextTransform?
+    /// Mitte des Schriftsatzes in der Skizze (vor transform): Drehpunkt der Griffe
+    private(set) var transformPivot: Point2
     var loops: [SketchLoop]
 
     struct Font: Identifiable {
@@ -332,7 +337,7 @@ struct SketchText: Codable {
     ]
 
     private enum CodingKeys: String, CodingKey {
-        case string, anchor, height, fontName, alignment, rotation
+        case string, anchor, height, fontName, alignment, rotation, transform
     }
 
     /// Die Umrisse werden nicht gespeichert, sondern beim Laden aus der Schrift neu erzeugt.
@@ -343,7 +348,8 @@ struct SketchText: Codable {
                   height: try container.decode(Double.self, forKey: .height),
                   fontName: try container.decode(String.self, forKey: .fontName),
                   alignment: try container.decode(TextAlignmentOption.self, forKey: .alignment),
-                  rotation: (try? container.decodeIfPresent(Double.self, forKey: .rotation)) ?? 0)
+                  rotation: (try? container.decodeIfPresent(Double.self, forKey: .rotation)) ?? 0,
+                  transform: try? container.decodeIfPresent(SketchTextTransform.self, forKey: .transform))
     }
 
     func encode(to encoder: Encoder) throws {
@@ -355,24 +361,32 @@ struct SketchText: Codable {
         try container.encode(alignment, forKey: .alignment)
         // Nur gedrehten Text mit Winkel speichern (sonst bleibt die Datei wie bisher)
         if rotation != 0 { try container.encode(rotation, forKey: .rotation) }
+        if let transform { try container.encode(transform, forKey: .transform) }
     }
 
     init(string: String, anchor: Point2, height: Double, fontName: String, alignment: TextAlignmentOption,
-         rotation: Double = 0) {
+         rotation: Double = 0, transform: SketchTextTransform? = nil) {
         self.string = string
         self.anchor = anchor
         self.height = height
         self.fontName = fontName
         self.alignment = alignment
         self.rotation = rotation
+        // Unveränderte Lage wird nicht gespeichert („Zurücksetzen“ übergibt .identity)
+        let shaped: SketchTextTransform? = transform.flatMap { $0.isIdentity ? nil : $0 }
+        let center = Self.layoutCenter(string: string, height: height, fontName: fontName, alignment: alignment)
+        let pivot = Self.placedBase(center, anchor: anchor, rotation: rotation)
+        self.transform = shaped
+        transformPivot = pivot
         loops = Self.outlines(string: string, anchor: anchor, height: height, fontName: fontName, alignment: alignment,
-                              rotation: rotation)
+                              rotation: rotation, transform: shaped, pivot: pivot)
     }
 
     /// Buchstabenumrisse als geschlossene Ketten aus Linien und Bézierkurven.
     /// height = Höhe der Großbuchstaben; anchor liegt auf der Grundlinie, rotation dreht um anchor.
     private static func outlines(string: String, anchor: Point2, height: Double, fontName: String,
-                                 alignment: TextAlignmentOption, rotation: Double) -> [SketchLoop] {
+                                 alignment: TextAlignmentOption, rotation: Double,
+                                 transform: SketchTextTransform?, pivot: Point2) -> [SketchLoop] {
         let text = string.replacingOccurrences(of: "\n", with: " ")
         guard !text.isEmpty, height > 0 else { return [] }
         let font = CTFontCreateWithName(fontName as CFString, 100, nil)
@@ -406,7 +420,9 @@ struct SketchText: Codable {
                 let map = { (p: CGPoint) -> Point2 in
                     let x: Double = scale * (Double(p.x + origin.x) + shift)
                     let y: Double = scale * Double(p.y + origin.y)
-                    return anchor + Point2(cosR * x - sinR * y, sinR * x + cosR * y)
+                    let placed: Point2 = anchor + Point2(cosR * x - sinR * y, sinR * x + cosR * y)
+                    // Auswahlgriffe (SketchTextTransform.swift): nach Anker und Drehung
+                    return transform?.apply(placed, pivot: pivot) ?? placed
                 }
                 loops += Self.loops(of: path, map: map)
             }

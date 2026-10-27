@@ -13,6 +13,8 @@ struct SketchSelectionSection: View {
                 if let index = sketch.selectedTextIndex {
                     // Gewählter Text: Inhalt, Schrift, Höhe, Winkel ändern (SketchTextPanel.swift)
                     SketchTextEditor(sketch: sketch, index: index, stacked: true)
+                    // Lage aus den Griffen: X, Y, Skalierung, Drehung (SketchTextTransformPanel.swift)
+                    SketchTextTransformFields(sketch: sketch, index: index)
                 } else {
                     SelectionDimensionRows(sketch: sketch)
                 }
