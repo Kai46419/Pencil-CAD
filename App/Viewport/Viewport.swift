@@ -421,6 +421,7 @@ final class ViewportView: MTKView {
                 lastPlacedPointCount = sketch.placedPointCount
             }
         }
+        renderer.gridAuto = sketching && sketch.options.gridAuto
         renderer.gridTransform = sketching && !sketch.showsGrid ? nil : sketching
             ? float4x4(origin: SIMD3<Float>(plane.origin), u: SIMD3<Float>(plane.u),
                        v: SIMD3<Float>(plane.v), n: SIMD3<Float>(plane.normal))

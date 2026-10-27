@@ -287,7 +287,7 @@ private struct LineTypeSection: View {
             let enabled: Bool
             if hasSelection {
                 // Umwandeln kann die Skizze bisher nur zwischen Normal und Konstruktion
-                // TODO-MERGE: Mittellinie/Unendlich für gewählte Kurven, sobald Paket 3 sie kennt
+                // Mittellinie/Unendlich gelten nur für neue Elemente
                 switch type {
                 case .normal: enabled = allConstruction
                 case .construction: enabled = !allConstruction
@@ -336,7 +336,7 @@ private struct LineTypeSection: View {
             }
         } else {
             options.lineType = type
-            // TODO-MERGE: Paket 3 wertet options.lineType beim Zeichnen aus; bis dahin wirkt der Konstruktionsschalter
+            // Nicht-normale Linientypen zählen wie Konstruktion (kein Profil)
             sketch.constructionMode = type != .normal
         }
     }
