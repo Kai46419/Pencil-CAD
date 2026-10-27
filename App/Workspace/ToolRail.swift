@@ -91,6 +91,10 @@ enum ToolCategory: String {
     case inspect = "Prüfen"
     case insert = "Einfügen"
     case view = "Ansicht"
+    // Skizzenmodus nach SolidCraft (Create / Modify / Pattern / Constrain / Reference / Inspect)
+    case sketchPattern = "Muster"
+    case constrain = "Bedingen"
+    case reference = "Referenz"
 
     /// Symbolfarbe (inaktiv) und Füllung (aktiv)
     var color: Color {
@@ -106,6 +110,10 @@ enum ToolCategory: String {
         case .construct: Color(red: 0.80, green: 0.56, blue: 0.0)
         case .inspect: Color(red: 0.0, green: 0.56, blue: 0.60)
         case .insert, .view: Color(red: 0.38, green: 0.44, blue: 0.53)
+        case .sketchPattern: Color(red: 0.68, green: 0.32, blue: 0.78)
+        // SolidCraft-Akzent der Bedingungen #C16358 bzw. der projizierten Geometrie #963CBE
+        case .constrain: Color(red: 0.76, green: 0.39, blue: 0.35)
+        case .reference: Color(red: 0.59, green: 0.24, blue: 0.75)
         }
     }
 
@@ -153,6 +161,19 @@ private struct RailEntry: Identifiable {
     /// langes Drücken öffnet die Varianten. Ohne primary öffnet Antippen das Untermenü (Gruppen wie „Mehr“).
     var primary: (() -> Void)?
     var action: () -> Void = {}
+    /// Statt einer Kachel ein Raster aus Bildknöpfen in zwei Spalten (Bedingungen wie im SolidCraft-Mockup)
+    var grid: [RailGridCell]?
+}
+
+/// Knopf im Raster der linken Leiste (Bedingung): passend = farbig, wartend = getönt mit Rahmen.
+private struct RailGridCell: Identifiable {
+    let id: String
+    let title: String
+    let icon: String
+    var detail: String?
+    var isApplicable = false
+    var isPending = false
+    var action: () -> Void = {}
 }
 
 /// Linke Werkzeugleiste (Aufbau wie bei Shapr3D, Symbole und Abschnitte wie Fusion 360):
@@ -165,10 +186,6 @@ struct ToolRail: View {
     let importSTEP: () -> Void
 
     @State private var openEntry: String?
-    /// Zuletzt gewähltes Werkzeug unter „Ändern“ (Antippen startet es wieder)
-    @State private var modifyTool: SketchTool = .fillet
-    /// Zuletzt gewähltes Werkzeug unter „Mehr“
-    @State private var moreTool: SketchTool = .project
     /// Zuletzt gewählte Variante unter „Schneiden“ (Antippen startet sie wieder)
     @State private var cutTool: SketchTool = .trim
     /// Zugeklappte Abschnitte im Skizzenmodus. „Ändern“ ist anfangs offen (Kai fand „Beschneiden“ im zugeklappten
@@ -241,7 +258,9 @@ struct ToolRail: View {
                             .frame(height: headerHeight)
                     }
                 }
-                if !isHidden(entry, collapsible: collapsible) {
+                if !isHidden(entry, collapsible: collapsible), let cells = entry.grid {
+                    RailGrid(cells: cells, size: tile, isEnabled: entry.isEnabled)
+                } else if !isHidden(entry, collapsible: collapsible) {
                 RailTile(title: entry.title, subtitle: entry.subtitle, systemImage: entry.systemImage,
                          category: entry.category, isActive: entry.isActive, isOpen: openEntry == entry.id,
                          size: tile, hasVariants: entry.flyout != nil && entry.primary != nil)
@@ -284,16 +303,22 @@ struct ToolRail: View {
             if let openEntry, let index = entries.firstIndex(where: { $0.id == openEntry }),
                let items = entries[index].flyout {
                 let sections = (0...index).filter { sectionStart(entries, $0) != nil }.count
-                let tilesAbove = (0..<index).filter { !isHidden(entries[$0], collapsible: collapsible) }.count
+                let heightAbove = (0..<index).filter { !isHidden(entries[$0], collapsible: collapsible) }
+                    .reduce(CGFloat(0)) { sum, k in sum + entryHeight(entries[k], tile: tile) + gap }
                 Flyout(title: entries[index].title, category: entries[index].category, items: items) {
                     self.openEntry = nil
                 }
-                .padding(.top, CGFloat(tilesAbove) * (tile + gap) + CGFloat(sections) * (headerHeight + gap)
-                         + (header == nil ? 0 : 30))
+                .padding(.top, heightAbove + CGFloat(sections) * (headerHeight + gap) + (header == nil ? 0 : 30))
                 .transition(.opacity.combined(with: .move(edge: .leading)))
             }
         }
         .animation(Theme.spring, value: openEntry)
+    }
+
+    /// Höhe eines Eintrags in der Leiste (Kachel bzw. Raster), für die Lage des Untermenüs.
+    private func entryHeight(_ entry: RailEntry, tile: CGFloat) -> CGFloat {
+        guard let cells = entry.grid else { return tile }
+        return RailGrid.height(count: cells.count, size: tile)
     }
 
     // MARK: Skizzenmodus
@@ -385,19 +410,25 @@ struct ToolRail: View {
         }
     }
 
-    /// Aufteilung wie die Registerkarte „Skizze“ in Fusion 360: Fertig stellen, Erstellen, Ändern, Prüfen.
-    /// Einschränkungen stehen rechts, 3D-Werkzeuge erst nach dem Beenden der Skizze.
+    /// Bedingungen als Raster 2 × 6 wie im SolidCraft-Mockup (`sketch.png`): erst Symbol, dann Elemente antippen;
+    /// passt die Auswahl schon, wirkt die Bedingung sofort (Ablauf wie die frühere ConstraintColumn rechts).
+    private var constraintCells: [RailGridCell] {
+        let kinds = [ConstraintKind.lock] + ConstraintKind.allCases.filter { $0 != .lock && $0 != .dimension }
+        return kinds.map { kind in
+            RailGridCell(id: kind.rawValue, title: kind.rawValue, icon: kind.systemImage, detail: kind.selectionHint,
+                         isApplicable: sketch.canApply(kind), isPending: sketch.pendingAction == .constraint(kind)) {
+                sketch.start(.constraint(kind))
+            }
+        }
+    }
+
+    /// Aufteilung wie die Registerkarte SKETCH in SolidCraft: Fertig stellen, Erstellen, Ändern, Muster, Bedingen,
+    /// Referenz, Prüfen. Die Eigenschaften des gewählten Werkzeugs stehen rechts in der Skizzenpalette.
     private var sketchEntries: [RailEntry] {
-        let lineTool = sketch.lineVariant
-        let lineItems: [ToolItem] = [toolItem(.polyline, title: "Linie")] + arcItems
-        let lineSubtitle = lineTool == .arc ? "Bogen \(sketch.arcMode.rawValue)" : lineTool.subtitle
         let polygonSubtitle = "\(Self.polygonName(sketch.polygonSides)) · \(sketch.polygonMode.rawValue)"
-        let roundTool: SketchTool = sketch.tool == .ellipse ? .ellipse : .circle
-        let modifyTools: [SketchTool] = [.fillet, .chamfer, .scale]
         // Schneiden: Beschneiden (antippen oder wischen), Teilen an Punkt, Unterbrechen, Verlängern
         let cutTools: [SketchTool] = [.trim, .splitAtPoint, .breakCurve, .extend]
         let shownCut: SketchTool = cutTools.contains(sketch.tool) ? sketch.tool : cutTool
-        let moreTools: [SketchTool] = [.project, .mirror, .rectPattern, .circPattern, .point, .text]
         // Spline: Fit-/Kontrollpunkte setzen, Freihand, Punkt einfügen
         let splineKindItems: [ToolItem] = SplineKind.allCases.map { kind -> ToolItem in
             let icon: String? = kind == .control ? "sc.spline_cv" : nil
@@ -417,6 +448,8 @@ struct ToolRail: View {
             }
         }
         let splineItems = splineKindItems + splineInputItems
+        let planeReady = !sketch.isChoosingPlane
+        let detachPending = sketch.pendingAction == .detach
         return [
             RailEntry(id: "sketch.finish", title: "Skizzieren beenden", systemImage: "checkmark", category: .finish, action: {
                 workspace.finishSketch()
@@ -439,12 +472,9 @@ struct ToolRail: View {
                           },
                       ], primary: { sketch.tool = .select }),
             // ERSTELLEN
-            RailEntry(id: "sketch.line", title: "Linie/Bogen", subtitle: lineSubtitle,
-                      systemImage: lineTool.systemImage, category: .create,
-                      isActive: sketch.tool == .polyline || sketch.tool == .arc,
-                      flyout: lineItems, primary: { sketch.tool = sketch.lineVariant }),
+            toolEntry(.polyline, category: .create),
             RailEntry(id: "sketch.rectangle", title: "Rechteck", subtitle: sketch.rectangleMode.rawValue,
-                      systemImage: SketchTool.rectangle.systemImage, category: .create,
+                      systemImage: sketch.rectangleMode.systemImage, category: .create,
                       isActive: sketch.tool == .rectangle,
                       flyout: RectangleMode.allCases.map { mode in
                           ToolItem(id: "rect.\(mode.rawValue)", title: mode.rawValue, subtitle: "Rechteck",
@@ -454,50 +484,68 @@ struct ToolRail: View {
                               sketch.rectangleMode = mode
                           }
                       }, primary: { sketch.tool = .rectangle }),
-            // Ellipse liegt wie in Fusion 360 bei den Kreisen
-            RailEntry(id: "sketch.circle", title: roundTool == .ellipse ? "Ellipse" : "Kreis",
-                      subtitle: roundTool == .ellipse ? nil : sketch.circleMode.rawValue,
-                      systemImage: roundTool.systemImage, category: .create,
-                      isActive: sketch.tool == .circle || sketch.tool == .ellipse,
-                      flyout: circleItems + [toolItem(.ellipse, subtitle: "Mitte zur Ecke")],
-                      primary: { sketch.tool = roundTool }),
+            RailEntry(id: "sketch.circle", title: "Kreis", subtitle: sketch.circleMode.rawValue,
+                      systemImage: sketch.circleMode.systemImage, category: .create, isActive: sketch.tool == .circle,
+                      flyout: circleItems, primary: { sketch.tool = .circle }),
+            // Bogen als eigene Familie (Kai: „von A nach B, dann den Bogen aufziehen“)
+            RailEntry(id: "sketch.arc", title: "Bogen", subtitle: sketch.arcMode.rawValue,
+                      systemImage: sketch.arcMode.systemImage, category: .create, isActive: sketch.tool == .arc,
+                      flyout: arcItems, primary: { sketch.tool = .arc }),
             RailEntry(id: "sketch.polygon", title: "Polygon", subtitle: polygonSubtitle,
                       systemImage: SketchTool.polygon.systemImage, category: .create, isActive: sketch.tool == .polygon,
                       flyout: polygonItems, primary: { sketch.tool = .polygon }),
             RailEntry(id: "sketch.slot", title: "Langloch", subtitle: sketch.slotMode.rawValue,
-                      systemImage: SketchTool.slot.systemImage, category: .create, isActive: sketch.tool == .slot,
+                      systemImage: sketch.slotMode.systemImage, category: .create, isActive: sketch.tool == .slot,
                       flyout: slotItems, primary: { sketch.tool = .slot }),
             RailEntry(id: "sketch.spline", title: "Spline",
                       subtitle: sketch.splineInput == .points ? sketch.splineKind.rawValue : sketch.splineInput.rawValue,
                       systemImage: sketch.splineInput.systemImage, category: .create, isActive: sketch.tool == .spline,
                       flyout: splineItems, primary: { sketch.tool = .spline }),
-            // Projizieren, Spiegeln, Muster, Punkt, Text: Antippen startet das zuletzt gewählte
-            RailEntry(id: "sketch.more", title: moreTools.contains(sketch.tool) ? sketch.tool.rawValue : "Mehr",
-                      subtitle: moreTools.contains(sketch.tool) ? nil : moreTool.rawValue,
-                      systemImage: moreTool.systemImage, category: .create, isActive: moreTools.contains(sketch.tool),
-                      flyout: moreTools.map { tool in toolItem(tool) { moreTool = tool } },
-                      primary: { sketch.tool = moreTool }),
+            toolEntry(.ellipse, category: .create),
+            toolEntry(.point, category: .create),
+            toolEntry(.text, category: .create),
             RailEntry(id: "sketch.construction", title: "Konstruktion", subtitle: sketch.constructionMode ? "Ein" : "Aus",
                       systemImage: "sc.construction", category: .create, isActive: sketch.constructionMode, action: {
                 sketch.constructionMode.toggle()
+                sketch.options.lineType = sketch.constructionMode ? .construction : .normal
             }),
             // ÄNDERN
             // Schneiden mit der Schere zuoberst: Antippen startet die zuletzt gewählte Variante, lange drücken zeigt alle
             RailEntry(id: "sketch.cut", title: "Schneiden", subtitle: shownCut.rawValue,
-                      systemImage: SketchTool.trim.systemImage, category: .modify,
+                      systemImage: shownCut.systemImage, category: .modify,
                       isActive: cutTools.contains(sketch.tool),
                       flyout: cutTools.map { tool in toolItem(tool) { cutTool = tool } },
                       primary: { sketch.tool = cutTool }),
             toolEntry(.offset, category: .modify),
-            RailEntry(id: "sketch.modify", title: modifyTools.contains(sketch.tool) ? sketch.tool.rawValue : "Ändern",
-                      subtitle: modifyTools.contains(sketch.tool) ? nil : modifyTool.rawValue,
-                      systemImage: modifyTool.systemImage, category: .modify, isActive: modifyTools.contains(sketch.tool),
-                      flyout: modifyTools.map { tool in toolItem(tool) { modifyTool = tool } },
-                      primary: { sketch.tool = modifyTool }),
+            toolEntry(.fillet, category: .modify),
+            toolEntry(.chamfer, category: .modify),
+            toolEntry(.scale, category: .modify),
             RailEntry(id: "sketch.delete", title: "Löschen", subtitle: sketch.selection.isEmpty ? nil : "Auswahl",
                       systemImage: "sc.delete", category: .modify, isEnabled: !sketch.selection.isEmpty, action: {
                 sketch.deleteSelection()
             }),
+            // MUSTER
+            toolEntry(.mirror, category: .sketchPattern),
+            toolEntry(.circPattern, category: .sketchPattern),
+            toolEntry(.rectPattern, category: .sketchPattern),
+            // BEDINGEN: Bemaßung, dann das Raster der Bedingungen
+            RailEntry(id: "sketch.dimension", title: ConstraintKind.dimension.rawValue, subtitle: "Element antippen",
+                      systemImage: ConstraintKind.dimension.systemImage, category: .constrain, isEnabled: planeReady,
+                      action: {
+                // Maße erscheinen zur Auswahl im Viewport (Maßfeld mit Schloss)
+                if sketch.pendingAction != nil { sketch.cancelPending() }
+                sketch.tool = .select
+                sketch.notice = ConstraintKind.dimension.selectionHint
+            }),
+            RailEntry(id: "sketch.constraints", title: "Bedingungen", systemImage: "sc.c_hv", category: .constrain,
+                      isEnabled: planeReady, grid: constraintCells),
+            RailEntry(id: "sketch.detach", title: "Trennen", subtitle: detachPending ? "Aktiv" : nil,
+                      systemImage: "link.badge.plus", category: .constrain, isActive: detachPending,
+                      isEnabled: planeReady, action: {
+                sketch.start(.detach)
+            }),
+            // REFERENZ
+            toolEntry(.project, category: .reference),
             // PRÜFEN
             toolEntry(.measure, category: .inspect),
             RailEntry(id: "sketch.section", title: "Schnittansicht", subtitle: workspace.sketchSection ? "Ein" : "Aus",
@@ -1158,6 +1206,73 @@ struct RailTile: View {
             shape.strokeBorder(category.color.opacity(0.18), lineWidth: 1)
         } else if !filled {
             shape.strokeBorder(Theme.hairline, lineWidth: Theme.hairlineWidth)
+        }
+    }
+}
+
+/// Raster aus Bildknöpfen in zwei Spalten auf gemeinsamem Grund (Bedingungen im Skizzenmodus).
+private struct RailGrid: View {
+    let cells: [RailGridCell]
+    let size: CGFloat
+    var isEnabled = true
+
+    static let spacing: CGFloat = 4
+
+    /// Höhe für count Knöpfe in zwei Spalten (mit Innenabstand)
+    static func height(count: Int, size: CGFloat) -> CGFloat {
+        let rows = CGFloat((count + 1) / 2)
+        return rows * size + max(0, rows - 1) * spacing + 2 * spacing
+    }
+
+    var body: some View {
+        let columns = [GridItem(.fixed(size), spacing: Self.spacing), GridItem(.fixed(size), spacing: Self.spacing)]
+        LazyVGrid(columns: columns, alignment: .leading, spacing: Self.spacing) {
+            ForEach(cells) { cell in
+                Button(action: cell.action) {
+                    RailGridIcon(cell: cell, size: size, isEnabled: isEnabled)
+                }
+                .buttonStyle(.pressable)
+                .accessibilityLabel(cell.title)
+                .accessibilityAddTraits(cell.isPending ? .isSelected : [])
+                .hoverTip(cell.title, cell.detail)
+            }
+        }
+        .padding(Self.spacing)
+        .floatingSurface(in: RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
+        .disabled(!isEnabled)
+    }
+}
+
+/// Symbol im Raster: passend farbig, sonst grau und blass; wartend getönt mit Rahmen.
+private struct RailGridIcon: View {
+    let cell: RailGridCell
+    let size: CGFloat
+    let isEnabled: Bool
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: Theme.Radius.label, style: .continuous)
+        let active = isEnabled && (cell.isApplicable || cell.isPending)
+        glyph(active: active)
+            .frame(width: size, height: size)
+            .background(cell.isPending ? Color.accentColor.opacity(0.22) : Color.clear, in: shape)
+            .overlay {
+                if cell.isPending {
+                    shape.strokeBorder(Color.accentColor, lineWidth: 2)
+                }
+            }
+            .contentShape(shape)
+    }
+
+    @ViewBuilder private func glyph(active: Bool) -> some View {
+        if ToolIcon.isCustom(cell.icon) {
+            ToolIcon(cell.icon, size: size * 0.58)
+                .saturation(active ? 1 : 0)
+                .opacity(active ? 1 : (isEnabled ? 0.55 : 0.3))
+        } else {
+            Image(systemName: cell.icon)
+                .symbolRenderingMode(.hierarchical)
+                .font(.system(size: size * 0.36, weight: .medium))
+                .foregroundStyle(active ? Color.accentColor : Color.primary.opacity(isEnabled ? 0.6 : 0.3))
         }
     }
 }

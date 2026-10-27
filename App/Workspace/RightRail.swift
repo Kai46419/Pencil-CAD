@@ -84,10 +84,6 @@ struct SnapMenu: View {
                     Text("Fang")
                         .font(.headline)
                 }
-                // Maßband-Ticken beim Ziehen; das Klicken beim Einrasten bleibt immer an (Kai)
-                Toggle(isOn: $sketch.drawHaptics) {
-                    row("Haptik beim Zeichnen", "Feines Ticken beim Ziehen von Linien und Formen", "hand.tap")
-                }
                 Divider()
                 Text("EINRASTEN")
                     .font(.caption.weight(.semibold))
@@ -126,9 +122,6 @@ struct SnapMenu: View {
                 }
                 Toggle(isOn: $sketch.showsSnapHints) {
                     row("Einrasthinweise", "Art des Fangs als Schild am Stift", "text.bubble")
-                }
-                Toggle(isOn: $sketch.snapHaptics) {
-                    row("Fühlbares Einrasten", "Kurzes Klicken, wenn ein Fangpunkt greift", "hand.tap")
                 }
                 Toggle(isOn: $sketch.autoConstrain) {
                     row("Automatisch einschränken", "Waagerecht, senkrecht, parallel und rechtwinklig beim Zeichnen festhalten", "link")
@@ -170,8 +163,6 @@ struct RightRail: View {
     /// Rahmenauswahl als Lasso (lange drücken auf „Rahmenauswahl“)
     @AppStorage(LassoSelection.key) private var lassoSelects = false
 
-    @State private var showsConstraints = true
-
     /// Eigenschaften öffnen bzw. schließen; beim Öffnen gilt das Auswahlwerkzeug.
     private func toggleProperties() {
         if panel == .properties {
@@ -199,8 +190,9 @@ struct RightRail: View {
         }
     }
 
-    /// Skizzenmodus wie bei Shapr3D: Fang, Raster, Ausrichten und Finger in einer Säule, daneben der Würfel;
-    /// darunter Anzeigemodi, Screenshot, Verlauf und die Einschränkungen (vor der Ebenenwahl ausgegraut).
+    /// Skizzenmodus (schlank, SolidCraft): Fang, Raster, Ausrichten und Finger in einer Säule, daneben der Würfel;
+    /// darunter Anzeigemodi, Screenshot, Verlauf, Eigenschaften und Sichtbarkeit als Symbole. Die Schalter der
+    /// früheren „Skizzenpalette“ stehen in SketchPalette, die Bedingungen links in der ToolRail.
     private var sketchColumn: some View {
         VStack(alignment: .trailing, spacing: 10) {
             HStack(alignment: .top, spacing: 8) {
@@ -246,65 +238,38 @@ struct RightRail: View {
                 }
             }
 
-            Menu {
-                displayModePicker
-            } label: {
-                HStack(spacing: 8) {
-                    RailLabel(title: "Anzeigemodi", subtitle: workspace.displayMode.rawValue)
-                    RailIcon(systemImage: workspace.displayMode.systemImage)
+            // Ansicht und Fenster als schmale Säule ohne Schilder: links daneben steht die Skizzenpalette
+            // (Werkzeug-Eigenschaften, Schalter der früheren „Skizzenpalette“); Bedingungen liegen links (ToolRail)
+            RailGroup {
+                Menu {
+                    displayModePicker
+                } label: {
+                    RailIcon(systemImage: workspace.displayMode.systemImage, shadowed: false)
                 }
-            }
-            .accessibilityLabel("Anzeigemodus")
-            .hoverTip("Anzeigemodi")
-            labeledButton("Screenshot", systemImage: "camera", action: screenshot)
-            labeledButton("Verlauf", systemImage: "clock.arrow.circlepath", isActive: panel == .history) {
-                panel = panel == .history ? nil : .history
-            }
-            labeledButton("Eigenschaften", systemImage: "info.circle", isActive: panel == .properties) {
-                toggleProperties()
-            }
-            Menu {
-                visibilityItems
-            } label: {
-                HStack(spacing: 8) {
-                    RailLabel(title: "Sichtbarkeit")
-                    RailIcon(systemImage: "eye")
+                .accessibilityLabel("Anzeigemodus")
+                .hoverTip("Anzeigemodi")
+                compactButton("Screenshot", systemImage: "camera", action: screenshot)
+                compactButton("Verlauf", systemImage: "clock.arrow.circlepath", isActive: panel == .history) {
+                    panel = panel == .history ? nil : .history
                 }
-            }
-            .accessibilityLabel("Sichtbarkeit")
-            .hoverTip("Sichtbarkeit")
-            Menu {
-                sketchPaletteItems
-            } label: {
-                HStack(spacing: 8) {
-                    RailLabel(title: "Skizzenpalette")
-                    RailIcon(systemImage: "slider.horizontal.3")
+                compactButton("Eigenschaften", systemImage: "info.circle", isActive: panel == .properties) {
+                    toggleProperties()
                 }
-            }
-            .accessibilityLabel("Skizzenpalette")
-            .hoverTip("Skizzenpalette")
-
-            Capsule()
-                .fill(Color.secondary.opacity(0.35))
-                .frame(width: 30, height: 3)
-                .frame(width: 44)
-            labeledButton("Einschränkungen", systemImage: "gearshape.fill", isActive: false) {
-                withAnimation(.easeOut(duration: 0.15)) { showsConstraints.toggle() }
-            }
-            if showsConstraints {
-                ConstraintColumn(sketch: sketch, isEnabled: !sketch.isChoosingPlane)
+                Menu {
+                    visibilityItems
+                } label: {
+                    RailIcon(systemImage: "eye", shadowed: false)
+                }
+                .accessibilityLabel("Sichtbarkeit")
+                .hoverTip("Sichtbarkeit")
             }
         }
     }
 
-    private func labeledButton(_ title: String, subtitle: String? = nil, systemImage: String, isActive: Bool = false,
+    private func compactButton(_ title: String, systemImage: String, isActive: Bool = false,
                                action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack(spacing: 8) {
-                RailLabel(title: title, subtitle: subtitle)
-                RailIcon(systemImage: systemImage, isActive: isActive)
-            }
-            .contentShape(Rectangle())
+            RailIcon(systemImage: systemImage, isActive: isActive, shadowed: false)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(title)
@@ -314,6 +279,12 @@ struct RightRail: View {
     /// Rastermaß; im Skizzenmodus wie bei Shapr3D zweizeilig („50“ über „mm“).
     private func gridMenu(stacked: Bool) -> some View {
         Menu {
+            if stacked {
+                // SolidCraft: Rasterweite 1-2-5 nach Zoom (Skizzenmodus); feste Weite darunter
+                Toggle("Automatisch (1-2-5)", systemImage: "square.grid.3x3",
+                       isOn: Binding(get: { sketch.options.gridAuto }, set: { sketch.options.gridAuto = $0 }))
+                Divider()
+            }
             Picker("Raster", selection: $sketch.gridStep) {
                 ForEach(Self.gridSteps, id: \.self) { step in
                     Text(LengthUnit.current.gridLabel(step)).tag(step)
@@ -358,22 +329,6 @@ struct RightRail: View {
         Button("Einzeln in „Ebenen“ …", systemImage: "square.3.layers.3d") {
             workspace.showsLayers = true
         }
-    }
-
-    /// Skizzenpalette wie in Fusion 360: was beim Skizzieren angezeigt wird.
-    @ViewBuilder
-    private var sketchPaletteItems: some View {
-        Toggle("Skizzierraster", systemImage: "grid", isOn: $sketch.showsGrid)
-        Toggle("Fang", systemImage: "scope", isOn: $sketch.snapEnabled)
-        Divider()
-        Toggle("Profil (Bereiche)", systemImage: "square.fill.on.square", isOn: $sketch.showsProfiles)
-        Toggle("Punkte", systemImage: "circle.grid.cross", isOn: $sketch.showsPoints)
-        Toggle("Bemaßungen", systemImage: "ruler", isOn: $sketch.showsDimensions)
-        Toggle("Feste Maße als Schloss", systemImage: "lock", isOn: $sketch.collapsesLockedDimensions)
-        Toggle("Abhängigkeiten", systemImage: "link", isOn: $sketch.showsConstraintBadges)
-        Toggle("Bestimmtheit (grün = fest)", systemImage: "checkmark.seal", isOn: $sketch.showsDefinition)
-        Toggle("Automatisch einschränken", systemImage: "wand.and.rays", isOn: $sketch.autoConstrain)
-        Toggle("Konstruktionsgeometrie", systemImage: "square.dashed", isOn: $sketch.showsConstruction)
     }
 
     @ViewBuilder
