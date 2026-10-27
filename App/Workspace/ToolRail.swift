@@ -162,6 +162,8 @@ private struct RailEntry: Identifiable {
     var action: () -> Void = {}
     /// Statt einer Kachel ein Raster aus Bildknöpfen in zwei Spalten (Bedingungen wie im SolidCraft-Mockup)
     var grid: [RailGridCell]?
+    /// Kurze Beschriftung unter der Kachel in der Skizzenleiste (nil = title)
+    var label: String?
 }
 
 /// Knopf im Raster der linken Leiste (Bedingung): passend = farbig, wartend = getönt mit Rahmen.
@@ -173,6 +175,35 @@ private struct RailGridCell: Identifiable {
     var isApplicable = false
     var isPending = false
     var action: () -> Void = {}
+}
+
+/// Abschnitt der Skizzenleiste (category nil = obere Zeile mit „Beenden“ und „Auswählen“).
+private struct RailSection: Identifiable {
+    let id: String
+    let category: ToolCategory?
+    var entries: [RailEntry]
+}
+
+/// Zelle im Zwei-Spalten-Raster der Skizzenleiste: Werkzeugkachel oder Bedingungsknopf.
+private enum RailCell: Identifiable {
+    case entry(RailEntry)
+    case grid(RailGridCell, isEnabled: Bool)
+
+    var id: String {
+        switch self {
+        case .entry(let entry): "entry.\(entry.id)"
+        case .grid(let cell, _): "grid.\(cell.id)"
+        }
+    }
+}
+
+/// Lage der Kacheln mit Untermenü in der Skizzenleiste
+private struct RailEntryFramesKey: PreferenceKey {
+    static let defaultValue: [String: CGRect] = [:]
+
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue()) { _, new in new }
+    }
 }
 
 /// Linke Werkzeugleiste (Aufbau wie bei Shapr3D, Symbole und Abschnitte wie Fusion 360):
@@ -199,6 +230,9 @@ struct ToolRail: View {
     /// Gemessene Höhe der Leiste und Lage jeder Gruppe darin (Koordinatenraum „ribbon“), für die Lage des Untermenüs
     @State private var railHeight: CGFloat = 0
     @State private var groupFrames: [ToolGroup: CGRect] = [:]
+    /// Lage der Skizzenkacheln mit Untermenü (Koordinatenraum „sketchRail“) und Höhe der Skizzenleiste
+    @State private var sketchFrames: [String: CGRect] = [:]
+    @State private var sketchRailHeight: CGFloat = 0
     /// Angeheftete Befehle (Stecknadel im Gruppenmenü, ModelRibbon.pinsKey)
     @AppStorage("ribbon.pins") private var pinsText = ""
     /// Kontextvorschläge (Shapr3D): mit Auswahl Aktionen statt Gruppen links (Std. aus, ModelRibbon.contextKey)
@@ -208,7 +242,7 @@ struct ToolRail: View {
 
     var body: some View {
         if sketch.isActive {
-            entryRail(sketchEntries, tile: 44, header: sketchHeader, collapsible: true)
+            sketchRail
         } else if showsContext {
             entryRail(contextEntries, tile: 44, header: nil)
         } else {
@@ -243,23 +277,7 @@ struct ToolRail: View {
             }
             ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
                 if let section = sectionStart(entries, index) {
-                    if collapsible, section != .create {
-                        SectionHeader(category: section, isCollapsed: collapsedSections.contains(section))
-                            .frame(height: headerHeight)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                if collapsedSections.contains(section) {
-                                    collapsedSections.remove(section)
-                                } else {
-                                    collapsedSections.insert(section)
-                                }
-                            }
-                            .accessibilityAddTraits(.isButton)
-                            .hoverTip(collapsedSections.contains(section) ? "Aufklappen" : "Zuklappen")
-                    } else {
-                        SectionHeader(category: section)
-                            .frame(height: headerHeight)
-                    }
+                    sectionHeader(section, collapsible: collapsible && section != .create)
                 }
                 if !isHidden(entry, collapsible: collapsible), let cells = entry.grid {
                     RailGrid(cells: cells, size: tile, isEnabled: entry.isEnabled)
@@ -267,29 +285,8 @@ struct ToolRail: View {
                 RailTile(title: entry.title, subtitle: entry.subtitle, systemImage: entry.systemImage,
                          category: entry.category, isActive: entry.isActive, isOpen: openEntry == entry.id,
                          size: tile, hasVariants: entry.flyout != nil && entry.primary != nil)
-                    .onTapGesture {
-                        if let primary = entry.primary {
-                            openEntry = nil
-                            primary()
-                        } else if entry.flyout != nil {
-                            openEntry = openEntry == entry.id ? nil : entry.id
-                        } else {
-                            openEntry = nil
-                            entry.action()
-                        }
-                    }
-                    .onLongPressGesture(minimumDuration: 0.35) {
-                        guard entry.flyout != nil else {
-                            // Ohne Varianten: kurze Erklärung als Kapsel unten
-                            if let text = ToolTips.detail(for: entry.title) {
-                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                                workspace.explain(ToolExplanation(title: entry.title, text: text))
-                            }
-                            return
-                        }
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                        openEntry = entry.id
-                    }
+                    .onTapGesture { tapEntry(entry) }
+                    .onLongPressGesture(minimumDuration: 0.35) { pressEntry(entry) }
                     .allowsHitTesting(entry.isEnabled)
                     .opacity(entry.isEnabled ? 1 : 0.45)
                     .accessibilityAddTraits(.isButton)
@@ -321,6 +318,53 @@ struct ToolRail: View {
         .animation(Theme.spring, value: openEntry)
     }
 
+    /// Abschnittskopf (ERSTELLEN, ÄNDERN …), auf Wunsch zuklappbar.
+    @ViewBuilder private func sectionHeader(_ section: ToolCategory, collapsible: Bool) -> some View {
+        if collapsible {
+            SectionHeader(category: section, isCollapsed: collapsedSections.contains(section))
+                .frame(height: headerHeight)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    if collapsedSections.contains(section) {
+                        collapsedSections.remove(section)
+                    } else {
+                        collapsedSections.insert(section)
+                    }
+                }
+                .accessibilityAddTraits(.isButton)
+                .hoverTip(collapsedSections.contains(section) ? "Aufklappen" : "Zuklappen")
+        } else {
+            SectionHeader(category: section)
+                .frame(height: headerHeight)
+        }
+    }
+
+    /// Antippen: Werkzeug starten (zuletzt gewählte Variante), Untermenü öffnen bzw. Aktion ausführen.
+    private func tapEntry(_ entry: RailEntry) {
+        if let primary = entry.primary {
+            openEntry = nil
+            primary()
+        } else if entry.flyout != nil {
+            openEntry = openEntry == entry.id ? nil : entry.id
+        } else {
+            openEntry = nil
+            entry.action()
+        }
+    }
+
+    /// Langes Drücken: Varianten zeigen; ohne Varianten eine kurze Erklärung als Kapsel unten.
+    private func pressEntry(_ entry: RailEntry) {
+        guard entry.flyout != nil else {
+            if let text = ToolTips.detail(for: entry.title) {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                workspace.explain(ToolExplanation(title: entry.title, text: text))
+            }
+            return
+        }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        openEntry = entry.id
+    }
+
     /// Höhe eines Eintrags in der Leiste (Kachel bzw. Raster), für die Lage des Untermenüs.
     private func entryHeight(_ entry: RailEntry, tile: CGFloat) -> CGFloat {
         guard let cells = entry.grid else { return tile }
@@ -329,15 +373,218 @@ struct ToolRail: View {
 
     // MARK: Skizzenmodus
 
-    /// Skizzenname und Ebene (ersetzt die frühere Kachel „Aktive Ebene“)
-    private var sketchHeader: String {
-        let name: String
+    /// Kachelgröße, Spaltenbreite (Kachel + Platz für die Beschriftung), Abstand und Innenabstand der Skizzenleiste
+    private let sketchTile: CGFloat = 44
+    private let sketchColumn: CGFloat = 48
+    private let sketchGap: CGFloat = 4
+    private let sketchPadding: CGFloat = 5
+
+    /// Feste Breite der Skizzenleiste: zwei Spalten. Breiter wird sie nie (sonst fängt sie Striche über dem Viewport ab).
+    private var sketchRailWidth: CGFloat { 2 * sketchColumn + sketchGap + 2 * sketchPadding }
+
+    /// Skizzenname (ersetzt die frühere Kachel „Aktive Ebene“)
+    private var sketchName: String {
         if let index = workspace.editingSketchIndex, model.sketches.indices.contains(index) {
-            name = model.sketches[index].name
-        } else {
-            name = "Skizze \(model.sketches.count + 1)"
+            return model.sketches[index].name
         }
-        return "\(name) · \(sketch.isChoosingPlane ? "Ebene wählen" : activePlaneName)"
+        return "Skizze \(model.sketches.count + 1)"
+    }
+
+    /// Skizzenname und Ebene, zweizeilig in Leistenbreite
+    private var sketchTitle: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(sketchName)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.primary)
+            Text(sketch.isChoosingPlane ? "Ebene wählen" : activePlaneName)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .lineLimit(1)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 4)
+        .floatingSurface(.regularMaterial, in: RoundedRectangle(cornerRadius: Theme.Radius.label, style: .continuous),
+                         elevation: .flat)
+    }
+
+    /// Skizzenleiste: zwei Kacheln je Zeile auf einer gemeinsamen schmalen Fläche, Abschnitte zuklappbar.
+    /// Das Untermenü (Varianten) liegt rechts daneben auf Höhe der Kachel und verbreitert die Leiste nicht.
+    private var sketchRail: some View {
+        let entries = sketchEntries
+        let sections = railSections(entries)
+        let list = VStack(alignment: .leading, spacing: 8) {
+            ForEach(sections) { section in
+                sketchSection(section)
+            }
+        }
+        .padding(sketchPadding)
+        .frame(width: sketchRailWidth, alignment: .leading)
+        return VStack(alignment: .leading, spacing: 6) {
+            sketchTitle
+            ViewThatFits(in: .vertical) {
+                list
+                ScrollView(showsIndicators: false) { list }
+                    .frame(width: sketchRailWidth)
+            }
+            .frame(width: sketchRailWidth)
+            .floatingSurface(in: RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
+        }
+        .frame(width: sketchRailWidth, alignment: .leading)
+        .coordinateSpace(name: "sketchRail")
+        .onPreferenceChange(RailEntryFramesKey.self) { frames in
+            sketchFrames = frames
+        }
+        .background {
+            GeometryReader { proxy in
+                Color.clear
+                    .onAppear { sketchRailHeight = proxy.size.height }
+                    .onChange(of: proxy.size.height) { _, height in
+                        sketchRailHeight = height
+                    }
+            }
+        }
+        .overlay(alignment: .topLeading) {
+            sketchFlyout(entries)
+        }
+        .animation(Theme.spring, value: openEntry)
+    }
+
+    /// Untermenü des offenen Eintrags: obere Kacheln öffnen es nach unten, untere nach oben.
+    @ViewBuilder private func sketchFlyout(_ entries: [RailEntry]) -> some View {
+        if let openEntry, let entry = entries.first(where: { $0.id == openEntry }), let items = entry.flyout {
+            let frame = sketchFrames[openEntry] ?? .zero
+            let fromTop = frame.midY * 2 < max(sketchRailHeight, 1)
+            Flyout(title: entry.title, category: entry.category, items: items) {
+                self.openEntry = nil
+            }
+            .padding(.top, fromTop ? max(frame.minY, 0) : 0)
+            .padding(.bottom, fromTop ? 0 : max(sketchRailHeight - frame.maxY, 0))
+            .frame(maxHeight: .infinity, alignment: fromTop ? .top : .bottom)
+            .offset(x: sketchRailWidth + 10)
+            .transition(.opacity.combined(with: .move(edge: .leading)))
+        }
+    }
+
+    /// Aufeinanderfolgende Einträge gleicher Kategorie bilden einen Abschnitt; „Beenden“ und „Auswählen“ die obere Zeile.
+    private func railSections(_ entries: [RailEntry]) -> [RailSection] {
+        var result: [RailSection] = []
+        for entry in entries {
+            let category: ToolCategory? = entry.category == .neutral || entry.category == .finish ? nil : entry.category
+            let id = category?.rawValue ?? "top"
+            if let last = result.last, last.id == id {
+                result[result.count - 1].entries.append(entry)
+            } else {
+                result.append(RailSection(id: id, category: category, entries: [entry]))
+            }
+        }
+        return result
+    }
+
+    /// Zeilen zu je zwei Zellen; ein Raster (Bedingungen) beginnt in einer neuen Zeile.
+    private func sketchRows(_ entries: [RailEntry]) -> [[RailCell]] {
+        var rows: [[RailCell]] = []
+        var current: [RailCell] = []
+        for entry in entries where !isHidden(entry, collapsible: true) {
+            if let cells = entry.grid {
+                if !current.isEmpty {
+                    rows.append(current)
+                    current = []
+                }
+                for cell in cells {
+                    current.append(.grid(cell, isEnabled: entry.isEnabled))
+                    if current.count == 2 {
+                        rows.append(current)
+                        current = []
+                    }
+                }
+                if !current.isEmpty {
+                    rows.append(current)
+                    current = []
+                }
+            } else {
+                current.append(.entry(entry))
+                if current.count == 2 {
+                    rows.append(current)
+                    current = []
+                }
+            }
+        }
+        if !current.isEmpty {
+            rows.append(current)
+        }
+        return rows
+    }
+
+    private func sketchSection(_ section: RailSection) -> some View {
+        let rows = sketchRows(section.entries)
+        return VStack(alignment: .leading, spacing: sketchGap) {
+            if let category = section.category {
+                sectionHeader(category, collapsible: category != .create)
+            }
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                HStack(spacing: sketchGap) {
+                    ForEach(row) { cell in
+                        railCell(cell)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private func railCell(_ cell: RailCell) -> some View {
+        switch cell {
+        case .entry(let entry):
+            compactTile(entry)
+        case .grid(let item, let isEnabled):
+            Button(action: item.action) {
+                RailGridIcon(cell: item, size: sketchTile, isEnabled: isEnabled)
+            }
+            .buttonStyle(.pressable)
+            .disabled(!isEnabled)
+            .accessibilityLabel(item.title)
+            .accessibilityAddTraits(item.isPending ? .isSelected : [])
+            .hoverTip(item.title, item.detail)
+            .frame(width: sketchColumn)
+        }
+    }
+
+    /// Kachel mit kleiner Beschriftung darunter; Variante und Erklärung im Schild.
+    private func compactTile(_ entry: RailEntry) -> some View {
+        RailTile(title: entry.label ?? entry.title, subtitle: entry.subtitle, systemImage: entry.systemImage,
+                 category: entry.category, isActive: entry.isActive, isOpen: openEntry == entry.id,
+                 size: sketchTile, hasVariants: entry.flyout != nil && entry.primary != nil, labelBelow: true)
+            .frame(width: sketchColumn)
+            .contentShape(Rectangle())
+            .onTapGesture { tapEntry(entry) }
+            .onLongPressGesture(minimumDuration: 0.35) { pressEntry(entry) }
+            .allowsHitTesting(entry.isEnabled)
+            .opacity(entry.isEnabled ? 1 : 0.45)
+            .accessibilityLabel(entry.title)
+            .accessibilityAddTraits(.isButton)
+            .hoverTip(entry.title, entryTip(entry))
+            .background {
+                if entry.flyout != nil {
+                    GeometryReader { proxy in
+                        Color.clear.preference(key: RailEntryFramesKey.self,
+                                               value: [entry.id: proxy.frame(in: .named("sketchRail"))])
+                    }
+                }
+            }
+    }
+
+    /// Schild: gewählte Variante, Erklärung und Hinweis auf die Varianten
+    private func entryTip(_ entry: RailEntry) -> String? {
+        var parts: [String] = []
+        if let subtitle = entry.subtitle {
+            parts.append(subtitle + ".")
+        }
+        if let detail = ToolTips.detail(for: entry.title) {
+            parts.append(detail)
+        }
+        if entry.primary != nil {
+            parts.append("Lange drücken: alle Varianten.")
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " ")
     }
 
     private func toolEntry(_ tool: SketchTool, category: ToolCategory, subtitle: String? = nil) -> RailEntry {
@@ -459,7 +706,7 @@ struct ToolRail: View {
         return [
             RailEntry(id: "sketch.finish", title: "Skizzieren beenden", systemImage: "checkmark", category: .finish, action: {
                 workspace.finishSketch()
-            }),
+            }, label: "Beenden"),
             // Pfeil: zeichnet nicht, sondern wählt, verschiebt und zieht Eck- und Endpunkte
             // Ins Leere ziehen wählt mit Rahmen bzw. Lasso (lange drücken: Variante wählen)
             RailEntry(id: "sketch.select", title: SketchTool.select.rawValue,
@@ -534,7 +781,7 @@ struct ToolRail: View {
             toolEntry(.mirror, category: .sketchPattern),
             toolEntry(.circPattern, category: .sketchPattern),
             toolEntry(.rectPattern, category: .sketchPattern),
-            // BEDINGEN: Bemaßung, dann das Raster der Bedingungen
+            // BEDINGEN: Bemaßung und Trennen in einer Zeile, dann das Raster der Bedingungen
             RailEntry(id: "sketch.dimension", title: ConstraintKind.dimension.rawValue, subtitle: "Element antippen",
                       systemImage: ConstraintKind.dimension.systemImage, category: .constrain, isEnabled: planeReady,
                       action: {
@@ -543,13 +790,13 @@ struct ToolRail: View {
                 sketch.tool = .select
                 sketch.notice = ConstraintKind.dimension.selectionHint
             }),
-            RailEntry(id: "sketch.constraints", title: "Bedingungen", systemImage: "sc.c_hv", category: .constrain,
-                      isEnabled: planeReady, grid: constraintCells),
             RailEntry(id: "sketch.detach", title: "Trennen", subtitle: detachPending ? "Aktiv" : nil,
                       systemImage: "link.badge.plus", category: .constrain, isActive: detachPending,
                       isEnabled: planeReady, action: {
                 sketch.start(.detach)
             }),
+            RailEntry(id: "sketch.constraints", title: "Bedingungen", systemImage: "sc.c_hv", category: .constrain,
+                      isEnabled: planeReady, grid: constraintCells),
             // REFERENZ
             toolEntry(.project, category: .reference),
             // PRÜFEN
@@ -557,7 +804,7 @@ struct ToolRail: View {
             RailEntry(id: "sketch.section", title: "Schnittansicht", subtitle: workspace.sketchSection ? "Ein" : "Aus",
                       systemImage: "sc.section", category: .inspect, isActive: workspace.sketchSection, action: {
                 workspace.sketchSection.toggle()
-            }),
+            }, label: "Schnitt"),
         ]
     }
 
@@ -1049,6 +1296,8 @@ struct RailTile: View {
     var size: CGFloat = 52
     /// Kleines Dreieck unten rechts: lange drücken zeigt weitere Varianten (wie Shapr3D/Fusion 360)
     var hasVariants = false
+    /// Schmale Form (Skizzenleiste): kleine Beschriftung unter der Kachel statt der Kapsel daneben
+    var labelBelow = false
 
     private var isCustom: Bool { ToolIcon.isCustom(systemImage) }
 
@@ -1061,6 +1310,25 @@ struct RailTile: View {
     private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: size * 0.27, style: .continuous) }
 
     var body: some View {
+        if labelBelow {
+            VStack(spacing: 2) {
+                tile
+                Text(title)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(isActive ? category.fill : Color.primary.opacity(0.7))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .minimumScaleFactor(0.85)
+                    .frame(width: size + 4)
+            }
+            .contentShape(Rectangle())
+            .animation(Theme.snappy, value: isActive)
+        } else {
+            besideBody
+        }
+    }
+
+    private var besideBody: some View {
         HStack(spacing: 8) {
             tile
             VStack(alignment: .leading, spacing: 0) {
@@ -1164,7 +1432,11 @@ private struct RailGrid: View {
                 .hoverTip(cell.title, cell.detail)
             }
         }
+        // Feste Breite: ein LazyVGrid nimmt sonst die ganze angebotene Breite ein (dunkles Band bis unters rechte
+        // Panel, das Berührungen über dem Viewport abfängt)
+        .frame(width: 2 * size + Self.spacing)
         .padding(Self.spacing)
+        .fixedSize(horizontal: true, vertical: false)
         .floatingSurface(in: RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
         .disabled(!isEnabled)
     }
