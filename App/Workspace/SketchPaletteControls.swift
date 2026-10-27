@@ -383,7 +383,10 @@ struct PaletteNumberRow: View {
                           step: stepped, onDone: { showsPad = false }, onKeyboard: switchToKeyboard)
         }
         .onChange(of: showsPad) { _, shown in
-            if !shown && !typesWithKeyboard { commit() }
+            guard !shown && !typesWithKeyboard else { return }
+            // „12,“ (Komma ohne Nachkommastelle) gilt als „12“, sonst meldet der Formelleser ein Zeichen zu viel
+            if text.hasSuffix(",") || text.hasSuffix(".") { text.removeLast() }
+            commit()
         }
     }
 

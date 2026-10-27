@@ -166,6 +166,12 @@ struct CompactKeypad: View {
         }
     }
 
+    /// Hat die Zahl am Ende schon ein Dezimalzeichen („12,5“ bzw. „12.5“ je nach Sprache)? Dann kein zweites Komma.
+    private var trailingNumberHasSeparator: Bool {
+        let run = text.reversed().prefix(while: { $0.isNumber || $0 == "," || $0 == "." })
+        return run.contains(",") || run.contains(".")
+    }
+
     private func press(_ key: Key) {
         switch key {
         case .digit(let digit):
@@ -174,7 +180,7 @@ struct CompactKeypad: View {
         case .comma:
             if replaces || text.isEmpty {
                 text = "0,"
-            } else if text.last != "," {
+            } else if !trailingNumberHasSeparator {
                 if !(text.last?.isNumber ?? false) { text += "0" }
                 text += ","
             }
