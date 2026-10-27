@@ -368,69 +368,72 @@ struct RightRail: View {
             RailButton(systemImage: "arrow.up.left.and.arrow.down.right", label: "Einpassen") {
                 workspace.send(.fitAll)
             }
-            Menu {
-                Button("Aktuelle Ansicht speichern", systemImage: "plus", action: workspace.saveCurrentView)
-                if !workspace.savedViews.isEmpty {
-                    Divider()
-                    ForEach(workspace.savedViews) { view in
-                        Button(view.name, systemImage: "camera.viewfinder") { workspace.restoreView(view) }
-                    }
-                    Menu("Löschen", systemImage: "trash") {
+            // Offener Modellbefehl (FeaturePanel): darunter stehen OK/Abbrechen, die übrigen Knöpfe ruhen
+            if workspace.command == nil {
+                Menu {
+                    Button("Aktuelle Ansicht speichern", systemImage: "plus", action: workspace.saveCurrentView)
+                    if !workspace.savedViews.isEmpty {
+                        Divider()
                         ForEach(workspace.savedViews) { view in
-                            Button(view.name, role: .destructive) { workspace.deleteView(view.id) }
+                            Button(view.name, systemImage: "camera.viewfinder") { workspace.restoreView(view) }
+                        }
+                        Menu("Löschen", systemImage: "trash") {
+                            ForEach(workspace.savedViews) { view in
+                                Button(view.name, role: .destructive) { workspace.deleteView(view.id) }
+                            }
                         }
                     }
+                } label: {
+                    RailIcon(systemImage: "camera.viewfinder")
+                        .accessibilityLabel("Ansichten")
                 }
-            } label: {
-                RailIcon(systemImage: "camera.viewfinder")
-                    .accessibilityLabel("Ansichten")
-            }
-            .hoverTip("Ansichten", "Blickwinkel und Zoom speichern und später mit einem Tipp wiederherstellen.")
-            Menu {
-                displayModePicker
-            } label: {
-                RailIcon(systemImage: workspace.displayMode.systemImage)
-                    .accessibilityLabel("Anzeigemodus")
-            }
-            .hoverTip("Anzeigemodi")
-            RailButton(systemImage: "camera", label: "Screenshot", action: screenshot)
-            RailButton(systemImage: "clock.arrow.circlepath", label: "Verlauf", isActive: panel == .history) {
-                panel = panel == .history ? nil : .history
-            }
-            RailButton(systemImage: "info.circle", label: "Eigenschaften", isActive: panel == .properties) {
-                toggleProperties()
-            }
-            Menu {
-                visibilityItems
-            } label: {
-                RailIcon(systemImage: "eye")
-                    .accessibilityLabel("Sichtbarkeit")
-            }
-            .hoverTip("Sichtbarkeit")
-            RailButton(systemImage: "square.3.layers.3d", label: "Ebenen", isActive: workspace.showsLayers) {
-                workspace.showsLayers.toggle()
-            }
-            RailButton(systemImage: "cube", label: "Körper wählen", isActive: workspace.selectsBodies) {
-                workspace.selectsBodies.toggle()
-                if workspace.selectsBodies, workspace.tool != .select { workspace.activate(.select) }
-            }
-            RailButton(systemImage: lassoSelects ? "lasso" : "rectangle.dashed",
-                       label: lassoSelects ? "Lassoauswahl" : "Rahmenauswahl", isActive: workspace.boxSelects) {
-                workspace.boxSelects.toggle()
-                if workspace.boxSelects, !workspace.acceptsBoxSelection { workspace.activate(.select) }
-            }
-            // Lange drücken: Rahmen oder Lasso (gilt auch für den Stift und in der Skizze)
-            .contextMenu {
-                Picker("Auswahlform", selection: $lassoSelects) {
-                    Label("Rahmen", systemImage: "rectangle.dashed").tag(false)
-                    Label("Lasso", systemImage: "lasso").tag(true)
+                .hoverTip("Ansichten", "Blickwinkel und Zoom speichern und später mit einem Tipp wiederherstellen.")
+                Menu {
+                    displayModePicker
+                } label: {
+                    RailIcon(systemImage: workspace.displayMode.systemImage)
+                        .accessibilityLabel("Anzeigemodus")
                 }
+                .hoverTip("Anzeigemodi")
+                RailButton(systemImage: "camera", label: "Screenshot", action: screenshot)
+                RailButton(systemImage: "clock.arrow.circlepath", label: "Verlauf", isActive: panel == .history) {
+                    panel = panel == .history ? nil : .history
+                }
+                RailButton(systemImage: "info.circle", label: "Eigenschaften", isActive: panel == .properties) {
+                    toggleProperties()
+                }
+                Menu {
+                    visibilityItems
+                } label: {
+                    RailIcon(systemImage: "eye")
+                        .accessibilityLabel("Sichtbarkeit")
+                }
+                .hoverTip("Sichtbarkeit")
+                RailButton(systemImage: "square.3.layers.3d", label: "Ebenen", isActive: workspace.showsLayers) {
+                    workspace.showsLayers.toggle()
+                }
+                RailButton(systemImage: "cube", label: "Körper wählen", isActive: workspace.selectsBodies) {
+                    workspace.selectsBodies.toggle()
+                    if workspace.selectsBodies, workspace.tool != .select { workspace.activate(.select) }
+                }
+                RailButton(systemImage: lassoSelects ? "lasso" : "rectangle.dashed",
+                           label: lassoSelects ? "Lassoauswahl" : "Rahmenauswahl", isActive: workspace.boxSelects) {
+                    workspace.boxSelects.toggle()
+                    if workspace.boxSelects, !workspace.acceptsBoxSelection { workspace.activate(.select) }
+                }
+                // Lange drücken: Rahmen oder Lasso (gilt auch für den Stift und in der Skizze)
+                .contextMenu {
+                    Picker("Auswahlform", selection: $lassoSelects) {
+                        Label("Rahmen", systemImage: "rectangle.dashed").tag(false)
+                        Label("Lasso", systemImage: "lasso").tag(true)
+                    }
+                }
+                // Direkte Knöpfe (vorher unter Prüfen bzw. Ändern links)
+                Capsule()
+                    .fill(Color.secondary.opacity(0.35))
+                    .frame(width: 30, height: 3)
+                ModelRailButtons(workspace: workspace, model: workspace.model, showsLabels: showsLabels && panel == nil)
             }
-            // Direkte Knöpfe (vorher unter Prüfen bzw. Ändern links)
-            Capsule()
-                .fill(Color.secondary.opacity(0.35))
-                .frame(width: 30, height: 3)
-            ModelRailButtons(workspace: workspace, model: workspace.model, showsLabels: showsLabels && panel == nil)
         }
     }
 }

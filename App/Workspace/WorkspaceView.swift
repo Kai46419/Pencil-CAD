@@ -106,17 +106,30 @@ private struct WorkspaceContent: View {
                             EmptyView()
                         }
                         // Skizzenpalette (SolidCraft): Eigenschaften des Werkzeugs bzw. der Auswahl rechts;
-                        // unten bleibt Platz für Hinweise und Rückgängig
+                        // unten bleibt Platz für Hinweise und Rückgängig. Nach „Skizze beenden“ zeigt dieselbe Stelle
+                        // das Eigenschaften-Panel des offenen Modellbefehls (FeaturePanel.swift)
                         if sketch.isActive {
                             SketchPalette(workspace: workspace, model: model, sketch: sketch)
                                 .padding(.bottom, 84)
                                 .transition(.opacity.combined(with: .move(edge: .trailing)))
+                        } else if let command = workspace.command {
+                            FeaturePanel(workspace: workspace, model: model, command: command)
+                                .id(ObjectIdentifier(command))
+                                .padding(.bottom, 84)
+                                .transition(.opacity.combined(with: .move(edge: .trailing)))
                         }
-                        RightRail(workspace: workspace, sketch: sketch, panel: $panel, screenshot: takeScreenshot)
+                        VStack(alignment: .trailing, spacing: 12) {
+                            RightRail(workspace: workspace, sketch: sketch, panel: $panel, screenshot: takeScreenshot)
+                            // Großer Haken und großes Kreuz unter dem Ansichtswürfel (CornerConfirm.swift)
+                            if !sketch.isActive, let command = workspace.command {
+                                CornerConfirm(workspace: workspace, model: model, command: command)
+                            }
+                        }
                     }
                     .padding(.trailing, 16)
                     .padding(.top, 76)
                     .animation(Theme.spring, value: sketch.isActive)
+                    .animation(Theme.spring, value: workspace.command == nil)
                 }
                 .overlay(alignment: .bottom) { bottomArea }
                 .overlay(alignment: .bottomLeading) { undoRedo }
@@ -419,11 +432,12 @@ private struct WorkspaceContent: View {
             if sketch.isActive, let calibration = workspace.canvasCalibration {
                 CanvasTraceCard(workspace: workspace, model: model, canvasID: calibration.canvas)
             }
-            // Im Skizzenmodus stehen die Werkzeug-Eigenschaften rechts in der Skizzenpalette
-            if !sketch.isActive {
+            // Im Skizzenmodus stehen die Werkzeug-Eigenschaften rechts in der Skizzenpalette, bei offenem
+            // Modellbefehl im Eigenschaften-Panel rechts
+            if !sketch.isActive, workspace.command == nil {
                 ParameterCard(workspace: workspace, model: model, sketch: sketch)
             }
-            if workspace.showsDoneBar {
+            if workspace.showsDoneBar, workspace.command == nil {
                 doneBar
             }
             if timelineSetting, !sketch.isActive {

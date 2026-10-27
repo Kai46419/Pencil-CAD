@@ -185,6 +185,22 @@ struct FeatureData: Codable {
     /// angrenzende Bereiche zusammengefasst und berührende Teile verschmolzen – beim Nachbau ebenso, damit die
     /// Körpernummern späterer Schritte stimmen.
     var separateParts: Bool?
+    // Eigenschaften-Panel nach SolidCraft (ExtrudeCommand.swift, RevolveCommand.swift, PrimitiveCommand.swift):
+    // was das Panel beim Bearbeiten braucht. Fehlt in älteren Ständen.
+    /// Ausmaß (ExtrudeExtent bzw. „Winkel“/„Bis Objekt“ beim Drehen) als Rohwert
+    var extent: String?
+    /// Start versetzt (mm entlang der Skizzennormale)
+    var startOffset: Double?
+    /// Bis Objekt bzw. Von Objekt: angetippter Punkt
+    var toObject: SIMD3<Double>?
+    var fromObject: SIMD3<Double>?
+    /// Symmetrisch als Gesamtabstand: Parameter „distance“ ist je Seite gespeichert (Nachbau), das Panel zeigt
+    /// das Doppelte. nil/false = alter Weg (Wert je Seite)
+    var symmetricTotal: Bool?
+    /// Operation von der Automatik gewählt (nicht von Hand)
+    var operationAuto: Bool?
+    /// Richtung umgekehrt (Panel-Schalter)
+    var flipped: Bool?
 }
 
 /// Ein Schritt im parametrischen Verlauf.
@@ -298,7 +314,26 @@ extension ModelStore {
         feature.data.onFace = plane.isOnFace
         feature.data.target = unionTarget(plane.sourceBody)
         feature.data.separateParts = true
+        feature.data.symmetricTotal = regionDirection == .symmetric && regionSymmetricTotal ? true : nil
+        // Versetzter Start und Dünn „Zwei Seiten“ kennt der Nachbau nicht: fester Stand statt falschem Feature
+        if regionStartOffset != 0 || (regionThin && regionThinThickness2 != nil) {
+            featureRecorder.preview = nil
+            return
+        }
         featureRecorder.preview = PendingFeature(feature: feature, regions: selectedRegions)
+    }
+
+    /// Angaben des Eigenschaften-Panels an die offene Extrusion bzw. Drehung hängen (nach noteExtrude/noteRevolve).
+    func notePanelData(extent: String?, toObject: SIMD3<Double>?, fromObject: SIMD3<Double>?, operationAuto: Bool,
+                       flipped: Bool) {
+        guard var pending = featureRecorder.preview,
+              pending.feature.kind == .extrude || pending.feature.kind == .revolve else { return }
+        pending.feature.data.extent = extent
+        pending.feature.data.toObject = toObject
+        pending.feature.data.fromObject = fromObject
+        pending.feature.data.operationAuto = operationAuto
+        pending.feature.data.flipped = flipped ? true : nil
+        featureRecorder.preview = pending
     }
 
     /// Bereiche um eine Achse gedreht (Vorschau).
@@ -312,6 +347,8 @@ extension ModelStore {
         feature.data.axis = axis
         feature.data.target = unionTarget(sketches[first.sketch].plane.sourceBody)
         feature.data.separateParts = true
+        feature.data.direction = ExtrudeDirection.oneSide.rawValue
+        feature.data.extent = "angle"
         featureRecorder.preview = PendingFeature(feature: feature, regions: selectedRegions)
     }
 
@@ -330,6 +367,7 @@ extension ModelStore {
         }
         feature.data.primitive = primitive.rawValue
         feature.data.origin = base
+        feature.data.mode = ExtrudeMode.newBody.rawValue
         featureRecorder.preview = PendingFeature(feature: feature)
     }
 

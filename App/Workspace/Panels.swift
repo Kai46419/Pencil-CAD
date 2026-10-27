@@ -121,7 +121,11 @@ struct ParameterCard: View {
     @ObservedObject var sketch: SketchController
 
     var body: some View {
-        if sketch.isActive {
+        if workspace.command != nil {
+            // Offener Modellbefehl: Werte stehen im Eigenschaften-Panel rechts (FeaturePanel.swift); die Karten
+            // bleiben als Rückfall für Werkzeuge ohne Treiber
+            EmptyView()
+        } else if sketch.isActive {
             // Skizzenmodus: Ebenenwahl und Werkzeug-Einstellungen stehen rechts in der Skizzenpalette
             // (SketchPalette.swift). sketchCard/toolOptions bleiben bis zum Abgleich als Quelle stehen.
             EmptyView()
