@@ -2094,7 +2094,9 @@ final class ViewportView: MTKView {
 
     /// Finger im Werkzeug „Beschneiden“: wischt wie der Stift über die Kurven (Power Trim), Antippen beschneidet ein Stück.
     private func acceptsForCutSwipe(_ touch: UITouch) -> Bool {
-        guard touch.type == .direct, let sketch, sketch.isActive, !sketch.isChoosingPlane else { return false }
+        // Aufgelegter Handballen (große Berührfläche) schneidet nicht
+        guard touch.type == .direct, touch.majorRadius < 40, let sketch, sketch.isActive, !sketch.isChoosingPlane
+        else { return false }
         return sketch.tool == .trim
     }
 
@@ -2455,7 +2457,8 @@ final class ViewportView: MTKView {
                 return
             case .splitAtPoint:
                 if let point = sketchPoint(at: location) {
-                    sketch.splitCurve(at: point, snapped: point, tolerance: snapTolerance)
+                    let snapped = sketch.cutSnapPoint(point, tolerance: snapTolerance)
+                    sketch.splitCurve(at: point, snapped: snapped, tolerance: snapTolerance)
                 }
                 refresh()
                 return

@@ -24,17 +24,21 @@ extension SketchController {
 
     /// Richtungen, an denen eine neue Linie an der vorhandenen Linie (Richtung v) einrastet: parallel,
     /// gespiegelt (nur bei schrägen Linien – bei waagerechten/senkrechten fällt es mit parallel zusammen) und
-    /// senkrecht. Bei gleichem Abstand gewinnt die frühere (bei 45° also „gespiegelt“ vor „senkrecht“).
+    /// senkrecht. Bei 45° fällt „gespiegelt“ mit „senkrecht“ zusammen: dann nur „senkrecht“, damit z. B. eine
+    /// Raute beim späteren Ändern des Winkels rechtwinklig bleibt.
     static func inferenceDirections(_ v: Point2, ref: SketchCurveRef) -> [(direction: Point2, relation: InferredRelation)] {
         let length = simd_length(v)
         guard length > 1e-12 else { return [] }
         let d = v / length
         var result: [(direction: Point2, relation: InferredRelation)] = [(direction: d, relation: .parallel(ref))]
         let slant = min(abs(d.x), abs(d.y))
-        if slant > sin(equalAngleTolerance) {
-            result.append((direction: Point2(d.x, -d.y), relation: .mirrored(ref)))
+        let mirror = Point2(d.x, -d.y)
+        let perpendicular = Point2(-d.y, d.x)
+        let matchesPerpendicular: Bool = abs(simd_dot(mirror, perpendicular)) > cos(equalAngleTolerance)
+        if slant > sin(equalAngleTolerance), !matchesPerpendicular {
+            result.append((direction: mirror, relation: .mirrored(ref)))
         }
-        result.append((direction: Point2(-d.y, d.x), relation: .perpendicular(ref)))
+        result.append((direction: perpendicular, relation: .perpendicular(ref)))
         return result
     }
 

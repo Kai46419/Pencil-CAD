@@ -38,7 +38,12 @@ enum SketchCut {
                         guard let x = SketchTrim.segmentSegment(path[j], path[j + 1], c, d) else { continue }
                         let length: Double = max(simd_distance(path[j], path[j + 1]), 1e-12)
                         let along: Double = Double(j) + simd_distance(path[j], x) / length
-                        found.append((position: along, point: x))
+                        // Ein Hauch entlang der Kurve versetzt: Läuft der Strich genau durch einen Schnittpunkt
+                        // zweier Kurven, trifft jeder Treffer weiter seine eigene Kurve statt einer zufälligen
+                        let segment: Point2 = d - c
+                        let segmentLength: Double = simd_length(segment)
+                        let shift: Point2 = segmentLength > 1e-12 ? segment * (step * 0.25 / segmentLength) : .zero
+                        found.append((position: along, point: x + shift))
                     }
                 }
             }
