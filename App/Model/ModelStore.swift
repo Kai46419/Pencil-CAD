@@ -915,9 +915,11 @@ final class ModelStore: ObservableObject {
     /// Abziehen „bis hinten“: liegt die Rückseite des Materials höchstens eine Toleranz vor bzw. hinter dem
     /// Werkzeugende, wird der Abstand über die Rückseite hinaus verlängert (OpenCASCADE lässt sonst bei koplanarem
     /// bzw. knapp verfehltem Ende eine Haut stehen). distance wie in setRegionValue; nil = nichts ändern.
-    private func cutThroughDistance(_ regions: [SketchRegion], plane: SketchPlane, distance: Double) -> Double? {
+    /// in: Körperstand (Nachbau im Verlauf), sonst die aktuellen Körper.
+    func cutThroughDistance(_ regions: [SketchRegion], plane: SketchPlane, distance: Double,
+                            in state: [SceneBody]? = nil) -> Double? {
         guard PCKShape.kernelAvailable, distance != 0, distance.isFinite else { return nil }
-        let shapes: [PCKShape] = bodies.filter { !$0.isHidden }.map(\.shape)
+        let shapes: [PCKShape] = (state ?? bodies).filter { !$0.isHidden }.map(\.shape)
         guard !shapes.isEmpty else { return nil }
         let depth = abs(distance)
         let main = plane.extrusionSign(mode: .cut) * distance

@@ -919,8 +919,14 @@ extension ModelStore {
         let regions = separate || feature.data.thin == true ? filled : SketchRegionMerge.merged(filled)
         let mode = ExtrudeMode(rawValue: feature.data.mode ?? "") ?? .newBody
         let direction = ExtrudeDirection(rawValue: feature.data.direction ?? "") ?? .oneSide
-        let distance = feature.value("distance") ?? 0
+        var distance = feature.value("distance") ?? 0
         guard distance != 0 else { throw FeatureError("Abstand 0.") }
+        // Wie in der Vorschau (setRegionValue): Abziehen bis an die Rückseite schneidet durchgehend, auch nach
+        // „Bearbeiten“ mit genau der Materialstärke (sonst bliebe dort eine Haut)
+        if mode == .cut, direction == .oneSide,
+           let through = cutThroughDistance(regions, plane: plane, distance: distance, in: state) {
+            distance = through
+        }
         let second = feature.value("second") ?? 0
         let solid: PCKShape?
         if feature.data.thin == true {
