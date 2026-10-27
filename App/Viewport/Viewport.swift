@@ -1997,7 +1997,8 @@ final class ViewportView: MTKView {
     private func acceptsForSketchBox(_ touch: UITouch) -> Bool {
         guard acceptsForSketch(touch), let sketch, sketch.tool == .select, sketch.pendingAction == nil,
               let point = sketchPoint(for: touch) else { return false }
-        guard sketch.pick(at: point, tolerance: snapTolerance) == nil else { return false }
+        // Auch Text: auf der Schrift aufsetzen verschiebt ihn (wie beginSelectDrag), statt ein Lasso zu beginnen
+        guard sketch.pick(at: point, tolerance: snapTolerance, includeText: true) == nil else { return false }
         // Spline-Tangentengriffe
         guard !sketch.hitsSplineHandle(at: point, tolerance: snapTolerance) else { return false }
         guard !sketch.hitsRadiusHandle(at: point, tolerance: snapTolerance) else { return false }
