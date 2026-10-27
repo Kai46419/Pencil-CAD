@@ -396,7 +396,7 @@ final class ModelStore: ObservableObject {
     @Published private(set) var previewName: String?
     /// Skizze des Körpers, der gerade abgerundet bzw. gefast wird: ihre (eckige) Kontur passt nicht mehr zum
     /// Körper und wird während der Vorschau ausgeblendet, beim Übernehmen dauerhaft (Kai: „die Außenlinie muss weg“).
-    @Published private(set) var previewHiddenSketch: UUID?
+    @Published var previewHiddenSketch: UUID?
     @Published private(set) var history: [HistoryEntry] = []
     @Published private(set) var future: [HistoryEntry] = []
     private var previewBodies: [SceneBody]?
