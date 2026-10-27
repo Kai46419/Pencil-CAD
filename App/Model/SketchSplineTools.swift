@@ -334,7 +334,7 @@ extension SketchConstraint {
         case .distance(let a, let b, let value): result.variant = .distance(f(a), f(b), value: value)
         case .pointLineDistance(let a, let c, let value): result.variant = .pointLineDistance(f(a), c, value: value)
         case .parallel, .perpendicular, .tangent, .concentric, .horizontal, .vertical, .equalLength, .equalRadius,
-             .angle, .radius:
+             .equalAngle, .angle, .radius:
             break
         }
         return result

@@ -228,6 +228,7 @@ enum ToolTips {
         "Konzentrisch": "Kreise oder Bögen haben dieselbe Mitte. Wählen: zwei oder mehr Kreise/Bögen.",
         "Horizontal/Vertikal": "Linie wird waagrecht bzw. senkrecht (je nachdem, was näher liegt); auch für zwei Punkte. Wählen: Linie(n) oder zwei Punkte.",
         "Gleich": "Gleiche Länge bzw. gleicher Radius. Wählen: zwei Linien oder zwei Kreise/Bögen.",
+        "Gleicher Winkel": "Linien haben denselben Winkel zur Waagerechten oder den gespiegelten (z. B. 70° und 110°, symmetrisch zur Senkrechten). Wählen: zwei oder mehr Linien.",
         "Symmetrien": "Zwei Punkte oder Elemente spiegelbildlich zu einer Achse. Wählen: zwei Punkte/Elemente, zuletzt die Achse (Linie).",
         "Trennen": "Löst Einschränkungen an der Auswahl, z. B. trennt zusammenhängende Ecken, damit sie einzeln verschoben werden können.",
         "Verankern": "Fixiert Punkte oder Kurven an ihrer Stelle; sie bewegen sich beim Ändern anderer Elemente nicht mehr.",

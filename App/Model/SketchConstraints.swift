@@ -42,6 +42,8 @@ enum ConstraintKind: String, CaseIterable, Identifiable, Codable {
     case concentric = "Konzentrisch"
     case horizontalVertical = "Horizontal/Vertikal"
     case equal = "Gleich"
+    /// Gleicher bzw. gespiegelter Winkel zweier Linien (70° und 110°: symmetrisch zur Senkrechten)
+    case equalAngle = "Gleicher Winkel"
     case symmetric = "Symmetrien"
     /// Punkte bzw. Kurven an ihrer Stelle verankern (Fusion 360 „Fix“)
     case lock = "Verankern"
@@ -62,6 +64,7 @@ enum ConstraintKind: String, CaseIterable, Identifiable, Codable {
         case .concentric: "◎"
         case .horizontalVertical: "H/V"
         case .equal: "="
+        case .equalAngle: "∠="
         case .symmetric: "⟷"
         case .lock: "🔒"
         case .dimension: ""
@@ -80,6 +83,7 @@ enum ConstraintKind: String, CaseIterable, Identifiable, Codable {
         case .concentric: "Konzentrisch: zwei oder mehr Kreise/Bögen antippen."
         case .horizontalVertical: "Horizontal/Vertikal: Linien oder zwei Punkte antippen."
         case .equal: "Gleich: zwei Linien oder zwei Kreise/Bögen antippen."
+        case .equalAngle: "Gleicher Winkel: zwei oder mehr Linien antippen – gleich oder gespiegelt (z. B. 70° und 110°)."
         case .symmetric: "Symmetrie: zwei Punkte (oder zwei Kreise/Linien) und zuletzt die Achse antippen."
         case .lock: "Verankern: Punkte oder Kurven antippen – sie bleiben beim Ändern von Maßen stehen."
         case .dimension: "Bemaßen: ein Element, zwei Punkte, Punkt und Linie oder zwei Linien antippen."
@@ -97,6 +101,7 @@ enum ConstraintKind: String, CaseIterable, Identifiable, Codable {
         case .concentric: "circle.circle"
         case .horizontalVertical: "arrow.up.and.down.and.arrow.left.and.right"
         case .equal: "equal"
+        case .equalAngle: "chevron.up"
         case .symmetric: "arrow.left.and.right.righttriangle.left.righttriangle.right"
         case .lock: "lock"
         case .dimension: "ruler"
@@ -121,6 +126,9 @@ struct SketchConstraint: Codable, Hashable {
         case verticalPoints(SketchPointRef, SketchPointRef)
         case equalLength(SketchCurveRef, SketchCurveRef)
         case equalRadius(SketchCurveRef, SketchCurveRef)
+        /// Gleicher Winkel zur Waagerechten: mirrored = gespiegelt (α und 180° − α, symmetrisch zur Senkrechten;
+        /// für ungerichtete Linien dasselbe wie −α, symmetrisch zur Waagerechten), sonst wie parallel
+        case equalAngle(SketchCurveRef, SketchCurveRef, mirrored: Bool)
         case symmetric(SketchPointRef, SketchPointRef, axis: SketchCurveRef)
         case lock(SketchPointRef, at: Point2)
         /// Treibende Maße: Abstand zweier Punkte, Abstand Punkt–Linie, Winkel zweier Linien (Grad)
@@ -147,6 +155,7 @@ struct SketchConstraint: Codable, Hashable {
         case .concentric: .concentric
         case .horizontal, .vertical, .horizontalPoints, .verticalPoints: .horizontalVertical
         case .equalLength, .equalRadius: .equal
+        case .equalAngle: .equalAngle
         case .symmetric: .symmetric
         case .lock: .lock
         case .distance, .pointLineDistance, .angle, .radius: .dimension
@@ -181,7 +190,7 @@ struct SketchConstraint: Codable, Hashable {
     var entities: [Int] {
         switch variant {
         case .parallel(let a, let b), .perpendicular(let a, let b), .tangent(let a, let b, _), .concentric(let a, let b),
-             .equalLength(let a, let b), .equalRadius(let a, let b):
+             .equalLength(let a, let b), .equalRadius(let a, let b), .equalAngle(let a, let b, _):
             [a.entity, b.entity]
         case .coincident(let a, let b), .horizontalPoints(let a, let b), .verticalPoints(let a, let b):
             [a.entity, b.entity]
@@ -223,6 +232,7 @@ struct SketchConstraint: Codable, Hashable {
         case .verticalPoints(let a, let b): v = p(a).flatMap { a in p(b).map { .verticalPoints(a, $0) } }
         case .equalLength(let a, let b): v = c(a).flatMap { a in c(b).map { .equalLength(a, $0) } }
         case .equalRadius(let a, let b): v = c(a).flatMap { a in c(b).map { .equalRadius(a, $0) } }
+        case .equalAngle(let a, let b, let m): v = c(a).flatMap { a in c(b).map { .equalAngle(a, $0, mirrored: m) } }
         case .symmetric(let a, let b, let axis):
             v = p(a).flatMap { a in p(b).flatMap { b in c(axis).map { .symmetric(a, b, axis: $0) } } }
         case .lock(let a, let at): v = p(a).map { .lock($0, at: at) }
@@ -792,6 +802,13 @@ enum ConstraintSolver {
         case .equalRadius(let a, let b):
             guard case .circle(_, let r1) = curve(a, e), case .circle(_, let r2) = curve(b, e) else { return [] }
             return [r1 - r2]
+        case .equalAngle(let a, let b, let mirrored):
+            guard case .line(let p1, let p2) = curve(a, e), case .line(let q1, let q2) = curve(b, e) else { return [] }
+            let d1 = direction(p1, p2), d2 = direction(q1, q2)
+            // Gespiegelt: Richtung an der Waagerechten spiegeln (x, y) → (x, −y); für Linien ohne Richtungssinn
+            // ist das dieselbe Gerade wie gespiegelt an der Senkrechten (−x, y)
+            let target: Point2 = mirrored ? Point2(d2.x, -d2.y) : d2
+            return [cross(d1, target)]
         case .symmetric(let a, let b, let axis):
             guard let p = point(a, e), let q = point(b, e), case .line(let s1, let s2) = curve(axis, e) else { return [] }
             let d = direction(s1, s2)

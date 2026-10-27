@@ -489,6 +489,8 @@ final class ViewportView: MTKView {
     /// Skizzenlinien in Graphit (Kai, Variante 1): sRGB #2F3440, hier linear (Ausgabe ist sRGB).
     /// Gilt beim Zeichnen und für freie fertige Linien, mit 1,6 pt Strich und Endpunkten r 2,6 pt.
     private static let sketchGraphite = SIMD3<Float>(0.0284, 0.0343, 0.0513)
+    /// Gleicher bzw. gespiegelter Winkel beim Zeichnen (Vorschau und Bezugslinie)
+    private static let angleMatchGreen = SIMD3<Float>(0.08, 0.62, 0.2)
     private static let sketchLineWidth: Float = 1.6
     private static let sketchPointRadius: Float = 2.6
     /// Profilfläche: Graphit mit 14 % Deckkraft statt der blauen Tönung
@@ -658,7 +660,9 @@ final class ViewportView: MTKView {
                         previewEnds.append(last)
                     }
                 }
-                groups.append(LineGroup(polylines: preview.map { $0.map(world) }, color: Self.sketchGraphite,
+                // Eingerastet auf gleichen bzw. gespiegelten Winkel einer vorhandenen Linie: grün
+                let previewColor: SIMD3<Float> = sketch.showsAngleMatch ? Self.angleMatchGreen : Self.sketchGraphite
+                groups.append(LineGroup(polylines: preview.map { $0.map(world) }, color: previewColor,
                                         width: Self.sketchLineWidth, dots: previewEnds.map(world),
                                         dotRadius: Self.sketchPointRadius))
             }
@@ -701,7 +705,7 @@ final class ViewportView: MTKView {
             // Gleicher Winkel wie eine vorhandene Linie: diese leuchtet grün
             if !sketch.parallelLines.isEmpty {
                 groups.append(LineGroup(polylines: sketch.parallelLines.map { $0.map(world) },
-                                        color: SIMD3(0.08, 0.62, 0.2), width: 4))
+                                        color: Self.angleMatchGreen, width: 4))
             }
             // Gemerkte Punkte (Stift gedrückt) als orange Kreuze
             if !sketch.capturedPoints.isEmpty {

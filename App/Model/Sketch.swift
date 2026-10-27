@@ -341,7 +341,7 @@ final class SketchController: ObservableObject {
     /// Bezugslinie für die Sperre „parallel“ bzw. „senkrecht“: zuletzt erkannte bzw. zuletzt gezeichnete Linie
     private(set) var lockReference: SketchCurveRef?
     /// Beim aktuellen Fang erkannte Beziehung zu einer vorhandenen Linie
-    private var inferredRelation: InferredRelation?
+    private(set) var inferredRelation: InferredRelation?
     /// Einzelne Fangarten; werden für die nächste Sitzung gemerkt.
     @Published var snapKinds: Set<SnapKind> = SketchController.storedSnapKinds() {
         didSet { UserDefaults.standard.set(snapKinds.map(\.rawValue), forKey: Self.snapKindsKey) }
@@ -1807,6 +1807,9 @@ final class SketchController: ObservableObject {
         case .perpendicular(let other)? where entities.indices.contains(other.entity) && other.entity != index:
             constraints.append(SketchConstraint(variant: .perpendicular(other, ref)))
             lockReference = other
+        case .mirrored(let other)? where entities.indices.contains(other.entity) && other.entity != index:
+            // Gespiegelter Winkel (70° ↔ 110°): hält die Symmetrie zur Senkrechten (SketchAngleSnap.swift)
+            constraints.append(SketchConstraint(variant: .equalAngle(other, ref, mirrored: true)))
         default:
             if abs(d.y) <= length * 1e-9 {
                 constraints.append(SketchConstraint(variant: .horizontal(ref)))
@@ -3558,6 +3561,10 @@ final class SketchController: ObservableObject {
             if lines.count == curves.count { return lines.dropFirst().map { .equalLength(lines[0], $0) } }
             if circles.count == curves.count { return circles.dropFirst().map { .equalRadius(circles[0], $0) } }
             return []
+        case .equalAngle:
+            // Gleich oder gespiegelt – je nachdem, was näher an der jetzigen Lage ist (SketchAngleSnap.swift)
+            guard points.isEmpty, lines.count >= 2, lines.count == curves.count else { return [] }
+            return lines.dropFirst().map { equalAngleVariant(lines[0], $0) }
         case .symmetric:
             // Zwei Punkte und eine Linie als Achse, oder zwei Kreise/Linien und zuletzt die Achse
             if points.count == 2, lines.count == 1, curves.count == 1 {
@@ -3732,7 +3739,8 @@ final class SketchController: ObservableObject {
     private func badgePosition(_ constraint: SketchConstraint) -> Point2? {
         switch constraint.variant {
         case .parallel(let c, _), .perpendicular(let c, _), .tangent(let c, _, _), .concentric(let c, _),
-             .horizontal(let c), .vertical(let c), .equalLength(let c, _), .equalRadius(let c, _):
+             .horizontal(let c), .vertical(let c), .equalLength(let c, _), .equalRadius(let c, _),
+             .equalAngle(let c, _, _):
             guard let line = curvePolyline(c), !line.isEmpty else { return nil }
             return line[line.count / 2]
         case .coincident(let p, _), .pointOnCurve(let p, _), .midpoint(let p, _), .horizontalPoints(let p, _),
@@ -3988,23 +3996,28 @@ final class SketchController: ObservableObject {
         var result = snapped
         // Wie SketchUp: parallel oder senkrecht zu einer vorhandenen Linie (magenta Inferenz)
         var best: (distance: Double, point: Point2, relation: InferredRelation)?
+        let reach = simd_distance(p, anchor)
         for line in lines {
-            let d = simd_normalize(line.b - line.a)
-            for (direction, perpendicular) in [(d, false), (Point2(-d.y, d.x), true)] {
+            // Parallel, gespiegelt (70° ↔ 110°) und senkrecht, siehe SketchAngleSnap.swift
+            for candidate in Self.inferenceDirections(line.b - line.a, ref: line.ref) {
+                let direction = candidate.direction
                 let along = simd_dot(p - anchor, direction)
                 let distance = simd_distance(anchor + direction * along, p)
                 // Länge entlang der Richtung im Rastermaß
                 let stepped = snapKinds.contains(.grid) && gridStep > 0 ? (along / gridStep).rounded() * gridStep : along
                 let projected = anchor + direction * stepped
-                if distance <= tolerance, distance < (best?.distance ?? .infinity) {
-                    best = (distance, projected,
-                            perpendicular ? InferredRelation.perpendicular(line.ref) : .parallel(line.ref))
+                let limit = Self.inferenceLimit(candidate.relation, reach: reach, tolerance: tolerance)
+                if distance <= limit, distance < (best?.distance ?? .infinity) {
+                    best = (distance, projected, candidate.relation)
                 }
             }
         }
         guard let best else { return snapped.kind == .angle ? alignedOnRay(snapped, anchor: anchor, tolerance: tolerance) : snapped }
+        // Waagerecht/senkrecht (15°-Schritt) hat Vorrang vor gleichem bzw. gespiegeltem Winkel
+        let keepsAxis = snapped.kind == .angle && !best.relation.isPerpendicular
+            && Self.isAxisAligned(snapped.point - anchor)
         // Parallel bzw. senkrecht schlägt den 15°-Schritt, wenn es näher am Stift liegt
-        if snapped.kind != .angle || best.distance < simd_distance(snapped.point, p) - 1e-9 {
+        if !keepsAxis, snapped.kind != .angle || best.distance < simd_distance(snapped.point, p) - 1e-9 {
             result.point = best.point
             result.kind = .angle
             result.guides = [(anchor, best.point)]
@@ -4015,10 +4028,16 @@ final class SketchController: ObservableObject {
         let current = result.point - anchor
         guard simd_length(current) > 1e-9 else { return result }
         let direction = simd_normalize(current)
+        let perpendicularMatch = inferredRelation?.isPerpendicular == true
+        let mirroredMatch = inferredRelation?.isMirrored == true
         parallelLines = lines.filter { line in
             let d = simd_normalize(line.b - line.a)
             let cross = abs(d.x * direction.y - d.y * direction.x)
-            return cross < 1e-4 || (inferredRelation?.isPerpendicular == true && abs(cross - 1) < 1e-4)
+            // Gespiegelt: Kreuzprodukt mit der an der Waagerechten gespiegelten Richtung
+            let mirroredCross = abs(d.x * direction.y + d.y * direction.x)
+            if cross < 1e-4 { return true }
+            if perpendicularMatch, abs(cross - 1) < 1e-4 { return true }
+            return mirroredMatch && mirroredCross < 1e-4
         }.map { [$0.a, $0.b] }
         return result
     }

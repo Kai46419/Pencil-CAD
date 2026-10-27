@@ -91,6 +91,9 @@ enum DirectionLock: String, CaseIterable, Identifiable {
 enum InferredRelation: Equatable {
     case parallel(SketchCurveRef)
     case perpendicular(SketchCurveRef)
+    /// Gespiegelter Winkel (70° ↔ 110°): symmetrisch zur Senkrechten bzw. Waagerechten der Skizze –
+    /// für ungerichtete Linien ist beides dieselbe Richtung (siehe SketchAngleSnap.swift)
+    case mirrored(SketchCurveRef)
 
     var isPerpendicular: Bool {
         if case .perpendicular = self { return true }
