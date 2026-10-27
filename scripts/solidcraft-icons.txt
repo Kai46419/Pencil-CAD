@@ -1,8 +1,8 @@
-
 align
 appearance
 arc3
 arc_center
+arc_tangent
 axis
 axis_normal_to_face
 box
@@ -22,6 +22,8 @@ chamfer
 circle
 circle2
 circle3
+circle_tt
+circle_ttt
 coil
 combine
 cone
@@ -61,6 +63,7 @@ project_surface
 rect
 rect3
 rect_center
+rect_rounded
 replace_face
 revolve
 rib

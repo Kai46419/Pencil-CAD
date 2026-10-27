@@ -10,6 +10,10 @@ enum CircleMode: String, CaseIterable, Identifiable {
     case center = "Mittelpunkt"
     case twoPoint = "2 Punkte"
     case threePoint = "3 Punkte"
+    /// Kreis tangential an zwei Kurven (SolidCraft „2-Tangent“, Radius nach Augenmaß, eintippbar)
+    case twoTangent = "2 Tangenten"
+    /// Kreis tangential an drei Kurven (SolidCraft „3-Tangent“)
+    case threeTangent = "3 Tangenten"
 
     var id: Self { self }
 
@@ -18,6 +22,8 @@ enum CircleMode: String, CaseIterable, Identifiable {
         case .center: "sc.circle"
         case .twoPoint: "sc.circle2"
         case .threePoint: "sc.circle3"
+        case .twoTangent: "sc.circle_tt"
+        case .threeTangent: "sc.circle_ttt"
         }
     }
 }
@@ -26,6 +32,8 @@ enum CircleMode: String, CaseIterable, Identifiable {
 enum ArcMode: String, CaseIterable, Identifiable {
     case threePoint = "3 Punkte"
     case center = "Mittelpunkt"
+    /// Tangential am Ende einer Linie bzw. eines Bogens (SolidCraft „Tangent arc“)
+    case tangent = "Tangential"
 
     var id: Self { self }
 
@@ -33,6 +41,7 @@ enum ArcMode: String, CaseIterable, Identifiable {
         switch self {
         case .threePoint: "sc.arc3"
         case .center: "sc.arc_center"
+        case .tangent: "sc.arc_tangent"
         }
     }
 }
