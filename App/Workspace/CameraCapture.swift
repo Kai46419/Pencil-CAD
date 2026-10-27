@@ -90,8 +90,8 @@ enum ImageFileLoader {
     /// Datei ist ein Bild oder PDF (der gemeinsame Dateiimporter unterscheidet so die Wege)
     static func isImageFile(_ url: URL) -> Bool {
         let ext = url.pathExtension.lowercased()
-        // SVG zählt als Bild, wird aber als Skizze eingelesen (Workspace.importVectorFile)
-        guard ext != "svg", let type = UTType(filenameExtension: ext) else { return false }
+        // SVG (und DXF) werden als Skizze eingelesen (Workspace.importVectorFile), nie als Bild
+        guard ext != "svg", ext != "dxf", let type = UTType(filenameExtension: ext) else { return false }
         return type.conforms(to: .image) || type.conforms(to: .pdf)
     }
 

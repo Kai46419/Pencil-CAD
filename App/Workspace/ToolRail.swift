@@ -737,7 +737,7 @@ struct ToolRail: View {
     /// damit es auch bei den letzten Gruppen genug Platz hat.
     private func groupFlyout(_ group: ToolGroup) -> some View {
         let rows: Int = ToolGroup.allCases.count + (showsBackTile ? 1 : 0)
-        let row: Int = row(of: group)
+        let row: Int = self.row(of: group)
         let step: CGFloat = groupSize.tile + groupSize.gap
         let fromTop = row * 2 < rows
         let top: CGFloat = fromTop ? CGFloat(row) * step : 0

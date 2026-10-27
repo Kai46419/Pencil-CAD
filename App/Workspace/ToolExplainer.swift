@@ -32,7 +32,8 @@ enum ToolExplainer {
         case .boolean(.intersect):
             return "Körper antippen: übrig bleibt nur der Bereich, in dem sie sich überlappen."
         case .move:
-            return "Körper oder Skizze antippen und an den farbigen Pfeilen verschieben bzw. am Ring drehen."
+            return "Körper oder Skizze antippen, an den farbigen Pfeilen verschieben bzw. an den Bögen drehen "
+                + "(rastet alle 15°) – mit „Kopieren“ wird eine Kopie bewegt, das Original bleibt stehen."
         case .mirror:
             return "Körper antippen, dann die Spiegelebene oder ebene Fläche – es entsteht ein gespiegeltes Gegenstück."
         case .shell:
@@ -56,7 +57,8 @@ enum ToolExplainer {
         case .split:
             return "Körper antippen, dann Ebene, Körper oder Skizze: der Körper wird daran in Teile getrennt."
         case .section:
-            return "Schneidet die Ansicht auf, damit man hineinsieht – am Modell ändert sich nichts."
+            return "Schneidet die Ansicht auf, damit man hineinsieht – am Pfeil ziehen führt den Schnitt durch den "
+                + "Körper. Am Modell ändert sich nichts."
         case .measure:
             return "Kante, Fläche oder zwei Punkte antippen: Länge, Fläche, Radius oder Abstand erscheinen unten."
         case .construct(let kind):

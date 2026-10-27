@@ -1,8 +1,8 @@
 import SwiftUI
 import simd
 
-// Ändern › Vereinigen/Abziehen/Schneiden mit sichtbaren Rollen (Ziel orange umrandet, Werkzeuge halbtransparent rot),
-// Live-Vorschau und Spiel beim Abziehen, dazu Erstellen › Negativform (Block um einen Körper, Körper mit Spiel
+// Kombinieren › Vereinigen/Abziehen/Schneiden mit sichtbaren Rollen (Ziel orange umrandet, Werkzeuge halbtransparent rot),
+// Live-Vorschau und Spiel beim Abziehen, dazu Kombinieren › Negativform (Block um einen Körper, Körper mit Spiel
 // herausgeschnitten, wahlweise zweiteilig). Rechnen: MoldTools.swift.
 
 /// Einstellungen von Abziehen-Spiel und Negativform (eigenes Objekt, damit Workspace nur eine Zeile dazubekommt).

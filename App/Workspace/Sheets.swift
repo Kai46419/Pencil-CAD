@@ -250,7 +250,7 @@ enum HelpTopic: String, CaseIterable, Identifiable {
                     + "Durchmesser. Fläche ersetzen verlängert Flächen bis an eine Zielfläche.",
                 "Umhüllen und Prägen legt Text oder ein Logo um einen Zylinder. Kante abdrücken überträgt eine Skizze als "
                     + "Kanten auf den Körper.",
-                "Verschieben: Pfeile ziehen entlang einer Achse, die farbigen Quadrate in einer Ebene, die Ringe drehen "
+                "Verschieben: Pfeile ziehen entlang einer Achse, die farbigen Quadrate in einer Ebene, die Bögen drehen "
                     + "um X (rot), Y (grün) und Z (blau). „Kopieren“ lässt das Original stehen. Übersetzen bringt einen "
                     + "Körper von einem Punkt genau auf einen anderen.",
                 "Im Browser „Ebenen“ lassen sich Körper in Ordner legen (lange drücken › In Ordner) und nach Körpern, "
@@ -306,7 +306,7 @@ enum HelpTopic: String, CaseIterable, Identifiable {
                 "Abziehen mit Vorschau: das Ergebnis erscheint sofort, das Ziel ist orange umrandet, Werkzeuge sind "
                     + "halbtransparent rot; in der Karte stehen die Rollen („Als Ziel“ tauscht sie). Neu: Spiel in mm "
                     + "(Vorlagen FDM 0,2 · Harz 0,1) dickt das Werkzeug vor dem Abziehen auf.",
-                "Ändern › Negativform: Körper antippen – ein Block mit Rand (Standard 10 mm) entsteht um ihn, der Körper "
+                "Kombinieren › Negativform: Körper antippen – ein Block mit Rand (Standard 10 mm) entsteht um ihn, der Körper "
                     + "wird mit Spiel herausgeschnitten, auf Wunsch in zwei Hälften geteilt. Der Körper bleibt erhalten.",
                 "Neue Skizze: Die Ebenen Oben, Vorne, Rechts liegen beschriftet und größer neben den Körpern, unten gibt "
                     + "es Kacheln dafür (auch für eigene Konstruktionsebenen). Ebene Körperflächen leuchten unter dem "
@@ -320,7 +320,7 @@ enum HelpTopic: String, CaseIterable, Identifiable {
                 "Gewinde robuster und genauer: die Schraubenlinie wird je Umdrehung gebaut (lange Gewinde wie M3 × 60 mm "
                     + "stimmen jetzt und rechnen etwa doppelt so schnell), Gänge und Kernloch werden in einem Schritt "
                     + "abgezogen. Sackloch-Gewinde enden wahlweise bis Grund, mit Auslauf nach DIN 76 oder nach Maß.",
-                "Gewinde (Erstellen › Gewinde): Zylinderfläche antippen – Bolzen bekommen ein Außen-, Bohrungen ein "
+                "Gewinde (Löcher › Gewinde): Zylinderfläche antippen – Bolzen bekommen ein Außen-, Bohrungen ein "
                     + "Innengewinde, die passende Normgröße wird vorgeschlagen. Metrisch ISO (Regel- und Feingewinde "
                     + "M1–M64), UNC/UNF, Whitworth, Rohrgewinde G, R und NPT (kegelig), Trapez, Rund- und Sägengewinde; "
                     + "Steigung, Länge, Versatz, Links/Rechts und 1–4 Gänge wählbar. Das Gewinde wird echt modelliert "
@@ -330,7 +330,7 @@ enum HelpTopic: String, CaseIterable, Identifiable {
                     + "echter Körper – bohren, schneiden, vereinigen und ebene Flächen extrudieren gehen.",
                 "Beim Import: doppelte Punkte verschweißt, kaputte Dreiecke entfernt, kleine Löcher geschlossen. "
                     + "Über 60.000 Dreiecke wird vorher reduziert; die Meldung sagt, was passiert ist.",
-                "Ändern › Netz bearbeiten: mit dem Stift anheben, absenken, glätten, abflachen. Fester drücken "
+                "Einfügen › Netz bearbeiten: mit dem Stift anheben, absenken, glätten, abflachen. Fester drücken "
                     + "verstärkt; unten Radius, Stärke, Verfeinern, Reduzieren und Löcher schließen.",
                 "Messen (Prüfen › Messen): Kante antippen zeigt die ganze Länge, bei Kreisen und Bögen auch Radius und "
                     + "Durchmesser. Fläche antippen zeigt den Inhalt in mm² und Länge × Breite (Zylinder: Durchmesser "
