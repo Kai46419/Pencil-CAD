@@ -4158,8 +4158,9 @@ final class SketchController: ObservableObject {
     private func withParallel(_ snapped: SnapResult, raw p: Point2, anchor: Point2?, tolerance: Double) -> SnapResult {
         parallelLines = []
         inferredRelation = nil
+        // Eigener Schalter „Parallel/Rechtwinklig“ (bisher hing es an „Winkel 15°“)
         guard let anchor, tool == .polyline || tool == .rectangle && rectangleMode == .threePoint,
-              snapKinds.contains(.angle) else { return snapped }
+              snapKinds.contains(.parallel) else { return snapped }
         // Punktfang hat Vorrang
         if let kind = snapped.kind,
            ([.endpoint, .midpoint, .center, .intersection, .onCurve, .modelPoint, .distantEdge] as [SnapKind]).contains(kind) {

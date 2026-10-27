@@ -159,15 +159,39 @@ extension SketchController {
                         tracking: SnapTracking = SnapTracking()) -> SnapCandidate {
         let metrics = snapMetrics(tolerance)
         click.mmPerPoint = metrics.mmPerPoint
-        // Fang unterdrückt: Stift fest drücken oder (SolidCraft-Modus) einen Finger auflegen
-        if snapSuspended || arcModifier { return .free(raw) }
+        // Fang aus (Hauptschalter „Fang“ – wirkte hier bisher nicht, Kai) bzw. unterdrückt: Stift fest drücken
+        // oder (SolidCraft-Modus) einen Finger auflegen
+        if !snapEnabled || snapSuspended || arcModifier { return .free(raw) }
         let extra = click.points.map(\.point) + splinePoints + marks
         updateWokenCenter(raw, metrics: metrics, extra: extra)
-        let gridOn = snapEnabled && snapKinds.contains(.grid)
+        let gridOn = snapKinds.contains(.grid)
         let step = options.gridAuto || gridStep <= 0 ? metrics.fineGridStep : gridStep
-        return inference.refine(raw, prev: prev, lineTool: lineTool, metrics: metrics, midOnly: options.midpointOnly,
-                                kinds: snapKinds, extra: extra, woken: wokenCenter, fineStep: step, gridOn: gridOn,
-                                tracking: tracking)
+        let found = inference.refine(raw, prev: prev, lineTool: lineTool, metrics: metrics, midOnly: options.midpointOnly,
+                                     kinds: snapKinds, extra: extra, woken: wokenCenter, fineStep: step, gridOn: gridOn,
+                                     tracking: tracking)
+        // „Entfernte Kanten“: ohne anderen Fang auf eine projizierte Körperkante (wirkte bisher nur im klassischen Stil)
+        if found.target == nil || found.target == .grid, snapKinds.contains(.distantEdge),
+           let edge = Self.nearestOnPolylines(raw, modelGuides.curves, reach: metrics.onCurve) {
+            return SnapCandidate(point: edge, target: .modelVertex(edge), guide: nil, label: "Kante")
+        }
+        return found
+    }
+
+    /// Nächster Punkt auf den Linienzügen innerhalb reach (für „Entfernte Kanten“).
+    private static func nearestOnPolylines(_ p: Point2, _ lines: [[Point2]], reach: Double) -> Point2? {
+        var best: (distance: Double, point: Point2)?
+        for line in lines where line.count >= 2 {
+            for i in 1..<line.count {
+                let a = line[i - 1], b = line[i]
+                let ab = b - a
+                let l2 = simd_length_squared(ab)
+                let t = l2 > 1e-18 ? min(max(simd_dot(p - a, ab) / l2, 0), 1) : 0
+                let q = a + ab * t
+                let d = simd_distance(q, p)
+                if d <= reach, d < (best?.distance ?? .infinity) { best = (d, q) }
+            }
+        }
+        return best?.point
     }
 
     // MARK: Ausrichtung und gemerkte Fangpunkte (PencilCAD, wie der klassische Fang bis Build 149)
@@ -224,8 +248,15 @@ extension SketchController {
         let placed = click.points.map(\.point)
         click.pinned.removeAll { q in !inference.holds(q) && !placed.contains { simd_distance($0, q) < 1e-9 } }
         if let kind = inference.trackKind(snapped.target, at: snapped.point) { rememberTracked(kind, snapped.point) }
-        var shown = inference.trackedNodes(near: raw, radius: metrics.trackRadius, kinds: snapKinds,
-                                           extra: click.points.map(\.point))
+        // Fang aus: nichts zeigen; „Leitpunkte“ (Zeigen) aus: keine Knoten in Stiftnähe, nur die gemerkten
+        guard snapEnabled else {
+            clickTrackedPoints = []
+            return
+        }
+        var shown = showsGuidePoints
+            ? inference.trackedNodes(near: raw, radius: metrics.trackRadius, kinds: snapKinds,
+                                     extra: click.points.map(\.point))
+            : []
         for item in click.tracked where !shown.contains(where: { simd_distance($0.point, item.point) < 1e-9 }) {
             shown.append(item)
         }
@@ -239,6 +270,7 @@ extension SketchController {
     /// Finger-Doppeltipp; Sketch.captureHovered). Ein einziger gemerkter Punkt liefert sofort Spuren.
     /// false = kein Punktfang (Ende, Mitte, Zentrum, Schnitt, Körperecke) in der Nähe.
     func togglePinnedPoint(at raw: Point2, tolerance: Double) -> Bool {
+        guard snapEnabled else { return false }
         let metrics = snapMetrics(tolerance)
         let kinds = snapKinds.union([SnapKind.endpoint, .midpoint, .center, .intersection, .modelPoint])
         let extra = click.points.map(\.point) + marks
@@ -255,7 +287,9 @@ extension SketchController {
                 click.pinned.removeFirst(click.pinned.count - Self.pinnedLimit)
             }
             rememberTracked(kind, p)
-            notice = "Punkt gemerkt – Spuren aktiv (gestrichelt senkrecht zu den Linien daran, waagerecht und senkrecht)."
+            notice = snapKinds.contains(.alignment)
+                ? "Punkt gemerkt – Spuren aktiv (gestrichelt senkrecht zu den Linien daran, waagerecht und senkrecht)."
+                : "Punkt gemerkt – Spuren erscheinen erst mit „Skizzenleitlinien“ im Fang-Menü."
         }
         // Schwebt der Stift noch: Fang neu bestimmen, damit die Spur gleich erscheint
         if click.press == nil, click.hover != nil, let last = click.raw { clickHover(at: last, tolerance: tolerance) }
@@ -362,8 +396,10 @@ extension SketchController {
     /// rastet auf waagerecht/senkrecht (2,5°), eines auf einer Kurve wandert an den Achsschnitt.
     func clickPlaced(_ candidate: SnapCandidate, metrics: SnapMetrics) -> SnapCandidate {
         guard let kind = clickKind, let a = click.points.last?.point else { return candidate }
+        // Achsfang (2,5°) gehört zu „Waagerecht/Senkrecht“; mit Fang aus bzw. ohne diese Fangart frei
+        let axisLimit = snapEnabled && snapKinds.contains(.alignment) ? metrics.axisSnap : 0
         if hasLockedBox {
-            let p = clickEffective(candidate.point, axisLimit: metrics.axisSnap)
+            let p = clickEffective(candidate.point, axisLimit: axisLimit)
             // Nur die Länge getippt: ein eingerasteter Winkel bleibt samt Leitlinie (die Richtung ändert sich nicht)
             var alongRay = false
             switch candidate.target {
@@ -382,14 +418,14 @@ extension SketchController {
         }
         guard kind == .line else {
             var result = candidate
-            result.point = clickEffective(candidate.point, axisLimit: metrics.axisSnap)
+            result.point = clickEffective(candidate.point, axisLimit: axisLimit)
             return result
         }
         if case .throughCenter? = candidate.target { return candidate }
         // Leitlinien (Winkelschritt, Ausrichtung, //, ⊥, Verlängerung) liegen schon genau: kein Achsfang darüber
         if candidate.target?.isGuide == true { return candidate }
         if !candidate.hasArgument {
-            let p = clickEffective(candidate.point, axisLimit: metrics.axisSnap)
+            let p = clickEffective(candidate.point, axisLimit: axisLimit)
             if simd_distance(p, candidate.point) < 1e-9 { return candidate }
             // Achsfang: H/V statt der Inferenz
             let axis: SnapTarget = abs(p.y - a.y) < 1e-9 ? .horizontal : .vertical
@@ -397,7 +433,7 @@ extension SketchController {
         }
         // Schnitt einer Leitlinie mit der Kurve: liegt schon genau
         if candidate.guide != nil { return candidate }
-        return inference.onCurveAxis(start: a, candidate: candidate, limit: metrics.axisSnap) ?? candidate
+        return inference.onCurveAxis(start: a, candidate: candidate, limit: axisLimit) ?? candidate
     }
 
     /// Fang des Stifts für die Klickfolge (mit PencilCAD-Kreis-Erkennung beim Mittelpunkt-Kreis).
@@ -423,7 +459,7 @@ extension SketchController {
         // PencilCAD-Mehrwert: Radius rastet tangential bzw. auf gleichen Radius ein, solange der Randpunkt keinen
         // Punktfang hat und nichts getippt ist
         if clickKind == .circle, circleMode == .center, click.points.count == 1, !hasLockedBox,
-           !result.hasArgument, !snapSuspended, !arcModifier,
+           !result.hasArgument, snapEnabled, !snapSuspended, !arcModifier,
            let found = inferCircle(center: click.points[0].point, raw: raw, tolerance: tolerance) {
             click.circleInference = found
             let label = found.label.hasPrefix("Gleich") ? "=" : found.label.hasPrefix("Durch") ? "Pt" : "T"

@@ -388,8 +388,8 @@ struct SketchInference {
         if midOnly { return gridded(lp, fineStep: fineStep, gridOn: gridOn) }
         // 4, 5: Tangente und durch das Zentrum (nur Linie)
         if lineTool, let prev {
-            if let found = tangent(prev: prev, lp: lp, tolerance: tol) { return found }
-            if let found = throughCenter(prev: prev, lp: lp, tolerance: tol) { return found }
+            if kinds.contains(.tangent), let found = tangent(prev: prev, lp: lp, tolerance: tol) { return found }
+            if kinds.contains(.center), let found = throughCenter(prev: prev, lp: lp, tolerance: tol) { return found }
         }
         // Leitlinien (PencilCAD): waagerecht/senkrecht zum vorigen Punkt, Winkelschritte, parallel/senkrecht,
         // Verlängerungen und Ausrichtung an gemerkten Punkten
@@ -409,7 +409,7 @@ struct SketchInference {
         }
         // 7, 8: Leitlinien und ihre Schnitte (H/V, Winkel, //, ⊥, Verlängerung, Ausrichtung); die freie Länge folgt
         // dem Feinraster entlang der Leitlinie
-        if let found = leadSnap(lp, leads: leads, tolerance: tol, fineStep: fineStep) { return found }
+        if let found = leadSnap(lp, leads: leads, tolerance: tol, fineStep: gridOn ? fineStep : 0) { return found }
         // 9: Raster
         return gridded(lp, fineStep: fineStep, gridOn: gridOn)
     }
@@ -542,18 +542,20 @@ struct SketchInference {
             let v = lp - prev
             let length = simd_length(v)
             // Waagerecht/senkrecht zum vorigen Punkt (SolidCraft 7 pt, weiter weg auch im Winkelmaß)
-            result.append(SnapLead(origin: prev, dir: Point2(v.x < 0 ? -1 : 1, 0), minAlong: tol,
-                                   reach: angular(abs(v.x), minimum: tol), weight: 0.8, target: .horizontal, label: "H",
-                                   rounding: .coordinate, overshoot: overshoot))
-            result.append(SnapLead(origin: prev, dir: Point2(0, v.y < 0 ? -1 : 1), minAlong: tol,
-                                   reach: angular(abs(v.y), minimum: tol), weight: 0.8, target: .vertical, label: "V",
-                                   rounding: .coordinate, overshoot: overshoot))
+            if kinds.contains(.alignment) {
+                result.append(SnapLead(origin: prev, dir: Point2(v.x < 0 ? -1 : 1, 0), minAlong: tol,
+                                       reach: angular(abs(v.x), minimum: tol), weight: 0.8, target: .horizontal,
+                                       label: "H", rounding: .coordinate, overshoot: overshoot))
+                result.append(SnapLead(origin: prev, dir: Point2(0, v.y < 0 ? -1 : 1), minAlong: tol,
+                                       reach: angular(abs(v.y), minimum: tol), weight: 0.8, target: .vertical,
+                                       label: "V", rounding: .coordinate, overshoot: overshoot))
+            }
             if tracking.angleSteps, kinds.contains(.angle), length >= tol * 2 {
                 result += angleLeads(v, prev: prev, previous: tracking.previous,
                                      reach: angular(length, minimum: tol * 0.5), tolerance: tol, overshoot: overshoot)
             }
             // Parallel bzw. senkrecht zu einer schrägen Linie (achsparallele Richtungen übernimmt H/V)
-            if lineTool, length >= tol * 2 {
+            if lineTool, kinds.contains(.parallel), length >= tol * 2 {
                 for curve in curves where !curve.construction {
                     guard case .line(let a, let b) = curve.shape else { continue }
                     let segment = b - a
@@ -575,7 +577,7 @@ struct SketchInference {
         }
         // Verlängerung über die Enden hinaus (gestrichelt ab dem Ende); die Linie, an der weitergezeichnet wird,
         // verlängert der Winkel zum vorigen Stück
-        for curve in curves where !curve.construction {
+        for curve in curves where !curve.construction && kinds.contains(.lineExtension) {
             guard case .line(let a, let b) = curve.shape else { continue }
             let l = simd_distance(a, b)
             guard l > 1e-9 else { continue }

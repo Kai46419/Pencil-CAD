@@ -66,23 +66,30 @@ struct SnapMenu: View {
     let gridSteps: [Double]
     @State private var showsDetails = false
 
-    /// Gruppen wie in Shapr3D; jede schaltet mehrere Fangarten
+    /// Gruppen wie in Shapr3D; jede schaltet mehrere Fangarten (einzeln unter „Einzelne Fangarten“)
     private static let groups: [(title: String, detail: String, systemImage: String, kinds: Set<SnapKind>)] = [
-        ("Raster", "Punkte rasten im Rastermaß ein", "grid", [.grid]),
-        ("Skizzenleitlinien", "Waagerecht, senkrecht und 15°-Winkel zu vorhandenen Punkten", "line.diagonal",
-         [.alignment, .angle]),
-        ("Skizzenleitpunkte", "Enden, Mitten, Zentren, Schnittpunkte und Kurven", "smallcircle.filled.circle",
-         [.endpoint, .midpoint, .center, .intersection, .onCurve]),
-        ("3D-Leitpunkte", "Ecken und Kantenmitten der Körper", "cube", [.modelPoint]),
-        ("Entfernte Kanten", "Körperkanten außerhalb der Skizzenebene", "cube.transparent", [.distantEdge]),
+        ("Raster", "Punkte und Längen rasten im Rastermaß ein", "grid", [.grid]),
+        ("Skizzenleitlinien",
+         "Gestrichelte Hilfslinien: waagerecht/senkrecht, 15°, parallel, rechtwinklig, Verlängerung "
+            + "und Spuren an gemerkten Punkten",
+         "line.diagonal", [.alignment, .angle, .parallel, .lineExtension]),
+        ("Skizzenleitpunkte", "Einrasten auf Enden, Mitten, Zentren, Schnittpunkten, Kurven und Tangenten",
+         "smallcircle.filled.circle", [.endpoint, .midpoint, .center, .intersection, .onCurve, .tangent]),
+        ("3D-Leitpunkte", "Ecken der Körper, auf die Skizze projiziert", "cube", [.modelPoint]),
+        ("Entfernte Kanten", "Körperkanten außerhalb der Skizzenebene, projiziert", "cube.transparent", [.distantEdge]),
     ]
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
                 Toggle(isOn: $sketch.snapEnabled) {
-                    Text("Fang")
-                        .font(.headline)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Fang")
+                            .font(.headline)
+                        Text("Aus: der Stift setzt Punkte frei, ohne Einrasten und Hilfslinien")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 Divider()
                 Text("EINRASTEN")
@@ -104,7 +111,7 @@ struct SnapMenu: View {
                 }
                 .pickerStyle(.segmented)
                 DisclosureGroup("Einzelne Fangarten", isExpanded: $showsDetails) {
-                    ForEach(SnapKind.allCases) { kind in
+                    ForEach(SnapKind.menuOrder) { kind in
                         Toggle(isOn: Binding(get: { sketch.snapKinds.contains(kind) }, set: { on in
                             if on { sketch.snapKinds.insert(kind) } else { sketch.snapKinds.remove(kind) }
                         })) {
@@ -118,10 +125,10 @@ struct SnapMenu: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                 Toggle(isOn: $sketch.showsGuidePoints) {
-                    row("Leitpunkte", "Knoten in Stiftnähe beim Schweben", "circle.dotted")
+                    row("Leitpunkte", "Fangpunkte in Stiftnähe beim Schweben anzeigen", "circle.dotted")
                 }
                 Toggle(isOn: $sketch.showsSnapHints) {
-                    row("Einrasthinweise", "Art des Fangs als Schild am Stift", "text.bubble")
+                    row("Einrasthinweise", "Kürzel des Fangs am Stift (Pt, Mid, X, H, V, //, ⊥, Ext …)", "text.bubble")
                 }
                 Toggle(isOn: $sketch.autoConstrain) {
                     row("Automatisch einschränken", "Waagerecht, senkrecht, parallel und rechtwinklig beim Zeichnen festhalten", "link")

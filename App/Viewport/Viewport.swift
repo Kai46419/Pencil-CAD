@@ -980,8 +980,11 @@ final class ViewportView: MTKView {
             groups.append(LineGroup(polylines: markers.map { $0.map(world) }, color: Self.previewBlue, width: 1.2))
         }
         // Spurpunkte (gemerkt bzw. Start des Linienzugs): kleines „+“, von dort laufen die Objektfangspuren
-        var spurPoints = sketch.click.pinned
-        if let first = sketch.click.chainFirst, !spurPoints.contains(where: { simd_distance($0, first) < 1e-9 }) {
+        // Nur wenn Spuren wirken (Fang an, „Skizzenleitlinien“ bzw. „Waagerecht/Senkrecht“ an)
+        let tracesOn = sketch.snapEnabled && sketch.snapKinds.contains(.alignment)
+        var spurPoints = tracesOn ? sketch.click.pinned : []
+        if tracesOn, let first = sketch.click.chainFirst,
+           !spurPoints.contains(where: { simd_distance($0, first) < 1e-9 }) {
             spurPoints.append(first)
         }
         if !spurPoints.isEmpty {
