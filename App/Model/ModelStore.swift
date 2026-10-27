@@ -313,6 +313,10 @@ final class ModelStore: ObservableObject {
     @Published var isBlendComputing = false
     /// Hintergrund-Rundung: laufende/wartende Anfrage, gemerkte Ergebnisse (BlendJobs.swift)
     let blendJobs = BlendJobs()
+    /// Flächen werden im Hintergrund extrudiert (FaceExtrudeJobs.swift); „OK“ wartet so lange
+    @Published var isFaceComputing = false
+    /// Hintergrund-Extrudieren ebener Flächen: laufende/wartende Anfrage, gemerkte Ergebnisse (FaceExtrudeJobs.swift)
+    let faceJobs = FaceExtrudeJobs()
     /// Kantenmitte und Richtung ins Material.
     @Published private(set) var edgeHandle: (origin: SIMD3<Double>, direction: SIMD3<Double>)?
     /// Flächenmitte und Normale der gewählten ebenen Fläche (Extrudieren per Pfeil).
@@ -724,25 +728,15 @@ final class ModelStore: ObservableObject {
         faceValue = value
         guard let face = selection, bodies.indices.contains(face.body) else { return }
         guard value != 0 else {
+            cancelFaceExtrudeJobs()
             dropPreview()
             return
         }
         guard requireKernel() else { return }
-        // Mehrere Flächen: je Körper alle zugleich, jede entlang ihrer eigenen Normale
-        var preview = bodies
+        // Mehrere Flächen: je Körper alle zugleich, jede entlang ihrer eigenen Normale. Gerechnet wird im Hintergrund
+        // an einer Kopie mit Zeitlimit (FaceExtrudeJobs.swift; vorher synchron hier – Absturz bei großen Importen)
         let faces = selectedFaces.filter { bodies.indices.contains($0.body) }
-        for body in Set(faces.map(\.body)) {
-            let numbers = faces.filter { $0.body == body }.map { NSNumber(value: $0.face) }
-            guard let result = bodies[body].shape.extruding(faces: numbers, distance: value) else {
-                message = faces.count > 1 ? "Diese Flächen lassen sich nicht zusammen extrudieren."
-                    : "Extrudieren der Fläche nicht möglich."
-                return
-            }
-            preview[body] = preview[body].with(result)
-        }
-        message = nil
-        showPreview(preview, name: faces.count > 1 ? "Flächen extrudieren" : "Extrudieren")
-        noteFaceExtrude(distance: value)
+        requestFaceExtrude(faces, distance: value)
     }
 
     private static let regionPreviewName = "Extrudieren"
@@ -1176,6 +1170,7 @@ final class ModelStore: ObservableObject {
 
     func cancelPreview() {
         cancelBlendJobs()
+        cancelFaceExtrudeJobs()
         dropPreview()
         edgeValue = 0
         // Variable Rundung gilt nur für die eine Rundung, nicht für die nächste Auswahl bzw. das nächste Werkzeug
@@ -1667,8 +1662,9 @@ final class ModelStore: ObservableObject {
     }
 
     private func clearSelectionState() {
-        // Rechnet noch eine Rundung im Hintergrund: ihr Ergebnis gilt nicht mehr
+        // Rechnet noch eine Rundung bzw. Extrusion im Hintergrund: ihr Ergebnis gilt nicht mehr
         cancelBlendJobs()
+        cancelFaceExtrudeJobs()
         selection = nil
         extraFaces = []
         selectedEdges = []

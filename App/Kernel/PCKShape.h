@@ -285,6 +285,9 @@ NS_ASSUME_NONNULL_BEGIN
 /// Unabhängige Kopie (Geometrie kopiert, gleiche Flächen- und Kantennummern) für Rechnungen im Hintergrund,
 /// während der Vordergrund diesen Körper weiter benutzt (vernetzt). nil bei Fehler bzw. abweichender Nummerierung.
 - (nullable PCKShape *)independentCopy NS_SWIFT_NAME(independentCopy());
+/// Wie independentCopy, aber das vorhandene Netz wird als eigene Kopie mitgenommen: ein Ergebnis im Hintergrund muss
+/// dann nur die neuen Flächen vernetzen.
+- (nullable PCKShape *)independentCopyKeepingMesh NS_SWIFT_NAME(independentCopyKeepingMesh());
 
 /// Variable Rundung (Fusion 360 „Variabler Radius“): Radius radius am Anfang, endRadius am Ende jeder Kante
 /// bzw. tangentialen Kantenkette. nil bei Fehler.

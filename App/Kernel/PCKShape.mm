@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <exception>
 #include <utility>
 #include <vector>
 
@@ -1564,6 +1565,8 @@ static TopoDS_Shape applyFaceExtrusionTools(const TopoDS_Shape &body, const TopT
         BRepAlgoAPI_Fuse op;
         op.SetArguments(arguments);
         op.SetTools(tools);
+        // Eingangskörper nicht verändern (Toleranzen): er wird im Verlauf und in der Anzeige weiter benutzt
+        op.SetNonDestructive(Standard_True);
         op.Build();
         if (!op.IsDone() || op.HasErrors()) return TopoDS_Shape();
         result = op.Shape();
@@ -1571,6 +1574,7 @@ static TopoDS_Shape applyFaceExtrusionTools(const TopoDS_Shape &body, const TopT
         BRepAlgoAPI_Cut op;
         op.SetArguments(arguments);
         op.SetTools(tools);
+        op.SetNonDestructive(Standard_True);
         op.Build();
         if (!op.IsDone() || op.HasErrors()) return TopoDS_Shape();
         result = op.Shape();
@@ -1592,15 +1596,25 @@ static TopoDS_Shape applyFaceExtrusionTools(const TopoDS_Shape &body, const TopT
         // Alle Prismen entstehen aus dem Ausgangskörper, daher bleiben die Flächennummern gültig
         TopTools_ListOfShape tools;
         for (NSNumber *number in indices) {
+            // Nummer außerhalb des Körpers (veraltete Auswahl): nicht ungeprüft in die Flächenliste greifen
+            if (number.integerValue < 1 || number.integerValue > _faces.Extent()) return nil;
             NSArray<NSNumber *> *plane = [self planeOfFace:number.integerValue];
-            if (plane == nil) return nil;
+            if (plane == nil || plane.count < 6) return nil;
             const gp_Vec normal(plane[3].doubleValue, plane[4].doubleValue, plane[5].doubleValue);
             const TopoDS_Face face = TopoDS::Face(_faces(number.intValue));
             if (!appendFaceExtrusionTools(_shape, face, normal, distance, tools)) return nil;
         }
+        if (tools.IsEmpty()) return nil;
         const TopoDS_Shape result = applyFaceExtrusionTools(_shape, tools, distance);
         if (result.IsNull()) return nil;
+        // Ergebnis ohne Flächen nicht weitergeben (nichts zu vernetzen, Folgefehler)
+        TopExp_Explorer anyFace(result, TopAbs_FACE);
+        if (!anyFace.More()) return nil;
         return [[PCKShape alloc] initWithShape:result];
+    } catch (const Standard_Failure &) {
+        return nil;
+    } catch (const std::exception &) {
+        return nil;
     } catch (...) {
         return nil;
     }
@@ -2416,10 +2430,19 @@ static TopoDS_Shape variableFilletOnce(const TopoDS_Shape &shape, const std::vec
 }
 
 - (nullable PCKShape *)independentCopy {
+    return [self independentCopyWithMesh:NO];
+}
+
+- (nullable PCKShape *)independentCopyKeepingMesh {
+    return [self independentCopyWithMesh:YES];
+}
+
+- (nullable PCKShape *)independentCopyWithMesh:(BOOL)withMesh {
     try {
-        // Geometrie mitkopieren, Netz nicht: die Kopie teilt nichts mehr mit diesem Körper (Vernetzen im
-        // Vordergrund schreibt sonst gleichzeitig in dieselben Flächen und Kanten, während der Hintergrund rechnet)
-        BRepBuilderAPI_Copy copier(_shape, Standard_True, Standard_False);
+        // Geometrie mitkopieren (auf Wunsch auch das Netz als eigene Kopie): die Kopie teilt nichts mehr mit diesem
+        // Körper (Vernetzen im Vordergrund schreibt sonst gleichzeitig in dieselben Flächen und Kanten, während der
+        // Hintergrund rechnet)
+        BRepBuilderAPI_Copy copier(_shape, Standard_True, withMesh ? Standard_True : Standard_False);
         const TopoDS_Shape copied = copier.Shape();
         if (copied.IsNull()) return nil;
         PCKShape *copy = [[PCKShape alloc] initWithShape:copied];
@@ -3239,6 +3262,10 @@ static bool isSoftMeshEdge(const TopTools_ListOfShape &faces) {
 }
 
 - (nullable PCKShape *)independentCopy {
+    return self;
+}
+
+- (nullable PCKShape *)independentCopyKeepingMesh {
     return self;
 }
 

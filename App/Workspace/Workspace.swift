@@ -2440,8 +2440,8 @@ extension Workspace {
             refreshCommandPreview()
         }
         guard driver.canCommit(cmd, self) else {
-            // Rundung bzw. Fase rechnet noch im Hintergrund (BlendJobs.swift)
-            if model.isBlendComputing {
+            // Rundung, Fase bzw. Extrusion rechnet noch im Hintergrund (BlendJobs.swift, FaceExtrudeJobs.swift)
+            if model.isBlendComputing || model.isFaceComputing {
                 model.message = "Wird noch berechnet – gleich noch einmal bestätigen."
                 return
             }

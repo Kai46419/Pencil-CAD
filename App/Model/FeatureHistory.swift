@@ -1189,8 +1189,11 @@ extension ModelStore {
             guard state.indices.contains(body) else { throw FeatureError("Körper fehlt.") }
             let group = signatures.filter { $0.body == body }
             let numbers = try matchFaces(group, in: state[body].shape).map { NSNumber(value: $0) }
-            guard let shape = state[body].shape.extruding(faces: numbers, distance: distance) else {
-                throw FeatureError("Fläche ziehen nicht möglich.")
+            // An einer Kopie auf großem Stapel mit Zeitlimit (FaceExtrudeJobs.swift): rot statt Absturz bzw. Hänger
+            let outcome = FaceExtrudeKernel.extrudeGuarded(state[body].shape, faces: numbers, distance: distance)
+            guard let shape = outcome.shape else {
+                throw FeatureError(outcome.timedOut ? "Fläche ziehen zu aufwendig (Zeitlimit) – übersprungen."
+                                   : "Fläche ziehen nicht möglich.")
             }
             result[body] = result[body].with(shape)
         }

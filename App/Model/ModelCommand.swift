@@ -175,7 +175,7 @@ extension ModelCommandDriver {
     static func load(_ feature: Feature, into ws: Workspace) -> ModelCommand? { nil }
     static func tapped(_ tap: CommandTap, _ cmd: ModelCommand, _ ws: Workspace) -> Bool { false }
     static func canCommit(_ cmd: ModelCommand, _ ws: Workspace) -> Bool {
-        cmd.isReady && cmd.error == nil && ws.model.hasPreview
+        cmd.isReady && cmd.error == nil && ws.model.hasPreview && !ws.model.isFaceComputing
     }
     static func valueText(handle: HandleKind, value: Double, _ cmd: ModelCommand) -> String? { nil }
     static var explanation: String? { nil }

@@ -169,7 +169,9 @@ enum PressPullCommand {
             model.dropPreview()
             return "Am Pfeil ziehen oder einen Abstand eingeben."
         }
+        model.faceJobs.finished = FaceExtrudePanel.finished(cmd, ws)
         model.setFaceValue(distance)
+        if model.isFaceComputing { return nil }
         return model.hasPreview ? nil : (model.message ?? "Diese Flächen lassen sich nicht ziehen.")
     }
 

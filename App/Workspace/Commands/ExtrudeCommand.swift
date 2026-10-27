@@ -151,8 +151,12 @@ enum ExtrudeCommand: ModelCommandDriver {
         var value = cmd.number(Key.distance, default: 10)
         if cmd.flag("flip") { value = -value }
         model.message = nil
+        // Ergebnis aus dem Hintergrund (FaceExtrudeJobs.swift): Fehlertext im Panel nachtragen
+        model.faceJobs.finished = FaceExtrudePanel.finished(cmd, ws)
         model.setFaceValue(value)
-        if value != 0, !model.hasPreview { return model.message ?? "Extrudieren der Fläche nicht möglich." }
+        // Rechnet noch im Hintergrund: (noch) kein Fehler
+        if model.isFaceComputing { return nil }
+        if value != 0, !model.hasPreview { return model.message ?? ModelStore.faceExtrudeFailedMessage }
         return nil
     }
 
@@ -561,7 +565,7 @@ enum ExtrudeCommand: ModelCommandDriver {
 
     static func canCommit(_ cmd: ModelCommand, _ ws: Workspace) -> Bool {
         if cmd.editing != nil { return cmd.error == nil && cmd.number(Key.distance, default: 0) != 0 }
-        return cmd.isReady && cmd.error == nil && ws.model.hasPreview
+        return cmd.isReady && cmd.error == nil && ws.model.hasPreview && !ws.model.isFaceComputing
     }
 
     static func commit(_ cmd: ModelCommand, _ ws: Workspace) {

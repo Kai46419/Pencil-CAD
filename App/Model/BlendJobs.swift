@@ -11,7 +11,7 @@ import simd
 //
 // Jetzt:
 // - Gemerkt: Ergebnisse und Fehlschläge je Körper, Kanten, Werten und Verlauf – derselbe Wert rechnet nie zweimal.
-// - Hintergrund: eine serielle Warteschlange, an einer unabhängigen Kopie des Körpers (PCKShape.independentCopy;
+// - Hintergrund: eigener Thread mit großem Stapel, an einer unabhängigen Kopie des Körpers (PCKShape.independentCopy;
 //   Vernetzen im Vordergrund schreibt sonst in dieselben OCCT-Flächen/Kanten). Es rechnet immer höchstens eine
 //   Rundung; neue Werte warten (nur der neueste), alte Ergebnisse werden verworfen (generation).
 // - Zeitlimit 8 s: Meldung „zu aufwendig“, Vorschau verworfen, Werte als Fehlschlag gemerkt. Der hängende Aufruf läuft
@@ -246,12 +246,33 @@ extension ModelStore {
                                                                second: request.input.second, end: request.input.end)
         HangGuard.willRun(marker, in: folder)
         // Im Hintergrund nur an unabhängigen Kopien rechnen (die Kopie kostet Millisekunden; erst hier, damit beim
-        // Ziehen wartende Anfragen nicht jedes Mal kopieren; scheitert sie, am Original)
+        // Ziehen wartende Anfragen nicht jedes Mal kopieren)
         var input = request.input
-        input.shape = input.shape.independentCopy() ?? input.shape
-        if let mergeShape = input.mergeShape { input.mergeShape = mergeShape.independentCopy() ?? mergeShape }
+        var independent = true
+        if let copy = input.shape.independentCopy(), copy !== input.shape {
+            input.shape = copy
+        } else {
+            independent = false
+        }
+        if let mergeShape = input.mergeShape {
+            if let copy = mergeShape.independentCopy(), copy !== mergeShape {
+                input.mergeShape = copy
+            } else {
+                independent = false
+            }
+        }
         let box = UncheckedBox(input)
-        jobs.queue.async {
+        guard independent else {
+            // Kopie gescheitert: das Original nie in den Hintergrund geben (nach dem Zeitlimit liefe die Rundung dort
+            // weiter, während der Vordergrund denselben Körper vernetzt). Dann wartend, aber auf großem Stapel
+            let waited = KernelThread.wait("PencilCAD.blend", limit: nil) { UncheckedBox(BlendKernel.run(box.value)) }
+            let result = waited?.value ?? BlendJobResult(shape: nil, amount: request.input.value, limit: nil)
+            blendJobReturned(result, number: number)
+            return
+        }
+        // Eigener Thread mit großem Stapel (FaceExtrudeJobs.swift KernelThread): GCD-Threads haben nur 512 KB, tiefe
+        // Rekursion in OCCT liefe dort über. Es rechnet ohnehin immer höchstens eine Rundung (current/queued)
+        KernelThread.start("PencilCAD.blend") {
             let result = BlendKernel.run(box.value)
             let out = UncheckedBox(result)
             Task { @MainActor [weak self] in
