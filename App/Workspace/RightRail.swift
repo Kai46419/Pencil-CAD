@@ -558,9 +558,11 @@ private struct ModelRailButtons: View {
         }
         button("Löschen", subtitle: canDelete ? "Gewählte Körper" : "Nichts gewählt", systemImage: "trash",
                isActive: false) {
-            model.deleteSelected()
-            // Andere Werkzeuge halten Körpernummern (Ziel, Werkzeuge, Vorschau): danach zurück zur Auswahl
+            let targets: [Int] = model.deletableBodies
+            // Andere Werkzeuge halten Körpernummern (Ziel, Werkzeuge, Vorschau): zurück zur Auswahl
             if workspace.tool != .select { workspace.activate(.select) }
+            // Ein Rückgängig-Schritt mit Hinweis (BodyDelete.swift)
+            model.deleteBodies(targets)
         }
         .disabled(!canDelete)
         .opacity(canDelete ? 1 : 0.4)

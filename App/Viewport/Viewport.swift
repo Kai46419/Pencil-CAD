@@ -303,6 +303,8 @@ final class ViewportView: MTKView {
         let pencil = UIPencilInteraction()
         pencil.delegate = self
         addInteraction(pencil)
+        // Lange drücken auf einen Körper: Kontextmenü „Löschen“ (BodyContextMenu.swift)
+        addInteraction(BodyContextMenuInteraction())
         orbitGesture = orbit
         panGesture = pan
         pinchGesture = pinch

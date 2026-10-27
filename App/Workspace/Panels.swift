@@ -2081,9 +2081,10 @@ struct LayersPanel: View {
             ComponentMenuItems(model: model, index: index)
             MaterialMenuItems(model: model, index: index, targets: folderTargets(index))
             FinishMenuItems(model: model, index: index, targets: folderTargets(index))
-            Button("Löschen", systemImage: "trash", role: .destructive) {
-                model.toggleBody(index, exclusive: true)
-                model.deleteSelected()
+            // Gehört die Zeile zur Mehrfachauswahl, gehen alle gewählten Körper (ein Rückgängig-Schritt, BodyDelete.swift)
+            Button(ModelStore.deleteTitle(count: folderTargets(index).count), systemImage: "trash", role: .destructive) {
+                if workspace.tool != .select { workspace.activate(.select) }
+                model.deleteBodies(folderTargets(index))
             }
         }
     }

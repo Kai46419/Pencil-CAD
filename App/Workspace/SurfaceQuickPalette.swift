@@ -26,7 +26,11 @@ struct BodySurfacePalette: View {
         if let first = targets.first {
             let item: SceneBody = model.bodies[first]
             VStack(alignment: .leading, spacing: PaletteStyle.spacing) {
-                header(item, count: targets.count)
+                // Papierkorb neben dem Kopf: gewählte Körper löschen (BodyDelete.swift)
+                HStack(spacing: 4) {
+                    header(item, count: targets.count)
+                    BodyTrashButton(model: model)
+                }
                 if !collapsed {
                     glossSwitch(item)
                     tiles(current: item.finish)

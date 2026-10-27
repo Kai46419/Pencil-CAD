@@ -1009,7 +1009,7 @@ struct ToolRail: View {
                 if let region = model.selectedRegions.first {
                     model.deleteSketch(region.sketch)
                 } else {
-                    model.deleteSelected()
+                    model.deleteBodies(model.deletableBodies)
                 }
             }),
         ]
