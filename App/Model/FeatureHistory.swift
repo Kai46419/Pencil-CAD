@@ -266,6 +266,11 @@ final class FeatureRecorder {
     var cache: [UUID: [SceneBody]] = [:]
     /// Körper der festen Stände (aus features/<id>.step nachgeladen)
     var snapshots: [UUID: [SceneBody]] = [:]
+    /// Vorschau einer Rundung bzw. Fase, die vor spätere Schnitte eingefügt wird (BlendBeforeCuts.swift); wird
+    /// mit commitPreview zur neuen Feature-Liste
+    var orderedPreview: OrderedBlendPreview?
+    /// Gemerkte Suche nach der ursprünglichen Kante (je Kantenauswahl und Körper, BlendBeforeCuts.swift)
+    var blendPlacement: BlendPlacement?
 }
 
 /// Inhalt von features.json.
@@ -372,8 +377,19 @@ extension ModelStore {
     }
 
     /// Kanten abgerundet bzw. gefast (Vorschau). value = tatsächlich verwendeter Wert.
-    func noteBlend(_ operation: EdgeOperation, value: Double, second: Double? = nil, end: Double? = nil) {
+    /// edges = tatsächlich verrundete Kanten (nil = die gewählten).
+    func noteBlend(_ operation: EdgeOperation, value: Double, second: Double? = nil, end: Double? = nil,
+                   edges: [EdgeRef]? = nil) {
         guard let body = selectedEdges.first?.body else { return }
+        var feature = Self.blendFeature(operation, value: value, second: second, end: end)
+        feature.data.target = body
+        let used = edges ?? selectedEdges
+        featureRecorder.preview = PendingFeature(feature: feature, edges: used.filter { $0.body == body })
+    }
+
+    /// Feature „Abrunden“ bzw. „Fase“ mit seinen Werten (ohne Kanten und Ziel).
+    static func blendFeature(_ operation: EdgeOperation, value: Double, second: Double? = nil,
+                             end: Double? = nil) -> Feature {
         var feature: Feature
         if operation == .fillet {
             feature = Feature(name: end == nil ? "Abrunden" : "Variabel abrunden", kind: .fillet)
@@ -384,8 +400,7 @@ extension ModelStore {
             feature.parameters.append(.length("distance", "Abstand", value))
             if let second { feature.parameters.append(.length("second", "Zweiter Abstand", second)) }
         }
-        feature.data.target = body
-        featureRecorder.preview = PendingFeature(feature: feature, edges: selectedEdges.filter { $0.body == body })
+        return feature
     }
 
     /// Ebene Flächen gezogen (Vorschau).
@@ -503,8 +518,16 @@ extension ModelStore {
 
     /// commitPreview: das Feature der Vorschau wird mit dem folgenden commit aufgezeichnet.
     func takePreviewFeature() {
-        featureRecorder.pending = featureRecorder.preview
-        featureRecorder.preview = nil
+        let recorder = featureRecorder
+        recorder.pending = recorder.preview
+        recorder.preview = nil
+        // Rundung vor Schnitt: die umgestellte Liste samt ihren Zwischenständen übernehmen
+        if let ordered = recorder.orderedPreview {
+            recorder.orderedPreview = nil
+            recorder.pending = nil
+            recorder.replacement = ordered.features
+            for (id, state) in ordered.states { recorder.cache[id] = state }
+        }
     }
 
     /// Skizze wird gelöscht: Features, die sie verwenden, behalten eine Kopie (Nachbau bleibt möglich).
@@ -670,6 +693,8 @@ extension ModelStore {
     func featuresRestored() {
         featureRecorder.cache = [:]
         featureRecorder.preview = nil
+        featureRecorder.orderedPreview = nil
+        featureRecorder.blendPlacement = nil
         if let last = features.last { featureRecorder.cache[last.id] = bodies }
     }
 }
@@ -739,29 +764,36 @@ extension ModelStore {
             message = "Nachbau nicht möglich: ein gespeicherter Zwischenstand fehlt."
             return
         }
-        var result = run.bodies
-        if result.count == bodies.count {
-            // Name, Farbe, Sichtbarkeit, Ordner … der Körper bleiben, nur die Geometrie ist neu
-            for index in result.indices {
-                var body = bodies[index]
-                body.shape = result[index].shape
-                body.sketchID = result[index].sketchID
-                body.componentID = result[index].componentID
-                body.placement = result[index].placement
-                // Text nach dem Extrudieren geändert: Textkörper neu benennen (SketchTextEdit.swift)
-                body = body.takingTextLabel(from: result[index])
-                result[index] = body
-            }
-        }
+        let result = carryingBodyDetails(run.bodies)
         featureRecorder.replacement = list
         commit(result, sketches: newSketches, name: name)
         if let note = run.note { message = note }
     }
 
+    /// Nach dem Nachbau: Name, Farbe, Sichtbarkeit, Ordner … der Körper bleiben, nur die Geometrie ist neu.
+    func carryingBodyDetails(_ rebuilt: [SceneBody]) -> [SceneBody] {
+        var result = rebuilt
+        guard result.count == bodies.count else { return result }
+        for index in result.indices {
+            var body = bodies[index]
+            body.shape = result[index].shape
+            body.sketchID = result[index].sketchID
+            body.componentID = result[index].componentID
+            body.placement = result[index].placement
+            // Text nach dem Extrudieren geändert: Textkörper neu benennen (SketchTextEdit.swift)
+            body = body.takingTextLabel(from: result[index])
+            result[index] = body
+        }
+        return result
+    }
+
     /// Rechnet list ab start (bzw. ab dem nächsten bekannten Zwischenstand davor) und markiert Fehlschläge.
-    /// nil = ein nötiger fester Stand fehlt.
-    private func runFeatures(_ list: inout [Feature], from start: Int, sketches sketchList: [StoredSketch],
-                             values: [String: Double]) -> (bodies: [SceneBody], note: String?)? {
+    /// nil = ein nötiger fester Stand fehlt. until = nur bis vor dieses Feature rechnen (Stand davor).
+    /// collect: Zwischenstände dorthin statt in den Speicher (Vorschau einer umgestellten Liste, die noch
+    /// verworfen werden kann).
+    func runFeatures(_ list: inout [Feature], from start: Int, until end: Int? = nil,
+                     sketches sketchList: [StoredSketch], values: [String: Double],
+                     collect: ((UUID, [SceneBody]) -> Void)? = nil) -> (bodies: [SceneBody], note: String?)? {
         let recorder = featureRecorder
         var state: [SceneBody] = []
         var begin = 0
@@ -784,7 +816,8 @@ extension ModelStore {
         var failures: [String] = []
         var fixedStand: String?
         var index = begin
-        while index < list.count {
+        let stop = min(end ?? list.count, list.count)
+        while index < stop {
             if list[index].isSuppressed {
                 list[index].failed = false
                 list[index].problem = nil
@@ -802,7 +835,11 @@ extension ModelStore {
                     failures.append(list[index].name)
                 }
             }
-            recorder.cache[list[index].id] = state
+            if let collect {
+                collect(list[index].id, state)
+            } else {
+                recorder.cache[list[index].id] = state
+            }
             index += 1
         }
         var note: String?

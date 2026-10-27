@@ -642,7 +642,13 @@ final class ModelStore: ObservableObject {
             return
         }
         guard requireKernel() else { return }
-        let numbers = selectedEdges.map { NSNumber(value: $0.edge) }
+        // Rundung vor Schnitt (BlendBeforeCuts.swift): Wurde die Kante erst durch einen späteren Schnitt (z. B.
+        // eine Text-Tasche) zerteilt, wird sie im Verlauf vor diesem Schnitt ganz verrundet und der Schnitt
+        // schneidet danach wieder hinein
+        if previewBlendBeforeCuts(value: value) { return }
+        // Sonst direkt am Körper, mit allen Teilstücken derselben geraden Kante (keine Stückelung)
+        let blendEdges = completedEdgeChain(selectedEdges, body: body)
+        let numbers = blendEdges.map { NSNumber(value: $0.edge) }
         let shape = bodies[body].shape
         let operation = edgeOperation
         // Fase mit zwei Abständen (Fusion 360 „Zwei Abstände“); nil = gleich breit
@@ -664,7 +670,7 @@ final class ModelStore: ObservableObject {
             preview[body] = preview[body].with(result)
             previewHiddenSketch = bodies[body].sketchID
             showPreview(preview, name: "Variabel abrunden")
-            noteBlend(.fillet, value: value, end: end)
+            noteBlend(.fillet, value: value, end: end, edges: blendEdges)
             return
         }
         if second != nil {
@@ -678,11 +684,11 @@ final class ModelStore: ObservableObject {
             preview[body] = preview[body].with(result)
             previewHiddenSketch = bodies[body].sketchID
             showPreview(preview, name: operation.rawValue)
-            noteBlend(operation, value: value, second: second)
+            noteBlend(operation, value: value, second: second, edges: blendEdges)
             return
         }
         // Zu groß: nicht einfach nichts zeigen, sondern den größten möglichen Wert (einmal je Auswahl gesucht)
-        let key = EdgeLimitKey(edges: selectedEdges, operation: operation, shape: ObjectIdentifier(shape))
+        let key = EdgeLimitKey(edges: blendEdges, operation: operation, shape: ObjectIdentifier(shape))
         var amount = value
         var result: PCKShape?
         if let limit = edgeLimit, limit.key == key, value > limit.value {
@@ -709,7 +715,7 @@ final class ModelStore: ObservableObject {
         preview[body] = preview[body].with(result)
         previewHiddenSketch = bodies[body].sketchID
         showPreview(preview, name: operation.rawValue)
-        noteBlend(operation, value: amount)
+        noteBlend(operation, value: amount, edges: blendEdges)
     }
 
     /// Wie in Fusion 360: Während Kanten zum Abrunden bzw. Fasen gewählt sind, übernimmt das Antippen einer
@@ -1611,6 +1617,7 @@ final class ModelStore: ObservableObject {
 
     func showPreview(_ preview: [SceneBody], name: String, plain: Bool = false) {
         featureRecorder.preview = nil
+        featureRecorder.orderedPreview = nil
         previewBodies = preview
         previewName = name
         plainPreview = plain
@@ -1620,6 +1627,7 @@ final class ModelStore: ObservableObject {
 
     func dropPreview() {
         featureRecorder.preview = nil
+        featureRecorder.orderedPreview = nil
         guard previewBodies != nil else { return }
         previewBodies = nil
         previewName = nil
