@@ -113,6 +113,7 @@ enum ModelRibbon {
                 command(.wrap, "Umhüllen und Prägen", "Auf Zylinder", "sc.emboss", heading: "SPEZIAL", ws),
                 command(.imprint, "Kante abdrücken", "Skizze auf Fläche", "sc.project_surface", heading: "SPEZIAL", ws),
                 command(.mold, "Negativform", "Form aus Block", "cube.transparent", heading: "SPEZIAL", ws),
+                SheetUI.modifyCommand(ws),
             ]
         case .arrange:
             return [

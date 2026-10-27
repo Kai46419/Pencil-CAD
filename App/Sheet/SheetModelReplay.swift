@@ -405,6 +405,28 @@ extension ModelStore {
 
     // MARK: Nachbau im Verlauf
 
+    /// Nachbau mit anderer Körperzahl (REVIEW 48, Aufruf aus carryingBodyDetails): Blechkörper über ihr Rezept (erster
+    /// Schritt + Sitzungsname, Kopien unterscheiden sich im Alias) wiedererkennen und ihre Angaben übernehmen.
+    func sheetCarryDetails(_ result: inout [SceneBody]) {
+        func key(_ info: SheetBodyInfo) -> String? {
+            info.steps.first.map { "\($0.id.uuidString)|\(info.kernelBody)" }
+        }
+        var previous: [String: SceneBody] = [:]
+        for body in bodies {
+            if let info = body.sheetMetal, let k = key(info) { previous[k] = body }
+        }
+        for index in result.indices {
+            guard let info = result[index].sheetMetal, let k = key(info), let old = previous[k] else { continue }
+            result[index].name = old.name
+            result[index].color = old.color
+            result[index].isHidden = old.isHidden
+            result[index].folder = old.folder
+            result[index].material = old.material
+            result[index].finish = old.finish
+            result[index].threads = old.threads
+        }
+    }
+
     /// Feature „Blech“ auf einen Stand anwenden (Aufruf aus applyFeature, FeatureHistory.swift).
     func replaySheetMetal(_ feature: Feature, _ state: [SceneBody]) throws -> [SceneBody] {
         guard let data = feature.data.sheet else { throw FeatureError("Blechdaten fehlen.") }
@@ -430,8 +452,10 @@ extension ModelStore {
             }
             // Ausgangskörper aus dem Stand davor (Änderungen davor wirken mit)
             let url = directory.appending(path: file)
-            guard PCKShape.writeSTEP([result[target].shape], path: url.path(percentEncoded: false)) else {
-                throw FeatureError("Ausgangskörper ließ sich nicht speichern.")
+            do {
+                try sheetWriteSTEP(result[target].shape, to: url, limit: SheetWorker.replayLimit)
+            } catch {
+                throw FeatureError("Ausgangskörper ließ sich nicht speichern: \(error.localizedDescription)")
             }
             var info = SheetBodyInfo(steps: steps, kernelBody: data.kernelBody ?? "$sheet", rule: data.rule ?? "")
             info.sourceFile = file
@@ -466,7 +490,8 @@ extension ModelStore {
 
     nonisolated private static func sheetReplayShape(_ info: SheetBodyInfo, directory: URL) throws -> PCKShape {
         do {
-            return try SheetWorker.run { try Self.sheetReplay(info, directory: directory).shape }
+            // Nachbau des Verlaufs: großzügiges Zeitlimit (REVIEW 44)
+            return try SheetWorker.run(limit: SheetWorker.replayLimit) { try Self.sheetReplay(info, directory: directory).shape }
         } catch {
             throw FeatureError(error.localizedDescription)
         }

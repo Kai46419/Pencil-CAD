@@ -263,15 +263,17 @@ extension ModelStore {
         let directory = FileManager.default.temporaryDirectory
         let file = "pencil-sheet-probe-\(UUID().uuidString).step"
         let url = directory.appending(path: file)
-        // STEP im Vordergrund schreiben: der Körper wird dort gleichzeitig vernetzt
-        guard PCKShape.writeSTEP([shape], path: url.path(percentEncoded: false)) else {
-            return ("Körper ließ sich nicht als STEP schreiben.", false)
-        }
+        // Unabhängige Kopie: der Vordergrund vernetzt den Körper weiter; geschrieben wird auf der Warteschlange
+        let copy = shape.independentCopy() ?? shape
+        let path = url.path(percentEncoded: false)
         var info = SheetBodyInfo(steps: steps, kernelBody: "$sheet", rule: "")
         info.sourceFile = file
         do {
             let flat = try SheetWorker.run { () throws -> FlatPattern in
                 defer { try? FileManager.default.removeItem(at: url) }
+                guard PCKShape.writeSTEP([copy], path: path) else {
+                    throw SheetKernelError("Körper ließ sich nicht als STEP schreiben.")
+                }
                 let result = try Self.sheetReplay(info, directory: directory)
                 return FlatPattern(json: try result.kernel.execute(SheetCommand("sheet.flat_pattern", ["body": .string(result.bodyName)])))
             }
@@ -411,9 +413,7 @@ extension ModelStore {
         let steps = Self.sheetConvertSteps(rule: rule, basePoint: face.point, bendPoints: points, plateOnly: plateOnly, gap: gap)
         let file = "\(UUID().uuidString).step"
         let url = sheetDocument.storageDirectory.appending(path: file)
-        guard PCKShape.writeSTEP([shape], path: url.path(percentEncoded: false)) else {
-            throw SheetKernelError("Körper ließ sich nicht als STEP schreiben.")
-        }
+        try sheetWriteSTEP(shape, to: url)
         var info = SheetBodyInfo(steps: steps, kernelBody: "$sheet", rule: rule.name)
         info.sourceFile = file
         let built: (body: SceneBody, warnings: [String])

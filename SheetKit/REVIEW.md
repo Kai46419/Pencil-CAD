@@ -316,7 +316,13 @@ Erledigt (Code, gegen sheet_convert.rs geprüft; mit echten STEP-Blechteilen noc
     Blechschritt (`state.begin()` = false). Vorschlag: beim Nachbauen des Verlaufs höheres bzw. kein Zeitlimit; Zeitlimit nur
     für interaktive Vorschauen. Außerdem: STEP lesen (OCCT) im Hintergrund, während der Vordergrund nach einem Zeitlimit
     erneut STEP schreibt – STEPControl nutzt globale Parameter (`Interface_Static`), nicht threadsicher. Schwere: MITTEL.
-    Status: offen.
+    Status: erledigt (Modell-Agent, 18:47): Nachbau des Verlaufs/Projekt-Öffnen mit `SheetWorker.replayLimit` = 120 s
+    (`sheetReplayShape`, STEP-Schreiben im Nachbau), interaktiv weiter 15 s. Statt Sperre nach Zeitlimit zählt
+    `SheetWorkerState` Aufträge: hinter einer hängenden Rechnung darf ein neuer warten, erst ein dritter wird abgewiesen;
+    endet die alte, geht es normal weiter. Alles STEP-I/O des Blechmoduls läuft über dieselbe serielle Warteschlange
+    (`sheetWriteSTEP` an `independentCopy`, auch in `sheetConvertPlan`/Probe/Nachbau; Lesen war schon dort). Rest:
+    das Projekt-Speichern der App (ModelStore.save, PCKShape.writeSTEP) liegt nicht auf dieser Warteschlange – überschneidet
+    sich nur, wenn eine Blechrechnung ihr Zeitlimit überschritten hat und noch läuft.
 
 ## Runde 8 – 18:02 UTC (Build-Einbindung: generate-project.sh, project-occt-sheet.yml, build-sheet-ios.sh, module.modulemap)
 
@@ -341,7 +347,9 @@ Blechmodul: Hinweis-Kachel statt Absturz, Befehle gesperrt.
 
 45. **App/Workspace/ModelRibbon.swift (Gruppe Ändern)** – SolidCraft zeigt „In Blech umwandeln“ zusätzlich unter
     MODEL › MODIFY (workspace.rs:84/459). In PencilCAD nur unter „Blech“. Für 1:1 in der Ändern-Gruppe ergänzen.
-    Schwere: NIEDRIG. Status: offen.
+    Schwere: NIEDRIG. Status: erledigt (Modell-Agent, 18:47): `SheetUI.modifyCommand(ws)` (ID `modify.sheetConvert`,
+    Überschrift BLECH, ohne Blechmodul gesperrt, startet über `SheetUI.start`) am Ende der Gruppe Ändern
+    (ModelRibbon.swift, eine Zeile).
 
 ## Runde 10 – 18:12 UTC (scripts/build-sheet-ios.sh geändert, Cargo.toml, .gitignore)
 
@@ -380,7 +388,11 @@ Viewport, WorkspaceView, CommandSearch, ModelStartBridge: keine Änderung). Gepr
     übernimmt `carryingBodyDetails` nur noch Farbe und Oberfläche, **nicht** Name, Sichtbarkeit, Ordner. Unser Blech-`copy`
     (Kopieren/Spiegeln eines Blechkörpers) hängt einen Körper an; wird ein solches Feature im Verlauf umgestellt/abgeschaltet,
     verlieren alle Körper ihre Namen/Ordner. Kein Fehler unseres Codes, aber wir lösen den Pfad häufiger aus. Hinweis an den
-    Upstream-Thread. Schwere: NIEDRIG. Status: Hinweis.
+    Upstream-Thread. Schwere: NIEDRIG. Status: erledigt (Modell-Agent, 18:47): im Zweig „Körperzahl geändert“ von
+    `carryingBodyDetails` ruft FeatureHistory.swift nach der Farb-/Oberflächen-Übernahme von 16d105c zusätzlich
+    `sheetCarryDetails(&result)` (SheetModelReplay.swift): Blechkörper werden über „erste Schritt-ID | Kernel-Körper“
+    wiedererkannt und erhalten Name, Farbe, Sichtbarkeit, Ordner, Material, Oberfläche und Gewinde des alten Körpers.
+    Nicht-Blechkörper bleiben wie Upstream.
 
 ### Abgleich aller früher offenen Befunde (Stand 18:18, gegen Commit 76b7542)
 
@@ -413,3 +425,43 @@ Viewport, WorkspaceView, CommandSearch, ModelStartBridge: keine Änderung). Gepr
 
 - **47 erledigt (18:24)** – neue Blechkörper bekommen `SceneBody.defaultColor` (SheetModelReplay.swift:423). Keine weitere
   `palette[...]`-Verwendung in App/Sheet.
+
+## Runde 12 – 18:35 UTC (Commit 0a68d8a) – Abschluss
+
+- project-occt-sheet.yml: `OTHER_LDFLAGS` jetzt laut `native-static-libs` (CoreFoundation, Security, libiconv, libc++) – in Ordnung.
+- Stand am Ende der Prüfung: **keine offenen KRITISCH- oder HOCH-Befunde.** Offen bleiben: 44 (MITTEL, 15-s-Zeitlimit auch
+  beim Nachbau des Verlaufs) sowie NIEDRIG/Hinweis: 2, 9, 10, 24 (Hinweis), 30, 34 (Löschen nur bei > 1 Regel), 40, 45, 46, 48.
+  Ungetestet (kein Xcode/iPad hier): Swift-Kompilat und das Umwandeln echter STEP-Blechteile (Schalen, Radius- und Fasenbiegungen).
+
+## Abschluss-Kontrolle – Compile-Prüfung (Stand 0a68d8a, ohne Swift-Compiler)
+
+Geprüft wie ein Compiler: alle 14 Dateien in App/Sheet (SheetKernel, SheetWorker, SheetModel, -Replay, -Sketch, -Convert,
+SheetUI, -Flange, -Convert, -Flat, -Rules, -Edit, -Overlay, FlatPatternView) und die Einhängepunkte aus 76b7542/0a68d8a
+(FeatureHistory, ModelCommand, ModelStore, Viewport, CommandSearch, ModelStartBridge, ModelRibbon, ToolRail, WorkspaceView).
+
+- Jede fremde Deklaration gegen das Repo abgeglichen (Labels, Reihenfolge der Memberwise-Inits, Optionalität): PCKShape
+  (NS_SWIFT_NAME: readSTEP(path:), writeSTEP(_:path:), compound(_:), edgeNumbers(ofFace:), surface/plane/cylinder/
+  outline/surfacePoint/geometry/handle, triangulate(deflection:), stepAvailable/kernelAvailable), pencil_sheet.h
+  (OpaquePointer?, UnsafeMutablePointer<CChar>!, UnsafePointer<CChar>!, UInt64/Int32), ModelStore/Workspace-API,
+  Panel-Bausteine (RibbonCommand, CommandItem, PickInput, PanelMenuRow, PaletteSection, CommandSection, CommandValueRow,
+  CommandNumberRow, CommandOptionRow, CommandFlagRow, CommandSegmentRow, CommandStatusRow, PrimaryWideButton, CheckRow,
+  PaletteNumberRow, PaletteFieldBox, PaletteExpression, DragHandle/HandleKind, LineGroup/FillGroup, SketchTheme/AppTheme).
+- Erschöpfende switches über ToolGroup (ToolRail systemImage/category/tip, ModelRibbon.commands), ModelCommandID
+  (ModelStartBridge.legacyModelTool; übrige mit default) und FeatureKind (FeatureKind.systemImage, applyFeature;
+  BlendBeforeCuts mit default) – alle um die neuen Fälle ergänzt.
+- Protokolle: alle Blechtreiber erfüllen MainCommandDriver (build/refresh/panel, id/title/icon); SheetEditableDriver
+  (@MainActor) liefert load/rows/commit/cancel/featureKinds als speziellere Vorgaben. Isolation: Treiber per Konformität
+  @MainActor wie die bestehenden Treiber; nonisolated nur reine Rechenfunktionen (Wiedergabe, Topologie, Überlappung),
+  die nichts Main-Actor-Isoliertes aufrufen. SWIFT_STRICT_CONCURRENCY nicht gesetzt (minimal, Swift 5.9).
+- Keine doppelten Typ- oder Extension-Member-Namen in App/, keine dateiübergreifenden private-Zugriffe, Imports
+  vollständig, alle sc.*-Symbole im Asset-Katalog vorhanden.
+- Beide Varianten von SheetKernel (#if PENCIL_SHEETKIT) und der Fallback-Build ohne OCCT (App/ komplett, PCKShape mit
+  Stubs, gleiche Schnittstelle) kompilieren nach dieser Prüfung.
+
+**Ergebnis: kein Compile-Fehler gefunden, keine Codeänderung.**
+
+Restrisiken (ohne Compiler nicht sicher zu klären):
+- `import PencilSheet`: setzt voraus, dass Xcode die Header des statischen xcframeworks samt `module.modulemap` in den
+  Suchpfad legt (übliches Muster, hier ungetestet).
+- Typprüfzeit großer SheetJSON-Literale (z. B. SheetUIFlange.swift:269, SheetModelReplay.swift:267) – mit Typangaben,
+  sollte reichen.

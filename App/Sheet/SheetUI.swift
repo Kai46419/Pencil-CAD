@@ -92,6 +92,16 @@ enum SheetUI {
         return list
     }
 
+    /// „In Blech umwandeln“ zusätzlich in der Gruppe „Ändern“ (SolidCraft MODEL → MODIFY, REVIEW 45); ohne
+    /// Blechmodul sichtbar, aber gesperrt. Eigene ID, damit die Stecknadel nicht mit der Gruppe „Blech“ geteilt wird.
+    static func modifyCommand(_ ws: Workspace) -> RibbonCommand {
+        RibbonCommand(id: "modify.sheetConvert", title: "In Blech umwandeln", subtitle: "Körper zu Blech",
+                      icon: "sc.convert_sheet", heading: "BLECH", isActive: ws.command?.id == .sheetConvert,
+                      isEnabled: ws.model.sheetAvailable) {
+            start(.sheetConvert, ws)
+        }
+    }
+
     /// Einträge der Befehlssuche (CommandSearch.swift)
     static func searchItems(_ ws: Workspace) -> [CommandItem] {
         func item(_ id: ModelCommandID, _ title: String, _ subtitle: String, _ icon: String,

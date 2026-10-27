@@ -790,6 +790,8 @@ extension ModelStore {
                 result[index].color = bodies[index].color
                 result[index].finish = bodies[index].finish
             }
+            // Blechkörper erkennt ihr Rezept wieder: Name, Ordner, Sichtbarkeit … bleiben (App/Sheet/SheetModelReplay.swift)
+            sheetCarryDetails(&result)
             return result
         }
         for index in result.indices {

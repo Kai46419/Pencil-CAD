@@ -3,11 +3,23 @@ import Foundation
 // Blechrechnungen im Hintergrund mit Zeitlimit (Vorbild BlendJobs.swift, Kais frühere Hänger): Wiedergabe der
 // SolidCraft-Rezepte, STEP-Austausch und Flachmuster laufen auf einer eigenen seriellen Warteschlange. Die Schnittstelle
 // des Modells bleibt synchron (Oberfläche und Verlauf erwarten das Ergebnis sofort): der Main Actor wartet höchstens
-// timeLimit Sekunden. Kehrt die Engine nicht zurück, meldet der Aufruf „zu aufwendig“, die App bleibt bedienbar; die
-// hängende Rechnung läuft weiter, bis sie endet, und bis dahin startet keine neue (nicht stapeln).
+// timeLimit Sekunden (Nachbau des Verlaufs replayLimit). Kehrt die Engine nicht zurück, meldet der Aufruf „zu aufwendig“,
+// die App bleibt bedienbar; die hängende Rechnung läuft weiter, höchstens ein neuer Auftrag wartet dahinter.
 //
 // Die Arbeit darf nichts aus dem Vordergrund anfassen, das gleichzeitig benutzt wird: übergeben werden nur Rezepte,
-// Dateipfade und eigene Sitzungen; PencilCAD-Körper werden vorher im Vordergrund als STEP geschrieben.
+// Dateipfade und eigene Sitzungen; PencilCAD-Körper als unabhängige Kopie (PCKShape.independentCopy), die erst hier
+// als STEP geschrieben wird.
+
+/// Körper als STEP schreiben – auf der Warteschlange des Blechmoduls, an einer unabhängigen Kopie.
+func sheetWriteSTEP(_ shape: PCKShape, to url: URL, limit: Double = SheetWorker.timeLimit) throws {
+    let copy = shape.independentCopy() ?? shape
+    let path = url.path(percentEncoded: false)
+    try SheetWorker.run(limit: limit) { () throws -> Void in
+        guard PCKShape.writeSTEP([copy], path: path) else {
+            throw SheetKernelError("Körper ließ sich nicht als STEP schreiben.")
+        }
+    }
+}
 
 /// Kapsel für Arbeit und Ergebnis über Threadgrenzen.
 private final class SheetJob<Value>: @unchecked Sendable {
@@ -19,35 +31,39 @@ private final class SheetJob<Value>: @unchecked Sendable {
     }
 }
 
-/// Zustand der Warteschlange (läuft gerade eine Rechnung über das Zeitlimit hinaus?).
+/// Zustand der Warteschlange: Anzahl der Aufträge (laufend + wartend). Nach einem Zeitlimit wartet höchstens ein
+/// neuer Auftrag hinter der alten Rechnung (nicht stapeln); sobald sie endet, geht es normal weiter.
 private final class SheetWorkerState: @unchecked Sendable {
     private let lock = NSLock()
-    private var running = false
+    private var pending = 0
 
     func begin() -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        if running { return false }
-        running = true
+        if pending >= 2 { return false }
+        pending += 1
         return true
     }
 
     func end() {
         lock.lock()
-        running = false
+        pending -= 1
         lock.unlock()
     }
 }
 
 enum SheetWorker {
-    /// Sekunden, die der Vordergrund höchstens wartet
+    /// Sekunden, die der Vordergrund bei Vorschau und Befehlen höchstens wartet
     static let timeLimit: Double = 15
+    /// Nachbau des Verlaufs (auch beim Öffnen eines Projekts): großzügig, damit große Rezepte nicht scheitern
+    static let replayLimit: Double = 120
     private static let queue = DispatchQueue(label: "PencilCAD.sheet", qos: .userInitiated)
     private static let state = SheetWorkerState()
 
-    /// Arbeit im Hintergrund ausführen und höchstens timeLimit Sekunden auf das Ergebnis warten.
+    /// Arbeit im Hintergrund ausführen und höchstens limit Sekunden auf das Ergebnis warten. Auch alles STEP-Lesen und
+    /// -Schreiben des Blechmoduls läuft hier (eine serielle Warteschlange: OCCT-STEP nutzt globale Einstellungen).
     @discardableResult
-    static func run<Value>(_ work: @escaping () throws -> Value) throws -> Value {
+    static func run<Value>(limit: Double = SheetWorker.timeLimit, _ work: @escaping () throws -> Value) throws -> Value {
         guard state.begin() else {
             throw SheetKernelError("Das Blechmodul rechnet noch an einem früheren, sehr aufwendigen Schritt – bitte kurz "
                 + "warten und erneut versuchen.", timedOut: true)
@@ -60,8 +76,8 @@ enum SheetWorker {
             state.end()
             done.signal()
         }
-        guard done.wait(timeout: .now() + timeLimit) == .success, let result = job.result else {
-            throw SheetKernelError("Blechberechnung zu aufwendig (über \(Int(timeLimit)) s) – abgebrochen.", timedOut: true)
+        guard done.wait(timeout: .now() + limit) == .success, let result = job.result else {
+            throw SheetKernelError("Blechberechnung zu aufwendig (über \(Int(limit)) s) – abgebrochen.", timedOut: true)
         }
         return try result.get()
     }

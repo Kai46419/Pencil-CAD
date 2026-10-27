@@ -231,8 +231,9 @@ Typen (`SheetModel.swift`):
   `.perforate(diameter:pitch:margin:pattern:)`, `.unfold`, `.refold`; `command.title` (deutscher Name).
 
 Hintergrund: Wiedergabe, STEP-Austausch, Flachmuster und Exporte laufen auf einer seriellen Warteschlange
-(`SheetWorker`, App/Sheet/SheetWorker.swift); der Main Actor wartet höchstens 15 s, danach Fehler „zu aufwendig“
-(`SheetKernelError.timedOut`); bis die hängende Rechnung endet, startet keine neue.
+(`SheetWorker`, App/Sheet/SheetWorker.swift), auch alles STEP-Lesen/-Schreiben des Blechmoduls; der Main Actor wartet
+höchstens 15 s (Nachbau des Verlaufs/Projekt-Öffnen 120 s), danach Fehler „zu aufwendig“ (`SheetKernelError.timedOut`);
+hinter einer hängenden Rechnung wartet höchstens ein neuer Auftrag.
 
 Funktionen am `ModelStore` (alle auf dem Main Actor; `Bool` = gelungen, sonst steht der Fehler in `model.message`
 und `sheetDocument.lastError`; `preview: true` zeigt eine Vorschau, übernommen wird mit `commitPreview()`,
