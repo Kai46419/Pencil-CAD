@@ -345,6 +345,8 @@ struct SketchText: Codable {
     var height: Double
     var fontName: String
     var alignment: TextAlignmentOption
+    /// Drehung um den Ankerpunkt (Bogenmaß, gegen den Uhrzeigersinn); fehlt in älteren Projekten (= 0)
+    var rotation: Double
     var loops: [SketchLoop]
 
     struct Font: Identifiable {
@@ -361,7 +363,7 @@ struct SketchText: Codable {
     ]
 
     private enum CodingKeys: String, CodingKey {
-        case string, anchor, height, fontName, alignment
+        case string, anchor, height, fontName, alignment, rotation
     }
 
     /// Die Umrisse werden nicht gespeichert, sondern beim Laden aus der Schrift neu erzeugt.
@@ -371,7 +373,8 @@ struct SketchText: Codable {
                   anchor: try container.decode(Point2.self, forKey: .anchor),
                   height: try container.decode(Double.self, forKey: .height),
                   fontName: try container.decode(String.self, forKey: .fontName),
-                  alignment: try container.decode(TextAlignmentOption.self, forKey: .alignment))
+                  alignment: try container.decode(TextAlignmentOption.self, forKey: .alignment),
+                  rotation: (try? container.decodeIfPresent(Double.self, forKey: .rotation)) ?? 0)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -381,21 +384,26 @@ struct SketchText: Codable {
         try container.encode(height, forKey: .height)
         try container.encode(fontName, forKey: .fontName)
         try container.encode(alignment, forKey: .alignment)
+        // Nur gedrehten Text mit Winkel speichern (sonst bleibt die Datei wie bisher)
+        if rotation != 0 { try container.encode(rotation, forKey: .rotation) }
     }
 
-    init(string: String, anchor: Point2, height: Double, fontName: String, alignment: TextAlignmentOption) {
+    init(string: String, anchor: Point2, height: Double, fontName: String, alignment: TextAlignmentOption,
+         rotation: Double = 0) {
         self.string = string
         self.anchor = anchor
         self.height = height
         self.fontName = fontName
         self.alignment = alignment
-        loops = Self.outlines(string: string, anchor: anchor, height: height, fontName: fontName, alignment: alignment)
+        self.rotation = rotation
+        loops = Self.outlines(string: string, anchor: anchor, height: height, fontName: fontName, alignment: alignment,
+                              rotation: rotation)
     }
 
     /// Buchstabenumrisse als geschlossene Ketten aus Linien und Bézierkurven.
-    /// height = Höhe der Großbuchstaben; anchor liegt auf der Grundlinie.
+    /// height = Höhe der Großbuchstaben; anchor liegt auf der Grundlinie, rotation dreht um anchor.
     private static func outlines(string: String, anchor: Point2, height: Double, fontName: String,
-                                 alignment: TextAlignmentOption) -> [SketchLoop] {
+                                 alignment: TextAlignmentOption, rotation: Double) -> [SketchLoop] {
         let text = string.replacingOccurrences(of: "\n", with: " ")
         guard !text.isEmpty, height > 0 else { return [] }
         let font = CTFontCreateWithName(fontName as CFString, 100, nil)
@@ -411,6 +419,7 @@ struct SketchText: Codable {
         case .right: -width
         }
 
+        let cosR: Double = cos(rotation), sinR: Double = sin(rotation)
         var loops: [SketchLoop] = []
         let runs = (CTLineGetGlyphRuns(line) as? [CTRun]) ?? []
         for run in runs {
@@ -426,7 +435,9 @@ struct SketchText: Codable {
                 guard let path = CTFontCreatePathForGlyph(runFont, glyphs[index], nil) else { continue }
                 let origin = positions[index]
                 let map = { (p: CGPoint) -> Point2 in
-                    anchor + scale * Point2(Double(p.x + origin.x) + shift, Double(p.y + origin.y))
+                    let x: Double = scale * (Double(p.x + origin.x) + shift)
+                    let y: Double = scale * Double(p.y + origin.y)
+                    return anchor + Point2(cosR * x - sinR * y, sinR * x + cosR * y)
                 }
                 loops += Self.loops(of: path, map: map)
             }

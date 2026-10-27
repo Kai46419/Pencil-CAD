@@ -353,7 +353,10 @@ struct ParameterCard: View {
             Text("Kurve antippen – sie wird genau dort in zwei Teile getrennt")
                 .foregroundStyle(.secondary)
         case .select:
-            if !sketch.selection.isEmpty {
+            if let index = sketch.selectedTextIndex {
+                // Gewählter Text: Inhalt, Schrift, Höhe, Winkel ändern (SketchTextPanel.swift)
+                SketchTextEditor(sketch: sketch, index: index)
+            } else if !sketch.selection.isEmpty {
                 // Auswahl verankern: bleibt beim Ändern von Maßen stehen (erneut tippen löst)
                 Button(sketch.isSelectionAnchored ? "Lösen" : "Verankern",
                        systemImage: sketch.isSelectionAnchored ? "lock.open" : "lock", action: sketch.toggleAnchor)
@@ -2020,6 +2023,11 @@ struct LayersPanel: View {
             if isOpen {
                 sketchRow(index)
                     .padding(.leading, 18)
+                // Texte der Skizze als eigene Einträge (SketchTextPanel.swift)
+                ForEach(item.textItems) { text in
+                    SketchTextLayerRow(workspace: workspace, sketch: workspace.sketch, sketchIndex: index, item: text)
+                }
+                .padding(.leading, 36)
             }
         }
         .padding(.vertical, 2)
@@ -2057,7 +2065,8 @@ struct LayersPanel: View {
         return HStack(spacing: 6) {
             eye(!item.isHidden) { model.setHidden(!item.isHidden, body: index) }
             // Komponente (verknüpfte Kopien) mit eigenem Symbol
-            Image(systemName: item.componentID == nil ? "cube.fill" : "shippingbox.fill")
+            // Textkörper mit Textsymbol (SketchTextEdit.swift)
+            Image(systemName: item.browserSymbol)
                 .foregroundStyle(Color(item.displayColor))
                 .frame(width: 20)
             Text(item.name)
