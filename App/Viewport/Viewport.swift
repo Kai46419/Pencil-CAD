@@ -102,6 +102,8 @@ final class ViewportView: MTKView {
     }
     private var planeLabels: [PaddedLabel] = []
     private var dimensionFields: [String: DimensionField] = [:]
+    /// Wertfelder beim Zeichnen mit ungültig getipptem Wert (Kennung → getippter Text), rot bis neu getippt wird
+    private var liveConflicts: [String: String] = [:]
     /// Bild kalibrieren mit dem Stift: Zug mit Lupe, der Punkt sitzt beim Absetzen
     private var calibrationTouch: UITouch?
     private var lastCalibrationPlacement = Date.distantPast
@@ -851,10 +853,26 @@ final class ViewportView: MTKView {
             if cutTrace.count >= 2 {
                 groups.append(LineGroup(polylines: [cutTrace.map(world)], color: Self.cutRed, width: 1.4))
             }
-            let dimensionLines = sketch.visibleDimensions.flatMap { dimensionGeometry($0, perPoint: perPoint).lines }
+            // Bleibende Maße wie gehabt; Wertfelder beim Zeichnen dünn und neutral, gesperrte grün (LiveDimensionStyle)
+            let shownDimensions = sketch.visibleDimensions
+            let dimensionLines = shownDimensions.filter { !$0.id.hasPrefix("box-") }
+                .flatMap { dimensionGeometry($0, perPoint: perPoint).lines }
             if !dimensionLines.isEmpty {
                 groups.append(LineGroup(polylines: dimensionLines.map { $0.map(world) }, color: Self.dimensionInk,
                                         width: 1.2))
+            }
+            let liveBoxes = shownDimensions.filter { $0.id.hasPrefix("box-") }
+            let liveFreeLines = liveBoxes.filter { $0.lockState != true }
+                .flatMap { dimensionGeometry($0, perPoint: perPoint).lines }
+            if !liveFreeLines.isEmpty {
+                groups.append(LineGroup(polylines: liveFreeLines.map { $0.map(world) }, color: LiveDimensionStyle.lineInk,
+                                        width: LiveDimensionStyle.lineWidth))
+            }
+            let liveLockedLines = liveBoxes.filter { $0.lockState == true }
+                .flatMap { dimensionGeometry($0, perPoint: perPoint).lines }
+            if !liveLockedLines.isEmpty {
+                groups.append(LineGroup(polylines: liveLockedLines.map { $0.map(world) },
+                                        color: LiveDimensionStyle.lineInkLocked, width: LiveDimensionStyle.lineWidth))
             }
             // Hilfspunkte (Mitten gewählter Punkte) als kleine Dreiecke, gewählte orange
             if !sketch.marks.isEmpty {
@@ -1686,7 +1704,9 @@ final class ViewportView: MTKView {
     /// Maßlinie mit Hilfslinien und Pfeilen (lokal) und Lage des Maßfelds.
     private func dimensionGeometry(_ dimension: SketchDimension, perPoint: Double)
         -> (lines: [[Point2]], label: Point2, onLine: Bool) {
-        let arrow = 8 * perPoint, wing = 3 * perPoint
+        let isLiveBox = dimension.id.hasPrefix("box-")
+        let arrow = (isLiveBox ? LiveDimensionStyle.arrowLength : 8) * perPoint
+        let wing = (isLiveBox ? LiveDimensionStyle.arrowWing : 3) * perPoint
         func arrowHead(at tip: Point2, from tail: Point2) -> [Point2] {
             let t = simd_normalize(tip - tail), n = Point2(-t.y, t.x)
             return [tip - t * arrow + n * wing, tip, tip - t * arrow - n * wing]
@@ -1905,11 +1925,17 @@ final class ViewportView: MTKView {
             shown.insert(dimension.id)
             field.allowsEditing = dimension.isEditable
             field.isFine = dimension.id.hasPrefix("mark-")
+            field.isLive = dimension.id.hasPrefix("box-")
+            let conflictText = liveConflicts[dimension.id]
+            field.hasConflict = conflictText != nil
             field.expression = sketch.expression(of: dimension)
             // Mit einer Variable verknüpft: ƒ vor dem Wert (wie Fusion 360 „fx“)
             field.prefix = field.expression == nil ? dimension.prefix : "ƒ " + dimension.prefix
             if !field.isFirstResponder {
-                if dimension.kind == .angle, dimension.id.hasPrefix("box-") {
+                if let conflictText {
+                    // Ungültig getippter Wert bleibt rot stehen, bis neu getippt wird
+                    field.text = conflictText
+                } else if dimension.kind == .angle, dimension.id.hasPrefix("box-") {
                     field.text = Self.liveAngleText(dimension.value, locked: dimension.lockState == true)
                 } else if dimension.kind == .angle {
                     // Winkel nur in ganzen Grad (Kai)
@@ -1922,8 +1948,10 @@ final class ViewportView: MTKView {
                 // Kai: 15°-Schritte (15, 30, 45 …) rot zeigen; einrasten erst nach kurzem Verweilen
                 let isStepAngle = dimension.id == "live-angle" && dimension.value.isFinite
                     && abs(dimension.value) < 1e6 && Int(dimension.value.rounded()) % 15 == 0
-                field.textColor = isStepAngle || (dimension.id == "live-angle" && sketch.angleCandidate)
-                    ? UIColor.systemRed : SketchTheme.UI.fieldText
+                if !field.isLive {
+                    field.textColor = isStepAngle || (dimension.id == "live-angle" && sketch.angleCandidate)
+                        ? UIColor.systemRed : SketchTheme.UI.fieldText
+                }
             }
             field.lockState = dimension.lockState
             let id = dimension.id
@@ -1973,6 +2001,8 @@ final class ViewportView: MTKView {
                 .map { $0.value.frame }
             placeLiveAngleField(field, dimension, perPoint: perPoint, avoiding: others)
         }
+        // Konflikt endet mit seinem Feld (nächste Stufe, Form fertig oder verworfen)
+        liveConflicts = liveConflicts.filter { shown.contains($0.key) }
         for (id, field) in dimensionFields where !shown.contains(id) {
             if field.isFirstResponder {
                 field.appliesOnEnd = false
@@ -2036,8 +2066,8 @@ final class ViewportView: MTKView {
             field.resignFirstResponder()
         case .done:
             field.resignFirstResponder()
-            // SolidCraft: Enter setzt den Punkt mit den gesperrten Werten
-            if field.dimensionID.hasPrefix("box-") { sketch?.placeLocked() }
+            // SolidCraft: Enter setzt den Punkt mit den gesperrten Werten (nicht bei ungültigem Wert)
+            if field.dimensionID.hasPrefix("box-"), liveConflicts[field.dimensionID] == nil { sketch?.placeLocked() }
             refresh()
             return
         }
@@ -2062,6 +2092,10 @@ final class ViewportView: MTKView {
         if field.dimensionID.hasPrefix("box-"), let sketch {
             let key = String(field.dimensionID.dropFirst(4))
             sketch.lockLiveValue(key, text: text, variables: model?.variableValues ?? [:])
+            // Nicht übernommen (Formel- oder Bereichsfehler): Feld rot mit dem getippten Text
+            let accepted = text.isEmpty || sketch.options.locked[key] == text
+            liveConflicts[field.dimensionID] = accepted ? nil : text
+            field.hasConflict = !accepted
             refresh()
             return
         }
@@ -3274,6 +3308,8 @@ extension ViewportView: UITextFieldDelegate {
     func textFieldDidBeginEditing(_ textField: UITextField) {
         if let field = textField as? DimensionField {
             field.appliesOnEnd = true
+            // Neu tippen hebt einen Konflikt auf (Feld wieder neutral mit Cursor)
+            if liveConflicts.removeValue(forKey: field.dimensionID) != nil { field.hasConflict = false }
             // Verknüpftes Maß: Formel zum Bearbeiten zeigen
             if let expression = field.expression { field.text = expression }
             field.inputView = UIView(frame: .zero)
@@ -3293,7 +3329,8 @@ extension ViewportView: UITextFieldDelegate {
 
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {
         textField.resignFirstResponder()
-        if let field = textField as? DimensionField, field.dimensionID.hasPrefix("box-") {
+        if let field = textField as? DimensionField, field.dimensionID.hasPrefix("box-"),
+           liveConflicts[field.dimensionID] == nil {
             sketch?.placeLocked()
             refresh()
         }
@@ -3423,6 +3460,28 @@ final class DimensionField: UITextField {
             updateStyle()
         }
     }
+    /// Wertfeld beim Zeichnen (SolidCraft „box-…“): feine neutrale Darstellung, grün erst bestätigt (LiveDimensionStyle)
+    var isLive = false {
+        didSet {
+            guard isLive != oldValue else { return }
+            font = isLive ? LiveDimensionStyle.font
+                : .monospacedDigitSystemFont(ofSize: isFine ? 12 : 13, weight: isFine ? .light : .medium)
+            updateLock()
+        }
+    }
+    /// Wertfeld beim Zeichnen: getippter Wert ungültig (rot, bis neu getippt wird)
+    var hasConflict = false {
+        didSet {
+            guard hasConflict != oldValue else { return }
+            updateStyle()
+        }
+    }
+    /// Zustand des Wertfelds beim Zeichnen: Tippen geht vor gesperrt, damit erst Enter grün macht
+    var liveState: LiveDimensionStyle.State {
+        if hasConflict { return .conflict }
+        if isFirstResponder { return .editing }
+        return lockState == true ? .locked : .free
+    }
     /// Festes Maß nur als kleines, dünnes Schloss (Kai); antippen ruft onLockTap (Viewport klappt es auf)
     var isCollapsed = false {
         didSet {
@@ -3485,7 +3544,8 @@ final class DimensionField: UITextField {
             updateStyle()
             return
         }
-        let configuration = UIImage.SymbolConfiguration(pointSize: isCollapsed ? 11 : 9, weight: .light)
+        let configuration = UIImage.SymbolConfiguration(pointSize: isCollapsed ? 11 : isLive ? 8 : 9,
+                                                        weight: isLive ? .thin : .light)
         lockButton.setImage(UIImage(systemName: lockState ? "lock" : "lock.open", withConfiguration: configuration),
                             for: .normal)
         lockButton.tintColor = lockState ? .systemGreen : .systemRed
@@ -3504,6 +3564,19 @@ final class DimensionField: UITextField {
             isUserInteractionEnabled = true
             return
         }
+        if isLive {
+            let state = liveState
+            layer.cornerRadius = LiveDimensionStyle.cornerRadius
+            layer.borderWidth = LiveDimensionStyle.borderWidth
+            backgroundColor = LiveDimensionStyle.backgroundColor(state)
+            layer.borderColor = LiveDimensionStyle.borderColor(state).resolvedColor(with: traitCollection).cgColor
+            textColor = LiveDimensionStyle.textColor(state)
+            // Cursor beim Tippen neutral statt Systemblau
+            tintColor = LiveDimensionStyle.text
+            if lockState != nil { lockButton.tintColor = LiveDimensionStyle.lockTint(state) }
+            isUserInteractionEnabled = allowsEditing || lockState != nil
+            return
+        }
         layer.cornerRadius = 5
         layer.borderWidth = isFine ? 0.5 : 0.75
         let fieldColor: UIColor = lockState == true ? SketchTheme.UI.fieldLocked : SketchTheme.UI.field
@@ -3520,7 +3593,23 @@ final class DimensionField: UITextField {
         let width = text.size(withAttributes: [.font: font ?? UIFont.systemFont(ofSize: 13)]).width
         let prefixWidth = prefix.isEmpty ? 0 : prefixLabel.intrinsicContentSize.width + 2
         let lockWidth: CGFloat = lockState == nil ? 0 : 13
-        return CGSize(width: max(width + prefixWidth + lockWidth + 12, 30), height: 22)
+        let height: CGFloat = isLive ? LiveDimensionStyle.fieldHeight : 22
+        return CGSize(width: max(width + prefixWidth + lockWidth + 12, 30), height: height)
+    }
+
+    // Tippen beginnt bzw. endet: Wertfeld beim Zeichnen wechselt zwischen neutral (Cursor) und bestätigt
+    @discardableResult
+    override func becomeFirstResponder() -> Bool {
+        let became = super.becomeFirstResponder()
+        if isLive { updateStyle() }
+        return became
+    }
+
+    @discardableResult
+    override func resignFirstResponder() -> Bool {
+        let resigned = super.resignFirstResponder()
+        if isLive { updateStyle() }
+        return resigned
     }
 
     /// Eingeklappt: kein Wert, nur das Schloss
