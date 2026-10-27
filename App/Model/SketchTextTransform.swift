@@ -231,8 +231,8 @@ extension SketchController {
     /// Trefferradius der Griffe (pt): mindestens 22 pt für Stift und Finger
     private static let textHandleHitPoints: Double = 24
 
-    /// TODO-MERGE: beim Zusammenführen auf `textDeformMode == nil` verdrahten (Verformen-Griffe haben Vorrang).
-    var textTransformHandlesVisible: Bool { true }
+    /// Nur ohne aktiven Verformungsmodus (die Verformungsgriffe haben Vorrang, SketchTextDeformHandles.swift).
+    var textTransformHandlesVisible: Bool { textDeformMode == nil }
 
     /// Text, dessen Griffe gezeigt werden: allein gewählt im Pfeil-Werkzeug, ohne Bedingungen am Text (die hängen
     /// am Anker und würden durch die Griffe nicht mitgeführt).

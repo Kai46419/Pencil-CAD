@@ -824,6 +824,8 @@ final class ViewportView: MTKView {
             }
             // Verschieben, Skalieren, Drehen des gewählten Texts (SketchTextTransform.swift)
             addTextTransformHandles(to: &groups, sketch: sketch, perPoint: perPoint, world: world)
+            // Verformungsgriffe am gewählten Text (SketchTextDeformHandles.swift)
+            addTextDeformHandles(to: &groups, sketch: sketch, perPoint: perPoint, world: world)
             // Linie beim Zeichnen: Graphit wie die fertigen Linien, offene Enden als kleine Punkte
             let preview = sketch.previewPolylines
             if !preview.isEmpty {
@@ -2424,6 +2426,7 @@ final class ViewportView: MTKView {
         guard !sketch.hitsSplineHandle(at: point, tolerance: snapTolerance) else { return false }
         guard !sketch.hitsRadiusHandle(at: point, tolerance: snapTolerance) else { return false }
         guard !sketch.hitsTextTransformHandle(at: point, tolerance: snapTolerance) else { return false }
+        guard !sketch.hitsTextDeformHandle(at: point, tolerance: snapTolerance) else { return false }
         return sketch.markIndex(at: point, tolerance: snapTolerance, curveHit: false) == nil
     }
 
@@ -2512,9 +2515,11 @@ final class ViewportView: MTKView {
     private func acceptsForRadiusHandle(_ touch: UITouch) -> Bool {
         guard touch.type == .direct, let sketch, sketch.isActive, !sketch.isChoosingPlane, sketch.tool == .select,
               let point = sketchPoint(for: touch) else { return false }
-        // Auch Rahmen und Griffe eines gewählten Texts (SketchTextTransform.swift)
+        // Auch Rahmen und Griffe eines gewählten Texts (SketchTextTransform.swift) und Verformungsgriffe
+        // (SketchTextDeformHandles.swift)
         return sketch.hitsRadiusHandle(at: point, tolerance: snapTolerance)
             || sketch.hitsTextTransformHandle(at: point, tolerance: snapTolerance)
+            || sketch.hitsTextDeformHandle(at: point, tolerance: snapTolerance)
     }
 
     /// Finger im Werkzeug „Beschneiden“: wischt wie der Stift über die Kurven (Power Trim), Antippen beschneidet ein Stück.
@@ -3212,6 +3217,37 @@ final class ViewportView: MTKView {
         renderer?.camera.zoom(by: Float(gesture.scale))
         gesture.scale = 1
         refresh()
+    }
+}
+
+// MARK: Text verformen
+
+extension ViewportView {
+    /// Rahmen bzw. Pfad und Griffe zum Verformen des gewählten Texts (nur mit aktivem Modus in der Leiste
+    /// „Verformen“). Griffe als Ring (blau mit hellem Kern), Hülle/Pfad-Griffe in Bernstein.
+    fileprivate func addTextDeformHandles(to groups: inout [LineGroup], sketch: SketchController, perPoint: Double,
+                                          world: (Point2) -> SIMD3<Float>) {
+        let geometry = sketch.textDeformGeometry(unit: perPoint)
+        guard !geometry.knobs.isEmpty || !geometry.accents.isEmpty || !geometry.frame.isEmpty || !geometry.path.isEmpty
+        else { return }
+        let frame = geometry.frame.flatMap { dashed($0, dash: 4 * perPoint) }
+        if !frame.isEmpty {
+            groups.append(LineGroup(polylines: frame.map { $0.map(world) }, color: Self.previewBlue, width: 1.2))
+        }
+        if !geometry.path.isEmpty {
+            groups.append(LineGroup(polylines: geometry.path.map { $0.map(world) }, color: Self.helperOrange, width: 2.2))
+        }
+        let core: SIMD3<Float> = Self.themed(SIMD3<Float>(1, 1, 1), SketchTheme.Metal.halo)
+        if !geometry.knobs.isEmpty {
+            groups.append(LineGroup(polylines: [], color: Self.previewBlue, width: 0,
+                                    dots: geometry.knobs.map(world), dotRadius: 6.5))
+            groups.append(LineGroup(polylines: [], color: core, width: 0, dots: geometry.knobs.map(world), dotRadius: 3.5))
+        }
+        if !geometry.accents.isEmpty {
+            groups.append(LineGroup(polylines: [], color: Self.helperOrange, width: 0,
+                                    dots: geometry.accents.map(world), dotRadius: 7))
+            groups.append(LineGroup(polylines: [], color: core, width: 0, dots: geometry.accents.map(world), dotRadius: 3.5))
+        }
     }
 }
 

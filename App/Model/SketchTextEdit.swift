@@ -8,13 +8,19 @@ import simd
 
 extension SketchText {
     /// Gleicher Text mit geänderten Einstellungen, an derselben Stelle (der Anker bleibt).
+    /// Die Verformung bleibt (deform: .some(nil) entfernt sie); geänderte Höhe skaliert ihre Maße mit.
     func with(string: String? = nil, height: Double? = nil, fontName: String? = nil,
               alignment: TextAlignmentOption? = nil, rotation: Double? = nil,
-              transform: SketchTextTransform? = nil) -> SketchText {
+              deform: SketchTextDeform?? = nil, transform: SketchTextTransform? = nil) -> SketchText {
         // transform: .identity setzt die Griff-Lage zurück (nil = bleibt)
-        SketchText(string: string ?? self.string, anchor: anchor, height: height ?? self.height,
-                   fontName: fontName ?? self.fontName, alignment: alignment ?? self.alignment,
-                   rotation: rotation ?? self.rotation, transform: transform ?? self.transform)
+        let newHeight: Double = height ?? self.height
+        var kept: SketchTextDeform? = deform ?? self.deform
+        if deform == nil, self.height > 0, abs(newHeight - self.height) > 1e-12 {
+            kept = kept?.scaled(by: newHeight / self.height, about: nil)
+        }
+        return SketchText(string: string ?? self.string, anchor: anchor, height: newHeight,
+                          fontName: fontName ?? self.fontName, alignment: alignment ?? self.alignment,
+                          rotation: rotation ?? self.rotation, deform: kept, transform: transform ?? self.transform)
     }
 
     /// Kurzname für Browser und Körper: ohne Zeilenumbrüche, lange Texte gekürzt.

@@ -378,6 +378,10 @@ final class SketchController: ObservableObject {
     var radiusHandleDrag: RadiusHandleDrag?
     /// Verschiebe-, Skalier- bzw. Drehgriff eines Texts, der gerade gezogen wird (SketchTextTransform.swift)
     var textTransformDrag: TextTransformDrag?
+    /// Verformen eines gewählten Texts (SketchTextDeformHandles.swift): aktiver Griffmodus (nil = keine
+    /// Verformungsgriffe) und der Griff, der gerade gezogen wird
+    @Published var textDeformMode: SketchTextDeformMode?
+    var textDeformDrag: TextDeformDrag?
     @Published var rectangleMode: RectangleMode = .diagonal {
         didSet {
             rectangleBase = nil
@@ -723,6 +727,7 @@ final class SketchController: ObservableObject {
             // Wartet eine Bedingung, wählt der Stift nur (Griffe ziehen erst danach wieder)
             if pendingAction == nil {
                 if beginTextTransformDrag(at: point, tolerance: tolerance) { return }  // Textgriffe
+                if beginTextDeformDrag(at: point, tolerance: tolerance) { return }  // Text verformen
                 if beginSplineHandleDrag(at: point, tolerance: tolerance) { return }  // Spline-Tangentengriffe
                 if beginRadiusHandleDrag(at: point, tolerance: tolerance) { return }  // Radiusgriff Bogen/Kreis
             }
@@ -759,6 +764,7 @@ final class SketchController: ObservableObject {
     func moved(to point: Point2, tolerance: Double) {
         if tool == .select {
             if moveTextTransformDrag(to: point, tolerance: tolerance) { return }  // Textgriffe
+            if moveTextDeformDrag(to: point, tolerance: tolerance) { return }  // Text verformen
             if moveSplineHandleDrag(to: point, tolerance: tolerance) { return }  // Spline-Tangentengriffe
             if moveRadiusHandleDrag(to: point, tolerance: tolerance) { return }  // Radiusgriff Bogen/Kreis
             moveSelectDrag(to: point, tolerance: tolerance)
@@ -804,6 +810,7 @@ final class SketchController: ObservableObject {
     func ended(at point: Point2, tolerance: Double) {
         if tool == .select {
             if endTextTransformDrag(at: point, tolerance: tolerance) { return }  // Textgriffe
+            if endTextDeformDrag(at: point, tolerance: tolerance) { return }  // Text verformen
             if endSplineHandleDrag(at: point, tolerance: tolerance) { return }  // Spline-Tangentengriffe
             if endRadiusHandleDrag(at: point, tolerance: tolerance) { return }  // Radiusgriff Bogen/Kreis
             endSelectDrag(at: point, tolerance: tolerance)
@@ -1032,6 +1039,7 @@ final class SketchController: ObservableObject {
         // Radiusgriff: bis dahin Gezogenes bleibt (ein Rückgängig-Schritt)
         radiusHandleDrag = nil
         cancelTextTransformDrag()  // Textgriffe: Gezogenes bleibt
+        cancelTextDeformDrag()  // Verformungsgriffe: Gezogenes bleibt
         dragStart = nil
         dragCurrent = nil
         strokeSamples = []
@@ -4409,6 +4417,8 @@ final class SketchController: ObservableObject {
     }
 
     private func entitiesChanged() {
+        // Text am Pfad folgt der geänderten Kurve (SketchTextDeformHandles.swift)
+        for update in textPathUpdates() { entities[update.index] = update.entity }
         let profile = entities.indices.filter { !construction.contains($0) }.map { entities[$0] }
         let found = findRegions(in: profile)
         regions = found.regions

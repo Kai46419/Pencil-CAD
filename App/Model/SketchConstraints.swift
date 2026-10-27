@@ -317,7 +317,8 @@ extension SketchEntity {
             let anchor = Point2(v[0], v[1])
             guard simd_distance(anchor, t.anchor) > 1e-9 else { return self }
             return .text(SketchText(string: t.string, anchor: anchor, height: t.height, fontName: t.fontName,
-                                    alignment: t.alignment, rotation: t.rotation, transform: t.transform))
+                                    alignment: t.alignment, rotation: t.rotation, deform: t.deform,
+                                    transform: t.transform))
         }
     }
 

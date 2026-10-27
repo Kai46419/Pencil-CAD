@@ -8,6 +8,17 @@ struct SketchSelectionSection: View {
     @ObservedObject var sketch: SketchController
 
     var body: some View {
+        selectionSection
+        if let index = sketch.selectedTextIndex {
+            // Gewählter Text: Verformen und am Pfad ausrichten (SketchTextDeformPanel.swift)
+            PaletteRule()
+            SketchTextDeformSection(sketch: sketch, index: index)
+            PaletteRule()
+            SketchTextPathSection(sketch: sketch, index: index)
+        }
+    }
+
+    private var selectionSection: some View {
         PaletteSection("Auswahl", detail: summary) {
             VStack(alignment: .leading, spacing: PaletteStyle.spacing) {
                 if let index = sketch.selectedTextIndex {
