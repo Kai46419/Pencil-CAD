@@ -4388,7 +4388,8 @@ extension SketchController {
     /// Fangpunkt (Ende, Mitte, Schnittpunkt …) für „Teilen an Punkt“ mit dem Finger, ohne Fanghinweise zu ändern.
     func cutSnapPoint(_ p: Point2, tolerance: Double) -> Point2 {
         let kinds: Set<SnapKind> = snapKinds.subtracting([.angle, .grid])
-        return snapIndex.snap(p, tolerance: tolerance * Self.snapSensitivity, kinds: kinds, gridStep: gridStep).point
+        return snapIndex.snap(p, tolerance: tolerance * Self.snapSensitivity, kinds: kinds, extra: marks,
+                              gridStep: gridStep).point
     }
 
     /// Stand vor dem Schneiden merken (ein Rückgängig-Schritt, auch für einen ganzen Wisch).
