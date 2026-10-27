@@ -76,6 +76,8 @@ final class ViewportView: MTKView {
     private var scaleViewRevision = -1
     /// Drehscheibe im Verschieben-Werkzeug
     private var ringDrag: RingDragState?
+    /// Griff des Verschieben-Werkzeugs unter dem schwebenden Stift (TransformGizmo.swift)
+    private var gizmoHover: GizmoPart?
     private let ringLabel = PaddedLabel()
     private let valueLabel = PaddedLabel()
     /// Einrasthinweis am Stift (Endpunkt, Mittelpunkt …)
@@ -417,9 +419,7 @@ final class ViewportView: MTKView {
 
         let handles = workspace.handles
         // Ein Pfeil, der knapp über dem Objekt schwebt; Ziehen in Gegenrichtung ergibt negative Werte
-        renderer.handles = handles.map { handle in
-            HandleGraphic(base: arrowBase(handle), direction: handle.pointing, color: handle.color, scale: handle.scale)
-        }
+        renderer.handles = shownHandleGraphics(handles)
         updateValueLabel(handles)
         updateDimensionFields()
         updateSnapHint()
@@ -572,7 +572,7 @@ final class ViewportView: MTKView {
         addConstructionItems(to: &groups, perPoint: perPoint, sketching: sketching)
         addCosmeticThreads(to: &groups)
         if !sketching {
-            addRotationRing(to: &groups)
+            addRotationRing(to: &groups, fills: &fills)
             addPlaneHandles(to: &fills, groups: &groups)
         }
         if !sketch.isActive || sketch.isChoosingPlane { addHoverHighlight(to: &groups, fills: &fills) }
@@ -950,14 +950,31 @@ final class ViewportView: MTKView {
     /// Ring zum Drehen: Mitte, Radius und Achse (0 = X, 1 = Y, 2 = Z).
     private typealias Ring = (center: SIMD3<Double>, radius: Double, axis: Int)
 
-    /// Ringe des Verschieben-Werkzeugs: beim Drehen nur der gegriffene (wie beim Ansetzen gemerkt), sonst die
-    /// Drehscheibe am Boden (Z) und die Drehbögen um X und Y.
+    /// Ringe des Verschieben-Werkzeugs (alle um die Mitte der Auswahl, Radius fest in Bildschirmpunkten): beim
+    /// Drehen nur der gegriffene (Mitte wie beim Ansetzen gemerkt), sonst X, Y und Z. Die Drehung um Z durch die
+    /// Mitte ist dieselbe wie früher durch die Mitte am Boden (gleiche senkrechte Achse).
     private var currentRings: [Ring] {
-        if let ringDrag { return [(ringDrag.center, ringDrag.radius, ringDrag.axis)] }
         guard let workspace else { return [] }
-        var rings: [Ring] = workspace.rotationArcs.map { ($0.center, $0.radius, $0.axis) }
-        if let ring = workspace.rotationRing { rings.append((ring.center, ring.radius, 2)) }
-        return rings
+        if let ringDrag {
+            return [(ringDrag.center, gizmoRadius(at: ringDrag.center), ringDrag.axis)]
+        }
+        guard let center = workspace.rotationArcs.first?.center else { return [] }
+        let radius = gizmoRadius(at: center)
+        return [0, 1, 2].map { axis -> Ring in (center, radius, axis) }
+    }
+
+    /// Radius der Drehbögen in Weltmaß: fest in Bildschirmpunkten (wie Blender, Fusion 360, Shapr3D), unabhängig
+    /// von Zoom und Größe der Auswahl.
+    private func gizmoRadius(at center: SIMD3<Double>) -> Double {
+        guard let renderer else { return 20 }
+        let unit = renderer.camera.worldUnitsPerPoint(at: SIMD3<Float>(center), viewHeight: Float(bounds.height))
+        return TransformGizmo.ringRadius * Double(unit)
+    }
+
+    /// Richtung von der Mitte zur Kamera (für das sichtbare Viertel und die Vorderseite des Rings).
+    private var towardCamera: SIMD3<Double> {
+        guard let renderer else { return SIMD3<Double>(0, 0, 1) }
+        return SIMD3<Double>(-renderer.camera.forward)
     }
 
     private static let ringBlue = SIMD3<Float>(0.1, 0.36, 0.88)
@@ -984,31 +1001,118 @@ final class ViewportView: MTKView {
         return SIMD3<Float>(ring.center + (e1 * cos(angle) + e2 * sin(angle)) * ring.radius * scale)
     }
 
-    /// Drehscheibe wie in Bambu Studio / PrusaSlicer (blau, Z) und Drehbögen um X (rot) und Y (grün) wie bei
-    /// Shapr3D: Striche alle 15°, Griffpunkt; beim Drehen der überstrichene Bogen orange.
-    private func addRotationRing(to groups: inout [LineGroup]) {
+    /// Mittelwinkel des ruhenden Bogens: im Viertel der Ringebene, das zur Kamera zeigt (Fusion 360, Shapr3D).
+    private func arcMidAngle(_ ring: Ring) -> Double {
+        let (e1, e2) = Self.ringBasis(ring.axis)
+        return TransformGizmo.facingAngle(e1: e1, e2: e2, toward: towardCamera)
+    }
+
+    /// Punkte des ruhenden Bogens (60° im Viertel zur Kamera).
+    private func arcPoints(_ ring: Ring) -> [SIMD3<Float>] {
+        let mid = arcMidAngle(ring)
+        let span = TransformGizmo.arcHalfSpan
+        let steps = 24
+        var points: [SIMD3<Float>] = []
+        for k in 0...steps {
+            let t = Double(k) / Double(steps)
+            let angle: Double = mid - span + 2 * span * t
+            points.append(Self.ringPoint(ring, angle: angle))
+        }
+        return points
+    }
+
+    /// Drehgriffe: ruhend schlanke Bögen im Viertel zur Kamera mit Griffpunkt, unter dem Stift breiter und heller;
+    /// beim Drehen nur der gegriffene Ring (siehe addActiveRing). Während ein Pfeil oder Ebenengriff gezogen wird,
+    /// sind die Bögen ausgeblendet.
+    private func addRotationRing(to groups: inout [LineGroup], fills: inout [FillGroup]) {
+        guard handleDrag == nil, planeDrag == nil else { return }
+        if let drag = ringDrag {
+            addActiveRing(drag, to: &groups, fills: &fills)
+            return
+        }
         for ring in currentRings {
-            let color = Self.ringColors[ring.axis]
-            let segments = 120
-            let circle = (0...segments).map { Self.ringPoint(ring, angle: Double($0) / Double(segments) * 2 * .pi) }
-            let ticks = (0..<24).map { k -> [SIMD3<Float>] in
-                let angle = Double(k) * .pi / 12
-                let inner = k % 6 == 0 ? 0.86 : 0.93
-                return [Self.ringPoint(ring, angle: angle, scale: inner), Self.ringPoint(ring, angle: angle)]
+            let lit = gizmoHover == .ring(ring.axis)
+            let base = Self.ringColors[ring.axis]
+            let color = lit ? TransformGizmo.highlighted(base) : base
+            let width = lit ? TransformGizmo.activeWidth : TransformGizmo.lineWidth
+            let knob = Self.ringPoint(ring, angle: arcMidAngle(ring))
+            groups.append(LineGroup(polylines: [arcPoints(ring)], color: color, width: width,
+                                    dots: [knob], dotRadius: lit ? 5.5 : 4))
+        }
+    }
+
+    /// Gegriffener Ring beim Drehen (Blender dial3d): voller Kreis, hintere Hälfte abgeblendet, Rasterstriche alle
+    /// 15° ab dem Ansatzpunkt, überstrichener Winkel als halbtransparentes Kreissegment mit Speichen.
+    private func addActiveRing(_ drag: RingDragState, to groups: inout [LineGroup], fills: inout [FillGroup]) {
+        guard let ring = currentRings.first else { return }
+        let toward = towardCamera
+        let (e1, e2) = Self.ringBasis(ring.axis)
+        let base = Self.ringColors[ring.axis]
+        let back = TransformGizmo.faded(base)
+        let isFront = { (angle: Double) -> Bool in
+            let direction: SIMD3<Double> = e1 * cos(angle) + e2 * sin(angle)
+            return simd_dot(direction, toward) >= 0
+        }
+        // Kreis in Läufe gleicher Seite zerlegen
+        let segments = 96
+        let step: Double = 2 * .pi / Double(segments)
+        var runs: [(front: Bool, points: [SIMD3<Float>])] = []
+        for k in 0...segments {
+            let angle = Double(k) * step
+            let point = Self.ringPoint(ring, angle: angle)
+            let nextFront = isFront(angle + step / 2)
+            if runs.isEmpty {
+                runs.append((nextFront, [point]))
+                continue
             }
-            let start = ringDrag?.startAngle ?? -.pi / 2
-            let turned = (ringDrag?.degrees ?? 0) * .pi / 180
-            let knob = Self.ringPoint(ring, angle: start + turned)
-            groups.append(LineGroup(polylines: [circle], color: color, width: ring.axis == 2 ? 3.2 : 2.4))
-            groups.append(LineGroup(polylines: ring.axis == 2 || ringDrag != nil ? ticks : [], color: color, width: 1.4,
-                                    dots: [knob], dotRadius: ring.axis == 2 ? 8 : 6.5))
-            if abs(turned) > 1e-9 {
-                let steps = max(2, Int(abs(turned) / (.pi / 90)))
-                let arc = (0...steps).map { Self.ringPoint(ring, angle: start + turned * Double($0) / Double(steps)) }
-                groups.append(LineGroup(polylines: [arc], color: Self.snapOrange, width: 4.5,
-                                        dots: [Self.ringPoint(ring, angle: start)], dotRadius: 3.5))
+            runs[runs.count - 1].points.append(point)
+            if k < segments, runs[runs.count - 1].front != nextFront {
+                runs.append((nextFront, [point]))
             }
         }
+        let frontLines: [[SIMD3<Float>]] = runs.filter { $0.front }.map { $0.points }
+        let backLines: [[SIMD3<Float>]] = runs.filter { !$0.front }.map { $0.points }
+        groups.append(LineGroup(polylines: backLines, color: back, width: TransformGizmo.lineWidth))
+        groups.append(LineGroup(polylines: frontLines, color: base, width: TransformGizmo.lineWidth))
+
+        // Rasterstriche ab dem Ansatzpunkt (dort rastet der Winkel ein), jeder 90°-Strich länger
+        let tickCount = Int(360 / TransformGizmo.tickStep)
+        var frontTicks: [[SIMD3<Float>]] = []
+        var backTicks: [[SIMD3<Float>]] = []
+        for k in 0..<tickCount {
+            let angle: Double = drag.startAngle + Double(k) * TransformGizmo.tickStep * .pi / 180
+            let inner: Double = k % 6 == 0 ? 0.84 : 0.92
+            let tick = [Self.ringPoint(ring, angle: angle, scale: inner), Self.ringPoint(ring, angle: angle)]
+            if isFront(angle) { frontTicks.append(tick) } else { backTicks.append(tick) }
+        }
+        groups.append(LineGroup(polylines: backTicks, color: back, width: 1.2))
+        groups.append(LineGroup(polylines: frontTicks, color: base, width: 1.2))
+
+        let turned: Double = drag.degrees * .pi / 180
+        let center = SIMD3<Float>(ring.center)
+        let startPoint = Self.ringPoint(ring, angle: drag.startAngle)
+        let knob = Self.ringPoint(ring, angle: drag.startAngle + turned)
+        if abs(turned) > 1e-9 {
+            // Überstrichener Winkel (höchstens eine volle Umdrehung gezeichnet)
+            let sweep: Double = max(min(turned, 2 * .pi), -2 * .pi)
+            let steps = max(2, Int(abs(sweep) / (.pi / 90)))
+            var arc: [SIMD3<Float>] = []
+            for k in 0...steps {
+                let angle: Double = drag.startAngle + sweep * Double(k) / Double(steps)
+                arc.append(Self.ringPoint(ring, angle: angle))
+            }
+            var sector: [SIMD3<Float>] = []
+            for k in 1..<arc.count {
+                sector += [center, arc[k - 1], arc[k]]
+            }
+            fills.append(FillGroup(triangles: sector, color: SIMD4(base.x, base.y, base.z, 0.2), onTop: true))
+            let lit = TransformGizmo.highlighted(base)
+            groups.append(LineGroup(polylines: [arc], color: lit, width: TransformGizmo.activeWidth))
+        }
+        // Speichen zum Ansatzpunkt und zum Griff, Griffpunkt
+        groups.append(LineGroup(polylines: [[center, startPoint], [center, knob]], color: base, width: 1.2,
+                                dots: [startPoint], dotRadius: 3))
+        groups.append(LineGroup(polylines: [], color: base, width: 0, dots: [knob], dotRadius: 5.5))
     }
 
     /// Winkel (Bogenmaß) des Bildschirmpunkts in der Ringebene um die Ringmitte.
@@ -1026,17 +1130,20 @@ final class ViewportView: MTKView {
         return atan2(y, x)
     }
 
-    /// Ring nah an der Berührung (höchstens 24 pt), der nächste zuerst.
+    /// Bogen nah an der Berührung (unsichtbare Trefferzone von 22 pt), der nächste zuerst.
     private func ringHit(at location: CGPoint) -> Ring? {
-        guard let renderer else { return nil }
+        guard let renderer, handleDrag == nil, planeDrag == nil, ringDrag == nil else { return nil }
         var best: (ring: Ring, distance: CGFloat)?
         for ring in currentRings {
-            let points = (0...72).compactMap {
-                renderer.camera.project(Self.ringPoint(ring, angle: Double($0) / 72 * 2 * .pi), viewSize: bounds.size)
-            }
+            let points = arcPoints(ring).compactMap { renderer.camera.project($0, viewSize: bounds.size) }
             guard points.count > 1 else { continue }
-            let distance = (1..<points.count).map { location.distance(toSegment: points[$0 - 1], points[$0]) }.min() ?? .infinity
-            if distance <= 24, distance < (best?.distance ?? .infinity) { best = (ring, distance) }
+            var distance = CGFloat.infinity
+            for k in 1..<points.count {
+                distance = min(distance, location.distance(toSegment: points[k - 1], points[k]))
+            }
+            if distance <= TransformGizmo.hitDistance, distance < (best?.distance ?? .infinity) {
+                best = (ring, distance)
+            }
         }
         return best?.ring
     }
@@ -1048,33 +1155,38 @@ final class ViewportView: MTKView {
         return abs(degrees - detent) < 3 ? detent : degrees.rounded()
     }
 
+    /// Winkel-Etikett (wie das Wertfeld an den Pfeilen) außerhalb des Rings am Griff: Achse und Grad mit Vorzeichen.
     private func updateRingLabel() {
         guard let ringDrag, let renderer,
-              let point = renderer.camera.project(Self.ringPoint((ringDrag.center, ringDrag.radius, ringDrag.axis),
+              let point = renderer.camera.project(Self.ringPoint((ringDrag.center, gizmoRadius(at: ringDrag.center),
+                                                                  ringDrag.axis),
                                                                  angle: ringDrag.startAngle + ringDrag.degrees * .pi / 180,
-                                                                 scale: 1.18),
+                                                                 scale: 1.3),
                                                   viewSize: bounds.size) else {
             ringLabel.isHidden = true
             return
         }
-        ringLabel.text = "\(["X", "Y", "Z"][ringDrag.axis]) \(Int(ringDrag.degrees))°"
-        ringLabel.backgroundColor = UIColor(red: CGFloat(Self.ringColors[ringDrag.axis].x),
-                                            green: CGFloat(Self.ringColors[ringDrag.axis].y),
-                                            blue: CGFloat(Self.ringColors[ringDrag.axis].z), alpha: 1)
+        let value = Int(ringDrag.degrees)
+        let sign = value > 0 ? "+" : value < 0 ? "−" : ""
+        ringLabel.text = "\(["X", "Y", "Z"][ringDrag.axis]) \(sign)\(abs(value))°"
+        let color = Self.ringColors[ringDrag.axis]
+        ringLabel.backgroundColor = UIColor(red: CGFloat(color.x), green: CGFloat(color.y), blue: CGFloat(color.z),
+                                            alpha: 1)
         ringLabel.sizeToFit()
-        ringLabel.center = CGPoint(x: point.x, y: point.y - 22)
+        ringLabel.center = point
         ringLabel.isHidden = false
     }
 
     // MARK: Ebenengriffe
 
     /// Quadrate in den Ebenen XY, YZ und XZ an der Mitte der Auswahl (Shapr3D): Ziehen verschiebt in der Ebene.
-    /// normal = Achse senkrecht zur Ebene.
+    /// normal = Achse senkrecht zur Ebene. Größe fest in Bildschirmpunkten wie Pfeile und Bögen.
     private var planeHandles: [(normal: Int, corners: [SIMD3<Double>])] {
-        guard let workspace, workspace.tool == .move, !(sketch?.isActive ?? false),
+        guard let renderer, let workspace, workspace.tool == .move, !(sketch?.isActive ?? false),
               let center = workspace.moveCenter else { return [] }
-        let size = workspace.handleSize * 0.22
-        let offset = workspace.handleSize * 0.18
+        let unit = Double(renderer.camera.worldUnitsPerPoint(at: SIMD3<Float>(center), viewHeight: Float(bounds.height)))
+        let size: Double = TransformGizmo.planeSize * unit
+        let offset: Double = TransformGizmo.planeOffset * unit
         return (0..<3).map { normal in
             let (e1, e2) = Self.ringBasis(normal)
             let base = center + (e1 + e2) * offset
@@ -1082,14 +1194,21 @@ final class ViewportView: MTKView {
         }
     }
 
+    /// Ebenengriffe vor den Körpern; unter dem Stift bzw. gegriffen kräftiger, beim Drehen oder Pfeilziehen aus,
+    /// beim Ziehen eines Ebenengriffs nur dieser.
     private func addPlaneHandles(to fills: inout [FillGroup], groups: inout [LineGroup]) {
+        guard ringDrag == nil, handleDrag == nil else { return }
         for handle in planeHandles {
+            if let planeDrag, planeDrag.normal != handle.normal { continue }
             let corners = handle.corners.map { SIMD3<Float>($0) }
-            let color = Self.ringColors[handle.normal]
-            let active = planeDrag?.normal == handle.normal
-            fills.append(FillGroup(triangles: [corners[0], corners[1], corners[2], corners[0], corners[2], corners[3]],
-                                   color: SIMD4(color.x, color.y, color.z, active ? 0.75 : 0.4)))
-            groups.append(LineGroup(polylines: [corners + [corners[0]]], color: color, width: 1.6))
+            let base = Self.ringColors[handle.normal]
+            let active = planeDrag?.normal == handle.normal || gizmoHover == .plane(handle.normal)
+            let color = active ? TransformGizmo.highlighted(base) : base
+            let triangles = [corners[0], corners[1], corners[2], corners[0], corners[2], corners[3]]
+            fills.append(FillGroup(triangles: triangles, color: SIMD4(color.x, color.y, color.z, active ? 0.7 : 0.35),
+                                   onTop: true))
+            groups.append(LineGroup(polylines: [corners + [corners[0]]], color: color,
+                                    width: active ? 2.4 : 1.4))
         }
     }
 
@@ -1101,11 +1220,43 @@ final class ViewportView: MTKView {
             guard projected.count == 4 else { continue }
             let polygon = projected.map { Point2(Double($0.x), Double($0.y)) }
             let center = polygon.reduce(.zero, +) / 4
-            // Etwas größer als gezeichnet, damit der Finger trifft
-            let grown = polygon.map { center + ($0 - center) * 1.35 }
+            // Deutlich größer als gezeichnet, damit Finger und Stift treffen
+            let grown = polygon.map { center + ($0 - center) * 1.6 }
             if polygonContains(grown, Point2(Double(location.x), Double(location.y))) { return handle.normal }
         }
         return nil
+    }
+
+    /// Griff unter dem schwebenden Stift hervorheben (gleiche Reihenfolge wie beim Ansetzen: Pfeil, Ebene, Bogen).
+    private func updateGizmoHover(at location: CGPoint?) {
+        var part: GizmoPart?
+        if let location, handleDrag == nil, ringDrag == nil, planeDrag == nil {
+            if let handle = handleHit(at: location) {
+                part = .arrow(handle.kind)
+            } else if let normal = planeHandleHit(at: location) {
+                part = .plane(normal)
+            } else if let ring = ringHit(at: location) {
+                part = .ring(ring.axis)
+            }
+        }
+        guard part != gizmoHover else { return }
+        gizmoHover = part
+        refresh()
+    }
+
+    /// Gezeigte Ziehpfeile: beim Ziehen nur der gegriffene, beim Drehen bzw. Ebenengriff-Ziehen keiner;
+    /// gegriffener bzw. überfahrener Pfeil heller und etwas größer.
+    private func shownHandleGraphics(_ handles: [DragHandle]) -> [HandleGraphic] {
+        if ringDrag != nil || planeDrag != nil { return [] }
+        var result: [HandleGraphic] = []
+        for handle in handles {
+            if let drag = handleDrag, drag.handle.kind != handle.kind { continue }
+            let lit = handleDrag != nil || gizmoHover == .arrow(handle.kind)
+            let color = lit ? TransformGizmo.highlighted(handle.color) : handle.color
+            let scale: Float = lit ? handle.scale * 1.08 : handle.scale
+            result.append(HandleGraphic(base: arrowBase(handle), direction: handle.pointing, color: color, scale: scale))
+        }
+        return result
     }
 
     /// Punkt der Ebene (durch die Mitte der Auswahl, senkrecht zu normal) unter dem Bildschirmpunkt.
@@ -1718,7 +1869,8 @@ final class ViewportView: MTKView {
 
     /// Maß-Etikett an der Pfeilspitze des ersten Ziehpfeils.
     private func updateValueLabel(_ handles: [DragHandle]) {
-        guard let renderer, let handle = handles.first(where: { $0.value != 0 }) ?? handles.first,
+        guard let renderer, ringDrag == nil, planeDrag == nil,
+              let handle = handles.first(where: { $0.value != 0 }) ?? handles.first,
               !handle.isMove || handles.count == 3 else {
             valueLabel.isHidden = true
             return
@@ -1993,6 +2145,8 @@ final class ViewportView: MTKView {
            let parameter = axisParameter(at: touch.location(in: self), handle: handle) {
             handleDrag = HandleDragState(touch: touch, handle: handle, startParameter: parameter,
                                          step: dragStep(at: handle.base))
+            gizmoHover = nil
+            refresh()
             return
         }
         if planeDrag == nil, ringDrag == nil, handleDrag == nil, alone,
@@ -2002,6 +2156,7 @@ final class ViewportView: MTKView {
            let start = planePoint(at: touch.location(in: self), normal: normal, origin: center) {
             planeDrag = PlaneDragState(touch: touch, normal: normal, origin: center, start: start,
                                        startOffset: model.moveOffset, step: dragStep(at: SIMD3<Float>(center)))
+            gizmoHover = nil
             refresh()
             return
         }
@@ -2012,6 +2167,7 @@ final class ViewportView: MTKView {
             workspace?.beginRingRotation()
             ringDrag = RingDragState(touch: touch, center: ring.center, radius: ring.radius, startAngle: angle,
                                      lastAngle: angle, axis: ring.axis)
+            gizmoHover = nil
             updateRingLabel()
             refresh()
             return
@@ -2438,6 +2594,7 @@ final class ViewportView: MTKView {
         switch gesture.state {
         case .began, .changed:
             lastHoverLocation = gesture.location(in: self)
+            updateGizmoHover(at: gesture.location(in: self))
             updateHoverPick(at: sketch.isActive && !sketch.isChoosingPlane ? nil : gesture.location(in: self))
             guard sketch.isActive, !sketch.isChoosingPlane, sketchTouch == nil,
                   let point = sketchPoint(at: gesture.location(in: self)) else {
@@ -2453,6 +2610,7 @@ final class ViewportView: MTKView {
         default:
             lastHoverLocation = nil
             updateHoverDwell(at: nil)
+            updateGizmoHover(at: nil)
             updateHoverPick(at: nil)
             sketch.endHover()
         }

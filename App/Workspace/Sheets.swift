@@ -272,6 +272,12 @@ enum HelpTopic: String, CaseIterable, Identifiable {
                     + "PDF-Seite 1) oder Foto aufnehmen mit der Kamera – danach startet gleich das Kalibrieren auf Maß.",
                 "Werkzeuge neu sortiert wie in Fusion 360: Bohrung, Spiegeln, Muster und Negativform liegen jetzt unter "
                     + "Erstellen, Ändern enthält nur noch Änderungen an Körpern, Transformieren nur Lage und Größe.",
+                "Verschieben/Rotieren feiner: Drehgriffe sind jetzt schlanke Bögen fester Bildschirmgröße (unabhängig "
+                    + "von Zoom und Körpergröße) im Viertel zur Kamera; der Griff unter dem Stift leuchtet auf, beim Ziehen "
+                    + "bleibt nur der gegriffene sichtbar. Beim Drehen: voller Ring (Rückseite blass), Striche alle 15° "
+                    + "ab dem Ansatz, überstrichener Winkel als Segment und Grad-Etikett.",
+                "Schnittansicht mit Pfeil: blauer Ziehpfeil senkrecht zur Schnittebene – ziehen führt den Schnitt "
+                    + "live durch den Körper, der Versatz steht am Pfeil und in der Karte.",
                 "Skizze: Radius eines Bogens ändern (Maß oder Ziehen an der Wölbung) bewegt nur den Bogen – seine Enden "
                     + "gleiten auf den Nachbarlinien, der Rest bleibt stehen. Gewählte Bögen und Kreise haben einen blauen "
                     + "Griff zum Ziehen des Radius.",

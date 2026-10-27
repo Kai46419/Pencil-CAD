@@ -193,6 +193,8 @@ enum HandleKind: Equatable {
     case scale
     /// Rundung ändern: Pfeil an der Zylinderfläche, Wert = Versatz aus dem Material heraus (RadiusHandle.swift)
     case radius
+    /// Schnittansicht (Kai): Pfeil senkrecht zur Schnittebene, Wert = Versatz der Ebene (SectionHandle.swift)
+    case section
 }
 
 /// Ziehpfeil: Achse (Ursprung + Richtung), aktueller Wert in mm entlang der Achse.
@@ -1894,6 +1896,8 @@ final class Workspace: ObservableObject {
                 return DragHandle(kind: .move(axis: index), axisOrigin: SIMD3<Float>(origin),
                                   direction: SIMD3<Float>(axis.0), value: value, color: axis.1)
             }
+        case .section:
+            return sectionHandle.map { [$0] } ?? []
         case .scale:
             guard let reference = currentScaleReference() else { return [] }
             let origin = SIMD3<Float>(reference.center)
@@ -1966,6 +1970,8 @@ final class Workspace: ObservableObject {
             updatePreview()
         case .radius:
             setRadiusOffset(value)
+        case .section:
+            if value != section?.offset { section?.offset = value }
         }
     }
 
@@ -2097,7 +2103,7 @@ final class Workspace: ObservableObject {
                 : "Rand, Spiel und Teilung einstellen, dann „Fertig“ – der Körper bleibt erhalten"
         case .move:
             if model.movingSketch != nil { return "Skizze: Achsenpfeil ziehen oder Werte eingeben, dann „Fertig“" }
-            return model.selectedBodies.isEmpty ? "Körper antippen" : "Achsenpfeil ziehen · am Ring drehen (rastet alle 15°)"
+            return model.selectedBodies.isEmpty ? "Körper antippen" : "Achsenpfeil ziehen · am Bogen drehen (rastet alle 15°)"
         case .mirror:
             if mirrorPicksFace { return "Ebene Fläche antippen, an der gespiegelt wird" }
             return model.selectedBodies.isEmpty ? "Körper antippen" : "Ebene wählen, dann „Fertig“"
@@ -2133,7 +2139,7 @@ final class Workspace: ObservableObject {
         case .meshSculpt:
             return sculpt.body == nil ? "Körper antippen oder mit dem Stift darauf malen"
                 : "Stift ziehen formt das Netz, fester drücken verstärkt · ein Finger dreht die Ansicht"
-        case .section: return "Ebene wählen oder ebene Fläche antippen"
+        case .section: return "Ebene wählen oder ebene Fläche antippen · Pfeil ziehen führt den Schnitt durch den Körper"
         case .measure:
             if measureMode == .element { return "Kante antippen = ganze Länge · Fläche antippen = Inhalt und Länge × Breite" }
             return measurePoints.count == 1 ? "Zweiten Punkt antippen – rastet parallel zu X, Y, Z bzw. senkrecht zur Fläche ein"
