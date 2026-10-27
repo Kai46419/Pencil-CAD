@@ -726,10 +726,12 @@ final class SketchController: ObservableObject {
         if tool == .select {
             // Wartet eine Bedingung, wählt der Stift nur (Griffe ziehen erst danach wieder)
             if pendingAction == nil {
-                if beginTextTransformDrag(at: point, tolerance: tolerance) { return }  // Textgriffe
-                if beginTextDeformDrag(at: point, tolerance: tolerance) { return }  // Text verformen
+                // Griffe des gewählten Elements zuerst: Textgriffe greifen auch nicht gewählte Texte und
+                // überdeckten sonst Spline- und Radiusgriffe, die über einem Text liegen
                 if beginSplineHandleDrag(at: point, tolerance: tolerance) { return }  // Spline-Tangentengriffe
                 if beginRadiusHandleDrag(at: point, tolerance: tolerance) { return }  // Radiusgriff Bogen/Kreis
+                if beginTextTransformDrag(at: point, tolerance: tolerance) { return }  // Textgriffe
+                if beginTextDeformDrag(at: point, tolerance: tolerance) { return }  // Text verformen
             }
             beginSelectDrag(at: point, tolerance: tolerance)
             return
@@ -4431,6 +4433,9 @@ final class SketchController: ObservableObject {
     }
 
     func changed(publish: Bool = true) {
+        // Verformungsmodus gilt nur für einen gewählten Text: sonst blieben die Textgriffe (Verschieben, Skalieren)
+        // aller Texte ausgeblendet bzw. „Pfad wählen“ finge jedes Antippen ab
+        if textDeformMode != nil, selectedTextIndex == nil { textDeformMode = nil }
         updateLabel()
         // Panel-Wertfelder folgen dem Stift auch ohne veröffentlichte Änderung
         options.noteLive(clickKind != nil ? clickLiveValues : [])
