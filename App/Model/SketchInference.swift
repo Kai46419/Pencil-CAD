@@ -103,6 +103,8 @@ struct SnapCandidate {
     var target: SnapTarget?
     var guide: (Point2, Point2)?
     var label: String = ""
+    /// Weitere gestrichelte Hilfslinien (Ausrichtung an Punkten, Verlängerungen, Winkelstrahl), zusätzlich zu guide.
+    var guides: [(Point2, Point2)] = []
 
     static func free(_ p: Point2) -> SnapCandidate { SnapCandidate(point: p, target: nil, guide: nil, label: "") }
 

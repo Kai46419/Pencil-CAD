@@ -444,6 +444,8 @@ final class SketchController: ObservableObject {
     var inference = SketchInference()
     /// Geweckter Kreismittelpunkt (SolidCraft `woken_centre`)
     var wokenCenter: Point2?
+    /// SolidCraft-Fang: gemerkte Fangpunkte (Ende, Mitte, Schnitt, Zentrum) nahe dem Stift, die die Anzeige markiert.
+    var clickTrackedPoints: [(kind: SnapKind, point: Point2)] = []
     /// Zählt gesetzte Punkte der Klickfolge (der Viewport gibt dabei einen leichten Klick)
     var placedPointCount = 0
     /// Freiheitsgrade, zwischengespeichert je Geometrie- und Bedingungsstand
