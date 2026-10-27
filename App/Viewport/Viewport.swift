@@ -160,7 +160,8 @@ final class ViewportView: MTKView {
         for gesture in [orbitGesture, panGesture, pinchGesture] as [UIGestureRecognizer?] {
             gesture?.cancelsTouchesInView = !sketching
         }
-        if sketch.isActive, !sketch.isChoosingPlane, !sketch.fingerDraws {
+        // Beim Beschneiden wischt ein Finger (SketchCut.swift) – er ist dann keine Bogen-Taste
+        if sketch.isActive, !sketch.isChoosingPlane, !sketch.fingerDraws, sketch.tool != .trim {
             heldFingers.formUnion(began.filter { $0.type == .direct })
         }
         let wasHeld = !heldFingers.isEmpty
@@ -500,6 +501,8 @@ final class ViewportView: MTKView {
     private static let selectionOrange = SIMD3<Float>(0.98, 0.5, 0.06)
     private static let helperOrange = SIMD3<Float>(0.93, 0.55, 0.16)
     private static let dimensionInk = SIMD3<Float>(0.18, 0.2, 0.26)
+    /// Spur beim Beschneiden per Wischen
+    private static let cutRed = SIMD3<Float>(0.9, 0.15, 0.12)
     private static let axes: [(SIMD3<Float>, SIMD3<Float>)] = [
         ([1, 0, 0], [0.78, 0.16, 0.11]),
         ([0, 1, 0], [0.17, 0.52, 0.2]),
@@ -661,6 +664,11 @@ final class ViewportView: MTKView {
                 groups.append(LineGroup(polylines: preview.map { $0.map(world) }, color: Self.sketchGraphite,
                                         width: Self.sketchLineWidth, dots: previewEnds.map(world),
                                         dotRadius: Self.sketchPointRadius))
+            }
+            // Beschneiden per Wischen: Spur des Stifts bzw. Fingers dünn rot (SketchCut.swift)
+            let cutTrace = sketch.cutTrace
+            if cutTrace.count >= 2 {
+                groups.append(LineGroup(polylines: [cutTrace.map(world)], color: Self.cutRed, width: 1.4))
             }
             let dimensionLines = sketch.visibleDimensions.flatMap { dimensionGeometry($0, perPoint: perPoint).lines }
             if !dimensionLines.isEmpty {
@@ -2075,6 +2083,12 @@ final class ViewportView: MTKView {
         return sketch.hitsRadiusHandle(at: point, tolerance: snapTolerance)
     }
 
+    /// Finger im Werkzeug „Beschneiden“: wischt wie der Stift über die Kurven (Power Trim), Antippen beschneidet ein Stück.
+    private func acceptsForCutSwipe(_ touch: UITouch) -> Bool {
+        guard touch.type == .direct, let sketch, sketch.isActive, !sketch.isChoosingPlane else { return false }
+        return sketch.tool == .trim
+    }
+
     /// Punkt der (unbegrenzten) Skizzenebene unter einem Bildschirmpunkt.
     private func sketchPoint(at location: CGPoint) -> SIMD2<Double>? {
         guard let renderer, let sketch else { return nil }
@@ -2094,6 +2108,12 @@ final class ViewportView: MTKView {
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         updateHeldFingers(began: touches)
+        // Beschneiden mit dem Finger: kommt ein zweiter Finger dazu (Verschieben, Zoomen, Rückgängig), ist es kein Wisch
+        if let touch = sketchTouch, touch.type == .direct, sketch?.tool == .trim, !touches.contains(touch) {
+            sketchTouch = nil
+            sketch?.cancelStroke()
+            refresh()
+        }
         // Bild kalibrieren: Stift aufsetzen zeigt die Lupe, gesetzt wird beim Absetzen
         if calibrationTouch == nil, workspace?.canvasCalibration != nil,
            let touch = touches.first(where: { $0.type == .pencil }) {
@@ -2157,7 +2177,9 @@ final class ViewportView: MTKView {
         }
         // Radiusgriff an Bogen bzw. Kreis lässt sich auch mit dem Finger ziehen (SketchArcHandle.swift)
         let handleTouch: UITouch? = alone ? touches.first(where: acceptsForRadiusHandle) : nil
-        guard sketchTouch == nil, let touch = touches.first(where: acceptsForSketch) ?? handleTouch,
+        // Beschneiden: ein einzelner Finger wischt über Kurven bzw. tippt ein Stück an (SketchCut.swift)
+        let cutTouch: UITouch? = alone ? touches.first(where: acceptsForCutSwipe) : nil
+        guard sketchTouch == nil, let touch = touches.first(where: acceptsForSketch) ?? handleTouch ?? cutTouch,
               let point = sketchPoint(for: touch) else {
             super.touchesBegan(touches, with: event)
             return
@@ -2420,6 +2442,12 @@ final class ViewportView: MTKView {
                 return
             case .breakCurve:
                 if let point = sketchPoint(at: location) { sketch.breakCurve(at: point, tolerance: snapTolerance) }
+                refresh()
+                return
+            case .splitAtPoint:
+                if let point = sketchPoint(at: location) {
+                    sketch.splitCurve(at: point, snapped: point, tolerance: snapTolerance)
+                }
                 refresh()
                 return
             case .measure:

@@ -169,8 +169,11 @@ struct ToolRail: View {
     @State private var modifyTool: SketchTool = .fillet
     /// Zuletzt gewähltes Werkzeug unter „Mehr“
     @State private var moreTool: SketchTool = .project
-    /// Zugeklappte Abschnitte im Skizzenmodus (Kai: „Ändern“ und „Prüfen“ anfangs zu, „Erstellen“ immer offen)
-    @State private var collapsedSections: Set<ToolCategory> = [.modify, .inspect]
+    /// Zuletzt gewählte Variante unter „Schneiden“ (Antippen startet sie wieder)
+    @State private var cutTool: SketchTool = .trim
+    /// Zugeklappte Abschnitte im Skizzenmodus. „Ändern“ ist anfangs offen (Kai fand „Beschneiden“ im zugeklappten
+    /// Abschnitt nicht), „Prüfen“ zu, „Erstellen“ immer offen.
+    @State private var collapsedSections: Set<ToolCategory> = [.inspect]
     /// Auswahl ins Leere gezogen: Lasso statt Rahmen (lange drücken auf „Auswählen“)
     @AppStorage(LassoSelection.key) private var lassoSelects = false
 
@@ -390,7 +393,10 @@ struct ToolRail: View {
         let lineSubtitle = lineTool == .arc ? "Bogen \(sketch.arcMode.rawValue)" : lineTool.subtitle
         let polygonSubtitle = "\(Self.polygonName(sketch.polygonSides)) · \(sketch.polygonMode.rawValue)"
         let roundTool: SketchTool = sketch.tool == .ellipse ? .ellipse : .circle
-        let modifyTools: [SketchTool] = [.fillet, .chamfer, .extend, .breakCurve, .scale]
+        let modifyTools: [SketchTool] = [.fillet, .chamfer, .scale]
+        // Schneiden: Beschneiden (antippen oder wischen), Teilen an Punkt, Unterbrechen, Verlängern
+        let cutTools: [SketchTool] = [.trim, .splitAtPoint, .breakCurve, .extend]
+        let shownCut: SketchTool = cutTools.contains(sketch.tool) ? sketch.tool : cutTool
         let moreTools: [SketchTool] = [.project, .mirror, .rectPattern, .circPattern, .point, .text]
         // Spline: Fit-/Kontrollpunkte setzen, Freihand, Punkt einfügen
         let splineKindItems: [ToolItem] = SplineKind.allCases.map { kind in
@@ -475,7 +481,12 @@ struct ToolRail: View {
                 sketch.constructionMode.toggle()
             }),
             // ÄNDERN
-            toolEntry(.trim, category: .modify),
+            // Schneiden mit der Schere zuoberst: Antippen startet die zuletzt gewählte Variante, lange drücken zeigt alle
+            RailEntry(id: "sketch.cut", title: "Schneiden", subtitle: shownCut.rawValue,
+                      systemImage: SketchTool.trim.systemImage, category: .modify,
+                      isActive: cutTools.contains(sketch.tool),
+                      flyout: cutTools.map { tool in toolItem(tool) { cutTool = tool } },
+                      primary: { sketch.tool = cutTool }),
             toolEntry(.offset, category: .modify),
             RailEntry(id: "sketch.modify", title: modifyTools.contains(sketch.tool) ? sketch.tool.rawValue : "Ändern",
                       subtitle: modifyTools.contains(sketch.tool) ? nil : modifyTool.rawValue,

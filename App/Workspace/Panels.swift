@@ -349,6 +349,9 @@ struct ParameterCard: View {
         case .breakCurve:
             Text("Kurve antippen – sie wird an den nächsten Schnittpunkten geteilt")
                 .foregroundStyle(.secondary)
+        case .splitAtPoint:
+            Text("Kurve antippen – sie wird genau dort in zwei Teile getrennt")
+                .foregroundStyle(.secondary)
         case .select:
             if !sketch.selection.isEmpty {
                 // Auswahl verankern: bleibt beim Ändern von Maßen stehen (erneut tippen löst)
@@ -426,7 +429,7 @@ struct ParameterCard: View {
                     .buttonStyle(.borderedProminent)
             }
         case .trim:
-            Text("Kurvenstück antippen (Stift oder Finger)")
+            Text("Kurvenstück antippen oder über mehrere wischen (Stift oder Finger)")
                 .foregroundStyle(.secondary)
         case .fillet:
             HStack(spacing: 14) {
