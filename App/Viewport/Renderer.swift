@@ -278,6 +278,12 @@ final class Renderer: NSObject, MTKViewDelegate {
         indexBuffer = makeBuffer(mesh.indices)
         indexCount = mesh.indices.count
         hasGlass = Renderer.containsTransparent(mesh.vertices)
+        if let bounds = mesh.bounds {
+            camera.sceneCenter = (bounds.min + bounds.max) / 2
+            camera.sceneRadius = simd_length(bounds.max - bounds.min) / 2
+        } else {
+            camera.sceneRadius = 0
+        }
         let edges = mesh.edges.map { Vertex(position: $0, normal: SIMD3(0, 0, 1)) }
         edgeBuffer = makeBuffer(edges)
         edgeCount = edges.count
