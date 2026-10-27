@@ -156,7 +156,8 @@ struct SnapMenu: View {
     }
 }
 
-/// Rechte Leiste: Fang, Rastergröße, ViewCube, Einpassen, Anzeigemodus, Screenshot, Verlauf, Elemente.
+/// Rechte Leiste: Fang, Rastergröße, ViewCube, Einpassen, Anzeigemodus, Screenshot, Verlauf, Elemente;
+/// im 3D-Modus unten Schnittansicht, Isolieren und Löschen.
 struct RightRail: View {
     @ObservedObject var workspace: Workspace
     @ObservedObject var sketch: SketchController
@@ -188,7 +189,13 @@ struct RightRail: View {
                 ScrollView(showsIndicators: false) { sketchColumn }
             }
         } else {
-            mainColumn
+            // Passt die Säule nicht in die Höhe (iPad 11" quer): enger, sonst scrollen (dann ohne Schilder,
+            // die die Scrollfläche abschneiden würde)
+            ViewThatFits(in: .vertical) {
+                mainColumn(spacing: 10, showsLabels: true)
+                mainColumn(spacing: 6, showsLabels: true)
+                ScrollView(showsIndicators: false) { mainColumn(spacing: 6, showsLabels: false) }
+            }
         }
     }
 
@@ -380,8 +387,8 @@ struct RightRail: View {
         Toggle("Orthografisch", systemImage: "cube.transparent", isOn: $workspace.isOrthographic)
     }
 
-    private var mainColumn: some View {
-        VStack(spacing: 10) {
+    private func mainColumn(spacing: CGFloat, showsLabels: Bool) -> some View {
+        VStack(spacing: spacing) {
             Button {
                 isSnapMenuShown = true
             } label: {
@@ -463,7 +470,67 @@ struct RightRail: View {
                     Label("Lasso", systemImage: "lasso").tag(true)
                 }
             }
+            // Direkte Knöpfe (vorher unter Prüfen bzw. Ändern links)
+            Capsule()
+                .fill(Color.secondary.opacity(0.35))
+                .frame(width: 30, height: 3)
+            ModelRailButtons(workspace: workspace, model: workspace.model, showsLabels: showsLabels && panel == nil)
         }
+    }
+}
+
+/// Schnittansicht, Isolieren und Löschen als direkte Knöpfe der rechten Leiste im 3D-Modus, mit Schild links
+/// daneben (das Schild liegt über dem Viewport und verbreitert die Leiste nicht).
+private struct ModelRailButtons: View {
+    @ObservedObject var workspace: Workspace
+    /// Eigenes Beobachten: Auswahl und Isolieren ändern sich im Modell
+    @ObservedObject var model: ModelStore
+    var showsLabels: Bool
+
+    var body: some View {
+        let sectionOn = workspace.section != nil
+        let isolated = model.isIsolated
+        let canDelete = !model.selectedBodies.isEmpty || model.selectedBody != nil
+        button("Schnittansicht", subtitle: sectionOn ? "Ein" : "Aus", systemImage: "square.split.diagonal.2x2",
+               isActive: sectionOn) {
+            toggleSection()
+        }
+        button("Isolieren", subtitle: isolated ? "Ein" : "Aus", systemImage: "scope", isActive: isolated) {
+            workspace.toggleIsolate()
+        }
+        button("Löschen", subtitle: canDelete ? "Gewählte Körper" : "Nichts gewählt", systemImage: "trash",
+               isActive: false) {
+            model.deleteSelected()
+        }
+        .disabled(!canDelete)
+        .opacity(canDelete ? 1 : 0.4)
+    }
+
+    /// Ein: Werkzeug Schnittansicht (Karte unten); Aus: Schnitt entfernen.
+    private func toggleSection() {
+        if workspace.section != nil {
+            workspace.section = nil
+            if workspace.tool == .section { workspace.activate(.select) }
+        } else {
+            workspace.activate(.section)
+        }
+    }
+
+    private func button(_ title: String, subtitle: String, systemImage: String, isActive: Bool,
+                        action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            RailIcon(systemImage: systemImage, isActive: isActive)
+                .overlay(alignment: .trailing) {
+                    if showsLabels {
+                        RailLabel(title: title, subtitle: subtitle)
+                            .fixedSize()
+                            .offset(x: -52)
+                    }
+                }
+        }
+        .buttonStyle(.pressable)
+        .accessibilityLabel(title)
+        .hoverTip(title)
     }
 }
 

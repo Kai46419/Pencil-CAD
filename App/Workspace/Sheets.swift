@@ -268,10 +268,12 @@ enum HelpTopic: String, CaseIterable, Identifiable {
             ]
         case .news:
             [
+                "Linke Leiste neu sortiert, kleinere Gruppen: Skizze, Extrudieren (auch dünn), Formen, Abrundungen "
+                    + "(Abrunden, Fase), Löcher (Bohrung, Gewindebohrung, Gewinde), Flächen, Kombinieren, Verschieben "
+                    + "(mit Kopieren), Vervielfältigen, Konstruieren, Prüfen, Einfügen, Ansicht. Rechts neue Knöpfe für "
+                    + "Schnittansicht, Isolieren und Löschen.",
                 "Bild als Vorlage aus drei Quellen: Einfügen › Bild aus Fotos, Bild aus Dateien (PNG, JPEG, HEIC, "
                     + "PDF-Seite 1) oder Foto aufnehmen mit der Kamera – danach startet gleich das Kalibrieren auf Maß.",
-                "Werkzeuge neu sortiert wie in Fusion 360: Bohrung, Spiegeln, Muster und Negativform liegen jetzt unter "
-                    + "Erstellen, Ändern enthält nur noch Änderungen an Körpern, Transformieren nur Lage und Größe.",
                 "Skizze: Radius eines Bogens ändern (Maß oder Ziehen an der Wölbung) bewegt nur den Bogen – seine Enden "
                     + "gleiten auf den Nachbarlinien, der Rest bleibt stehen. Gewählte Bögen und Kreise haben einen blauen "
                     + "Griff zum Ziehen des Radius.",

@@ -9,14 +9,14 @@ enum PartTool: Equatable {
     case standard
     /// Einfügen › Vorlagen (Gehäuse, Stirnrad)
     case template
-    /// Erstellen › Helix (Feder, Gewinde)
+    /// Formen › Helix (Feder, Gewinde)
     case helix
-    /// Erstellen › Gewinde: Bolzen bzw. Bohrung antippen, Normgewinde modellieren; andere Flächen bekommen eine
+    /// Löcher › Gewinde: Bolzen bzw. Bohrung antippen, Normgewinde modellieren; andere Flächen bekommen eine
     /// Gewindebohrung am Tippunkt (ThreadPanel.swift, SurfaceHoles.swift)
     case thread
-    /// Erstellen › Dünn extrudieren: Linien einer Skizze (auch offene) als Wand
+    /// Extrudieren › Dünn extrudieren: Linien einer Skizze (auch offene) als Wand
     case thinLines
-    /// Ändern › Verjüngung (Entformungsschräge an Seitenflächen)
+    /// Flächen › Verjüngung (Entformungsschräge an Seitenflächen)
     case draft
 
     var title: String {
@@ -45,8 +45,10 @@ enum PartTool: Equatable {
     var group: ToolGroup {
         switch self {
         case .standard, .template: .insert
-        case .helix, .thread, .thinLines: .create
-        case .draft: .modify
+        case .helix: .shapes
+        case .thread: .holes
+        case .thinLines: .extrude
+        case .draft: .faces
         }
     }
 }

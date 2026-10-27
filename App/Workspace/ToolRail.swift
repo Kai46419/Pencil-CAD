@@ -1,12 +1,18 @@
 import SwiftUI
 
-/// Gruppen der linken Werkzeugleiste im 3D-Modus, aufgeteilt wie die Registerkarte „Volumenkörper“ in Fusion 360.
+/// Gruppen der linken Werkzeugleiste im 3D-Modus (Kai: kleinere, eindeutige Gruppen statt weniger großer Menüs).
+/// Reihenfolge wie der Arbeitsablauf: zeichnen, Körper erzeugen, bearbeiten, kombinieren, bewegen, prüfen.
+/// Schnittansicht, Isolieren und Löschen liegen als direkte Knöpfe in der rechten Leiste.
 enum ToolGroup: String, CaseIterable, Identifiable {
     case sketch = "Skizze"
     case extrude = "Extrudieren"
-    case create = "Erstellen"
-    case modify = "Ändern"
-    case transform = "Transformieren"
+    case shapes = "Formen"
+    case fillets = "Abrundungen"
+    case holes = "Löcher"
+    case faces = "Flächen"
+    case combine = "Kombinieren"
+    case move = "Verschieben"
+    case pattern = "Vervielfältigen"
     case construct = "Konstruieren"
     case inspect = "Prüfen"
     case insert = "Einfügen"
@@ -18,9 +24,13 @@ enum ToolGroup: String, CaseIterable, Identifiable {
         switch self {
         case .sketch: "square.and.pencil"
         case .extrude: "square.stack.3d.up.fill"
-        case .create: "cube.fill"
-        case .modify: "wrench.and.screwdriver.fill"
-        case .transform: "move.3d"
+        case .shapes: "cube.fill"
+        case .fillets: "rectangle.roundedtop.fill"
+        case .holes: "circle.circle.fill"
+        case .faces: "arrow.up.and.down.square.fill"
+        case .combine: "square.fill.on.circle.fill"
+        case .move: "move.3d"
+        case .pattern: "circle.grid.3x3.fill"
         case .construct: "square.dashed"
         case .inspect: "ruler"
         case .insert: "square.and.arrow.down"
@@ -28,11 +38,15 @@ enum ToolGroup: String, CaseIterable, Identifiable {
         }
     }
 
+    /// Farbfamilie: Erzeugen blau, Ändern orange, Bewegen violett
     var category: ToolCategory {
         switch self {
-        case .sketch, .extrude, .create: .create
-        case .modify: .modify
-        case .transform: .arrange
+        case .sketch, .extrude, .shapes: .create
+        case .holes: .hole
+        case .fillets, .faces: .modify
+        case .combine: .combine
+        case .move: .arrange
+        case .pattern: .pattern
         case .construct: .construct
         case .inspect: .inspect
         case .insert: .insert
@@ -40,23 +54,27 @@ enum ToolGroup: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Erklärung im Schild (eigene Texte, weil „Ändern“ auch in der Skizze vorkommt)
+    /// Erklärung im Schild (eigene Texte, weil manche Namen auch in der Skizze vorkommen)
     var tip: String {
         switch self {
         case .sketch: "Neue Skizze beginnen: Ebene oder ebene Körperfläche antippen, dann mit dem Stift zeichnen."
-        case .extrude: "Geschlossenen Skizzenbereich oder ebene Fläche antippen und am Pfeil ziehen bzw. Abstand eingeben."
-        case .create: "Erzeugt neue Geometrie: Achsendrehung, Sweep, Loft, Helix, Bohrung, Gewinde, Grundkörper, Spiegeln, Muster und Negativform."
-        case .modify: "Ändert vorhandene Körper: Kanten abrunden/fasen, Schale, Verjüngung, Fläche versetzen/ersetzen, Kante versetzen/abdrücken, Umhüllen und Prägen, Körper vereinigen, abziehen, schneiden oder teilen, Netz bearbeiten."
-        case .transform: "Ändert nur die Lage oder Größe: Körper oder Skizzen verschieben, drehen, übersetzen, skalieren oder ausrichten."
+        case .extrude: "Extrudieren (Bereich oder ebene Fläche am Pfeil ziehen) und Dünn extrudieren (Linien als Wand)."
+        case .shapes: "Körper aus Skizzen formen – Achsendrehung, Sweep, Loft, Helix – oder Grundkörper wie Quader, Zylinder und Kugel einfügen."
+        case .fillets: "Kanten abrunden oder fasen."
+        case .holes: "Bohrung mit Senkung oder Senkkopf, Gewindebohrung und Gewinde an Bolzen, Bohrungen oder jeder Fläche."
+        case .faces: "Flächen versetzen, ersetzen oder neigen, Körper aushöhlen, Kanten versetzen oder abdrücken, Umhüllen und Prägen."
+        case .combine: "Körper vereinigen, abziehen, schneiden oder teilen, Negativform um einen Körper."
+        case .move: "Körper oder Skizzen verschieben, drehen, kopieren, von Punkt zu Punkt übersetzen, ausrichten oder skalieren."
+        case .pattern: "Körper spiegeln oder als Muster in Reihe bzw. im Kreis vervielfältigen."
         case .construct: "Hilfsebenen, -achsen und -punkte, z. B. eine versetzte Ebene zum Skizzieren."
-        case .inspect: "Messen, Schnittansicht und Isolieren."
-        case .insert: "Normteile (Schrauben, Muttern, Lager), Vorlagen (Gehäuse, Stirnrad), STEP-, STL- und 3MF-Dateien, Bild als Vorlage (aus Fotos, Dateien oder direkt mit der Kamera), Körper eines anderen Projekts oder eine Variable einfügen."
-        case .visualize: "Anzeigemodus, orthografische Projektion und Körperfarbe."
+        case .inspect: "Messen und Druckprüfung (Überhang, dünne Wände). Schnittansicht und Isolieren liegen rechts."
+        case .insert: "Normteile (Schrauben, Muttern, Lager), Vorlagen (Gehäuse, Stirnrad), STEP-, STL- und 3MF-Dateien, Bild als Vorlage (aus Fotos, Dateien oder direkt mit der Kamera), Körper eines anderen Projekts, eine Variable, Netze bearbeiten."
+        case .visualize: "Anzeigemodus, orthografische Projektion, Körperfarbe und Zeichnung."
         }
     }
 
-    /// Skizze und Extrudieren sind direkte Aktionen ohne Untermenü.
-    var hasFlyout: Bool { self != .extrude && self != .sketch }
+    /// Skizze ist eine direkte Aktion ohne Untermenü; jede andere Kachel öffnet ihre Werkzeuge.
+    var hasFlyout: Bool { self != .sketch }
 }
 
 /// Werkzeugkategorien wie die Abschnitte der Fusion-360-Werkzeugleiste – jede mit eigener Symbolfarbe.
@@ -64,8 +82,11 @@ enum ToolCategory: String {
     case neutral = ""
     case finish = "Fertig"
     case create = "Erstellen"
+    case hole = "Löcher"
     case modify = "Ändern"
-    case arrange = "Transformieren"
+    case combine = "Kombinieren"
+    case arrange = "Verschieben"
+    case pattern = "Vervielfältigen"
     case construct = "Konstruieren"
     case inspect = "Prüfen"
     case insert = "Einfügen"
@@ -77,8 +98,11 @@ enum ToolCategory: String {
         case .neutral: .primary
         case .finish: Color(red: 0.16, green: 0.62, blue: 0.30)
         case .create: Color(red: 0.10, green: 0.45, blue: 0.86)
+        case .hole: Color(red: 0.02, green: 0.60, blue: 0.88)
         case .modify: Color(red: 0.92, green: 0.50, blue: 0.08)
+        case .combine: Color(red: 0.86, green: 0.33, blue: 0.20)
         case .arrange: Color(red: 0.43, green: 0.35, blue: 0.86)
+        case .pattern: Color(red: 0.68, green: 0.32, blue: 0.78)
         case .construct: Color(red: 0.80, green: 0.56, blue: 0.0)
         case .inspect: Color(red: 0.0, green: 0.56, blue: 0.60)
         case .insert, .view: Color(red: 0.38, green: 0.44, blue: 0.53)
@@ -97,6 +121,20 @@ struct ToolItem: Identifiable {
     var isEnabled = true
     var isActive = false
     var action: () -> Void = {}
+}
+
+/// Kachelgröße und Abstand der Werkzeuggruppen im 3D-Modus.
+private struct GroupSize: Equatable {
+    let tile: CGFloat
+    let gap: CGFloat
+
+    /// Von groß nach klein; die Leiste nimmt die erste, die in die Höhe passt.
+    static let sizes: [GroupSize] = [
+        GroupSize(tile: 52, gap: 10),
+        GroupSize(tile: 46, gap: 8),
+        GroupSize(tile: 42, gap: 6),
+        GroupSize(tile: 38, gap: 5),
+    ]
 }
 
 /// Eintrag der linken Leiste im Skizzen- und Kontextmodus: Aktion oder Untermenü.
@@ -136,9 +174,12 @@ struct ToolRail: View {
     /// Auswahl ins Leere gezogen: Lasso statt Rahmen (lange drücken auf „Auswählen“)
     @AppStorage(LassoSelection.key) private var lassoSelects = false
 
-    private let tileSize: CGFloat = 52
-    private let spacing: CGFloat = 10
     private let headerHeight: CGFloat = 18
+    /// Kachelgröße der Werkzeuggruppen: die größte, mit der alle Gruppen in die Höhe passen
+    /// (iPad 11"/13", hoch und quer); die gewählte merkt sich die Leiste für die Lage des Untermenüs.
+    @State private var groupSize = GroupSize.sizes[0]
+    /// Platz unten links für Rückgängig/Wiederholen
+    private let bottomReserve: CGFloat = 70
 
     var body: some View {
         if sketch.isActive {
@@ -476,7 +517,8 @@ struct ToolRail: View {
         return model.selectedBodies.count == 1 ? "1 Körper" : "\(model.selectedBodies.count) Körper"
     }
 
-    /// Nach Kategorien sortiert wie in Fusion 360: Erstellen, Ändern, Transformieren, Konstruieren, Prüfen.
+    /// Nach Kategorien sortiert wie die Werkzeuggruppen: Erstellen, Kombinieren, Ändern, Verschieben, Vervielfältigen,
+    /// Konstruieren, Prüfen.
     private var contextEntries: [RailEntry] {
         let hasRegions = !model.selectedRegions.isEmpty
         let face = model.selection
@@ -530,24 +572,19 @@ struct ToolRail: View {
                 sketch.tool = .text
             }))
         }
-        // Muster erzeugen neue Körper und liegen deshalb wie in Fusion 360 unter „Erstellen“
-        entries += PatternKind.allCases.map { kind in
-            RailEntry(id: "context.\(kind.rawValue)", title: kind.rawValue, systemImage: kind.systemImage,
-                      category: .create, action: {
-                workspace.activate(.pattern(kind))
-            })
-        }
 
-        // ÄNDERN
+        // KOMBINIEREN
         if model.selectedBodies.count > 1 {
             entries += BooleanKind.allCases.map { kind in
                 RailEntry(id: "context.\(kind.rawValue)", title: kind.rawValue,
                           subtitle: kind == .union ? "\(model.selectedBodies.count) → 1" : nil,
-                          systemImage: kind.systemImage, category: .modify, action: {
+                          systemImage: kind.systemImage, category: .combine, action: {
                     workspace.combineSelectedBodies(kind)
                 })
             }
         }
+
+        // ÄNDERN (Flächen)
         if face != nil {
             entries.append(RailEntry(id: "context.offsetFace", title: "Fläche versetzen",
                                      subtitle: model.selectedFaces.count > 1 ? "\(model.selectedFaces.count) Flächen" : nil,
@@ -576,11 +613,17 @@ struct ToolRail: View {
             }))
         }
 
-        // TRANSFORMIEREN
+        // VERSCHIEBEN (mit Kopieren)
         entries.append(RailEntry(id: "context.move", title: "Verschieben/Rotieren", systemImage: "move.3d",
                                  category: .arrange, action: {
-            workspace.activate(.move)
+            startMove(copies: false)
         }))
+        if model.selectedBody != nil, !hasRegions {
+            entries.append(RailEntry(id: "context.copy", title: "Kopieren", subtitle: "Verschieben mit Kopie",
+                                     systemImage: "plus.square.on.square", category: .arrange, action: {
+                startMove(copies: true)
+            }))
+        }
         if !model.selectedBodies.isEmpty || face != nil || !model.selectedEdges.isEmpty {
             entries.append(RailEntry(id: "context.translate", title: "Übersetzen", subtitle: "Punkt zu Punkt",
                                      systemImage: "point.topleft.down.to.point.bottomright.curvepath",
@@ -598,6 +641,14 @@ struct ToolRail: View {
                                      systemImage: "arrow.up.left.and.arrow.down.right", category: .arrange, action: {
                 workspace.activate(.scale)
             }))
+        }
+
+        // VERVIELFÄLTIGEN
+        entries += PatternKind.allCases.map { kind in
+            RailEntry(id: "context.\(kind.rawValue)", title: kind.rawValue, systemImage: kind.systemImage,
+                      category: .pattern, action: {
+                workspace.activate(.pattern(kind))
+            })
         }
 
         // KONSTRUIEREN
@@ -650,47 +701,84 @@ struct ToolRail: View {
 
     // MARK: Werkzeuggruppen
 
+    /// „Zurück“ (zur Auswahl) steht über den Gruppen
+    private var showsBackTile: Bool { workspace.showsAllTools && hasSelection }
+
+    /// Zahl der Kacheln über der Gruppe (mit „Zurück“, falls angezeigt)
+    private func row(of group: ToolGroup) -> Int {
+        let index = ToolGroup.allCases.firstIndex(of: group) ?? 0
+        return showsBackTile ? index + 1 : index
+    }
+
     private var modelTools: some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: spacing) {
-                if workspace.showsAllTools, hasSelection {
-                    Button {
-                        workspace.showsAllTools = false
-                    } label: {
-                        RailTile(title: "Zurück", subtitle: "Auswahl", systemImage: "chevron.backward", size: tileSize)
-                    }
-                    .buttonStyle(.plain)
-                }
-                ForEach(ToolGroup.allCases) { group in
-                    Button {
-                        tapped(group)
-                    } label: {
-                        RailTile(title: group.rawValue, systemImage: group.systemImage, category: group.category,
-                                 isActive: isActive(group), isOpen: openGroup == group, size: tileSize)
-                    }
-                    .buttonStyle(.plain)
-                    .hoverTip(group.rawValue, group.tip)
-                }
-            }
-            if let openGroup, let index = ToolGroup.allCases.firstIndex(of: openGroup) {
-                Flyout(title: openGroup.rawValue, category: openGroup.category, items: items(for: openGroup)) {
-                    self.openGroup = nil
-                }
-                .padding(.top, CGFloat(index + (workspace.showsAllTools && hasSelection ? 1 : 0)) * (tileSize + spacing))
-                .transition(.opacity.combined(with: .move(edge: .leading)))
+        let sizes = GroupSize.sizes
+        let smallest = sizes[sizes.count - 1]
+        // Größte Kachel, mit der alles in die Höhe passt; sonst kleinste Kachel und scrollen
+        return ViewThatFits(in: .vertical) {
+            groupColumn(sizes[0])
+            groupColumn(sizes[1])
+            groupColumn(sizes[2])
+            groupColumn(smallest)
+            ScrollView(showsIndicators: false) { groupColumn(smallest) }
+        }
+        // Untermenü rechts neben der Leiste; es verbreitert die Leiste nicht
+        .overlay(alignment: .topTrailing) {
+            if let openGroup {
+                groupFlyout(openGroup)
+                    .alignmentGuide(.trailing) { d in d[.leading] - 12 }
+                    .transition(.opacity.combined(with: .move(edge: .leading)))
             }
         }
+        .padding(.bottom, bottomReserve)
         .animation(Theme.spring, value: openGroup)
+    }
+
+    /// Obere Gruppen: Untermenü beginnt auf Höhe der Kachel; untere: es endet dort und wächst nach oben,
+    /// damit es auch bei den letzten Gruppen genug Platz hat.
+    private func groupFlyout(_ group: ToolGroup) -> some View {
+        let rows: Int = ToolGroup.allCases.count + (showsBackTile ? 1 : 0)
+        let row: Int = row(of: group)
+        let step: CGFloat = groupSize.tile + groupSize.gap
+        let fromTop = row * 2 < rows
+        let top: CGFloat = fromTop ? CGFloat(row) * step : 0
+        let bottom: CGFloat = fromTop ? 0 : CGFloat(rows - 1 - row) * step
+        return Flyout(title: group.rawValue, category: group.category, items: items(for: group)) {
+            self.openGroup = nil
+        }
+        .padding(.top, top)
+        .padding(.bottom, bottom)
+        .frame(maxHeight: .infinity, alignment: fromTop ? .top : .bottom)
+    }
+
+    private func groupColumn(_ size: GroupSize) -> some View {
+        VStack(alignment: .leading, spacing: size.gap) {
+            if showsBackTile {
+                Button {
+                    workspace.showsAllTools = false
+                } label: {
+                    RailTile(title: "Zurück", subtitle: "Auswahl", systemImage: "chevron.backward", size: size.tile)
+                }
+                .buttonStyle(.plain)
+            }
+            ForEach(ToolGroup.allCases) { group in
+                Button {
+                    tapped(group)
+                } label: {
+                    RailTile(title: group.rawValue, systemImage: group.systemImage, category: group.category,
+                             isActive: isActive(group), isOpen: openGroup == group, size: size.tile)
+                }
+                .buttonStyle(.plain)
+                .hoverTip(group.rawValue, group.tip)
+            }
+        }
+        // Nur die angezeigte Variante erscheint: ihre Größe gilt für die Lage des Untermenüs
+        .onAppear { groupSize = size }
     }
 
     private func tapped(_ group: ToolGroup) {
         guard group.hasFlyout else {
             openGroup = nil
-            if group == .sketch {
-                workspace.startSketch()
-            } else {
-                startExtrude()
-            }
+            workspace.startSketch()
             return
         }
         openGroup = openGroup == group ? nil : group
@@ -698,31 +786,36 @@ struct ToolRail: View {
 
     private func isActive(_ group: ToolGroup) -> Bool {
         switch workspace.tool {
-        // Wie Fusion 360: alles, was neue Geometrie erzeugt, liegt unter „Erstellen“ (auch Bohrung, Spiegeln, Muster)
-        case .insert, .revolve, .sweep, .loft, .hole, .mirror, .pattern, .mold:
-            return group == .create
+        case .insert, .revolve, .sweep, .loft:
+            return group == .shapes
         case .part(let kind):
             return group == kind.group
-        case .canvas:
-            return group == .insert
+        case .hole:
+            return group == .holes
+        case .boolean, .split, .mold:
+            return group == .combine
+        case .shell, .offsetEdges, .offsetFace, .replaceFace, .wrap, .imprint:
+            return group == .faces
+        case .move, .translate, .scale, .align, .scaleSketch:
+            return group == .move
+        case .mirror, .pattern:
+            return group == .pattern
         case .construct:
             return group == .construct
-        case .move, .scale, .align, .scaleSketch:
-            return group == .transform
-        case .boolean, .shell, .split, .offsetEdges, .offsetFace, .replaceFace, .wrap, .imprint, .meshSculpt:
-            return group == .modify
-        case .translate:
-            return group == .transform
-        case .section, .measure, .printCheck:
+        case .measure, .printCheck:
             return group == .inspect
+        case .canvas, .meshSculpt:
+            return group == .insert
         case .color:
             return group == .visualize
+        case .section:
+            // Schnittansicht liegt in der rechten Leiste
+            return false
         case .select:
             switch group {
             case .sketch: return sketch.isActive
-            case .modify: return !model.selectedEdges.isEmpty
+            case .fillets: return !model.selectedEdges.isEmpty
             case .extrude: return !model.selectedRegions.isEmpty || model.faceHandle != nil
-            case .inspect: return model.isIsolated
             default: return false
             }
         }
@@ -740,6 +833,23 @@ struct ToolRail: View {
         }
     }
 
+    /// Verschieben ohne bzw. mit Kopie (Kai: „Kopieren kommt beim Verschieben rein“).
+    private func startMove(copies: Bool) {
+        workspace.activate(.move)
+        // Skizzen werden nur verschoben, nie kopiert
+        model.moveCopies = copies && model.movingSketch == nil
+    }
+
+    /// Bohrung ohne bzw. mit Gewinde (Schalter „Gewinde“ in der Bohrungskarte).
+    private func startHole(threaded: Bool) {
+        workspace.activate(.hole)
+        if threaded {
+            workspace.setHoleThread(workspace.holeSpec.thread ?? HoleThread())
+        } else if workspace.holeSpec.thread != nil {
+            workspace.setHoleThread(nil)
+        }
+    }
+
     // MARK: Einträge
 
     private func item(_ tool: ModelTool, _ title: String, subtitle: String? = nil, _ systemImage: String) -> ToolItem {
@@ -751,32 +861,30 @@ struct ToolRail: View {
 
     private func items(for group: ToolGroup) -> [ToolItem] {
         switch group {
-        case .sketch, .extrude:
+        case .sketch:
             return []
-        case .create:
-            // Fusion-360-Logik: alles, was neue Geometrie erzeugt (auch Bohrung, Spiegeln, Muster, Negativform)
+        case .extrude:
+            let extruding = workspace.tool == .select && (!model.selectedRegions.isEmpty || model.faceHandle != nil)
+            return [
+                ToolItem(id: "extrude.extrude", title: "Extrudieren", subtitle: "Bereich oder Fläche, Pfeil ziehen",
+                         systemImage: "square.stack.3d.up", isActive: extruding) {
+                    startExtrude()
+                },
+                item(.part(.thinLines), "Dünn extrudieren", subtitle: "Linien als Wand", PartTool.thinLines.systemImage),
+            ]
+        case .shapes:
             var items: [ToolItem] = [
                 item(.revolve, "Achsendrehung", subtitle: "Bereich um Achse", "arrow.triangle.2.circlepath"),
                 item(.sweep, "Sweep", subtitle: "Bereich entlang Pfad", "point.3.connected.trianglepath.dotted"),
                 item(.loft, "Loft", subtitle: "Durch Querschnitte", "square.3.layers.3d"),
-                item(.part(.thinLines), "Dünn extrudieren", subtitle: "Linien als Wand", PartTool.thinLines.systemImage),
-                item(.part(.helix), "Helix", subtitle: "Feder, Gewinde", PartTool.helix.systemImage),
-                item(.hole, "Bohrung", subtitle: "Schrauben, Einsätze", "circle.circle"),
-                item(.part(.thread), "Gewinde", subtitle: "Bolzen, Bohrung, Fläche", PartTool.thread.systemImage),
+                item(.part(.helix), "Helix", subtitle: "Feder, Spirale", PartTool.helix.systemImage),
             ]
             items += Primitive.allCases.map { primitive in
                 item(.insert(primitive), primitive.rawValue, subtitle: "Grundkörper", primitive.systemImage)
             }
-            items += [
-                item(.mirror, "Spiegeln", subtitle: "Körper", "arrow.left.and.right.righttriangle.left.righttriangle.right"),
-                item(.pattern(.linear), "Muster linear", subtitle: "Körper", PatternKind.linear.systemImage),
-                item(.pattern(.circular), "Muster kreisförmig", subtitle: "Körper", PatternKind.circular.systemImage),
-                item(.mold, "Negativform", subtitle: "Form aus Block", "cube.transparent"),
-            ]
             return items
-        case .modify:
-            // Ändert vorhandene Körper
-            var items: [ToolItem] = EdgeOperation.allCases.map { operation in
+        case .fillets:
+            return EdgeOperation.allCases.map { operation in
                 ToolItem(id: "tools.\(operation.rawValue)", title: operation.rawValue, subtitle: "Kanten",
                          systemImage: operation == .fillet ? "app" : "octagon",
                          isActive: workspace.tool == .select && !model.selectedEdges.isEmpty
@@ -784,33 +892,58 @@ struct ToolRail: View {
                     workspace.startEdgeOperation(operation)
                 }
             }
-            items += [
-                item(.shell, "Schale", subtitle: "Fläche öffnen", "shippingbox"),
-                item(.part(.draft), "Verjüngung", subtitle: "Flächen neigen", PartTool.draft.systemImage),
+        case .holes:
+            let drilling = workspace.tool == .hole
+            let threaded = workspace.holeSpec.thread != nil
+            return [
+                ToolItem(id: "holes.hole", title: "Bohrung", subtitle: "Senkung, Senkkopf, Einsätze",
+                         systemImage: "circle.circle", isActive: drilling && !threaded) {
+                    startHole(threaded: false)
+                },
+                ToolItem(id: "holes.tapped", title: "Gewindebohrung", subtitle: "Kernloch mit Gewinde",
+                         systemImage: "circle.dashed.inset.filled", isActive: drilling && threaded) {
+                    startHole(threaded: true)
+                },
+                item(.part(.thread), "Gewinde", subtitle: "Bolzen, Bohrung, jede Fläche", PartTool.thread.systemImage),
+            ]
+        case .faces:
+            return [
                 item(.offsetFace, "Fläche versetzen", subtitle: "Auch Bohrungen", "arrow.up.and.down.square"),
                 item(.replaceFace, "Fläche ersetzen", subtitle: "Bis Zielfläche", "rectangle.portrait.and.arrow.forward"),
+                item(.part(.draft), "Verjüngung", subtitle: "Flächen neigen", PartTool.draft.systemImage),
+                item(.shell, "Schale", subtitle: "Fläche öffnen", "shippingbox"),
                 item(.offsetEdges, "Kante versetzen", subtitle: "Fläche antippen", "square.dashed.inset.filled"),
-                item(.wrap, "Umhüllen und Prägen", subtitle: "Auf Zylinder", "cylinder.split.1x2"),
                 item(.imprint, "Kante abdrücken", subtitle: "Skizze auf Fläche", "square.on.square.dashed"),
+                item(.wrap, "Umhüllen und Prägen", subtitle: "Auf Zylinder", "cylinder.split.1x2"),
             ]
-            items += BooleanKind.allCases.map { kind in
-                item(.boolean(kind), kind.rawValue, subtitle: "Kombinieren", kind.systemImage)
+        case .combine:
+            var items: [ToolItem] = BooleanKind.allCases.map { kind in
+                item(.boolean(kind), kind.rawValue, subtitle: "Körper", kind.systemImage)
             }
             items.append(item(.split, "Körper teilen", subtitle: "Ebene, Körper, Skizze", "rectangle.split.2x1"))
-            items.append(item(.meshSculpt, "Netz bearbeiten", subtitle: "Pinsel, STL/3MF", "paintbrush.pointed"))
-            items.append(ToolItem(id: "tools.delete", title: "Löschen", subtitle: "Körper", systemImage: "trash",
-                                  isEnabled: model.hasSelection) {
-                model.deleteSelected()
-            })
+            items.append(item(.mold, "Negativform", subtitle: "Form aus Block", "cube.transparent"))
             return items
-        case .transform:
-            // Nur Lage und Größe
+        case .move:
+            let moving = workspace.tool == .move
             return [
-                item(.move, "Verschieben/Rotieren", subtitle: "Körper oder Skizze", "move.3d"),
+                ToolItem(id: "move.move", title: "Verschieben/Rotieren", subtitle: "Körper oder Skizze",
+                         systemImage: "move.3d", isActive: moving && !model.moveCopies) {
+                    startMove(copies: false)
+                },
+                ToolItem(id: "move.copy", title: "Kopieren", subtitle: "Verschieben mit Kopie",
+                         systemImage: "plus.square.on.square", isActive: moving && model.moveCopies) {
+                    startMove(copies: true)
+                },
                 item(.translate, "Übersetzen", subtitle: "Punkt zu Punkt", "point.topleft.down.to.point.bottomright.curvepath"),
+                item(.align, "Ausrichten", subtitle: "Körper", "align.horizontal.center"),
                 item(.scale, "Skalieren", subtitle: "Körper", "arrow.up.left.and.arrow.down.right"),
                 item(.scaleSketch, "Skizze skalieren", subtitle: "Bereich antippen", "arrow.up.left.and.arrow.down.right"),
-                item(.align, "Ausrichten", subtitle: "Körper", "align.horizontal.center"),
+            ]
+        case .pattern:
+            return [
+                item(.mirror, "Spiegeln", subtitle: "Körper", "arrow.left.and.right.righttriangle.left.righttriangle.right"),
+                item(.pattern(.linear), "Muster linear", subtitle: "Körper in Reihe", PatternKind.linear.systemImage),
+                item(.pattern(.circular), "Muster kreisförmig", subtitle: "Körper im Kreis", PatternKind.circular.systemImage),
             ]
         case .construct:
             return ConstructionKind.allCases.map { kind in
@@ -820,13 +953,6 @@ struct ToolRail: View {
             return [
                 item(.measure, "Messen", subtitle: "Länge, Fläche, Abstand", "ruler"),
                 item(.printCheck, "Druckprüfung", subtitle: "Überhang, Wände", "printer"),
-                item(.section, "Schnittansicht", subtitle: workspace.section == nil ? "Aus" : "Ein",
-                     "square.split.diagonal.2x2"),
-                ToolItem(id: "inspect.isolate", title: "Isolieren",
-                         subtitle: model.isIsolated ? "Alle zeigen" : "Gewählten Körper",
-                         systemImage: "scope", isActive: model.isIsolated) {
-                    workspace.toggleIsolate()
-                },
             ]
         case .insert:
             return [
@@ -838,6 +964,7 @@ struct ToolRail: View {
                          systemImage: "triangle", action: importSTEP),
                 ToolItem(id: "insert.vector", title: "SVG / DXF", subtitle: "Als Skizze (Laser, CNC, Logos)",
                          systemImage: "scribble.variable", action: importSTEP),
+                item(.meshSculpt, "Netz bearbeiten", subtitle: "Pinsel, STL/3MF", "paintbrush.pointed"),
                 // Bild als Vorlage aus drei Quellen; danach gleich kalibrieren (WorkspaceView.insertImage)
                 ToolItem(id: "insert.image", title: "Bild aus Fotos", subtitle: "Fotoalbum, als Vorlage",
                          systemImage: "photo.on.rectangle") {

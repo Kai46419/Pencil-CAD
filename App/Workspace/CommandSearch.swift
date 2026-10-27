@@ -29,8 +29,8 @@ extension Workspace {
                 self?.model.message = "Skizzenbereich oder ebene Fläche antippen, dann am blauen Pfeil ziehen."
             },
         ]
-        // Reihenfolge wie die Leiste (Fusion-360-Logik): Erstellen, Ändern, Transformieren
-        // ERSTELLEN
+        // Reihenfolge ungefähr wie die Gruppen der Leiste: Formen, Löcher, Vervielfältigen, Abrundungen, Flächen,
+        // Kombinieren, Verschieben, Einfügen …
         items += [
             toolItem(.revolve, "Bereich um Achse drehen", "arrow.triangle.2.circlepath", "revolve drehen"),
             toolItem(.sweep, "Bereich entlang Pfad", "point.3.connected.trianglepath.dotted", "sweep"),
@@ -38,6 +38,12 @@ extension Workspace {
             toolItem(.part(.thinLines), "Linien einer Skizze als Wand", PartTool.thinLines.systemImage, "thin dünn wand linie"),
             toolItem(.part(.helix), "Feder, Gewinde", PartTool.helix.systemImage, "helix spirale feder gewinde thread spring"),
             toolItem(.hole, "Schrauben, Gewindeeinsätze, Senkungen", "circle.circle", "hole bohren gewinde ruthex"),
+            CommandItem(id: "tappedHole", title: "Gewindebohrung", subtitle: "Bohrung mit Gewinde, Kernloch nach Tabelle",
+                        systemImage: "circle.dashed.inset.filled", keywords: "tapped hole gewinde bohrung m3 m4 m5 m6") { [weak self] in
+                guard let self else { return }
+                self.activate(.hole)
+                self.setHoleThread(self.holeSpec.thread ?? HoleThread())
+            },
             toolItem(.part(.thread), "Metrisch, UNC, G, Trapez … an Bolzen, Bohrung oder als Gewindebohrung", PartTool.thread.systemImage,
                      "gewinde thread schraube mutter metrisch m6 m8 unc unf trapez whitworth npt rohrgewinde"),
             toolItem(.mirror, "Körper spiegeln", "arrow.left.and.right.righttriangle.left.righttriangle.right", "mirror"),
@@ -46,7 +52,7 @@ extension Workspace {
             toolItem(.mold, "Form aus Block, mit Spiel, zweiteilig", "cube.transparent",
                      "mold negativ form gussform abformen block würfel spiel"),
         ]
-        // ÄNDERN
+        // ABRUNDUNGEN, FLÄCHEN, KOMBINIEREN
         items += EdgeOperation.allCases.map { operation in
             CommandItem(id: "edge.\(operation.rawValue)", title: operation.rawValue, subtitle: "Kanten",
                         systemImage: operation == .fillet ? "app" : "octagon",
@@ -68,9 +74,15 @@ extension Workspace {
             toolItem(.split, "Mit Ebene, Körper oder Skizze", "rectangle.split.2x1", "split teilen schneiden"),
             toolItem(.meshSculpt, "Pinsel für Netze (STL, 3MF)", "paintbrush.pointed", "mesh netz sculpt pinsel stl 3mf glätten"),
         ]
-        // TRANSFORMIEREN
+        // VERSCHIEBEN
         items += [
             toolItem(.move, "Körper oder Skizze, mit Kopien", "move.3d", "move rotate drehen kopieren"),
+            CommandItem(id: "copy", title: "Kopieren", subtitle: "Verschieben mit Kopie", systemImage: "plus.square.on.square",
+                        keywords: "copy kopie duplizieren duplicate") { [weak self] in
+                guard let self else { return }
+                self.activate(.move)
+                self.model.moveCopies = self.model.movingSketch == nil
+            },
             toolItem(.translate, "Punkt zu Punkt", "point.topleft.down.to.point.bottomright.curvepath", "translate"),
             toolItem(.scale, "Körper skalieren", "arrow.up.left.and.arrow.down.right", "scale größe"),
             toolItem(.align, "Körper ausrichten", "align.horizontal.center", "align"),
