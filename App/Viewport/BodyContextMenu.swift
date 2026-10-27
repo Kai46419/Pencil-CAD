@@ -47,6 +47,11 @@ final class BodyContextMenuInteraction: NSObject, UIInteraction, UIEditMenuInter
         guard !sketch.isActive, workspace.command == nil, workspace.tool == .select,
               workspace.canvasCalibration == nil,
               !(workspace.boxSelects && workspace.acceptsBoxSelection) else { return }
+        // Läuft schon ein Drehen/Verschieben mit dem Finger, kein Menü
+        let recognizers: [UIGestureRecognizer] = viewport.gestureRecognizers ?? []
+        for other in recognizers where other !== gesture && other is UIPanGestureRecognizer {
+            if other.state == .began || other.state == .changed { return }
+        }
         let location = gesture.location(in: viewport)
         guard let ray = renderer.camera.ray(through: location, viewSize: viewport.bounds.size) else { return }
         let model = workspace.model
@@ -58,6 +63,13 @@ final class BodyContextMenuInteraction: NSObject, UIInteraction, UIEditMenuInter
         }
         targets = model.deletableBodies
         guard !targets.isEmpty else { return }
+        // Das Loslassen soll nicht noch als Antippen zählen (würde die Auswahl umschalten): einfaches Tippen abbrechen
+        for other in recognizers {
+            guard let tap = other as? UITapGestureRecognizer,
+                  tap.numberOfTapsRequired == 1, tap.numberOfTouchesRequired == 1 else { continue }
+            tap.isEnabled = false
+            tap.isEnabled = true
+        }
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         editMenu?.presentEditMenu(with: UIEditMenuConfiguration(identifier: nil, sourcePoint: location))
     }

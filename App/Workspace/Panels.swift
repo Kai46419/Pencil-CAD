@@ -2084,8 +2084,10 @@ struct LayersPanel: View {
             FinishMenuItems(model: model, index: index, targets: folderTargets(index))
             // Gehört die Zeile zur Mehrfachauswahl, gehen alle gewählten Körper (ein Rückgängig-Schritt, BodyDelete.swift)
             Button(ModelStore.deleteTitle(count: folderTargets(index).count), systemImage: "trash", role: .destructive) {
+                // Ziele vor dem Werkzeugwechsel festhalten (activate setzt die Auswahl zurück)
+                let targets: [Int] = folderTargets(index)
                 if workspace.tool != .select { workspace.activate(.select) }
-                model.deleteBodies(folderTargets(index))
+                model.deleteBodies(targets)
             }
         }
     }
