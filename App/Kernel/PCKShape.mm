@@ -25,6 +25,7 @@
 #include <BRepOffset_MakeOffset.hxx>
 #include <BRepBuilderAPI_GTransform.hxx>
 #include <BRepGProp.hxx>
+#include <BRepTools.hxx>
 #include <BRepOffsetAPI_MakePipe.hxx>
 #include <BRepOffsetAPI_ThruSections.hxx>
 #include <BRepPrimAPI_MakeHalfSpace.hxx>
@@ -1474,73 +1475,123 @@ static TopoDS_Shape cutWithTools(const TopoDS_Shape &body, const TopTools_ListOf
     }
 }
 
-- (nullable PCKShape *)extrudingFace:(NSInteger)index distance:(double)distance {
-    if (distance == 0) return nil;
-    NSArray<NSNumber *> *plane = [self planeOfFace:index];
-    if (plane == nil) return nil;
-    const gp_Vec normal(plane[3].doubleValue, plane[4].doubleValue, plane[5].doubleValue);
+/// Führt eine innere Randschleife einer ebenen Fläche in eine Vertiefung (Bohrung, Senkung, Tasche: direkt unter
+/// der Fläche ist innerhalb der Schleife Luft) – oder umrandet sie eine Insel (Zapfen), unter der das Material
+/// weitergeht? Probe: an einer Kante der Schleife knapp links und rechts in der Ebene und knapp unter der Fläche;
+/// liegt einer der beiden Punkte außerhalb des Körpers, ist es eine Vertiefung. normal zeigt aus dem Körper.
+static bool loopOpensIntoPocket(const TopoDS_Shape &body, const TopoDS_Wire &wire, const gp_Dir &normal) {
     try {
-        // Das Werkzeug beginnt knapp auf der anderen Seite der Fläche: so überlappen Körper und Prisma
-        // sicher (keine deckungsgleichen Flächen, an denen Vereinigen bzw. Abziehen bei schrägen
-        // Fasenflächen scheitert).
-        const double overlap = 0.01;
-        const double start = distance > 0 ? -overlap : overlap;
-        gp_Trsf shift;
-        shift.SetTranslation(normal * start);
-        const TopoDS_Shape face = _faces(int(index)).Moved(TopLoc_Location(shift));
-        BRepPrimAPI_MakePrism prism(face, normal * (distance - start));
-        if (!prism.IsDone()) return nil;
-        TopoDS_Shape result;
-        if (distance > 0) {
-            BRepAlgoAPI_Fuse op(_shape, prism.Shape());
-            if (!op.IsDone()) return nil;
-            result = op.Shape();
-        } else {
-            BRepAlgoAPI_Cut op(_shape, prism.Shape());
-            if (!op.IsDone()) return nil;
-            result = op.Shape();
-        }
-        try {
-            return [[PCKShape alloc] initWithShape:unified(result)];
-        } catch (...) {
-            return [[PCKShape alloc] initWithShape:result];
+        for (TopExp_Explorer it(wire, TopAbs_EDGE); it.More(); it.Next()) {
+            const TopoDS_Edge edge = TopoDS::Edge(it.Current());
+            if (BRep_Tool::Degenerated(edge)) continue;
+            BRepAdaptor_Curve curve(edge);
+            const double u = 0.5 * (curve.FirstParameter() + curve.LastParameter());
+            gp_Pnt point;
+            gp_Vec tangent;
+            curve.D1(u, point, tangent);
+            gp_Vec side = gp_Vec(normal).Crossed(tangent);
+            if (side.Magnitude() < 1e-9) continue;
+            side.Normalize();
+            // Flach in die Tiefe, damit auch sehr flache Kegelsenkungen (bis ~87° Wandneigung) erkannt werden
+            const double delta = 0.05, depth = 0.002;
+            for (double sign : {1.0, -1.0}) {
+                const gp_Vec offset = side * (sign * delta) - gp_Vec(normal) * depth;
+                BRepClass3d_SolidClassifier classifier(body, point.Translated(offset), 1e-7);
+                if (classifier.State() == TopAbs_OUT) return true;
+            }
+            return false;
         }
     } catch (...) {
-        return nil;
     }
+    return false;
+}
+
+/// Werkzeuge zum Ziehen einer ebenen Fläche (Nummer index) um distance entlang ihrer Normale: das Prisma der Fläche,
+/// beim Abtragen (distance < 0) zusätzlich je Bohrung/Tasche in der Fläche ein Prisma der gefüllten Öffnung.
+/// Kai: Oberseite mit Senkbohrung nach innen gezogen – das Prisma der Fläche hat dort ein Loch, also blieb im
+/// abgetragenen Bereich die Wand um die Bohrung als offene Röhre stehen. Inseln (Zapfen) bleiben ausgespart und
+/// werden dadurch länger, wie beim Push/Pull anderer CAD-Programme. false, wenn die Fläche nicht eben ist.
+static bool appendFaceExtrusionTools(const TopoDS_Shape &body, const TopoDS_Face &source, const gp_Vec &normal,
+                                     double distance, TopTools_ListOfShape &tools) {
+    // Das Werkzeug beginnt knapp auf der anderen Seite der Fläche: so überlappen Körper und Prisma sicher (keine
+    // deckungsgleichen Flächen, an denen Vereinigen bzw. Abziehen bei schrägen Fasenflächen scheitert).
+    const double overlap = 0.01;
+    const double start = distance > 0 ? -overlap : overlap;
+    gp_Trsf shift;
+    shift.SetTranslation(normal * start);
+    const TopLoc_Location moved(shift);
+    const gp_Vec sweep = normal * (distance - start);
+    BRepPrimAPI_MakePrism prism(source.Moved(moved), sweep);
+    if (!prism.IsDone()) return false;
+    tools.Append(prism.Shape());
+    if (distance >= 0) return true;
+    const TopoDS_Wire outer = BRepTools::OuterWire(source);
+    const gp_Dir direction(normal);
+    for (TopExp_Explorer it(source, TopAbs_WIRE); it.More(); it.Next()) {
+        const TopoDS_Wire wire = TopoDS::Wire(it.Current());
+        if (wire.IsSame(outer) || !loopOpensIntoPocket(body, wire, direction)) continue;
+        BRepBuilderAPI_MakeFace fill(wire, Standard_True);
+        if (!fill.IsDone()) return false;
+        BRepPrimAPI_MakePrism plug(fill.Face().Moved(moved), sweep);
+        if (!plug.IsDone()) return false;
+        TopoDS_Shape shape = plug.Shape();
+        // Umlaufsinn der Schleife (Loch = im Uhrzeigersinn) kann den Prismenkörper umstülpen
+        GProp_GProps props;
+        BRepGProp::VolumeProperties(shape, props);
+        if (props.Mass() < 0) shape.Reverse();
+        tools.Append(shape);
+    }
+    return true;
+}
+
+/// Körper mit allen Werkzeugen vereinigen (distance > 0) bzw. sie abziehen; nur ein gültiger, geschlossener Körper
+/// wird übernommen (sonst nil statt eines Körpers mit offenen Flächen).
+static TopoDS_Shape applyFaceExtrusionTools(const TopoDS_Shape &body, const TopTools_ListOfShape &tools,
+                                            double distance) {
+    TopTools_ListOfShape arguments;
+    arguments.Append(body);
+    TopoDS_Shape result;
+    if (distance > 0) {
+        BRepAlgoAPI_Fuse op;
+        op.SetArguments(arguments);
+        op.SetTools(tools);
+        op.Build();
+        if (!op.IsDone() || op.HasErrors()) return TopoDS_Shape();
+        result = op.Shape();
+    } else {
+        BRepAlgoAPI_Cut op;
+        op.SetArguments(arguments);
+        op.SetTools(tools);
+        op.Build();
+        if (!op.IsDone() || op.HasErrors()) return TopoDS_Shape();
+        result = op.Shape();
+    }
+    if (result.IsNull()) return TopoDS_Shape();
+    const TopoDS_Shape merged = validSolid(unified(result));
+    if (!merged.IsNull()) return merged;
+    return validSolid(result);
+}
+
+- (nullable PCKShape *)extrudingFace:(NSInteger)index distance:(double)distance {
+    if (distance == 0) return nil;
+    return [self extrudingFaces:@[@(index)] distance:distance];
 }
 
 - (nullable PCKShape *)extrudingFaces:(NSArray<NSNumber *> *)indices distance:(double)distance {
     if (distance == 0 || indices.count == 0) return nil;
-    if (indices.count == 1) return [self extrudingFace:indices[0].integerValue distance:distance];
     try {
-        const double overlap = 0.01;
-        const double start = distance > 0 ? -overlap : overlap;
-        BRep_Builder builder;
-        TopoDS_Compound tools;
-        builder.MakeCompound(tools);
+        // Alle Prismen entstehen aus dem Ausgangskörper, daher bleiben die Flächennummern gültig
+        TopTools_ListOfShape tools;
         for (NSNumber *number in indices) {
             NSArray<NSNumber *> *plane = [self planeOfFace:number.integerValue];
             if (plane == nil) return nil;
             const gp_Vec normal(plane[3].doubleValue, plane[4].doubleValue, plane[5].doubleValue);
-            gp_Trsf shift;
-            shift.SetTranslation(normal * start);
-            const TopoDS_Shape face = _faces(number.intValue).Moved(TopLoc_Location(shift));
-            BRepPrimAPI_MakePrism prism(face, normal * (distance - start));
-            if (!prism.IsDone()) return nil;
-            builder.Add(tools, prism.Shape());
+            const TopoDS_Face face = TopoDS::Face(_faces(number.intValue));
+            if (!appendFaceExtrusionTools(_shape, face, normal, distance, tools)) return nil;
         }
-        TopoDS_Shape result;
-        if (distance > 0) {
-            BRepAlgoAPI_Fuse op(_shape, tools);
-            if (!op.IsDone()) return nil;
-            result = op.Shape();
-        } else {
-            BRepAlgoAPI_Cut op(_shape, tools);
-            if (!op.IsDone()) return nil;
-            result = op.Shape();
-        }
-        return [[PCKShape alloc] initWithShape:unified(result)];
+        const TopoDS_Shape result = applyFaceExtrusionTools(_shape, tools, distance);
+        if (result.IsNull()) return nil;
+        return [[PCKShape alloc] initWithShape:result];
     } catch (...) {
         return nil;
     }
@@ -1917,6 +1968,39 @@ static TopoDS_Shape offsetClosedSolid(const TopoDS_Shape &solid, double distance
             [parts addObject:[[PCKShape alloc] initWithShape:it.Current()]];
         }
         return parts.count > 0 ? parts : @[self];
+    } catch (...) {
+        return @[self];
+    }
+}
+
+- (NSArray<PCKShape *> *)separatedParts {
+    try {
+        if (_shape.IsNull() || _shape.ShapeType() != TopAbs_COMPOUND) return [self separatedSolids];
+        std::vector<TopoDS_Shape> children;
+        for (TopoDS_Iterator it(_shape); it.More(); it.Next()) children.push_back(it.Value());
+        if (children.size() <= 1) return [self separatedSolids];
+        // Je Teil (z. B. je Skizzenbereich ein Prisma) eigene Körper: nur innerhalb eines Teils wird verschmolzen
+        NSMutableArray<PCKShape *> *parts = [NSMutableArray array];
+        for (const TopoDS_Shape &child : children) {
+            TopExp_Explorer solids(child, TopAbs_SOLID);
+            if (!solids.More()) continue;
+            PCKShape *piece = [[PCKShape alloc] initWithShape:child];
+            [parts addObjectsFromArray:[piece separatedSolids]];
+        }
+        return parts.count > 0 ? parts : [self separatedSolids];
+    } catch (...) {
+        return [self separatedSolids];
+    }
+}
+
+- (NSArray<PCKShape *> *)solidParts {
+    try {
+        std::vector<TopoDS_Shape> solids;
+        for (TopExp_Explorer it(_shape, TopAbs_SOLID); it.More(); it.Next()) solids.push_back(it.Current());
+        if (solids.size() <= 1) return @[self];
+        NSMutableArray<PCKShape *> *parts = [NSMutableArray array];
+        for (const TopoDS_Shape &solid : solids) [parts addObject:[[PCKShape alloc] initWithShape:solid]];
+        return parts;
     } catch (...) {
         return @[self];
     }
@@ -3143,6 +3227,14 @@ static bool isSoftMeshEdge(const TopTools_ListOfShape &faces) {
 }
 
 - (NSArray<PCKShape *> *)separatedSolids {
+    return @[self];
+}
+
+- (NSArray<PCKShape *> *)separatedParts {
+    return @[self];
+}
+
+- (NSArray<PCKShape *> *)solidParts {
     return @[self];
 }
 

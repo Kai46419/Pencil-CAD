@@ -228,6 +228,11 @@ NS_ASSUME_NONNULL_BEGIN
 /// Getrennte Teilkörper: sich berührende Solids werden verschmolzen, voneinander getrennte einzeln geliefert
 /// (mindestens ein Eintrag; ohne Kernel bzw. bei Fehler der Körper selbst).
 - (NSArray<PCKShape *> *)separatedSolids NS_SWIFT_NAME(separatedSolids());
+/// Wie separatedSolids, aber jeder Teil eines Verbunds (Compound aus mehreren Formen, z. B. je Skizzenbereich ein
+/// Prisma) bleibt ein eigener Körper, auch wenn er andere berührt; verschmolzen wird nur innerhalb eines Teils.
+- (NSArray<PCKShape *> *)separatedParts NS_SWIFT_NAME(separatedParts());
+/// Jeder Solid einzeln, auch sich berührende (In Einzelkörper trennen); ein Solid bzw. ohne Kernel: der Körper selbst.
+- (NSArray<PCKShape *> *)solidParts NS_SWIFT_NAME(solidParts());
 
 /// YES, wenn der Punkt im Inneren eines Teilkörpers liegt (BRepClass3d_SolidClassifier); ohne Kernel NO.
 - (BOOL)containsPoint:(simd_double3)point NS_SWIFT_NAME(contains(point:));

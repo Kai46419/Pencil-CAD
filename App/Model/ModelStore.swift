@@ -823,7 +823,7 @@ final class ModelStore: ObservableObject {
             return
         }
         guard let result = extrusionResult(solid, sourceBody: sketch.plane.sourceBody, mode: mode, sketch: sketch.id) else { return }
-        message = nil
+        message = SketchRegionMerge.newBodyNote(regions, mode: mode)
         showPreview(result, name: Self.regionPreviewName)
         noteExtrude(mode: mode, distance: distance)
     }
@@ -1050,12 +1050,14 @@ final class ModelStore: ObservableObject {
         commit(result, name: chosen.count == 1 ? "Löschen" : "\(chosen.count) Körper löschen")
     }
 
-    /// Körper aus mehreren getrennten Teilen (ältere Projekte, Importe) in Einzelkörper zerlegen.
+    /// Körper aus mehreren Teilen (ältere Projekte, Importe) in Einzelkörper zerlegen – auch sich berührende Teile,
+    /// solange sie noch eigene Solids sind (nicht verschmolzen).
     func separateBody(_ index: Int) {
         guard bodies.indices.contains(index) else { return }
-        let parts = bodies[index].shape.separatedSolids()
+        let parts = bodies[index].shape.solidParts()
         guard parts.count > 1 else {
-            message = "„\(bodies[index].name)“ besteht nur aus einem Teil."
+            message = "„\(bodies[index].name)“ ist ein einziger Volumenkörper. Berührende Teile sind verschmolzen – "
+                + "Ändern › Körper teilen nutzen."
             return
         }
         dropPreview()
@@ -1252,13 +1254,16 @@ final class ModelStore: ObservableObject {
     }
 
     /// Ergebnis einer Extrusion je Modus: neuer Körper, mit dem Flächenkörper vereinigt oder von allen abgezogen.
-    func extrusionResult(_ solid: PCKShape, sourceBody: Int?, mode: ExtrudeMode, sketch: UUID? = nil) -> [SceneBody]? {
+    /// joinTouching: bei „Neuer Körper“ sich berührende Teile zu einem Körper verschmelzen (Wände aus Linien).
+    func extrusionResult(_ solid: PCKShape, sourceBody: Int?, mode: ExtrudeMode, sketch: UUID? = nil,
+                         joinTouching: Bool = false) -> [SceneBody]? {
         switch mode {
         case .newBody:
-            // Kai: getrennte Bereiche einer Skizze werden getrennte Körper (einzeln wählbar, z. B. zum Verschieben);
-            // sich berührende Bereiche bleiben ein Körper
+            // Kai: jeder Bereich einer Skizze wird ein eigener Körper (einzeln wählbar), auch wenn Bereiche sich
+            // berühren; nur getrennte Stücke innerhalb eines Bereichs werden ebenfalls einzeln
             var result = bodies
-            for part in solid.separatedSolids() {
+            let parts: [PCKShape] = joinTouching ? solid.separatedSolids() : solid.separatedParts()
+            for part in parts {
                 result.append(SceneBody(shape: part, name: "Körper \(result.count + 1)",
                                         color: SceneBody.palette[result.count % SceneBody.palette.count], sketchID: sketch))
             }

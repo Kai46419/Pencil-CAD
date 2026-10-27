@@ -945,7 +945,7 @@ extension ModelStore {
         switch mode {
         case .newBody:
             var result = state
-            for part in solid.separatedSolids() {
+            for part in solid.separatedParts() {
                 let color = SceneBody.palette[result.count % SceneBody.palette.count]
                 result.append(SceneBody(shape: part, name: "Körper \(result.count + 1)", color: color, sketchID: sketch))
             }
