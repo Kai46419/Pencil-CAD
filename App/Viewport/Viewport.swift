@@ -68,6 +68,8 @@ final class ViewportView: MTKView {
     private var panGesture: UIPanGestureRecognizer?
     private var pinchGesture: UIPinchGestureRecognizer?
     private var tapGesture: UITapGestureRecognizer?
+    /// Finger doppeltippen = Punkt merken (im Zeichenwerkzeug mit zeichnendem Finger aus)
+    private var doubleTapGesture: UITapGestureRecognizer?
     private var undoGesture: UITapGestureRecognizer?
     private var redoGesture: UITapGestureRecognizer?
     private var sketchTouch: UITouch?
@@ -302,6 +304,7 @@ final class ViewportView: MTKView {
         panGesture = pan
         pinchGesture = pinch
         tapGesture = tap
+        doubleTapGesture = doubleTap
 
         valueLabel.font = .monospacedDigitSystemFont(ofSize: 15, weight: .semibold)
         valueLabel.textColor = SketchTheme.UI.valueText
@@ -407,6 +410,9 @@ final class ViewportView: MTKView {
         orbitGesture?.isEnabled = !sketching && !(workspace.boxSelects && workspace.acceptsBoxSelection)
         tapGesture?.isEnabled = !fingerSketching
         tapGesture?.allowedTouchTypes = sketching ? fingersOnly : fingersAndPencil
+        // Zeichnet der Finger mit einem Klickwerkzeug, gehört sein Doppeltipp dem Zeichnen (Start setzen bzw. Linienzug
+        // beenden, SketchClickTool.swift) – sonst merkte die Geste einen Punkt und brach das zweite Tippen ab
+        doubleTapGesture?.isEnabled = !(fingerSketching && sketch.clickKind != nil)
 
         let plane = sketch.plane
         if sketching {

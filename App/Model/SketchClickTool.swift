@@ -68,6 +68,19 @@ struct SketchClickState {
         var restart: Bool
         /// Der neue Linienzug hat beim Ziehen schon begonnen (Vorschau und Fang ab dem Aufsetzpunkt)
         var restarted = false
+        /// Zeitpunkt des Aufsetzens (Systemlaufzeit, s)
+        var time: TimeInterval = 0
+        /// Zweites Tippen eines Doppeltipps: setzt beim Antippen nichts
+        var secondTap = false
+        /// Vor dem Aufsetzen lief keine Form (bzw. kein Linienzug)
+        var startedEmpty = false
+    }
+
+    /// Letztes Antippen für den Doppeltipp: Zeit, ungefangene Stelle und ob es eine Form begonnen hat
+    struct Tap {
+        var time: TimeInterval
+        var raw: Point2
+        var startedShape: Bool
     }
 
     var points: [SketchClickPoint] = []
@@ -80,6 +93,8 @@ struct SketchClickState {
     /// Letzter ungefangener Stiftpunkt
     var raw: Point2?
     var press: Press?
+    /// Letztes Antippen (Doppeltipp-Erkennung); nil nach einem Ziehen
+    var lastTap: Tap?
     /// Mittelpunkt-Bogen: mitgezählter Bogenwinkel (Bogenmaß, Vorzeichen = Drehsinn)
     var sweep = 0.0
     var lastAngle = 0.0
@@ -408,12 +423,29 @@ extension SketchController {
         changed(publish: false)
     }
 
+    /// Doppeltipp: höchstens so lange (s) nach dem vorigen Antippen …
+    private static let doubleTapInterval: TimeInterval = 0.4
+    /// Kürzer als das (s) und kaum bewegt: Antippen, auch wenn der Stift beim Andrücken etwas zittert
+    private static let quickTapDuration: TimeInterval = 0.2
+
+    /// Zweites Tippen eines Doppeltipps: kurz nach dem vorigen Antippen und nahe dabei.
+    private func isSecondTap(_ raw: Point2, now: TimeInterval, metrics: SnapMetrics) -> Bool {
+        guard let tap = click.lastTap else { return false }
+        return now - tap.time <= Self.doubleTapInterval && simd_distance(tap.raw, raw) <= metrics.tapSlop * 3
+    }
+
     func clickBegan(at raw: Point2, tolerance: Double) {
         guard let kind = clickKind else { return }
         hoverCandidate = nil
         let metrics = snapMetrics(tolerance)
+        let now = ProcessInfo.processInfo.systemUptime
+        // Kai: Zeichnen per Antippen statt Drücken – das zweite Tippen eines Doppeltipps setzt beim Aufsetzen nichts
+        // (sonst begann es nach dem ersten Tippen gleich die nächste Form bzw. ein Stück der Länge null)
+        let secondTap = isSecondTap(raw, now: now, metrics: metrics)
+        let startedEmpty = click.isEmpty
         if case .tangentCircle = kind {
-            click.press = SketchClickState.Press(raw: raw, fresh: .free(raw), placedFirst: false, restart: false)
+            click.press = SketchClickState.Press(raw: raw, fresh: .free(raw), placedFirst: false, restart: false,
+                                                 time: now, secondTap: secondTap, startedEmpty: startedEmpty)
             changed()
             return
         }
@@ -422,7 +454,9 @@ extension SketchController {
         let candidate = clickCandidate(raw, tolerance: tolerance)
         var placedFirst = false
         var restart = false
-        if click.points.isEmpty, kind.pressPlacesFirstPoint {
+        if secondTap {
+            // Erst beim Abheben klar: Tippen (Doppeltipp) oder Ziehen
+        } else if click.points.isEmpty, kind.pressPlacesFirstPoint {
             clickPlace(candidate)
             placedFirst = !click.points.isEmpty
         } else if kind == .line, let last = click.points.last, simd_distance(last.point, fresh.point) > metrics.tapSlop {
@@ -431,7 +465,8 @@ extension SketchController {
             let nearEnd = simd_distance(last.point, raw) <= metrics.chainReach && !(fresh.target?.isPointSnap ?? false)
             restart = !nearEnd
         }
-        click.press = SketchClickState.Press(raw: raw, fresh: fresh, placedFirst: placedFirst, restart: restart)
+        click.press = SketchClickState.Press(raw: raw, fresh: fresh, placedFirst: placedFirst, restart: restart,
+                                             time: now, secondTap: secondTap, startedEmpty: startedEmpty)
         let shown = placedFirst ? clickCandidate(raw, tolerance: tolerance) : candidate
         click.hover = shown
         activeCandidate = shown
@@ -457,10 +492,32 @@ extension SketchController {
         guard let press = click.press, let kind = clickKind else { return }
         click.press = nil
         let metrics = snapMetrics(tolerance)
-        let dragged = simd_distance(raw, press.raw) > metrics.tapSlop
+        let now = ProcessInfo.processInfo.systemUptime
+        let moved = simd_distance(raw, press.raw)
+        // Kurz angetippt und dabei etwas verrutscht (Stift-Zittern beim Andrücken): bleibt ein Antippen
+        let quickTap = now - press.time < Self.quickTapDuration && moved <= metrics.tapSlop * 2
+        // Hat das Ziehen schon einen neuen Linienzug begonnen, bleibt es ein Ziehen
+        let dragged = press.restarted || moved > metrics.tapSlop && !quickTap
         if case .tangentCircle(let count) = kind {
             activeCandidate = nil
-            if !dragged { pickTangentCurve(at: raw, metrics: metrics, count: count) }
+            // Doppeltipp auf dieselbe Kurve wählt sie nicht gleich wieder ab
+            if !dragged, !press.secondTap { pickTangentCurve(at: raw, metrics: metrics, count: count) }
+            click.lastTap = dragged || press.secondTap ? nil : SketchClickState.Tap(time: now, raw: raw, startedShape: false)
+            changed()
+            return
+        }
+        if press.secondTap, !dragged {
+            // Doppeltipp: das erste Tippen hat den Punkt gesetzt (bzw. die Form beendet). Hat es einen Linienzug erst
+            // begonnen, bleibt der Startpunkt stehen – die Vorschau folgt dem schwebenden Stift; hat es ein Stück
+            // angehängt, ist der Linienzug fertig.
+            if kind == .line, let tap = click.lastTap, !tap.startedShape, !click.points.isEmpty {
+                click.points = []
+                click.chainFirst = nil
+                if !options.locked.isEmpty { options.locked = [:] }
+            }
+            click.lastTap = nil
+            activeCandidate = nil
+            click.hover = nil
             changed()
             return
         }
@@ -474,8 +531,21 @@ extension SketchController {
         } else {
             candidate = clickCandidate(raw, tolerance: tolerance)
         }
+        // Linie: den letzten Punkt angetippt, ohne dass der Fang ihn traf (z. B. Fang aus) – beendet den Zug statt
+        // ein winziges Stück anzuhängen
+        if kind == .line, !dragged, !hasLockedBox, let last = click.points.last,
+           simd_distance(raw, last.point) <= metrics.tapSlop * 2, simd_distance(candidate.point, last.point) > 1e-9 {
+            candidate = .free(last.point)
+        }
         activeCandidate = nil
-        if press.placedFirst {
+        if press.secondTap, dragged, click.points.isEmpty, kind.pressPlacesFirstPoint {
+            // Doppeltippen und gleich ziehen: wie Aufsetzen–Ziehen–Abheben von A nach B
+            clickPlace(press.fresh)
+            if !click.points.isEmpty {
+                candidate = clickCandidate(raw, tolerance: tolerance)
+                clickPlace(candidate)
+            }
+        } else if press.placedFirst {
             if dragged { clickPlace(candidate) }
         } else if press.restart, dragged {
             // Abseits des Zugendes gezogen: neuer Linienzug ab dem Aufsetzpunkt (meist schon beim Ziehen begonnen)
@@ -487,6 +557,9 @@ extension SketchController {
         } else {
             clickPlace(candidate)
         }
+        // Merken fürs Doppeltippen; „begonnen“ = vorher lief nichts, jetzt eine Form bzw. ein Linienzug
+        click.lastTap = dragged ? nil
+            : SketchClickState.Tap(time: now, raw: raw, startedShape: press.startedEmpty && !click.points.isEmpty)
         click.hover = nil
         // Nach dem Abheben nur noch die gemerkten Fangpunkte zeigen (die in Stiftnähe folgen beim Schweben)
         clickTrackedPoints = click.tracked
@@ -822,8 +895,8 @@ extension SketchController {
         let n = click.points.count
         switch kind {
         case .line:
-            return n == 0 ? "Linie: Punkte antippen – oder von A nach B ziehen"
-                : "Linie: nächsten Punkt antippen (Länge/Winkel eintippbar) · letzten Punkt erneut antippen oder „Fertig“ beendet · Anfang antippen schließt"
+            return n == 0 ? "Linie: Punkte antippen (auch doppeltippen) – oder von A nach B ziehen"
+                : "Linie: nächsten Punkt antippen (Länge/Winkel eintippbar) · doppeltippen, letzten Punkt erneut antippen oder „Fertig“ beendet · Anfang antippen schließt"
         case .arcThreePoint:
             switch n {
             case 0: return "Bogen: Start antippen – oder von Start nach Ende ziehen"

@@ -806,6 +806,8 @@ final class SketchController: ObservableObject {
         }
         if clickKind != nil {
             clickEnded(at: point, tolerance: tolerance)
+            // „Fang aus“ (Stift drücken) gilt nur für diesen Strich – blieb in der Klickfolge sonst dauerhaft aus
+            resetStrokeSnapState()
             return
         }
         guard let start = dragStart else { return }
