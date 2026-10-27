@@ -2061,8 +2061,9 @@ struct LayersPanel: View {
                     in: RoundedRectangle(cornerRadius: 8))
         .contentShape(Rectangle())
         .onTapGesture {
-            // Auswählen-Modus: Antippen nimmt den Körper hinzu bzw. heraus (wie das Häkchen)
-            if picksBodies { model.toggleBody(index) } else { select(index) }
+            // Auswählen-Modus: Antippen nimmt den Körper hinzu bzw. heraus (wie das Häkchen);
+            // select hält dabei die Vorschau eines offenen Befehls (z. B. Boolesch) aktuell
+            select(index)
         }
         // Schweben (Stift, Zeiger): Name und Maße des Körpers
         .hoverTip(item.name, workspace.bodySizeText(index))
@@ -2093,7 +2094,7 @@ struct LayersPanel: View {
     private func pickMark(_ index: Int) -> some View {
         let chosen = model.selectedBodies.contains(index)
         return Button {
-            model.toggleBody(index)
+            select(index)
         } label: {
             Image(systemName: chosen ? "checkmark.circle.fill" : "circle")
                 .foregroundStyle(chosen ? Color.accentColor : Color.secondary)
