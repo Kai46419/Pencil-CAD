@@ -111,6 +111,8 @@ struct SceneBody {
     var material: String? = nil
     /// Gewinde am Körper, modelliert oder kosmetisch (ThreadNotes.swift); nil = keine
     var threads: [ThreadNote]? = nil
+    /// Oberfläche (Kurzname aus SurfaceFinish.all oder „Eigene:…“, SurfaceFinish.swift); nil = nach Werkstoff
+    var finish: String? = nil
 
     func with(_ shape: PCKShape) -> SceneBody {
         var body = self
@@ -1084,6 +1086,8 @@ final class ModelStore: ObservableObject {
         var result = bodies
         for index in indices where result.indices.contains(index) {
             result[index].color = color
+            // Fertige Oberfläche wird zur eigenen Farbe mit ähnlichem Glanz (SurfaceFinish.swift)
+            result[index].finish = SurfaceFinish.recolored(result[index].finish)
         }
         commit(result, name: "Farbe")
         selectedBodies = indices.filter { bodies.indices.contains($0) }
@@ -1356,7 +1360,7 @@ final class ModelStore: ObservableObject {
         }
         // Feinere Triangulierung als für die Anzeige, damit Rundungen im Druck glatt werden
         let meshes = chosen.map { index in
-            ExportMesh(name: bodies[index].name, color: bodies[index].color,
+            ExportMesh(name: bodies[index].name, color: bodies[index].displayColor,
                        mesh: Mesh(bodies[index].shape.triangulate(deflection: 0.01), body: index))
         }
         switch format {
@@ -1376,7 +1380,7 @@ final class ModelStore: ObservableObject {
         }
         let url = FileManager.default.temporaryDirectory.appending(path: "PencilCAD-AR.usdz")
         let list = chosen.map { index in
-            (name: bodies[index].name, color: bodies[index].color,
+            (name: bodies[index].name, appearance: bodies[index].appearance,
              mesh: Mesh(bodies[index].shape.triangulate(deflection: 0.05), body: index))
         }
         guard USDZExport.write(list, to: url) else {
@@ -1863,6 +1867,7 @@ final class ModelStore: ObservableObject {
                 body.color = SIMD3(metas[index].color[0], metas[index].color[1], metas[index].color[2])
                 body.material = metas[index].material
                 body.threads = metas[index].threads
+                body.finish = metas[index].finish
             }
             body.folder = name
             return body
@@ -1970,6 +1975,8 @@ final class ModelStore: ObservableObject {
         var material: String?
         /// Gewinde (ThreadNotes.swift); fehlt in älteren Projekten
         var threads: [ThreadNote]?
+        /// Oberfläche (SurfaceFinish.swift); fehlt in älteren Projekten
+        var finish: String?
     }
 
     private var modelURL: URL? { folder?.appending(path: "model.step") }
@@ -2011,6 +2018,7 @@ final class ModelStore: ObservableObject {
                     .restoringComponent(meta.componentID, placement: meta.placement)
                 body.material = meta.material
                 body.threads = meta.threads
+                body.finish = meta.finish
                 return body
             }
             return SceneBody(shape: shape, name: "Körper \(index + 1)", color: SceneBody.palette[index % SceneBody.palette.count])
@@ -2043,7 +2051,7 @@ final class ModelStore: ObservableObject {
             BodyMeta(name: $0.name, color: [$0.color.x, $0.color.y, $0.color.z], isHidden: $0.isHidden, sketchID: $0.sketchID,
                      folder: $0.folder, componentID: $0.componentID,
                      placement: $0.componentID == nil ? nil : $0.placementValues, material: $0.material,
-                     threads: $0.threads)
+                     threads: $0.threads, finish: $0.finish)
         }
         if let data = try? JSONEncoder().encode(metas) {
             try? data.write(to: metaURL)

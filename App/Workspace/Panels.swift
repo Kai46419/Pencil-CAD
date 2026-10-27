@@ -2055,7 +2055,7 @@ struct LayersPanel: View {
             eye(!item.isHidden) { model.setHidden(!item.isHidden, body: index) }
             // Komponente (verknüpfte Kopien) mit eigenem Symbol
             Image(systemName: item.componentID == nil ? "cube.fill" : "shippingbox.fill")
-                .foregroundStyle(Color(item.color))
+                .foregroundStyle(Color(item.displayColor))
                 .frame(width: 20)
             Text(item.name)
                 .lineLimit(1)
@@ -2111,6 +2111,7 @@ struct LayersPanel: View {
             Button("In Einzelkörper trennen", systemImage: "square.split.2x1") { model.separateBody(index) }
             ComponentMenuItems(model: model, index: index)
             MaterialMenuItems(model: model, index: index, targets: folderTargets(index))
+            FinishMenuItems(model: model, index: index, targets: folderTargets(index))
             Button("Löschen", systemImage: "trash", role: .destructive) {
                 model.toggleBody(index, exclusive: true)
                 model.deleteSelected()

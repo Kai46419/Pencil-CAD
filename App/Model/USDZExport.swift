@@ -3,11 +3,12 @@ import SceneKit
 import UIKit
 
 // USDZ für AR Quick Look (Modell im Raum ansehen) und zum Teilen: glatte Normalen aus der Kernel-Triangulierung,
-// Farbe je Körper. USDZ rechnet in Metern mit Y nach oben; PencilCAD in mm mit Z nach oben.
+// Farbe, Metall, Rauheit, Klarlack und Transparenz je Körper aus seiner Oberfläche (SurfaceFinish.swift; Muster wie
+// Holz oder Carbon gibt es nur im Viewport). USDZ rechnet in Metern mit Y nach oben; PencilCAD in mm mit Z nach oben.
 
 enum USDZExport {
     /// Körper als USDZ-Datei schreiben; false bei Fehler.
-    static func write(_ bodies: [(name: String, color: SIMD3<Float>, mesh: Mesh)], to url: URL) -> Bool {
+    static func write(_ bodies: [(name: String, appearance: SurfaceAppearance, mesh: Mesh)], to url: URL) -> Bool {
         let scene = SCNScene()
         let root = SCNNode()
         // mm → m und Z oben → Y oben (−90° um X)
@@ -21,12 +22,23 @@ enum USDZExport {
             let element = SCNGeometryElement(indices: body.mesh.indices, primitiveType: .triangles)
             let geometry = SCNGeometry(sources: [SCNGeometrySource(vertices: positions), SCNGeometrySource(normals: normals)],
                                        elements: [element])
+            let look = body.appearance
             let material = SCNMaterial()
             material.lightingModel = .physicallyBased
-            material.diffuse.contents = UIColor(red: CGFloat(body.color.x), green: CGFloat(body.color.y),
-                                                blue: CGFloat(body.color.z), alpha: 1)
-            material.roughness.contents = 0.55
-            material.metalness.contents = 0.0
+            material.diffuse.contents = UIColor(red: CGFloat(look.albedo.x), green: CGFloat(look.albedo.y),
+                                                blue: CGFloat(look.albedo.z), alpha: 1)
+            // Ganz matt (bisherige Darstellung ohne Oberfläche) wie früher mit 0,55
+            let roughness: Float = look.roughness >= 0.99 ? 0.55 : max(look.roughness, 0.03)
+            material.roughness.contents = NSNumber(value: roughness)
+            material.metalness.contents = NSNumber(value: look.metallic ? 1.0 : 0.0)
+            if look.clearcoat {
+                material.clearCoat.contents = NSNumber(value: 1.0)
+                material.clearCoatRoughness.contents = NSNumber(value: 0.05)
+            }
+            if look.transparent {
+                material.transparency = 0.35
+                material.blendMode = .alpha
+            }
             material.isDoubleSided = true
             geometry.materials = [material]
             let node = SCNNode(geometry: geometry)

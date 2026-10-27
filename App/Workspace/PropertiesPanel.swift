@@ -147,6 +147,10 @@ struct PropertiesPanel: View {
                     .padding(.vertical, 6)
             } else {
                 section(snapshot.title, systemImage: snapshot.systemImage, rows: snapshot.rows)
+                if let body = snapshot.body {
+                    // Oberfläche wählen (SurfaceFinishUI.swift)
+                    SurfaceFinishSection(model: model, bodyIndex: body)
+                }
                 if !snapshot.faceRows.isEmpty {
                     section(snapshot.faceTitle, systemImage: "square.on.square", rows: snapshot.faceRows)
                 }

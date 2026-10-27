@@ -128,6 +128,8 @@ final class Renderer: NSObject, MTKViewDelegate {
     /// Verdeckte Kanten (Tiefe „größer“) und Zebra; optional, damit ein Fehler hier den Viewport nicht verhindert
     private let hiddenEdgePipeline: MTLRenderPipelineState?
     private let zebraPipeline: MTLRenderPipelineState?
+    /// Glas und klare Kunststoffe: zweiter, durchsichtiger Durchgang über den Körpern (SurfaceFinish.swift)
+    private let glassPipeline: MTLRenderPipelineState?
     private let behindDepthState: MTLDepthStencilState?
 
     private var vertexBuffer: MTLBuffer?
@@ -142,6 +144,8 @@ final class Renderer: NSObject, MTKViewDelegate {
     /// Gewählte Kanten (Punktpaare)
     private var edgeHighlight: [SIMD3<Float>] = []
     private var hasFramedOnce = false
+    /// Mindestens ein durchsichtiger Körper im Netz (dann zeichnet der Glas-Durchgang)
+    private var hasGlass = false
 
     init?(view: MTKView) {
         guard let device = view.device ?? MTLCreateSystemDefaultDevice(),
@@ -208,6 +212,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         self.alwaysDepthState = alwaysDepthState
         hiddenEdgePipeline = pipeline(vertex: "vertex_overlay", fragment: "fragment_dashed_clip", blended: true)
         zebraPipeline = pipeline(vertex: "vertex_main", fragment: "fragment_zebra")
+        glassPipeline = pipeline(vertex: "vertex_main", fragment: "fragment_glass", blended: true)
         behindDepthState = depth(.greater, write: false)
         super.init()
     }
@@ -218,6 +223,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         vertexBuffer = makeBuffer(mesh.vertices)
         indexBuffer = makeBuffer(mesh.indices)
         indexCount = mesh.indices.count
+        hasGlass = Renderer.containsTransparent(mesh.vertices)
         let edges = mesh.edges.map { Vertex(position: $0, normal: SIMD3(0, 0, 1)) }
         edgeBuffer = makeBuffer(edges)
         edgeCount = edges.count
@@ -570,6 +576,17 @@ final class Renderer: NSObject, MTKViewDelegate {
             case .xray:
                 drawEdges(depth: alwaysDepthState)
                 encoder.setRenderPipelineState(xrayPipeline)
+                encoder.setDepthStencilState(readOnlyDepthState)
+                encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
+                setUniforms(&uniforms)
+                encoder.drawIndexedPrimitives(type: .triangle, indexCount: indexCount, indexType: .uint32,
+                                              indexBuffer: indexBuffer, indexBufferOffset: 0)
+            }
+
+            // Glas und klare Kunststoffe durchsichtig darüber (fragment_main lässt sie aus), ohne Tiefe zu schreiben
+            let solidDrawn: Bool = displayMode.isSolid && (displayMode != .zebra || zebraPipeline == nil)
+            if hasGlass, solidDrawn, let glassPipeline {
+                encoder.setRenderPipelineState(glassPipeline)
                 encoder.setDepthStencilState(readOnlyDepthState)
                 encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
                 setUniforms(&uniforms)
