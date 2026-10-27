@@ -20,6 +20,17 @@ struct DrawingSheet: View {
     @State private var exportType: UTType = .pdf
     @State private var isExporting = false
     @State private var shareURL: URL?
+    // Winkelmaße von Hand (Punkt 15): Werkzeug, erste angetippte Kante, Auswahl, Verschieben
+    @State private var manualAngles: [DrawingAngle] = []
+    @State private var angleTool = false
+    @State private var pickedEdge: (Point2, Point2)?
+    @State private var pickedTap = Point2.zero
+    @State private var selectedAngle: UUID?
+    @State private var draggedAngle: UUID?
+    @State private var dragStartHandle = Point2.zero
+    @State private var isDragging = false
+    @State private var angleOverlay: UIImage?
+    @State private var angleHint: String?
 
     /// Gewählte Körper (Körper, Fläche oder Kante gewählt), sonst alle sichtbaren.
     private var selectedBodies: [Int] {
@@ -47,6 +58,17 @@ struct DrawingSheet: View {
                             .scaledToFit()
                             .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
+                    if let angleOverlay {
+                        Image(uiImage: angleOverlay)
+                            .resizable()
+                            .scaledToFit()
+                            .allowsHitTesting(false)
+                    }
+                    GeometryReader { proxy in
+                        angleHighlights(size: proxy.size)
+                            .contentShape(Rectangle())
+                            .gesture(sheetGesture(size: proxy.size))
+                    }
                     if isWorking {
                         progressBadge
                             .padding()
@@ -57,6 +79,7 @@ struct DrawingSheet: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                 optionsBar
+                angleBar
                 if let layout, layout.approximate {
                     Text(PCKShape.kernelAvailable
                          ? "Verdeckte Kanten angenähert (exakte Berechnung nicht möglich)."
@@ -80,6 +103,9 @@ struct DrawingSheet: View {
                         Label("Sichern", systemImage: "square.and.arrow.down")
                     }
                     .disabled(layout == nil || isWorking)
+                    if selectedAngle != nil {
+                        Button("Winkelmaß löschen", systemImage: "trash", role: .destructive) { deleteSelectedAngle() }
+                    }
                     if let shareURL {
                         ShareLink(item: shareURL)
                     }
@@ -128,6 +154,164 @@ struct DrawingSheet: View {
                 .onChange(of: options.author) { _, name in DrawingOptions.savedAuthor = name }
         }
         .font(.callout)
+    }
+
+    /// Zweite Zeile: Winkelmaße automatisch bzw. von Hand setzen
+    private var angleBar: some View {
+        HStack(spacing: 16) {
+            Toggle("Winkelmaße automatisch", isOn: $options.showsAngles)
+                .fixedSize()
+            Toggle(isOn: $angleTool) {
+                Label("Winkelmaß setzen", systemImage: "angle")
+            }
+            .toggleStyle(.button)
+            .onChange(of: angleTool) { _, _ in
+                pickedEdge = nil
+                angleHint = nil
+            }
+            Text(angleHint ?? angleToolText)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+        }
+        .font(.callout)
+    }
+
+    private var angleToolText: String {
+        if angleTool { return pickedEdge == nil ? "Erste Kante antippen" : "Zweite Kante antippen" }
+        if !manualAngles.isEmpty { return "Winkelmaß ziehen zum Verschieben, antippen zum Auswählen" }
+        return ""
+    }
+
+    /// Blattpunkt (mm, y nach oben) aus einer Stelle der Vorschau.
+    private func sheetPoint(_ location: CGPoint, size: CGSize) -> Point2 {
+        let k = max(Double(size.width), 1) / TechnicalDrawing.sheetWidth
+        return Point2(Double(location.x) / k, TechnicalDrawing.sheetHeight - Double(location.y) / k)
+    }
+
+    /// Hervorhebung der gewählten Kante bzw. des gewählten Winkelmaßes.
+    private func angleHighlights(size: CGSize) -> some View {
+        let k = Double(size.width) / TechnicalDrawing.sheetWidth
+        let edge = pickedEdge
+        let selected = manualAngles.first { $0.id == selectedAngle }.flatMap { TechnicalDrawing.angleShape($0) }
+        return Canvas { context, _ in
+            func point(_ p: Point2) -> CGPoint { CGPoint(x: p.x * k, y: (TechnicalDrawing.sheetHeight - p.y) * k) }
+            if let edge {
+                var path = Path()
+                path.move(to: point(edge.0))
+                path.addLine(to: point(edge.1))
+                context.stroke(path, with: .color(.accentColor), style: StrokeStyle(lineWidth: 4, lineCap: .round))
+            }
+            if let selected {
+                var path = Path()
+                path.addLines(selected.arc.map(point))
+                let a = point(selected.label.min), b = point(selected.label.max)
+                path.addRect(CGRect(x: min(a.x, b.x) - 3, y: min(a.y, b.y) - 3,
+                                    width: abs(b.x - a.x) + 6, height: abs(b.y - a.y) + 6))
+                context.stroke(path, with: .color(.accentColor), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+            }
+        }
+    }
+
+    /// Eine Geste für Antippen (Kante wählen, Winkelmaß auswählen) und Ziehen (Winkelmaß verschieben).
+    private func sheetGesture(size: CGSize) -> some Gesture {
+        let k = max(Double(size.width), 1) / TechnicalDrawing.sheetWidth
+        return DragGesture(minimumDistance: 0)
+            .onChanged { value in dragChanged(value, size: size, k: k) }
+            .onEnded { value in dragEnded(value, size: size, k: k) }
+    }
+
+    /// Trifft die Stelle ein von Hand gesetztes Winkelmaß?
+    private func manualAngle(at point: Point2, tolerance: Double) -> DrawingAngle? {
+        manualAngles.first { angle in
+            guard let shape = TechnicalDrawing.angleShape(angle) else { return false }
+            return TechnicalDrawing.hits(shape, point, tolerance: tolerance)
+        }
+    }
+
+    @MainActor
+    private func dragChanged(_ value: DragGesture.Value, size: CGSize, k: Double) {
+        if !isDragging {
+            isDragging = true
+            let hit = manualAngle(at: sheetPoint(value.startLocation, size: size), tolerance: 16 / k)
+            draggedAngle = hit?.id
+            dragStartHandle = hit?.handle ?? .zero
+        }
+        let distance = hypot(Double(value.translation.width), Double(value.translation.height))
+        guard let id = draggedAngle, distance > 6,
+              let index = manualAngles.firstIndex(where: { $0.id == id }) else { return }
+        let delta = Point2(Double(value.translation.width) / k, -Double(value.translation.height) / k)
+        manualAngles[index].handle = dragStartHandle + delta
+        selectedAngle = id
+        refreshAngleOverlay()
+    }
+
+    @MainActor
+    private func dragEnded(_ value: DragGesture.Value, size: CGSize, k: Double) {
+        let moved = hypot(Double(value.translation.width), Double(value.translation.height)) > 6
+        let wasDragging = draggedAngle != nil
+        isDragging = false
+        draggedAngle = nil
+        if !moved {
+            tapSheet(at: sheetPoint(value.location, size: size), tolerance: 16 / k)
+        } else if wasDragging {
+            refreshShareFile()
+        }
+    }
+
+    /// Antippen: Winkelmaß auswählen bzw. mit dem Werkzeug Kanten wählen.
+    @MainActor
+    private func tapSheet(at point: Point2, tolerance: Double) {
+        if let hit = manualAngle(at: point, tolerance: tolerance) {
+            selectedAngle = selectedAngle == hit.id ? nil : hit.id
+            return
+        }
+        selectedAngle = nil
+        guard angleTool, let layout else { return }
+        guard let edge = TechnicalDrawing.nearestEdge(in: layout, to: point, maxDistance: tolerance * 1.4) else {
+            angleHint = "Keine Kante getroffen – näher an eine Linie tippen"
+            return
+        }
+        angleHint = nil
+        guard let first = pickedEdge else {
+            pickedEdge = edge
+            pickedTap = point
+            return
+        }
+        pickedEdge = nil
+        guard let angle = TechnicalDrawing.angle(edge: first, tap: pickedTap, edge: edge, tap: point) else {
+            angleHint = "Die Kanten sind parallel – kein Winkel"
+            return
+        }
+        manualAngles.append(angle)
+        selectedAngle = angle.id
+        refreshAngleOverlay()
+        refreshShareFile()
+    }
+
+    @MainActor
+    private func deleteSelectedAngle() {
+        manualAngles.removeAll { $0.id == selectedAngle }
+        selectedAngle = nil
+        refreshAngleOverlay()
+        refreshShareFile()
+    }
+
+    /// Ebene mit den von Hand gesetzten Winkelmaßen über der Vorschau (schnell beim Verschieben).
+    @MainActor
+    private func refreshAngleOverlay() {
+        var elements: [DrawingElement] = []
+        for angle in manualAngles {
+            if let shape = TechnicalDrawing.angleShape(angle) { elements += shape.elements }
+        }
+        angleOverlay = elements.isEmpty ? nil : TechnicalDrawing.overlayImage(elements, width: 1400)
+    }
+
+    @MainActor
+    private func refreshShareFile() {
+        guard let layout else { return }
+        shareURL = writeShareFile(layout)
     }
 
     /// Ansichten (falls nötig) berechnen, Blatt anordnen, Vorschau und Teilen-Datei erzeugen.
@@ -180,6 +364,14 @@ struct DrawingSheet: View {
                                              subtitle: subtitle)
         layout = result
         preview = TechnicalDrawing.image(result, width: 1400)
+        // Von Hand gesetzte Winkelmaße behalten, solange ihre Kanten noch auf dem Blatt sind
+        manualAngles.removeAll { angle in
+            !TechnicalDrawing.containsEdge(result, angle.a0, angle.a1)
+                || !TechnicalDrawing.containsEdge(result, angle.b0, angle.b1)
+        }
+        if let id = selectedAngle, !manualAngles.contains(where: { $0.id == id }) { selectedAngle = nil }
+        pickedEdge = nil
+        refreshAngleOverlay()
         shareURL = writeShareFile(result)
         isWorking = false
     }
@@ -190,7 +382,8 @@ struct DrawingSheet: View {
         let safeName = fileName.replacingOccurrences(of: "/", with: "-")
         let url = FileManager.default.temporaryDirectory.appending(path: "\(safeName).pdf")
         do {
-            try TechnicalDrawing.pdfData(layout, title: projectName, author: options.author).write(to: url)
+            try TechnicalDrawing.pdfData(TechnicalDrawing.withAngles(layout, manualAngles), title: projectName,
+                                         author: options.author).write(to: url)
             return url
         } catch {
             return nil
@@ -199,7 +392,8 @@ struct DrawingSheet: View {
 
     @MainActor
     private func save(pdf: Bool) {
-        guard let layout else { return }
+        guard let base = layout else { return }
+        let layout = TechnicalDrawing.withAngles(base, manualAngles)
         exportFile = ExportFile(data: pdf ? TechnicalDrawing.pdfData(layout, title: projectName, author: options.author)
                                           : TechnicalDrawing.dxfData(layout))
         exportType = pdf ? .pdf : .dxfFile
