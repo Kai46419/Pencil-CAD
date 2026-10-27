@@ -7,6 +7,8 @@ import SwiftUI
 struct SketchTextEditor: View {
     @ObservedObject var sketch: SketchController
     let index: Int
+    /// Untereinander statt nebeneinander (schmales Fenster rechts)
+    var stacked = false
 
     @State private var content = ""
     /// Stand, zu dem content gehört: Inhalt des Texts und Anzahl der Elemente beim Laden. Nur wenn beides noch
@@ -17,14 +19,16 @@ struct SketchTextEditor: View {
 
     var body: some View {
         if let text = sketch.sketchText(at: index) {
-            HStack(spacing: 14) {
+            let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+                : AnyLayout(HStackLayout(spacing: 14))
+            layout {
                 Image(systemName: "textformat")
                     .foregroundStyle(.secondary)
                 TextField("Inhalt", text: $content)
                     .focused($isFocused)
                     .textFieldStyle(.roundedBorder)
                     .autocorrectionDisabled()
-                    .frame(width: 140)
+                    .frame(width: stacked ? PaletteStyle.contentWidth : 140)
                     .onSubmit { commitContent(at: index) }
                     .onChange(of: isFocused) { _, focused in
                         if !focused { commitContent(at: index) }
@@ -32,7 +36,7 @@ struct SketchTextEditor: View {
                 Picker("Schrift", selection: fontBinding) {
                     ForEach(SketchText.fonts) { Text($0.title).tag($0.name) }
                 }
-                .fixedSize()
+                .fixedSize(horizontal: !stacked, vertical: false)
                 NumberField(title: "Höhe", value: text.height, width: 56) { value in
                     guard value > 0 else { return }
                     sketch.updateText(at: index) { $0.with(height: value) }
@@ -45,7 +49,7 @@ struct SketchTextEditor: View {
                     ForEach(TextAlignmentOption.allCases) { Text($0.rawValue).tag($0) }
                 }
                 .pickerStyle(.segmented)
-                .fixedSize()
+                .fixedSize(horizontal: !stacked, vertical: false)
             }
             .onAppear { load(index) }
             // Anderer Text gewählt: Getipptes erst beim bisherigen Text übernehmen (Kai tippt oft gleich weiter)

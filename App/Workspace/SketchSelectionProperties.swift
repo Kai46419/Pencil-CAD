@@ -12,7 +12,7 @@ struct SketchSelectionSection: View {
             VStack(alignment: .leading, spacing: PaletteStyle.spacing) {
                 if let index = sketch.selectedTextIndex {
                     // Gewählter Text: Inhalt, Schrift, Höhe, Winkel ändern (SketchTextPanel.swift)
-                    SketchTextEditor(sketch: sketch, index: index)
+                    SketchTextEditor(sketch: sketch, index: index, stacked: true)
                 } else {
                     SelectionDimensionRows(sketch: sketch)
                 }
@@ -103,7 +103,8 @@ private struct SelectionDimensionRow: View {
     let dimension: SketchDimension
 
     var body: some View {
-        HStack(spacing: 2) {
+        // Schloss rechts neben dem Feld (die Beschriftung steht darüber)
+        HStack(alignment: .bottom, spacing: 2) {
             PaletteNumberRow(title: title, value: dimension.value, unit: dimension.kind == .angle ? "°" : "mm") { value in
                 sketch.setDimension(id: dimension.id, to: value)
             }
@@ -112,9 +113,9 @@ private struct SelectionDimensionRow: View {
                     sketch.toggleDimensionLock(id: dimension.id)
                 } label: {
                     Image(systemName: locked ? "lock.fill" : "lock.open")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(locked ? Color.green : Color.secondary)
-                        .frame(width: 32, height: PaletteStyle.touch)
+                        .frame(width: 28, height: PaletteStyle.iconButton)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -158,25 +159,26 @@ private struct SelectionConstraintButtons: View {
     }
 }
 
-/// Verankern/Lösen, Trennen, Konstruktion, Löschen.
+/// Verankern/Lösen, Trennen, Löschen als Symbolreihe (schmales Fenster; Namen im Hinweis).
 private struct SelectionActions: View {
     @ObservedObject var sketch: SketchController
 
     var body: some View {
-        VStack(spacing: PaletteStyle.spacing) {
-            HStack(spacing: PaletteStyle.spacing) {
-                PrimaryWideButton(title: sketch.isSelectionAnchored ? "Lösen" : "Fixieren",
-                                  systemImage: sketch.isSelectionAnchored ? "lock.open" : "lock", isPrimary: false,
-                                  isActive: sketch.isSelectionAnchored, action: sketch.toggleAnchor)
-                    .hoverTip("Fixieren", "Gewählte Punkte bzw. Kurven bleiben stehen, wenn du Maße änderst. Sind sie schon fixiert, löst der Knopf sie wieder.")
-                if sketch.selectionHasConstraints {
-                    PrimaryWideButton(title: "Trennen", systemImage: "link.badge.plus", isPrimary: false) {
-                        sketch.start(.detach)
-                    }
-                    .hoverTip("Trennen", "Bedingungen an der Auswahl lösen.")
+        HStack(spacing: PaletteStyle.spacing) {
+            PrimaryWideButton(title: sketch.isSelectionAnchored ? "Lösen" : "Fixieren",
+                              systemImage: sketch.isSelectionAnchored ? "lock.open" : "lock", isPrimary: false,
+                              isActive: sketch.isSelectionAnchored, showsTitle: false, action: sketch.toggleAnchor)
+                .hoverTip(sketch.isSelectionAnchored ? "Lösen" : "Fixieren",
+                          "Gewählte Punkte bzw. Kurven bleiben stehen, wenn du Maße änderst. Sind sie schon fixiert, löst der Knopf sie wieder.")
+            if sketch.selectionHasConstraints {
+                PrimaryWideButton(title: "Trennen", systemImage: "link.badge.plus", isPrimary: false, showsTitle: false) {
+                    sketch.start(.detach)
                 }
+                .hoverTip("Trennen", "Bedingungen an der Auswahl lösen.")
             }
-            PrimaryWideButton(title: "Löschen", systemImage: "trash", isPrimary: false, action: sketch.deleteSelection)
+            PrimaryWideButton(title: "Löschen", systemImage: "trash", isPrimary: false, showsTitle: false,
+                              action: sketch.deleteSelection)
+                .hoverTip("Löschen", "Gewählte Elemente entfernen.")
         }
     }
 }

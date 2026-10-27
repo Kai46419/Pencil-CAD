@@ -537,13 +537,7 @@ private struct FeatureTextRow: View {
     @Binding var text: String
 
     var body: some View {
-        HStack(spacing: PaletteStyle.spacing) {
-            Text(title)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-                .frame(width: PaletteStyle.labelWidth, alignment: .leading)
+        PaletteLabeled(title: title) {
             PaletteFieldBox(isLocked: false, hasError: false) {
                 TextField(title, text: $text)
                     .keyboardType(.numbersAndPunctuation)
@@ -569,7 +563,7 @@ struct CommandChoice: Identifiable, Hashable {
     var isEnabled = true
 }
 
-/// Segmentreihe 44 pt hoch, Titel darüber (passt auch mit vier Wahlen in die Panelbreite).
+/// Segmentreihe, Titel darüber; kurze Wahlen in einer Reihe, längere zu zweit umbrechend (schmales Fenster).
 struct CommandSegmentRow: View {
     let title: String
     let options: [CommandChoice]
@@ -580,33 +574,35 @@ struct CommandSegmentRow: View {
         let shape = RoundedRectangle(cornerRadius: PaletteStyle.controlRadius, style: .continuous)
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
-                .font(.callout)
+                .font(.caption)
                 .foregroundStyle(.secondary)
-            HStack(spacing: 0) {
+                .fixedSize(horizontal: false, vertical: true)
+            LazyVGrid(columns: paletteSegmentColumns(options.map(\.title)), spacing: 3) {
                 ForEach(options) { option in
                     segment(option)
                 }
             }
+            .padding(3)
             .background(PaletteStyle.field, in: shape)
-            .clipShape(shape)
             .overlay { shape.strokeBorder(PaletteStyle.controlBorder, lineWidth: 1) }
         }
     }
 
     private func segment(_ option: CommandChoice) -> some View {
         let isSelected = option.id == selected
+        let shape = RoundedRectangle(cornerRadius: PaletteStyle.controlRadius - 2, style: .continuous)
         return Button {
             pick(option.id)
         } label: {
             Text(option.title)
-                .font(.callout.weight(isSelected ? .semibold : .regular))
+                .font(.caption.weight(isSelected ? .semibold : .regular))
                 .lineLimit(1)
-                .minimumScaleFactor(0.65)
-                .padding(.horizontal, 4)
-                .frame(maxWidth: .infinity, minHeight: PaletteStyle.touch)
+                .minimumScaleFactor(0.7)
+                .padding(.horizontal, 2)
+                .frame(maxWidth: .infinity, minHeight: PaletteStyle.iconButton - 4)
                 .foregroundStyle(isSelected ? Color.accentColor : Color.primary)
-                .background(isSelected ? PaletteStyle.activeFill : Color.clear)
-                .contentShape(Rectangle())
+                .background(isSelected ? PaletteStyle.activeFill : Color.clear, in: shape)
+                .contentShape(shape)
         }
         .buttonStyle(.plain)
         .disabled(!option.isEnabled)
@@ -711,18 +707,13 @@ struct CommandStatusRow: View {
     var isDone = false
 
     var body: some View {
-        HStack(spacing: PaletteStyle.spacing) {
-            Text(title)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .frame(width: PaletteStyle.labelWidth, alignment: .leading)
+        PaletteLabeled(title: title) {
             Label(text, systemImage: isDone ? "checkmark.circle.fill" : "hand.tap")
-                .font(.callout)
+                .font(.footnote)
                 .foregroundStyle(isDone ? SketchTheme.success : Color.primary)
-                .lineLimit(2)
-            Spacer(minLength: 0)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .frame(minHeight: PaletteStyle.touch)
     }
 }
 

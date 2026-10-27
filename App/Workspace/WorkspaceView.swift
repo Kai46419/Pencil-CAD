@@ -105,25 +105,22 @@ private struct WorkspaceContent: View {
                         case nil:
                             EmptyView()
                         }
-                        // Skizzenpalette (SolidCraft): Eigenschaften des Werkzeugs bzw. der Auswahl rechts;
-                        // unten bleibt Platz für Hinweise und Rückgängig. Nach „Skizze beenden“ zeigt dieselbe Stelle
-                        // das Eigenschaften-Panel des offenen Modellbefehls (FeaturePanel.swift)
+                        // Ein schlankes Fenster rechts (Kai): oben Ansichtswürfel, Fang „U“ und Ansichtsknöpfe, darunter
+                        // die Eigenschaften von Werkzeug bzw. Auswahl (SketchPalette) oder des offenen Modellbefehls
+                        // (FeaturePanel); unten bleibt Platz für Hinweise und Rückgängig. Ohne beides die Säule RightRail.
                         if sketch.isActive {
-                            SketchPalette(workspace: workspace, model: model, sketch: sketch)
+                            SketchPalette(workspace: workspace, model: model, sketch: sketch, panel: $panel,
+                                          screenshot: takeScreenshot)
                                 .padding(.bottom, 84)
                                 .transition(.opacity.combined(with: .move(edge: .trailing)))
                         } else if let command = workspace.command {
-                            FeaturePanel(workspace: workspace, model: model, command: command)
+                            FeaturePanel(workspace: workspace, model: model, command: command, panel: $panel,
+                                         screenshot: takeScreenshot)
                                 .id(ObjectIdentifier(command))
                                 .padding(.bottom, 84)
                                 .transition(.opacity.combined(with: .move(edge: .trailing)))
-                        }
-                        VStack(alignment: .trailing, spacing: 12) {
+                        } else {
                             RightRail(workspace: workspace, sketch: sketch, panel: $panel, screenshot: takeScreenshot)
-                            // Großer Haken und großes Kreuz unter dem Ansichtswürfel (CornerConfirm.swift)
-                            if !sketch.isActive, let command = workspace.command {
-                                CornerConfirm(workspace: workspace, model: model, command: command)
-                            }
                         }
                     }
                     .padding(.trailing, 16)

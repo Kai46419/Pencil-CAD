@@ -1,19 +1,22 @@
 import SwiftUI
 
 // Bausteine der rechten Skizzenpalette nach SolidCraft (crates/ui-egui/src/sketch_palette.rs, ui_kit):
-// Abschnitte mit Titel in Großbuchstaben, Bildknöpfe für Varianten, Wertzeilen mit Beschriftung links und
-// Ausdrucksfeld rechts, Schalterzeilen und ein breiter Primärknopf. Für das iPad mit Touch-Zielen ≥ 44 pt.
+// Abschnitte mit Titel in Großbuchstaben, Bildknöpfe für Varianten, Wertzeilen mit Beschriftung über dem
+// Ausdrucksfeld, Schalterzeilen und ein breiter Primärknopf. Kai wollte das rechte Fenster schlank (halb so breit
+// wie zuvor 264 pt): Touch-Ziele 36–38 pt, Beschriftungen über den Feldern statt daneben.
 
 /// Maße und Farben der Skizzenpalette (dunkel, Anthrazit wie SolidCraft `Tokens::dark()`).
 enum PaletteStyle {
-    /// Breite des Panels (SolidCraft `form_card_width`)
-    static let width: CGFloat = 264
+    /// Breite des rechten Fensters (halb so breit wie die frühere Palette mit 264 pt)
+    static let width: CGFloat = 160
+    /// Innenabstand des Fensters
+    static let inset: CGFloat = 8
+    /// Nutzbare Breite im Fenster
+    static let contentWidth: CGFloat = width - 2 * inset
     /// Mindesthöhe antippbarer Zeilen und Knöpfe
-    static let touch: CGFloat = 44
-    /// Breite der Beschriftungsspalte von Wertzeilen
-    static let labelWidth: CGFloat = 84
-    /// Kantenlänge der Bildknöpfe
-    static let iconButton: CGFloat = 44
+    static let touch: CGFloat = 38
+    /// Höhe der Bildknöpfe und Eingabefelder
+    static let iconButton: CGFloat = 36
     static let spacing: CGFloat = 6
     static let radius: CGFloat = 12
     static let controlRadius: CGFloat = 8
@@ -29,6 +32,112 @@ enum PaletteStyle {
     static let controlBorder = Color.primary.opacity(0.18)
     /// Aktiver Bildknopf, gesperrter Wert (`accent_soft`)
     static let activeFill = Color.accentColor.opacity(0.24)
+}
+
+// MARK: Fenster
+
+/// Das eine schlanke Fenster rechts (Skizzenmodus und offener Modellbefehl): oben Ansichtswürfel und
+/// Ansichtsknöpfe, darunter Kopf, scrollender Mittelteil und fester Fuß. Alles hat feste Breite, damit nichts
+/// außerhalb des Fensters Berührungen abfängt (eine zu breite ScrollView hatte das Zeichnen blockiert).
+struct PaletteWindow<Top: View, Header: View, Middle: View, Footer: View>: View {
+    @ViewBuilder let top: Top
+    @ViewBuilder let header: Header
+    @ViewBuilder let middle: Middle
+    @ViewBuilder let footer: Footer
+
+    /// Höhe des scrollbaren Mittelteils; kurze Inhalte machen das Fenster nicht unnötig hoch
+    @State private var contentHeight: CGFloat = 240
+
+    var body: some View {
+        VStack(spacing: 0) {
+            top
+                .frame(width: PaletteStyle.contentWidth)
+                .padding(PaletteStyle.inset)
+            PaletteRule()
+            header
+                .frame(width: PaletteStyle.contentWidth, alignment: .leading)
+                .padding(PaletteStyle.inset)
+                .background(PaletteStyle.header)
+            PaletteRule()
+            ScrollView(.vertical, showsIndicators: true) {
+                middle
+                    .frame(width: PaletteStyle.contentWidth, alignment: .leading)
+                    .padding(PaletteStyle.inset)
+                    .background {
+                        GeometryReader { proxy in
+                            Color.clear.preference(key: PaletteContentHeightKey.self, value: proxy.size.height)
+                        }
+                    }
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .frame(width: PaletteStyle.width)
+            .frame(maxHeight: contentHeight)
+            .onPreferenceChange(PaletteContentHeightKey.self) { contentHeight = $0 }
+            PaletteRule()
+            footer
+                .frame(width: PaletteStyle.contentWidth)
+                .padding(PaletteStyle.inset)
+                .background(PaletteStyle.header)
+        }
+        .frame(width: PaletteStyle.width)
+        .background(PaletteStyle.background)
+        .clipShape(RoundedRectangle(cornerRadius: PaletteStyle.radius, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: PaletteStyle.radius, style: .continuous)
+                .strokeBorder(PaletteStyle.controlBorder, lineWidth: 1)
+                .allowsHitTesting(false)
+        }
+        .contentShape(RoundedRectangle(cornerRadius: PaletteStyle.radius, style: .continuous))
+        .elevationShadow(.floating)
+        // Dunkel (Anthrazit): Text, Systemfarben und die „sc.*-dark“-Bilder passend dazu
+        .environment(\.colorScheme, .dark)
+    }
+}
+
+struct PaletteContentHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+/// Beschriftung über einem Feld (schmales Fenster: kein Platz für eine Spalte daneben).
+struct PaletteFieldLabel: View {
+    let title: String
+
+    var body: some View {
+        Text(title)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+    }
+}
+
+/// Beschriftung oben, darunter das Feld in voller Breite.
+struct PaletteLabeled<Content: View>: View {
+    let title: String
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            PaletteFieldLabel(title: title)
+            content
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// Spalten einer Segmentreihe: kurze Wahlen (X/Y/Z, „Neu“) in einer Reihe, längere zu zweit umbrechend.
+func paletteSegmentColumns(_ labels: [String]) -> [GridItem] {
+    let count: Int
+    if labels.count <= 2 || labels.allSatisfy({ $0.count <= 4 }) {
+        count = max(1, min(labels.count, 4))
+    } else {
+        count = 2
+    }
+    return Array(repeating: GridItem(.flexible(), spacing: 3), count: count)
 }
 
 // MARK: Abschnitt
@@ -70,28 +179,32 @@ struct PaletteSection<Content: View>: View {
         }
     }
 
+    /// Titel in Großbuchstaben, die Angabe (Werkzeug, Auswahl) darunter – nebeneinander passt beides nicht.
     private var heading: some View {
-        HStack(spacing: 6) {
-            Text(title.uppercased())
-                .font(.system(size: 11, weight: .bold))
-                .tracking(0.6)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-            if let detail {
-                Text(detail)
-                    .font(.caption)
+        VStack(alignment: .leading, spacing: 1) {
+            HStack(spacing: 6) {
+                Text(title.uppercased())
+                    .font(.system(size: 11, weight: .bold))
+                    .tracking(0.6)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                Spacer(minLength: 0)
+                if collapsible {
+                    Image(systemName: "chevron.down")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(isExpanded ? 0 : -90))
+                }
             }
-            Spacer(minLength: 0)
-            if collapsible {
-                Image(systemName: "chevron.down")
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(.secondary)
-                    .rotationEffect(.degrees(isExpanded ? 0 : -90))
+            if let detail, !detail.isEmpty {
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(Color.primary.opacity(0.8))
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .frame(minHeight: collapsible ? PaletteStyle.touch : 24)
+        .frame(maxWidth: .infinity, minHeight: collapsible ? PaletteStyle.touch : 22, alignment: .leading)
         .contentShape(Rectangle())
     }
 }
@@ -116,17 +229,19 @@ struct IconChoice: Identifiable {
     var isEnabled = true
 }
 
-/// Bildknöpfe 44 × 44 pt in Reihen zu fünf; aktiv mit getöntem Grund und Rand (SolidCraft `palettes.rs:94-98`).
+/// Bildknöpfe 36 pt hoch, standardmäßig drei je Reihe (umbrechend); aktiv mit getöntem Grund und Rand
+/// (SolidCraft `palettes.rs:94-98`).
 struct IconSegment: View {
     let choices: [IconChoice]
     /// Gewählte Einträge (mehrere bei gemischter Auswahl, z. B. Linientypen)
     let selected: Set<String>
+    /// Knöpfe je Reihe (Linientyp: 2 × 2)
+    var columnCount = 3
     let pick: (String) -> Void
 
-    private let columns = Array(repeating: GridItem(.fixed(PaletteStyle.iconButton), spacing: 5), count: 5)
-
     var body: some View {
-        LazyVGrid(columns: columns, alignment: .leading, spacing: 5) {
+        let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: max(1, columnCount))
+        LazyVGrid(columns: columns, alignment: .leading, spacing: 4) {
             ForEach(choices) { choice in
                 IconChoiceButton(choice: choice, isSelected: selected.contains(choice.id)) {
                     pick(choice.id)
@@ -145,7 +260,8 @@ private struct IconChoiceButton: View {
         let shape = RoundedRectangle(cornerRadius: PaletteStyle.controlRadius, style: .continuous)
         Button(action: action) {
             glyph
-                .frame(width: PaletteStyle.iconButton, height: PaletteStyle.iconButton)
+                .frame(maxWidth: .infinity)
+                .frame(height: PaletteStyle.iconButton)
                 .background(isSelected ? PaletteStyle.activeFill : Color.primary.opacity(0.05), in: shape)
                 .overlay {
                     shape.strokeBorder(isSelected ? Color.accentColor : PaletteStyle.controlBorder,
@@ -163,30 +279,16 @@ private struct IconChoiceButton: View {
 
     @ViewBuilder private var glyph: some View {
         if ToolIcon.isCustom(choice.icon) {
-            ToolIcon(choice.icon, size: 28)
+            ToolIcon(choice.icon, size: 24)
         } else {
             Image(systemName: choice.icon)
-                .font(.system(size: 18, weight: .medium))
+                .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(isSelected ? Color.accentColor : Color.primary)
         }
     }
 }
 
 // MARK: Wertzeilen
-
-/// Beschriftung links in fester Breite (84 pt).
-private struct RowLabel: View {
-    let title: String
-
-    var body: some View {
-        Text(title)
-            .font(.callout)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-            .minimumScaleFactor(0.8)
-            .frame(width: PaletteStyle.labelWidth, alignment: .leading)
-    }
-}
 
 /// Liest einen Ausdruck wie NumberField: Länge in der Projekteinheit („mm“), sonst als Zahl (Grad, Faktor).
 enum PaletteExpression {
@@ -217,8 +319,7 @@ struct PaletteNumberRow: View {
     @FocusState private var isFocused: Bool
 
     var body: some View {
-        HStack(spacing: PaletteStyle.spacing) {
-            RowLabel(title: title)
+        PaletteLabeled(title: title) {
             PaletteFieldBox(isLocked: false, hasError: error != nil) {
                 TextField(title, text: $text)
                     .focused($isFocused)
@@ -283,46 +384,55 @@ struct PaletteLockRow: View {
     private var lockedText: String? { options.locked[key] }
 
     var body: some View {
-        HStack(spacing: PaletteStyle.spacing) {
-            RowLabel(title: title)
-            PaletteFieldBox(isLocked: lockedText != nil, hasError: error != nil) {
-                TextField(live.map { PaletteExpression.shown($0, unit: unit) } ?? "–", text: $text)
-                    .focused($isFocused)
-                    .keyboardType(.numbersAndPunctuation)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                    .multilineTextAlignment(.trailing)
-                    .monospacedDigit()
-                    .onSubmit(commit)
-                    .onChange(of: isFocused) { _, focused in
-                        if !focused { commit() }
-                    }
-                    .onChange(of: lockedText) { _, newValue in
-                        if !isFocused { text = newValue ?? "" }
-                    }
-                    .onAppear { text = lockedText ?? "" }
-                if !unit.isEmpty {
-                    Text(PaletteExpression.unitSymbol(unit))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize()
-                }
+        PaletteLabeled(title: title) {
+            HStack(spacing: 2) {
+                lockField
+                lockButton
             }
-            Button(action: toggleLock) {
-                Image(systemName: lockedText != nil ? "lock.fill" : "lock.open")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(lockedText != nil ? Color.accentColor : Color.secondary)
-                    .frame(width: 32, height: PaletteStyle.touch)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(lockedText == nil && live == nil)
-            .accessibilityLabel(lockedText != nil ? "\(title) lösen" : "\(title) sperren")
-            .hoverTip(lockedText != nil ? "Wert lösen" : "Wert sperren",
-                      lockedText != nil ? "Der Wert folgt wieder dem Stift."
-                                        : "Hält den aktuellen Wert fest; er wird beim Setzen als Bemaßung angelegt.")
         }
         .help(error ?? "")
+    }
+
+    private var lockField: some View {
+        PaletteFieldBox(isLocked: lockedText != nil, hasError: error != nil) {
+            TextField(live.map { PaletteExpression.shown($0, unit: unit) } ?? "–", text: $text)
+                .focused($isFocused)
+                .keyboardType(.numbersAndPunctuation)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+                .multilineTextAlignment(.trailing)
+                .monospacedDigit()
+                .onSubmit(commit)
+                .onChange(of: isFocused) { _, focused in
+                    if !focused { commit() }
+                }
+                .onChange(of: lockedText) { _, newValue in
+                    if !isFocused { text = newValue ?? "" }
+                }
+                .onAppear { text = lockedText ?? "" }
+            if !unit.isEmpty {
+                Text(PaletteExpression.unitSymbol(unit))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+            }
+        }
+    }
+
+    private var lockButton: some View {
+        Button(action: toggleLock) {
+            Image(systemName: lockedText != nil ? "lock.fill" : "lock.open")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(lockedText != nil ? Color.accentColor : Color.secondary)
+                .frame(width: 28, height: PaletteStyle.iconButton)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(lockedText == nil && live == nil)
+        .accessibilityLabel(lockedText != nil ? "\(title) lösen" : "\(title) sperren")
+        .hoverTip(lockedText != nil ? "Wert lösen" : "Wert sperren",
+                  lockedText != nil ? "Der Wert folgt wieder dem Stift."
+                                    : "Hält den aktuellen Wert fest; er wird beim Setzen als Bemaßung angelegt.")
     }
 
     private func commit() {
@@ -367,14 +477,13 @@ struct PaletteFieldBox<Content: View>: View {
             content
         }
         .font(.callout)
-        .padding(.horizontal, 10)
-        .frame(maxWidth: .infinity, minHeight: 36)
+        .padding(.horizontal, 8)
+        .frame(maxWidth: .infinity, minHeight: PaletteStyle.iconButton)
         .background(isLocked ? PaletteStyle.activeFill : PaletteStyle.field, in: shape)
         .overlay {
             shape.strokeBorder(hasError ? Color.red : (isLocked ? Color.accentColor.opacity(0.7) : PaletteStyle.controlBorder),
                                lineWidth: hasError ? 1.5 : 1)
         }
-        .frame(minHeight: PaletteStyle.touch)
     }
 }
 
@@ -390,24 +499,25 @@ struct CheckRow: View {
         Button {
             isOn.toggle()
         } label: {
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
                 Image(systemName: isOn ? "checkmark.square.fill" : "square")
-                    .font(.system(size: 18))
+                    .font(.system(size: 16))
                     .foregroundStyle(isOn ? Color.accentColor : Color.secondary)
                 if let icon {
-                    ToolIcon(icon, size: 18)
-                        .font(.system(size: 13))
+                    ToolIcon(icon, size: 16)
+                        .font(.system(size: 12))
                         .foregroundStyle(.secondary)
-                        .frame(width: 20)
+                        .frame(width: 18)
                 }
                 Text(title)
-                    .font(.callout)
+                    .font(.footnote)
                     .foregroundStyle(.primary)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
             }
-            .frame(minHeight: PaletteStyle.touch)
+            .frame(minHeight: PaletteStyle.iconButton)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -423,16 +533,17 @@ struct CountRow: View {
     let range: ClosedRange<Int>
 
     var body: some View {
-        HStack(spacing: PaletteStyle.spacing) {
-            RowLabel(title: title)
-            Spacer(minLength: 0)
-            stepButton("minus", enabled: value > range.lowerBound) { value = max(range.lowerBound, value - 1) }
-            Text("\(value)")
-                .font(.callout.weight(.semibold).monospacedDigit())
-                .frame(minWidth: 36)
-            stepButton("plus", enabled: value < range.upperBound) { value = min(range.upperBound, value + 1) }
+        PaletteLabeled(title: title) {
+            HStack(spacing: PaletteStyle.spacing) {
+                stepButton("minus", enabled: value > range.lowerBound) { value = max(range.lowerBound, value - 1) }
+                Text("\(value)")
+                    .font(.callout.weight(.semibold).monospacedDigit())
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .frame(maxWidth: .infinity)
+                stepButton("plus", enabled: value < range.upperBound) { value = min(range.upperBound, value + 1) }
+            }
         }
-        .frame(minHeight: PaletteStyle.touch)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(title)
         .accessibilityValue("\(value)")
@@ -448,8 +559,8 @@ struct CountRow: View {
     private func stepButton(_ systemImage: String, enabled: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: systemImage)
-                .font(.system(size: 14, weight: .bold))
-                .frame(width: PaletteStyle.touch, height: PaletteStyle.touch)
+                .font(.system(size: 13, weight: .bold))
+                .frame(width: PaletteStyle.touch, height: PaletteStyle.iconButton)
                 .background(PaletteStyle.field,
                             in: RoundedRectangle(cornerRadius: PaletteStyle.controlRadius, style: .continuous))
                 .overlay {
@@ -469,21 +580,26 @@ struct PrimaryWideButton: View {
     var systemImage: String?
     var isPrimary = true
     var isActive = false
+    /// false: nur das Symbol (schmales Fenster; der Name steht im Hinweis und in der Bedienungshilfe)
+    var showsTitle = true
     let action: () -> Void
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: PaletteStyle.controlRadius, style: .continuous)
         Button(action: action) {
-            HStack(spacing: 6) {
+            HStack(spacing: 5) {
                 if let systemImage {
                     Image(systemName: systemImage)
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(size: 13, weight: .semibold))
                 }
-                Text(title)
-                    .font(.callout.weight(.semibold))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+                if showsTitle || systemImage == nil {
+                    Text(title)
+                        .font(.footnote.weight(.semibold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                }
             }
+            .padding(.horizontal, 4)
             .foregroundStyle(isPrimary ? Color.white : (isActive ? Color.accentColor : Color.primary))
             .frame(maxWidth: .infinity, minHeight: PaletteStyle.touch)
             .background(isPrimary ? Color.accentColor : (isActive ? PaletteStyle.activeFill : PaletteStyle.field), in: shape)
@@ -509,7 +625,7 @@ struct PaletteHint: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Text(text)
-                .font(.footnote)
+                .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -525,16 +641,14 @@ struct PalettePickerRow<Value: Hashable, Options: RandomAccessCollection>: View 
     let label: (Value) -> String
 
     var body: some View {
-        HStack(spacing: PaletteStyle.spacing) {
-            RowLabel(title: title)
+        PaletteLabeled(title: title) {
             Picker(title, selection: $selection) {
                 ForEach(Array(options), id: \.self) { option in
                     Text(label(option)).tag(option)
                 }
             }
             .pickerStyle(.menu)
-            .frame(maxWidth: .infinity, alignment: .trailing)
+            .frame(maxWidth: .infinity, minHeight: PaletteStyle.iconButton, alignment: .leading)
         }
-        .frame(minHeight: PaletteStyle.touch)
     }
 }

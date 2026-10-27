@@ -3,7 +3,7 @@ import SwiftUI
 // Auswahlfeld im Eigenschaften-Panel nach SolidCraft (crates/ui-egui/src/dialogs.rs:2332-2420, docs/ui-kit.md:108):
 // leer „↖ Auswählen“ mit gestricheltem Umriss, gefüllt „N ausgewählt“ bzw. der Name bei Einzelauswahl, aktiv mit
 // Akzentrand und getöntem Grund. Antippen macht das Feld aktiv (das nächste Antippen im Viewport füllt es),
-// „×“ leert es. Alle Treffer ≥ 44 pt.
+// „×“ leert es. Titel über dem Feld (schmales Fenster), Treffer 36–38 pt.
 
 // label ruft PickNames (Main Actor) auch außerhalb von body auf: unter Xcode 15 ist View sonst nicht isoliert
 @MainActor
@@ -23,8 +23,7 @@ struct PickChip: View {
     }
 
     var body: some View {
-        HStack(spacing: PaletteStyle.spacing) {
-            PanelRowLabel(title: input.title)
+        PaletteLabeled(title: input.title) {
             chip
         }
         .accessibilityElement(children: .contain)
@@ -39,14 +38,16 @@ struct PickChip: View {
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(isActive ? SketchTheme.accent : Color.secondary)
                 Text(label)
-                    .font(.callout)
+                    .font(.footnote)
                     .foregroundStyle(isEmpty ? Color.secondary : Color.primary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.8)
+                    .multilineTextAlignment(.leading)
                 Spacer(minLength: 0)
             }
-            .padding(.leading, 10)
-            .padding(.trailing, isEmpty ? 10 : 40)
+            .padding(.leading, 8)
+            .padding(.trailing, isEmpty ? 8 : 32)
+            .padding(.vertical, 2)
             .frame(maxWidth: .infinity, minHeight: PaletteStyle.touch)
             .background(fill, in: shape)
             .overlay {
@@ -65,9 +66,9 @@ struct PickChip: View {
             if !isEmpty {
                 Button(action: clear) {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 16))
+                        .font(.system(size: 15))
                         .foregroundStyle(.secondary)
-                        .frame(width: PaletteStyle.touch, height: PaletteStyle.touch)
+                        .frame(width: 32, height: PaletteStyle.touch)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)

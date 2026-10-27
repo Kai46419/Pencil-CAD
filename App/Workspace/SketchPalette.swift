@@ -6,48 +6,25 @@ import SwiftUI
 // Aufbau: Kopf (Skizze, Freiheitsgrade, Balken) · Werkzeug bzw. Auswahl · Linientyp · Schalter · Mehr ·
 // fester Fuß („Skizze beenden“, „Ausrichten“, „Schnitt“). Die Mitte scrollt, Kopf und Fuß bleiben stehen.
 
-/// Eigenschaften-Panel im Skizzenmodus (rechts neben der Ansichtssäule).
+/// Das eine schlanke Fenster rechts im Skizzenmodus (Kai): oben Ansichtswürfel, Fang „U“ und die Ansichtsknöpfe
+/// der früheren Säule RightRail, darunter die Eigenschaften von Werkzeug bzw. Auswahl und der feste Fuß.
 struct SketchPalette: View {
     @ObservedObject var workspace: Workspace
     @ObservedObject var model: ModelStore
     @ObservedObject var sketch: SketchController
-
-    /// Höhe des scrollbaren Mittelteils; kurze Inhalte machen das Panel nicht unnötig hoch
-    @State private var contentHeight: CGFloat = 320
+    @Binding var panel: SidePanel?
+    let screenshot: () -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
+        PaletteWindow {
+            PaletteViewControls(workspace: workspace, sketch: sketch, panel: $panel, screenshot: screenshot)
+        } header: {
             PaletteHeader(workspace: workspace, model: model, sketch: sketch)
-                .padding(12)
-                .background(PaletteStyle.header)
-            PaletteRule()
-            ScrollView(showsIndicators: true) {
-                middle
-                    .padding(12)
-                    .background {
-                        GeometryReader { proxy in
-                            Color.clear.preference(key: PaletteContentHeightKey.self, value: proxy.size.height)
-                        }
-                    }
-            }
-            .scrollDismissesKeyboard(.interactively)
-            .frame(maxHeight: contentHeight)
-            .onPreferenceChange(PaletteContentHeightKey.self) { contentHeight = $0 }
-            PaletteRule()
+        } middle: {
+            middle
+        } footer: {
             PaletteFooter(workspace: workspace, sketch: sketch)
-                .padding(12)
-                .background(PaletteStyle.header)
         }
-        .frame(width: PaletteStyle.width)
-        .background(PaletteStyle.background)
-        .clipShape(RoundedRectangle(cornerRadius: PaletteStyle.radius, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: PaletteStyle.radius, style: .continuous)
-                .strokeBorder(PaletteStyle.controlBorder, lineWidth: 1)
-        }
-        .elevationShadow(.floating)
-        // Die Skizze ist dunkel (Anthrazit): Text, Systemfarben und die „sc.*-dark“-Bilder passend dazu
-        .environment(\.colorScheme, .dark)
     }
 
     @ViewBuilder private var middle: some View {
@@ -77,14 +54,6 @@ struct SketchPalette: View {
     }
 }
 
-private struct PaletteContentHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
-    }
-}
-
 // MARK: Kopf
 
 /// Skizzenname, Ebene, Freiheitsgrade mit Balken (SolidCraft `sketch_palette.rs:376-393`).
@@ -95,12 +64,13 @@ private struct PaletteHeader: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 10) {
-                ToolIcon("sc.sketch", size: 24)
+            HStack(spacing: 6) {
+                ToolIcon("sc.sketch", size: 20)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(sketchName)
-                        .font(.headline)
+                        .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                     Text(sketch.isChoosingPlane ? "Ebene wählen" : planeName)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -138,10 +108,10 @@ private struct DegreesOfFreedomView: View {
     }
 
     private var status: String {
-        if !dof.ok { return "Bedingungen widersprechen sich" }
-        if dof.total == 0 { return "Noch keine Geometrie" }
-        if dof.remaining == 0 { return "Vollständig bestimmt" }
-        return dof.remaining == 1 ? "1 Freiheitsgrad übrig" : "\(dof.remaining) Freiheitsgrade übrig"
+        if !dof.ok { return "Widerspruch" }
+        if dof.total == 0 { return "Noch leer" }
+        if dof.remaining == 0 { return "Voll bestimmt" }
+        return dof.remaining == 1 ? "1 Freiheitsgrad" : "\(dof.remaining) Freiheitsgrade"
     }
 
     private var fraction: CGFloat {
@@ -150,7 +120,7 @@ private struct DegreesOfFreedomView: View {
     }
 
     var body: some View {
-        let barWidth = PaletteStyle.width - 24
+        let barWidth = PaletteStyle.contentWidth
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 6) {
                 Circle()
@@ -159,6 +129,8 @@ private struct DegreesOfFreedomView: View {
                 Text(status)
                     .font(.footnote.weight(.medium))
                     .foregroundStyle(dof.ok && dof.remaining == 0 && dof.total > 0 ? Color.green : Color.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
             ZStack(alignment: .leading) {
                 Capsule()
@@ -181,12 +153,12 @@ private struct PlaneChoiceSection: View {
     @ObservedObject var workspace: Workspace
     @ObservedObject var model: ModelStore
 
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 6), count: 3)
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 3)
 
     var body: some View {
         PaletteSection("Skizzieren auf", collapsible: false) {
             VStack(alignment: .leading, spacing: 8) {
-                LazyVGrid(columns: columns, spacing: 6) {
+                LazyVGrid(columns: columns, spacing: 4) {
                     ForEach([BasePlane.top, .front, .right]) { side in
                         tile(side.rawValue, systemImage: Self.symbol(side)) { workspace.chooseSketchPlane(side) }
                     }
@@ -209,14 +181,16 @@ private struct PlaneChoiceSection: View {
 
     private func tile(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            VStack(spacing: 3) {
+            VStack(spacing: 2) {
                 Image(systemName: systemImage)
-                    .font(.title3)
+                    .font(.body)
                 Text(title)
-                    .font(.caption.weight(.medium))
+                    .font(.caption2.weight(.medium))
                     .lineLimit(1)
+                    .minimumScaleFactor(0.7)
             }
-            .frame(maxWidth: .infinity, minHeight: 56)
+            .padding(.horizontal, 2)
+            .frame(maxWidth: .infinity, minHeight: 46)
             .background(PaletteStyle.field, in: RoundedRectangle(cornerRadius: PaletteStyle.controlRadius, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: PaletteStyle.controlRadius, style: .continuous)
@@ -243,8 +217,10 @@ private struct PlaneOptionsSection: View {
                     }
                 } label: {
                     HStack {
-                        Label("Ebene: \(sketch.plane.name)", systemImage: "square.dashed")
-                            .font(.callout)
+                        Label(sketch.plane.name, systemImage: "square.dashed")
+                            .font(.footnote)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
                         Spacer(minLength: 0)
                         Image(systemName: "chevron.up.chevron.down")
                             .font(.caption)
@@ -270,10 +246,11 @@ private struct LineTypeSection: View {
     var body: some View {
         PaletteSection("Linientyp", collapsible: false) {
             VStack(alignment: .leading, spacing: 4) {
-                IconSegment(choices: choices, selected: selected, pick: pick)
+                IconSegment(choices: choices, selected: selected, columnCount: 2, pick: pick)
                 Text(caption)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -353,23 +330,18 @@ private struct LineTypeSection: View {
 
 // MARK: Schalter
 
-/// Häufige Schalter in zwei Spalten, darunter der Konstruktionsmodus (SolidCraft `:453-465`).
+/// Häufige Schalter als kompakte Zeilen, darunter der Konstruktionsmodus (SolidCraft `:453-465`). Eine Spalte:
+/// zu zweit nebeneinander brächen die Namen im schmalen Fenster um. Fang schaltet das „U“ oben.
 private struct PaletteToggles: View {
     @ObservedObject var sketch: SketchController
     @ObservedObject var options: SketchToolOptions
 
-    private let columns = [GridItem(.flexible(), spacing: 6, alignment: .leading),
-                           GridItem(.flexible(), spacing: 6, alignment: .leading)]
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            LazyVGrid(columns: columns, alignment: .leading, spacing: 0) {
-                CheckRow(title: "Bedingungen", isOn: $sketch.showsConstraintBadges)
-                CheckRow(title: "Bemaßungen", isOn: $sketch.showsDimensions)
-                CheckRow(title: "Punkte", isOn: $sketch.showsPoints)
-                CheckRow(title: "Fang", isOn: $sketch.snapEnabled)
-            }
-            CheckRow(title: "Konstruktionsmodus (X)", icon: "sc.construction",
+            CheckRow(title: "Bedingungen", isOn: $sketch.showsConstraintBadges)
+            CheckRow(title: "Bemaßungen", isOn: $sketch.showsDimensions)
+            CheckRow(title: "Punkte", isOn: $sketch.showsPoints)
+            CheckRow(title: "Konstruktion (X)", icon: "sc.construction",
                      isOn: Binding(get: { sketch.constructionMode }, set: { on in
                          sketch.constructionMode = on
                          options.lineType = on ? .construction : .normal
@@ -386,25 +358,25 @@ private struct PaletteMoreSection: View {
     var body: some View {
         PaletteSection("Mehr", expanded: false) {
             VStack(alignment: .leading, spacing: 0) {
-                CheckRow(title: "Skizzierraster", icon: "grid", isOn: $sketch.showsGrid)
-                CheckRow(title: "Raster automatisch (1-2-5)", icon: "square.grid.3x3", isOn: $options.gridAuto)
-                CheckRow(title: "Profil (Bereiche)", icon: "square.fill.on.square", isOn: $sketch.showsProfiles)
-                CheckRow(title: "Konstruktionsgeometrie", icon: "square.dashed", isOn: $sketch.showsConstruction)
-                CheckRow(title: "Feste Maße als Schloss", icon: "lock", isOn: $sketch.collapsesLockedDimensions)
-                CheckRow(title: "Bestimmtheit (grün = fest)", icon: "checkmark.seal", isOn: $sketch.showsDefinition)
-                CheckRow(title: "Automatisch einschränken", icon: "wand.and.rays", isOn: $sketch.autoConstrain)
+                CheckRow(title: "Raster", icon: "grid", isOn: $sketch.showsGrid)
+                CheckRow(title: "Raster 1-2-5", icon: "square.grid.3x3", isOn: $options.gridAuto)
+                CheckRow(title: "Bereiche", icon: "square.fill.on.square", isOn: $sketch.showsProfiles)
+                CheckRow(title: "Hilfslinien", icon: "square.dashed", isOn: $sketch.showsConstruction)
+                CheckRow(title: "Maße als Schloss", icon: "lock", isOn: $sketch.collapsesLockedDimensions)
+                CheckRow(title: "Bestimmtheit", icon: "checkmark.seal", isOn: $sketch.showsDefinition)
+                CheckRow(title: "Auto-Bedingungen", icon: "wand.and.rays", isOn: $sketch.autoConstrain)
                 PaletteRule()
                     .padding(.vertical, 4)
                 // Haptik des Stifts bleibt (Kai); die Schalter lagen bisher im Fang-Menü
-                CheckRow(title: "Haptik beim Zeichnen", icon: "hand.tap", isOn: $sketch.drawHaptics)
-                CheckRow(title: "Fühlbares Einrasten", icon: "hand.tap.fill", isOn: $sketch.snapHaptics)
+                CheckRow(title: "Haptik Zeichnen", icon: "hand.tap", isOn: $sketch.drawHaptics)
+                CheckRow(title: "Haptik Fang", icon: "hand.tap.fill", isOn: $sketch.snapHaptics)
                 PaletteRule()
                     .padding(.vertical, 4)
                 Text("Eingabestil")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .padding(.bottom, 4)
-                HStack(spacing: PaletteStyle.spacing) {
+                VStack(spacing: 4) {
                     ForEach(SketchInputStyle.allCases) { style in
                         PrimaryWideButton(title: style.rawValue, isPrimary: false, isActive: options.inputStyle == style) {
                             options.inputStyle = style
@@ -415,6 +387,7 @@ private struct PaletteMoreSection: View {
                      : "Striche wie bisher (Shapr3D-Gesten).")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 4)
             }
         }
@@ -423,7 +396,7 @@ private struct PaletteMoreSection: View {
 
 // MARK: Fuß
 
-/// Fester Fuß: „Skizze beenden“, darunter „Ausrichten“ und „Schnitt“ (SolidCraft `:477-495`).
+/// Fester Fuß: „Skizze beenden“, darunter „Ausrichten“ und „Schnitt“ nur als Symbol (SolidCraft `:477-495`).
 private struct PaletteFooter: View {
     @ObservedObject var workspace: Workspace
     @ObservedObject var sketch: SketchController
@@ -435,14 +408,14 @@ private struct PaletteFooter: View {
             }
             .hoverTip("Skizze beenden", "Skizze speichern und zurück in den 3D-Modus.")
             HStack(spacing: PaletteStyle.spacing) {
-                PrimaryWideButton(title: "Ausrichten", systemImage: "cube.transparent", isPrimary: false) {
+                PrimaryWideButton(title: "Ausrichten", systemImage: "cube.transparent", isPrimary: false, showsTitle: false) {
                     workspace.send(.alignToSketchPlane)
                 }
                 .disabled(sketch.isChoosingPlane)
                 .opacity(sketch.isChoosingPlane ? 0.45 : 1)
                 .hoverTip("Ausrichten", "Blick senkrecht auf die Skizzenebene.")
                 PrimaryWideButton(title: "Schnitt", systemImage: "square.split.diagonal.2x2", isPrimary: false,
-                                  isActive: workspace.sketchSection) {
+                                  isActive: workspace.sketchSection, showsTitle: false) {
                     workspace.sketchSection.toggle()
                 }
                 .hoverTip("Schnitt", "Körper vor der Skizzenebene ausblenden.")

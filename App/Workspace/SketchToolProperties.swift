@@ -50,6 +50,7 @@ private struct SketchToolVariants: View {
                     Text(title)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
@@ -297,7 +298,7 @@ private struct SketchToolFields: View {
                 if value > 0 { sketch.scaleFactor = value }
             }
             Text(sketch.selection.isEmpty ? "Ganze Skizze" : "\(sketch.selection.count) gewählt")
-                .font(.footnote)
+                .font(.caption)
                 .foregroundStyle(.secondary)
             PrimaryWideButton(title: "Skalieren", systemImage: "checkmark", action: sketch.applyScale)
         }
@@ -329,8 +330,9 @@ private struct SketchToolFields: View {
         VStack(alignment: .leading, spacing: 4) {
             ForEach(sketch.measurement.lines, id: \.self) { line in
                 Text(line)
-                    .font(.callout)
+                    .font(.footnote)
                     .monospacedDigit()
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if !sketch.measureRefs.isEmpty {
                 PrimaryWideButton(title: "Neu messen", systemImage: "arrow.counterclockwise", isPrimary: false,

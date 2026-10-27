@@ -7,53 +7,35 @@ import SwiftUI
 // des Treibers · Fehlerzeile · fester Fuß Abbrechen · OK. Dieselben Bausteine, Farben und dieselbe Breite wie die
 // Skizzenpalette (SketchPaletteControls.swift), damit Skizzen- und Modellmodus gleich aussehen.
 
-/// Rechtes Panel eines offenen Modellbefehls (`workspace.command`).
+/// Rechtes Fenster eines offenen Modellbefehls (`workspace.command`): dieselbe schlanke Form wie im
+/// Skizzenmodus – oben Ansichtswürfel, Fang und Raster (und der große Haken bzw. das Kreuz), darunter der Befehl.
 struct FeaturePanel: View {
     @ObservedObject var workspace: Workspace
     @ObservedObject var model: ModelStore
     @ObservedObject var command: ModelCommand
+    @Binding var panel: SidePanel?
+    let screenshot: () -> Void
 
-    /// Höhe des scrollbaren Mittelteils; kurze Inhalte machen das Panel nicht unnötig hoch
-    @State private var contentHeight: CGFloat = 320
     @State private var showsInfo = false
     @AppStorage(CornerConfirm.storageKey) private var cornerConfirm = true
 
     private var driver: ModelCommandDriver.Type? { ModelCommands.driver(command.id) }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-                .padding(12)
-                .background(PaletteStyle.header)
-            PaletteRule()
-            ScrollView(showsIndicators: true) {
-                middle
-                    .padding(12)
-                    .background {
-                        GeometryReader { proxy in
-                            Color.clear.preference(key: FeaturePanelHeightKey.self, value: proxy.size.height)
-                        }
-                    }
+        PaletteWindow {
+            VStack(spacing: 8) {
+                PaletteViewControls(workspace: workspace, sketch: workspace.sketch, panel: $panel, screenshot: screenshot)
+                // Großer Haken und großes Kreuz unter dem Ansichtswürfel (CornerConfirm.swift)
+                CornerConfirm(workspace: workspace, model: model, command: command)
             }
-            .scrollDismissesKeyboard(.interactively)
-            .frame(maxHeight: contentHeight)
-            .onPreferenceChange(FeaturePanelHeightKey.self) { contentHeight = $0 }
-            PaletteRule()
+        } header: {
+            header
+        } middle: {
+            middle
+        } footer: {
             footer
-                .padding(12)
-                .background(PaletteStyle.header)
         }
-        .frame(width: PaletteStyle.width)
-        .background(PaletteStyle.background)
-        .clipShape(RoundedRectangle(cornerRadius: PaletteStyle.radius, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: PaletteStyle.radius, style: .continuous)
-                .strokeBorder(PaletteStyle.controlBorder, lineWidth: 1)
-        }
-        .elevationShadow(.floating)
         .background { keyboardShortcuts }
-        // Wie die Skizzenpalette dunkel (Anthrazit): Text, Systemfarben und „sc.*“-Bilder passend dazu
-        .environment(\.colorScheme, .dark)
     }
 
     // MARK: Kopf
@@ -65,69 +47,74 @@ struct FeaturePanel: View {
         return "\(featureName) bearbeiten"
     }
 
+    /// Symbol und Knöpfe (ⓘ, Menü, ×) in einer Zeile, der Titel darunter – nebeneinander passt es nicht.
     private var header: some View {
-        HStack(spacing: 6) {
-            ToolIcon(driver?.icon ?? "sc.select", size: 24)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title)
-                    .font(.headline)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                if command.editing != nil {
-                    Text("Verlauf · Werte ändern, OK baut neu")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 2) {
+                ToolIcon(driver?.icon ?? "sc.select", size: 20)
+                Spacer(minLength: 0)
+                headerButtons
             }
-            Spacer(minLength: 0)
-            if let text = driver?.explanation {
-                Button {
-                    showsInfo.toggle()
-                } label: {
-                    Image(systemName: "info.circle")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 36, height: PaletteStyle.touch)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Erklärung")
-                .popover(isPresented: $showsInfo) {
-                    Text(text)
-                        .font(.callout)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(16)
-                        .frame(width: 300)
-                }
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            if command.editing != nil {
+                Text("Verlauf · Werte ändern, OK baut neu")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            Menu {
-                Toggle(isOn: previewBinding) {
-                    Label("Vorschau", systemImage: "eye")
-                }
-                Toggle(isOn: $cornerConfirm) {
-                    Label("OK und Abbrechen in der Ecke", systemImage: "checkmark.circle")
-                }
+        }
+    }
+
+    @ViewBuilder private var headerButtons: some View {
+        if let text = driver?.explanation {
+            Button {
+                showsInfo.toggle()
             } label: {
-                Image(systemName: "ellipsis.circle")
+                Image(systemName: "info.circle")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(.secondary)
-                    .frame(width: 36, height: PaletteStyle.touch)
-                    .contentShape(Rectangle())
-            }
-            .accessibilityLabel("Einstellungen des Panels")
-            Button {
-                workspace.cancelCommand()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 36, height: PaletteStyle.touch)
+                    .frame(width: 32, height: PaletteStyle.iconButton)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Abbrechen")
+            .accessibilityLabel("Erklärung")
+            .popover(isPresented: $showsInfo) {
+                Text(text)
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(16)
+                    .frame(width: 300)
+            }
         }
+        Menu {
+            Toggle(isOn: previewBinding) {
+                Label("Vorschau", systemImage: "eye")
+            }
+            Toggle(isOn: $cornerConfirm) {
+                Label("OK und Abbrechen in der Ecke", systemImage: "checkmark.circle")
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 32, height: PaletteStyle.iconButton)
+                .contentShape(Rectangle())
+        }
+        .accessibilityLabel("Einstellungen des Panels")
+        Button {
+            workspace.cancelCommand()
+        } label: {
+            Image(systemName: "xmark")
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(.secondary)
+                .frame(width: 32, height: PaletteStyle.iconButton)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Abbrechen")
     }
 
     /// Schalter „Vorschau“ (SolidCraft `preview_enabled`): aus = erst bei OK rechnen
@@ -186,18 +173,24 @@ struct FeaturePanel: View {
 
     // MARK: Fuß
 
+    /// Abbrechen · (Übernehmen) · OK; bei drei Knöpfen die ersten beiden nur als Symbol (schmales Fenster).
     private var footer: some View {
         let canCommit = workspace.canConfirmCommand
-        return HStack(spacing: 8) {
-            PrimaryWideButton(title: "Abbrechen", isPrimary: false) {
+        let repeatable = driver?.repeatable == true && command.editing == nil
+        return HStack(spacing: PaletteStyle.spacing) {
+            PrimaryWideButton(title: "Abbrechen", systemImage: repeatable ? "xmark" : nil, isPrimary: false,
+                              showsTitle: !repeatable) {
                 workspace.cancelCommand()
             }
-            if driver?.repeatable == true, command.editing == nil {
-                PrimaryWideButton(title: "Übernehmen", isPrimary: false) {
+            .hoverTip("Abbrechen", "Nichts wird geändert (Esc).")
+            if repeatable {
+                PrimaryWideButton(title: "Übernehmen", systemImage: "plus.square.on.square", isPrimary: false,
+                                  showsTitle: false) {
                     workspace.confirmCommand(keepOpen: true)
                 }
                 .disabled(!canCommit)
                 .opacity(canCommit ? 1 : 0.45)
+                .hoverTip("Übernehmen", "Ergebnis anlegen und den Befehl für das nächste offen lassen.")
             }
             PrimaryWideButton(title: "OK", systemImage: "checkmark") {
                 workspace.confirmCommand()
@@ -221,29 +214,7 @@ struct FeaturePanel: View {
     }
 }
 
-private struct FeaturePanelHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
-    }
-}
-
 // MARK: - Bausteine der Panelzeilen
-
-/// Beschriftung links in der Breite der Skizzenpalette.
-struct PanelRowLabel: View {
-    let title: String
-
-    var body: some View {
-        Text(title)
-            .font(.callout)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-            .minimumScaleFactor(0.75)
-            .frame(width: PaletteStyle.labelWidth, alignment: .leading)
-    }
-}
 
 /// Eine Wahl in einer Segmentzeile.
 struct SegmentOption: Identifiable {
@@ -251,7 +222,7 @@ struct SegmentOption: Identifiable {
     let label: String
 }
 
-/// Segmente mit Text (SolidCraft `ui_kit::segmented`), 44 pt hoch; Titel darüber, damit die Segmente die ganze
+/// Segmente mit Text (SolidCraft `ui_kit::segmented`), 32 pt hoch; Titel darüber, damit die Segmente die ganze
 /// Breite haben.
 struct PanelSegmentRow: View {
     let title: String?
@@ -266,7 +237,8 @@ struct PanelSegmentRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            HStack(spacing: 3) {
+            // Kurze Wahlen in einer Reihe, längere zu zweit umbrechend (schmales Fenster)
+            LazyVGrid(columns: paletteSegmentColumns(options.map(\.label)), spacing: 3) {
                 ForEach(options) { option in
                     segment(option)
                 }
@@ -290,8 +262,9 @@ struct PanelSegmentRow: View {
                 .font(.caption.weight(.semibold))
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
+                .padding(.horizontal, 2)
                 .foregroundStyle(isSelected ? Color.white : Color.primary)
-                .frame(maxWidth: .infinity, minHeight: PaletteStyle.touch - 6)
+                .frame(maxWidth: .infinity, minHeight: PaletteStyle.iconButton - 4)
                 .background(isSelected ? SketchTheme.accent : Color.clear, in: shape)
                 .contentShape(shape)
         }
@@ -317,8 +290,7 @@ struct CommandValueRow: View {
     @FocusState private var isFocused: Bool
 
     var body: some View {
-        HStack(spacing: PaletteStyle.spacing) {
-            PanelRowLabel(title: title)
+        PaletteLabeled(title: title) {
             PaletteFieldBox(isLocked: false, hasError: error != nil) {
                 TextField(title, text: $text)
                     .focused($isFocused)
@@ -430,8 +402,7 @@ struct PanelMenuRow<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {
-        HStack(spacing: PaletteStyle.spacing) {
-            PanelRowLabel(title: title)
+        PaletteLabeled(title: title) {
             Menu {
                 content
             } label: {
@@ -444,17 +415,16 @@ struct PanelMenuRow<Content: View>: View {
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.secondary)
                 }
-                .font(.callout)
+                .font(.footnote)
                 .foregroundStyle(.primary)
-                .padding(.horizontal, 10)
-                .frame(maxWidth: .infinity, minHeight: 36)
+                .padding(.horizontal, 8)
+                .frame(maxWidth: .infinity, minHeight: PaletteStyle.iconButton)
                 .background(PaletteStyle.field,
                             in: RoundedRectangle(cornerRadius: PaletteStyle.controlRadius, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: PaletteStyle.controlRadius, style: .continuous)
                         .strokeBorder(PaletteStyle.controlBorder, lineWidth: 1)
                 }
-                .frame(minHeight: PaletteStyle.touch)
                 .contentShape(Rectangle())
             }
         }

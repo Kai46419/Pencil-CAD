@@ -90,7 +90,7 @@ private struct ConstructPlaneRows: View {
                 workspace.constructReference = .world(Int(id) ?? 2)
             }
         } else {
-            HStack(spacing: PaletteStyle.spacing) {
+            VStack(alignment: .leading, spacing: 4) {
                 CommandStatusRow(title: "Bezug", text: "Fläche bzw. Ebene", isDone: true)
                 Button("Standardebene") { workspace.constructReference = .world(2) }
                     .font(.callout)
@@ -150,7 +150,7 @@ private struct ConstructAxisRows: View {
             switch workspace.axisMethod {
             case .pick:
                 if let custom = workspace.constructCustomAxis {
-                    HStack(spacing: PaletteStyle.spacing) {
+                    VStack(alignment: .leading, spacing: 4) {
                         CommandStatusRow(title: "Achse", text: "Durch \(custom.name)", isDone: true)
                         Button("Andere") { workspace.constructCustomAxis = nil }
                             .font(.callout)
