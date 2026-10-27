@@ -2288,7 +2288,11 @@ final class SketchController: ObservableObject {
     private func remember() {
         undoStack.append(Snapshot(entities: entities, constraints: constraints, construction: construction,
                                   chainStart: chainStart, chainEnd: chainEnd))
-        if undoStack.count > 200 { undoStack.removeFirst() }
+        if undoStack.count > 200 {
+            undoStack.removeFirst()
+            // Volle Liste: der für „Abbrechen“ gemerkte Stapelstand rückt mit nach vorn
+            if let count = textDeformSession?.undoCount { textDeformSession?.undoCount = max(0, count - 1) }
+        }
     }
 
     // MARK: Maße am Element
