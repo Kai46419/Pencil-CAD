@@ -348,8 +348,8 @@ private struct TextToolFields: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: PaletteStyle.spacing) {
-            PalettePickerRow(title: "Schrift", selection: $sketch.textFont, options: SketchText.fonts.map(\.name)) { name in
-                SketchText.fonts.first { $0.name == name }?.title ?? name
+            PaletteLabeled(title: "Schrift") {
+                FontPickerButton(selection: $sketch.textFont)
             }
             PaletteNumberRow(title: "Höhe", value: sketch.textHeight) { value in
                 if value > 0 { sketch.textHeight = value }

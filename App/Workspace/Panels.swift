@@ -499,10 +499,7 @@ struct ParameterCard: View {
             }
         case .text:
             HStack(spacing: 14) {
-                Picker("Schrift", selection: $sketch.textFont) {
-                    ForEach(SketchText.fonts) { Text($0.title).tag($0.name) }
-                }
-                .fixedSize()
+                FontPickerButton(selection: $sketch.textFont, fullWidth: false)
                 NumberField(title: "Höhe", value: sketch.textHeight, width: 56) { value in
                     if value > 0 { sketch.textHeight = value }
                 }
@@ -2352,9 +2349,7 @@ struct TextEntrySheet: View {
             Form {
                 TextField("Inhalt", text: $content)
                     .focused($isFocused)
-                Picker("Schrift", selection: $sketch.textFont) {
-                    ForEach(SketchText.fonts) { Text($0.title).tag($0.name) }
-                }
+                FontPickerFormRow(selection: $sketch.textFont)
                 HStack {
                     Text("Höhe")
                     Spacer()

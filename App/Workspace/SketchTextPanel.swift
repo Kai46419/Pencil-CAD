@@ -33,10 +33,8 @@ struct SketchTextEditor: View {
                     .onChange(of: isFocused) { _, focused in
                         if !focused { commitContent(at: index) }
                     }
-                Picker("Schrift", selection: fontBinding) {
-                    ForEach(SketchText.fonts) { Text($0.title).tag($0.name) }
-                }
-                .fixedSize(horizontal: !stacked, vertical: false)
+                FontPickerButton(selection: fontBinding, fullWidth: stacked)
+                    .frame(width: stacked ? PaletteStyle.contentWidth : nil)
                 NumberField(title: "Höhe", value: text.height, width: 56) { value in
                     guard value > 0 else { return }
                     sketch.updateText(at: index) { $0.with(height: value) }
