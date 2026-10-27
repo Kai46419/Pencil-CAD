@@ -108,16 +108,28 @@ struct QuickToolsPalette: View {
                 },
             ]
         }
+        // Mit Auswahl (ohne offenes Panel): die Aktionen zur Auswahl wie im Menü „Auswahl“ (ModelRibbon)
+        let hasSelection = model.selection != nil || !model.selectedEdges.isEmpty || !model.selectedBodies.isEmpty
+            || !model.selectedRegions.isEmpty
+        if hasSelection, workspace.command == nil {
+            let actions = ModelRibbon.contextCommands(workspace).filter(\.isEnabled).prefix(7)
+            return actions.map { command in
+                Item(id: command.title, systemImage: command.icon, isActive: command.isActive, action: command.run)
+            } + [Item(id: "Rückgängig", systemImage: "arrow.uturn.backward") { model.undo() }]
+        }
         return [
             Item(id: "Skizze", systemImage: ToolGroup.sketch.systemImage) { workspace.startSketch() },
-            Item(id: "Abrunden", systemImage: "sc.fillet") { workspace.startEdgeOperation(.fillet) },
-            Item(id: "Fase", systemImage: "sc.chamfer") { workspace.startEdgeOperation(.chamfer) },
-            Item(id: "Verschieben", systemImage: "sc.move", isActive: workspace.tool == .move) {
-                workspace.activate(.move)
+            Item(id: "Abrunden", systemImage: "sc.fillet", isActive: workspace.command?.id == .fillet) {
+                workspace.startCommand(.fillet)
             },
-            Item(id: "Spiegeln", systemImage: "sc.mirror",
-                 isActive: workspace.tool == .mirror) {
-                workspace.activate(.mirror)
+            Item(id: "Fase", systemImage: "sc.chamfer", isActive: workspace.command?.id == .chamfer) {
+                workspace.startCommand(.chamfer)
+            },
+            Item(id: "Verschieben", systemImage: "sc.move", isActive: workspace.command?.id == .move) {
+                workspace.startCommand(.move)
+            },
+            Item(id: "Spiegeln", systemImage: "sc.mirror", isActive: workspace.command?.id == .mirror) {
+                workspace.startCommand(.mirror)
             },
             Item(id: "Einpassen", systemImage: "arrow.up.left.and.arrow.down.right") { workspace.send(.fitAll) },
             Item(id: "Rückgängig", systemImage: "arrow.uturn.backward") { model.undo() },

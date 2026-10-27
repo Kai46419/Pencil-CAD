@@ -6,6 +6,7 @@ import simd
 
 /// Antippen läuft über den bisherigen Weg und ändert Zustand des Workspace: ohne Zwischenspeicher prüfen, ob OK möglich
 /// ist (der Stand der Befehlsfelder ändert sich dabei nicht).
+@MainActor
 protocol LiveLegacyDriver: LegacyTapDriver {
     @MainActor static func missing(_ ws: Workspace) -> String?
 }
@@ -320,6 +321,11 @@ enum SectionDriver: MainCommandDriver {
 
     static func mainValueKey(_ cmd: ModelCommand) -> String? { "offset" }
 
+    /// Der Schnitt ist keine Modellvorschau: OK, sobald die Ebene bestimmt ist
+    static func canCommit(_ cmd: ModelCommand, _ ws: Workspace) -> Bool {
+        cmd.error == nil
+    }
+
     @MainActor static func panel(_ cmd: ModelCommand, _ ws: Workspace) -> AnyView {
         AnyView(SectionRows(cmd: cmd, workspace: ws))
     }
@@ -338,7 +344,7 @@ private struct SectionRows: View {
                 CommandOptionRow(title: "Ebene", cmd: cmd, key: "axis", options: Self.worlds, fallback: "1",
                                  workspace: workspace)
             }
-            CommandValueRow(title: "Versatz", cmd: cmd, key: "offset", fallback: 0, workspace: workspace)
+            CommandNumberRow(title: "Versatz", cmd: cmd, key: "offset", fallback: 0, workspace: workspace)
             CommandFlagRow(title: "Seite umkehren", icon: "arrow.left.arrow.right", cmd: cmd, key: "flipped",
                            workspace: workspace)
             PaletteHint(text: "Am Pfeil ziehen führt den Schnitt durch den Körper. „Abbrechen“ schaltet ihn aus.")

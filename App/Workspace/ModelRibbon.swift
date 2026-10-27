@@ -73,6 +73,7 @@ enum ModelRibbon {
                 RibbonCommand(id: "hole", title: "Bohrung", subtitle: "Senkung, Senkkopf, Einsätze", icon: "sc.hole",
                               heading: "BOHRUNGEN", featured: true, isActive: drilling && !threaded) {
                     ws.startCommand(.hole)
+                    if ws.holeSpec.thread != nil { ws.setHoleThread(nil) }
                 },
                 // ★ Gewindebohrung als eigener Eintrag (Bohrung mit Gewinde)
                 RibbonCommand(id: "hole.tapped", title: "Gewindebohrung", subtitle: "Kernloch mit Gewinde",
@@ -241,8 +242,9 @@ enum ModelRibbon {
         }
     }
 
-    /// Läuft dieser Befehl gerade? (TODO-MERGE: workspace.command – zuerst `ws.command?.id == id` prüfen)
+    /// Läuft dieser Befehl gerade? Offenes Eigenschaften-Panel zuerst, sonst das bisherige Werkzeug.
     static func isActive(_ id: ModelCommandID, _ ws: Workspace) -> Bool {
+        if let current = ws.command?.id { return current == id }
         let model = ws.model
         switch id {
         case .extrude, .pressPull:
@@ -268,9 +270,8 @@ enum ModelRibbon {
 
     // MARK: Kontextvorschläge
 
-    /// Befehle zur jetzigen Auswahl (für Kontextmenü und Werkzeugrad; früher die Kontextleiste).
-    /// TODO-MERGE: Kontextmenü (langes Drücken auf die Auswahl, WorkspaceView/Viewport) und Werkzeugrad (QuickTools)
-    /// mit diesen Einträgen füllen.
+    /// Befehle zur jetzigen Auswahl (früher die Kontextleiste): Menü „Auswahl“ oben im Ribbon (ToolRail.swift) und
+    /// Werkzeugrad (QuickTools.swift).
     static func contextCommands(_ ws: Workspace) -> [RibbonCommand] {
         let model = ws.model
         let hasRegions = !model.selectedRegions.isEmpty

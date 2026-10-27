@@ -20,15 +20,5 @@ extension ModelCommands {
         // Antippen über den bisherigen Weg (eigene Regeln je Werkzeug)
         legacyTapIDs.formUnion([.wrap, .imprint, .mold, .translate, .constructPlane, .constructAxis, .constructPoint,
                                 .measure, .printCheck, .meshSculpt])
-        // Bearbeiten aus dem Verlauf (Werte im selben Panel)
-        editors[.fillet] = .fillet
-        editors[.chamfer] = .chamfer
-        editors[.faceExtrude] = .pressPull
-        editors[.shell] = .shell
-        editors[.boolean] = .combine
-        editors[.move] = .move
-        editors[.rotate] = .move
-        editors[.mirror] = .mirror
-        editors[.pattern] = .patternRect
     }
 }

@@ -441,7 +441,7 @@ private struct WorkspaceContent: View {
                 doneBar
             }
             if timelineSetting, !sketch.isActive {
-                TimelineBar(model: model)
+                TimelineBar(model: model, workspace: workspace, editingFeature: workspace.editingFeatureID)
             }
         }
         .padding(.horizontal, 120)

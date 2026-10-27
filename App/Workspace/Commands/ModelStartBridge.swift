@@ -1,68 +1,44 @@
 import SwiftUI
 
-// Brücke zwischen Leiste (Ribbon, ModelRibbon.swift) und Befehlsrahmen (Paket M1): Solange `workspace.start(_:)`
-// und `workspace.command` noch fehlen, baut startCommand den Befehl über seinen Treiber (der dabei das bisherige
-// Werkzeug startet) bzw. startet ohne Treiber das bisherige Werkzeug direkt. Nach dem Zusammenführen ruft
-// startCommand nur noch `start(id)` auf.
+// Brücke zwischen Leiste (Ribbon, ModelRibbon.swift), Kontextmenü, Werkzeugrad, Zeitleiste und Befehlsrahmen
+// (Workspace.start/edit, FeaturePanel.swift): Befehle mit Treiber öffnen das Eigenschaften-Panel, alle anderen
+// starten das bisherige Werkzeug.
 
 extension ModelCommands {
     /// Befehle, bei denen Antippen im Viewport weiter über Workspace.tapped läuft (eigene Regeln: Messen,
     /// Konstruieren, Druckprüfung …); das Panel zeigt nur Werte. Wird in registerModify() gefüllt.
-    /// TODO-MERGE: workspace.tapped – bei offenem Befehl mit dieser ID (oder ohne Auswahlfelder) den bisherigen Weg
-    /// nehmen statt `command.pick`.
     static var legacyTapIDs: Set<ModelCommandID> = []
 
-    /// Treiber, die Features des Verlaufs bearbeiten (Doppeltippen in der Zeitleiste). Wird in registerModify()
-    /// gefüllt.
-    static var editors: [FeatureKind: ModelCommandID] = [:]
-
-    /// Läuft Antippen bei diesem Befehl über den bisherigen Weg?
+    /// Läuft Antippen bei diesem Befehl über den bisherigen Weg? (Bearbeiten aus dem Verlauf nie: dort gibt es nichts
+    /// anzutippen.)
     static func usesLegacyTaps(_ cmd: ModelCommand) -> Bool {
         if drivers.isEmpty { registerAll() }
+        guard cmd.editing == nil else { return false }
         return legacyTapIDs.contains(cmd.id) || cmd.inputs.isEmpty
     }
-}
-
-/// Zuletzt über die Brücke gebauter Befehl, solange `workspace.command` (M1) fehlt.
-@MainActor
-enum ModelCommandBridge {
-    static var pending: ModelCommand?
 }
 
 extension Workspace {
     /// Befehl aus Leiste, Kontextmenü oder Werkzeugrad starten.
     func startCommand(_ id: ModelCommandID) {
-        // TODO-MERGE: workspace.start – nach dem Zusammenführen mit M1 nur noch:
-        //     start(id)
-        //     return
-        if let driver = ModelCommands.driver(id) {
-            // Der Treiber startet das bisherige Werkzeug und übernimmt die Vorauswahl; ohne FeaturePanel zeigt die
-            // bisherige Karte unten die Werte.
-            ModelCommandBridge.pending = driver.make(self)
+        if ModelCommands.driver(id) != nil {
+            start(id)
         } else {
-            ModelCommandBridge.pending = nil
+            if command != nil { cancelCommand(keepSelection: true) }
             startLegacyCommand(id)
         }
     }
 
-    /// Feature aus dem Verlauf im Eigenschaften-Panel bearbeiten. false = (noch) nicht möglich, die Zeitleiste zeigt
+    /// Feature aus dem Verlauf im Eigenschaften-Panel bearbeiten. false = nicht möglich, die Zeitleiste zeigt
     /// dann das kleine Fenster mit den Werten.
     func editFeatureInPanel(_ feature: Feature) -> Bool {
         guard feature.kind != .snapshot, !sketch.isActive else { return false }
-        if ModelCommands.drivers.isEmpty { ModelCommands.registerAll() }
-        guard let id = ModelCommands.editors[feature.kind], let driver = ModelCommands.driver(id),
-              driver.load(feature, into: self) != nil else { return false }
-        // TODO-MERGE: workspace.command – nach dem Zusammenführen mit M1:
-        //     cancelCommand()
-        //     command = driver.load(feature, into: self)
-        //     return command != nil
-        return false
+        return edit(feature)
     }
 
     /// Feature, das gerade im Panel bearbeitet wird (Kapsel „· bearbeiten“ in der Zeitleiste).
     var editingFeatureID: UUID? {
-        // TODO-MERGE: workspace.command – command?.editing
-        nil
+        command?.editing
     }
 
     /// Bisheriges Werkzeug eines Befehls (nil = Auswahlwerkzeug bzw. eigener Ablauf).
@@ -142,7 +118,8 @@ extension Workspace {
 
     /// Gewindebohrung (Bohrung mit Gewinde), wie bisher „Löcher › Gewindebohrung“.
     func startTappedHole() {
-        activate(.hole)
+        // Bohrung im Eigenschaften-Panel offen: nur das Gewinde einschalten (activate würde das Panel schließen)
+        if command?.id != .hole { activate(.hole) }
         setHoleThread(holeSpec.thread ?? HoleThread())
     }
 }

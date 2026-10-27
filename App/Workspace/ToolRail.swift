@@ -847,6 +847,10 @@ struct ToolRail: View {
                 }
                 .buttonStyle(.plain)
             }
+            // Kontextmenü zur Auswahl (früher die Kontextleiste): Aktionen nach ModelRibbon.contextCommands
+            if hasSelection, !showsBackTile, workspace.command == nil {
+                selectionMenu(size)
+            }
             ForEach(ToolGroup.allCases) { group in
                 ribbonGroup(group, size: size)
                     .background {
@@ -860,6 +864,34 @@ struct ToolRail: View {
                     }
             }
         }
+    }
+
+    /// Kachel „Auswahl“: Menü mit den Befehlen zur jetzigen Auswahl (Extrudieren, Abrunden, Verschieben …).
+    private func selectionMenu(_ size: RibbonSize) -> some View {
+        let actions = ModelRibbon.contextCommands(workspace)
+        return Menu {
+            Section(selectionSummary) {
+                ForEach(actions) { command in
+                    Button {
+                        openGroup = nil
+                        command.run()
+                    } label: {
+                        ToolLabel(command.title, icon: command.icon)
+                    }
+                    .disabled(!command.isEnabled)
+                }
+            }
+            Button(role: .destructive) {
+                model.resetSelection()
+            } label: {
+                Label("Alle abwählen", systemImage: "xmark.circle")
+            }
+        } label: {
+            RailTile(title: "Auswahl", subtitle: selectionSummary, systemImage: "contextualmenu.and.cursorarrow",
+                     isActive: true, size: size.tile)
+        }
+        .accessibilityLabel("Aktionen zur Auswahl")
+        .hoverTip("Auswahl", "Befehle zur gewählten Auswahl")
     }
 
     /// Gruppe: Kopf „NAME ▾“ (öffnet die vollständige Liste) und darunter die hervorgehobenen bzw. angehefteten Befehle

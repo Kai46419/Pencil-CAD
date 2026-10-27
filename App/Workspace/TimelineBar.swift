@@ -27,8 +27,9 @@ enum TimelineVisibility: Int {
 struct TimelineBar: View {
     @ObservedObject var model: ModelStore
     /// Für Bearbeiten im Panel und die Kapsel „· bearbeiten“.
-    /// TODO-MERGE: WorkspaceView – `TimelineBar(model: model, workspace: workspace)` übergeben.
     var workspace: Workspace? = nil
+    /// Feature im Panel (workspace.editingFeatureID) als Wert, damit die Kapsel beim Öffnen/Schließen neu zeichnet
+    var editingFeature: UUID? = nil
 
     /// Kleines Fenster mit den Werten (Fallback, feste Stände, „Schnell ändern“)
     @State private var editing: UUID?
@@ -241,7 +242,7 @@ struct TimelineBar: View {
 
     private func chip(_ feature: Feature, number: Int) -> some View {
         let isOpen = Binding(get: { editing == feature.id }, set: { if !$0 { editing = nil } })
-        let isEditing = workspace?.editingFeatureID == feature.id
+        let isEditing = (editingFeature ?? workspace?.editingFeatureID) == feature.id
         return VStack(spacing: 2) {
             ZStack(alignment: .topTrailing) {
                 ToolIcon(feature.systemImage, size: 22)

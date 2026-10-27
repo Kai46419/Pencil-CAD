@@ -240,7 +240,7 @@ private struct MoveRows: View {
             }
             switch mode {
             case "rotate":
-                CommandValueRow(title: "Winkel", cmd: cmd, key: "angle", fallback: 90, unit: "°", workspace: workspace)
+                CommandNumberRow(title: "Winkel", cmd: cmd, key: "angle", fallback: 90, unit: "°", workspace: workspace)
                 if cmd.items("axis").isEmpty {
                     CommandOptionRow(title: "Achse durch die Mitte", cmd: cmd, key: "axis", options: CommandAxes.choices,
                                      fallback: "2", workspace: workspace)
@@ -249,9 +249,9 @@ private struct MoveRows: View {
                 CommandStatusRow(title: "Versatz", text: MoveRows.vectorText(MoveCommand.offset(cmd)),
                                  isDone: !cmd.items("to").isEmpty)
             default:
-                CommandValueRow(title: "X", cmd: cmd, key: "x", fallback: 0, workspace: workspace)
-                CommandValueRow(title: "Y", cmd: cmd, key: "y", fallback: 0, workspace: workspace)
-                CommandValueRow(title: "Z", cmd: cmd, key: "z", fallback: 0, workspace: workspace)
+                CommandNumberRow(title: "X", cmd: cmd, key: "x", fallback: 0, workspace: workspace)
+                CommandNumberRow(title: "Y", cmd: cmd, key: "y", fallback: 0, workspace: workspace)
+                CommandNumberRow(title: "Z", cmd: cmd, key: "z", fallback: 0, workspace: workspace)
             }
             if !sketch {
                 PaletteSection("Optionen") {
@@ -546,7 +546,7 @@ private struct PatternRectRows: View {
                                      workspace: workspace)
                 }
                 CommandCountRow(title: "Anzahl", cmd: cmd, key: "count", fallback: 4, range: 1...500, workspace: workspace)
-                CommandValueRow(title: "Abstand", cmd: cmd, key: "spacing", fallback: 20, workspace: workspace)
+                CommandNumberRow(title: "Abstand", cmd: cmd, key: "spacing", fallback: 20, workspace: workspace)
                 CommandFlagRow(title: "Umkehren", icon: "arrow.left.arrow.right", cmd: cmd, key: "dir1Flip",
                                workspace: workspace)
             }
@@ -557,7 +557,7 @@ private struct PatternRectRows: View {
                 }
                 CommandCountRow(title: "Anzahl", cmd: cmd, key: "count2", fallback: 1, range: 1...500,
                                 workspace: workspace)
-                CommandValueRow(title: "Abstand", cmd: cmd, key: "spacing2", fallback: 20, workspace: workspace)
+                CommandNumberRow(title: "Abstand", cmd: cmd, key: "spacing2", fallback: 20, workspace: workspace)
                 CommandFlagRow(title: "Umkehren", icon: "arrow.left.arrow.right", cmd: cmd, key: "dir2Flip",
                                workspace: workspace)
             }
@@ -628,7 +628,7 @@ private struct PatternCircularRows: View {
                                  workspace: workspace)
             }
             CommandCountRow(title: "Anzahl", cmd: cmd, key: "count", fallback: 6, range: 2...500, workspace: workspace)
-            CommandValueRow(title: "Winkel", cmd: cmd, key: "angle", fallback: 360, unit: "°", workspace: workspace)
+            CommandNumberRow(title: "Winkel", cmd: cmd, key: "angle", fallback: 360, unit: "°", workspace: workspace)
             PaletteSection("Optionen") {
                 CommandPreviewRow(cmd: cmd, workspace: workspace)
             }

@@ -9,10 +9,11 @@ import simd
 // die Vorschau. Werkzeuge, deren Antippen eigene Regeln hat (Messen, Konstruieren …), stehen in
 // `ModelCommands.legacyTapIDs`: dort läuft Antippen weiter über Workspace.tapped.
 //
-// Workspace und ModelStore sind @MainActor, die Anforderungen von ModelCommandDriver nicht isoliert: Die
-// Erweiterung von MainCommandDriver leitet sie über MainActor.assumeIsolated an @MainActor-Funktionen weiter.
+// ModelCommandDriver ist @MainActor; MainActor.assumeIsolated in der Erweiterung unten stammt aus der Zeit davor und
+// ist damit nur noch eine Absicherung.
 
 /// Modellbefehl, dessen Arbeit auf dem Main Actor läuft.
+@MainActor
 protocol MainCommandDriver: ModelCommandDriver {
     /// Befehl anlegen: bisheriges Werkzeug starten, Vorauswahl übernehmen, Standardwerte
     @MainActor static func build(_ ws: Workspace) -> ModelCommand
@@ -113,10 +114,17 @@ extension MainCommandDriver {
         guard featureKinds.contains(feature.kind) else { return nil }
         return FeatureEdit.command(id, feature)
     }
+
+    /// Bearbeiten aus dem Verlauf rechnet erst bei OK (keine Vorschau): dann nur ohne Fehler
+    static func canCommit(_ cmd: ModelCommand, _ ws: Workspace) -> Bool {
+        if cmd.editing != nil { return cmd.error == nil }
+        return cmd.isReady && cmd.error == nil && ws.model.hasPreview
+    }
 }
 
 /// Werkzeug, das ganz über das bisherige Antippen arbeitet; das Panel zeigt seine Werte (PencilCAD-eigene Werkzeuge,
 /// Messen, Konstruieren). Steht in `ModelCommands.legacyTapIDs`.
+@MainActor
 protocol LegacyTapDriver: MainCommandDriver {
     static var legacyTool: ModelTool { get }
     @MainActor static func content(_ cmd: ModelCommand, _ ws: Workspace) -> AnyView
@@ -132,6 +140,12 @@ extension LegacyTapDriver {
 
     @MainActor static func panel(_ cmd: ModelCommand, _ ws: Workspace) -> AnyView {
         content(cmd, ws)
+    }
+
+    /// OK wie „Fertig“ im bisherigen Werkzeug (Messen, Druckprüfung … haben keine Vorschau); fehlt noch etwas,
+    /// meldet es preview als Fehler
+    static func canCommit(_ cmd: ModelCommand, _ ws: Workspace) -> Bool {
+        cmd.error == nil
     }
 }
 
@@ -153,10 +167,17 @@ enum CommandCache {
         return text
     }
 
+    /// Befehle, deren Vorschau gerade rechnet (ein Werkzeug-Baustein, der dabei updatePreview aufruft, landet über
+    /// refreshCommandPreview wieder hier – dann nicht noch einmal rechnen)
+    private static var running: Set<ObjectIdentifier> = []
+
     static func run(_ cmd: ModelCommand, _ body: () -> String?) -> String? {
         let key = ObjectIdentifier(cmd)
         if let state = states[key], state.signature == signature(cmd) { return state.error }
+        guard !running.contains(key) else { return nil }
+        running.insert(key)
         let error = body()
+        running.remove(key)
         // Nach dem Rechnen merken: refresh darf Felder ändern (z. B. übernommene Rundung)
         states[key] = (signature(cmd), error)
         return error
@@ -596,7 +617,7 @@ struct CommandSegmentRow: View {
 }
 
 /// Zahlenzeile für einen Wert des Befehls; rechnet nach der Eingabe die Vorschau neu.
-struct CommandValueRow: View {
+struct CommandNumberRow: View {
     let title: String
     @ObservedObject var cmd: ModelCommand
     let key: String

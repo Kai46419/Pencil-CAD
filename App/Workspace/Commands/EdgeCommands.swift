@@ -213,7 +213,7 @@ private struct FilletRows: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: PaletteStyle.spacing) {
-            CommandValueRow(title: isVariable ? "Anfang" : "Radius", cmd: cmd, key: "radius", fallback: 2,
+            CommandNumberRow(title: isVariable ? "Anfang" : "Radius", cmd: cmd, key: "radius", fallback: 2,
                             workspace: workspace) { max(0, $0) }
             CommandSegmentRow(title: "Typ", options: [CommandChoice(id: "constant", title: "Konstant"),
                                                       CommandChoice(id: "variable", title: "Variabel")],
@@ -230,7 +230,7 @@ private struct FilletRows: View {
                               selected: "g1") { _ in }
             if isVariable {
                 PaletteSection("Variabler Radius") {
-                    CommandValueRow(title: "Ende", cmd: cmd, key: "end", fallback: 4, workspace: workspace) { max(0.01, $0) }
+                    CommandNumberRow(title: "Ende", cmd: cmd, key: "end", fallback: 4, workspace: workspace) { max(0.01, $0) }
                     PrimaryWideButton(title: "Enden tauschen", systemImage: "arrow.left.arrow.right", isPrimary: false) {
                         let start = cmd.number("radius", default: 2)
                         cmd.putNumber("radius", cmd.number("end", default: 4))
@@ -265,14 +265,14 @@ private struct ChamferRows: View {
                     cmd.putNumber("distance2", cmd.number("distance", default: 1))
                 }
             }
-            CommandValueRow(title: "Abstand", cmd: cmd, key: "distance", fallback: 1, workspace: workspace) { max(0, $0) }
+            CommandNumberRow(title: "Abstand", cmd: cmd, key: "distance", fallback: 1, workspace: workspace) { max(0, $0) }
             if type == "two" {
-                CommandValueRow(title: "Abstand 2", cmd: cmd, key: "distance2", fallback: 1, workspace: workspace) {
+                CommandNumberRow(title: "Abstand 2", cmd: cmd, key: "distance2", fallback: 1, workspace: workspace) {
                     max(0.01, $0)
                 }
             }
             if type == "angle" {
-                CommandValueRow(title: "Winkel", cmd: cmd, key: "angle", fallback: 45, unit: "°", workspace: workspace)
+                CommandNumberRow(title: "Winkel", cmd: cmd, key: "angle", fallback: 45, unit: "°", workspace: workspace)
             }
             if type != "equal" {
                 CommandFlagRow(title: "Umkehren", icon: "arrow.left.arrow.right", cmd: cmd, key: "flip",

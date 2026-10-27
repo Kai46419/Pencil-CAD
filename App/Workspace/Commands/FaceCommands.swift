@@ -193,7 +193,7 @@ private struct PressPullRows: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: PaletteStyle.spacing) {
-            CommandValueRow(title: "Abstand", cmd: cmd, key: "distance", fallback: 0, workspace: workspace)
+            CommandNumberRow(title: "Abstand", cmd: cmd, key: "distance", fallback: 0, workspace: workspace)
             // ★ Letzte Höhe wiederholen (auch Doppeltippen auf die Fläche)
             if let last = model.lastExtrudeValue {
                 PrimaryWideButton(title: "Letzte Höhe \(LengthUnit.current.format(last))",
@@ -280,7 +280,7 @@ private struct ShellRows: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: PaletteStyle.spacing) {
-            CommandValueRow(title: "Dicke", cmd: cmd, key: "thickness", fallback: 2, workspace: workspace)
+            CommandNumberRow(title: "Dicke", cmd: cmd, key: "thickness", fallback: 2, workspace: workspace)
             // Der Kernel höhlt nach innen aus; Außen/Beide folgen mit einer Kernel-Funktion
             CommandSegmentRow(title: "Richtung", options: [CommandChoice(id: "inside", title: "Innen"),
                                                            CommandChoice(id: "outside", title: "Außen", isEnabled: false),
@@ -362,7 +362,7 @@ private struct DraftRows: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: PaletteStyle.spacing) {
-            CommandValueRow(title: "Winkel", cmd: cmd, key: "angle", fallback: 3, unit: "°", workspace: workspace)
+            CommandNumberRow(title: "Winkel", cmd: cmd, key: "angle", fallback: 3, unit: "°", workspace: workspace)
             if cmd.items("plane").isEmpty {
                 CommandOptionRow(title: "Zugrichtung", cmd: cmd, key: "axis", options: CommandAxes.choices,
                                  fallback: "2", workspace: workspace)
@@ -471,7 +471,7 @@ private struct OffsetFaceRows: View {
                              fallback: OffsetFaceMode.distance.rawValue, workspace: workspace) { _ in
                 cmd.values["value"] = nil
             }
-            CommandValueRow(title: mode.rawValue, cmd: cmd, key: "value", fallback: 0, workspace: workspace)
+            CommandNumberRow(title: mode.rawValue, cmd: cmd, key: "value", fallback: 0, workspace: workspace)
             PaletteSection("Optionen") {
                 CommandPreviewRow(cmd: cmd, workspace: workspace)
             }

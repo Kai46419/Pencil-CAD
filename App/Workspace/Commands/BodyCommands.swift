@@ -243,7 +243,7 @@ private struct SplitRows: View {
                     CommandOptionRow(title: "Achsebene (Normale)", cmd: cmd, key: "axis", options: CommandAxes.choices,
                                      fallback: "2", workspace: workspace)
                 }
-                CommandValueRow(title: "Versatz", cmd: cmd, key: "offset", fallback: 0, workspace: workspace)
+                CommandNumberRow(title: "Versatz", cmd: cmd, key: "offset", fallback: 0, workspace: workspace)
             }
             PaletteSection("Optionen") {
                 CommandPreviewRow(cmd: cmd, workspace: workspace)
@@ -292,7 +292,7 @@ enum ScaleDriver: MainCommandDriver {
             model.dropPreview()
             return "Am Pfeil ziehen oder einen Faktor eingeben."
         }
-        ws.updatePreview()
+        ws.updateToolPreview()
         return model.hasPreview ? nil : (model.message ?? "Skalieren nicht möglich.")
     }
 
@@ -313,14 +313,14 @@ enum ScaleDriver: MainCommandDriver {
         cmd.putNumber("factor", factor)
         ws.scaleUniform = true
         ws.scaleFactors = SIMD3(repeating: factor)
-        ws.updatePreview()
+        ws.updateToolPreview()
     }
 
     static func mainValueKey(_ cmd: ModelCommand) -> String? { "factor" }
 
     @MainActor static func panel(_ cmd: ModelCommand, _ ws: Workspace) -> AnyView {
         AnyView(VStack(alignment: .leading, spacing: PaletteStyle.spacing) {
-            CommandValueRow(title: "Faktor", cmd: cmd, key: "factor", fallback: 1, unit: "×", workspace: ws) { value in
+            CommandNumberRow(title: "Faktor", cmd: cmd, key: "factor", fallback: 1, unit: "×", workspace: ws) { value in
                 min(max(value, Workspace.scaleRange.lowerBound), Workspace.scaleRange.upperBound)
             }
             PaletteSection("Optionen") {

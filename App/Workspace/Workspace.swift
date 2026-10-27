@@ -1237,11 +1237,15 @@ final class Workspace: ObservableObject {
     /// Tippen im Modellierbereich (nicht im Skizzenmodus).
     func tapped(face tappedFace: FaceRef?, edge: EdgeRef?, region: RegionRef? = nil, point: SIMD3<Float>? = nil) {
         model.message = nil
-        // Offener Befehl (SolidCraft): der Pick geht ins aktive Auswahlfeld
-        if command != nil {
+        // Offener Befehl (SolidCraft): der Pick geht ins aktive Auswahlfeld. Befehle mit eigenen Antipp-Regeln
+        // (ModelCommands.legacyTapIDs: Messen, Konstruieren …) laufen über den bisherigen Weg, danach zeigt das Panel
+        // den neuen Stand.
+        let legacyCommand = command.map { ModelCommands.usesLegacyTaps($0) } ?? false
+        if command != nil, !legacyCommand {
             commandTapped(face: tappedFace, edge: edge, region: region, point: point)
             return
         }
+        defer { if legacyCommand { refreshCommandPreview() } }
         // Während einer Vorschau zeigt das Netz die Vorschaukörper mit anderen Flächennummern: für Werkzeuge,
         // die Flächen der echten Körper sammeln, die passende echte Fläche unter dem Punkt suchen
         var face = tappedFace
@@ -1417,11 +1421,18 @@ final class Workspace: ObservableObject {
 
     /// Vorschau des aktiven Werkzeugs mit den aktuellen Einstellungen neu berechnen.
     func updatePreview() {
-        // Alte Karten-Bausteine (z. B. Loft-Führungen) während eines offenen Befehls: der Befehl rechnet
-        if command != nil {
+        // Alte Karten-Bausteine (z. B. Loft-Führungen) während eines offenen Befehls: der Befehl rechnet. Befehle,
+        // die ganz über das bisherige Werkzeug laufen (ModelCommands.legacyTapIDs), rechnen wie bisher.
+        if let command, !ModelCommands.usesLegacyTaps(command) {
             refreshCommandPreview()
             return
         }
+        updateToolPreview()
+    }
+
+    /// Vorschau des bisherigen Werkzeugs (tool) rechnen – auch aus einem Befehlstreiber heraus (z. B. Skalieren),
+    /// ohne über refreshCommandPreview wieder im Treiber zu landen.
+    func updateToolPreview() {
         switch tool {
         case .pattern(.linear):
             guard let axis = model.resolve(patternAxis) else { return }
@@ -2381,8 +2392,11 @@ extension Workspace {
         toolExplanation = nil
         let cmd = driver.make(self)
         model.commitsOnSelect = false
-        if let tap, !driver.tapped(tap, cmd, self) {
-            route(tap, into: cmd)
+        if let tap {
+            // Mit Pick beginnen: Vorgaben aus make (z. B. Profil-Automatik der letzten Skizze) gelten nicht – sonst
+            // nähme das Antippen desselben Bereichs ihn gleich wieder heraus bzw. würde zur Höhe „bis dort“
+            for index in cmd.inputs.indices { cmd.inputs[index].items = [] }
+            if !driver.tapped(tap, cmd, self) { route(tap, into: cmd) }
         }
         if let distance, let key = driver.primaryValueKey(cmd) { cmd.setNumber(key, distance) }
         cmd.advance()
