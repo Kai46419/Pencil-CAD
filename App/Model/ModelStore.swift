@@ -1059,7 +1059,7 @@ final class ModelStore: ObservableObject {
         let parts = bodies[index].shape.solidParts()
         guard parts.count > 1 else {
             message = "„\(bodies[index].name)“ ist ein einziger Volumenkörper. Berührende Teile sind verschmolzen – "
-                + "Ändern › Körper teilen nutzen."
+                + "zum Zerlegen das Werkzeug „Körper teilen“ nutzen."
             return
         }
         dropPreview()
