@@ -36,8 +36,8 @@ enum TransformGizmo {
 
     /// Farbe zum Viewport-Hintergrund hin abgeblendet (Rückseite des Rings).
     static func faded(_ color: SIMD3<Float>) -> SIMD3<Float> {
-        let background = SIMD3<Float>(repeating: 0.845)
-        return color * 0.4 + background * 0.6
+        // Hintergrund des gewählten Designs (hell 0,845, dunkel Anthrazit #2E3440)
+        AppTheme.towardBackground(color, 0.6)
     }
 
     /// Aufgehellte Farbe für den Griff unter dem Stift bzw. den gegriffenen Griff.

@@ -1,8 +1,9 @@
 import SwiftUI
 
 // Gestaltung an einer Stelle: Radien, Maße, Farben, Schatten und Bewegungen der Oberfläche.
-// Leitbild: hell und ruhig, weiße Kacheln und Kapseln schweben mit feinem Rand und weichem Schatten
-// über dem Viewport; aktive Zustände sind farbig gefüllt mit weißem Symbol.
+// Leitbild: ruhig, Kacheln und Kapseln schweben mit feinem Rand und weichem Schatten über dem Viewport;
+// aktive Zustände sind farbig gefüllt mit weißem Symbol. Standard ist das dunkle Anthrazit nach SolidCraft
+// (SketchTheme.swift); „Helles Design“ zeigt die bisherigen weißen Flächen.
 
 enum Theme {
     /// Eckenradien (immer mit `style: .continuous` verwenden)
@@ -22,13 +23,19 @@ enum Theme {
 
     // MARK: Farben
 
-    /// Grund schwebender Kacheln, Knöpfe und Fenster (passt sich dem dunklen Modus an)
-    static let surface = Color(.systemBackground)
-    /// Feiner Rand um schwebende Flächen
-    static let hairline = Color.primary.opacity(0.08)
+    /// Grund schwebender Kacheln, Knöpfe und Fenster: hell weiß, dunkel Anthrazit-Panel #272B34 (SolidCraft)
+    static let surface = Color(SketchTheme.dynamic(light: .systemBackground, dark: SketchTheme.uiRGB(39, 43, 52)))
+    /// Feiner Rand um schwebende Flächen; dunkel der SolidCraft-Rand #3F4552
+    static let hairline = Color(SketchTheme.dynamic(light: UIColor.label.withAlphaComponent(0.08),
+                                                    dark: SketchTheme.uiRGB(63, 69, 82)))
     static let hairlineWidth: CGFloat = 0.5
-    /// Hintergrund der Startseite
-    static let homeBackground = Color(.systemGroupedBackground)
+    /// Hintergrund der Startseite; dunkel #1F232B (SolidCraft file_background)
+    static let homeBackground = Color(SketchTheme.dynamic(light: .systemGroupedBackground,
+                                                          dark: SketchTheme.uiRGB(31, 35, 43)))
+    /// Dunkles Farbschema (Anthrazit) mit allen SolidCraft-Werten
+    typealias Sketch = SketchTheme
+    /// Schatten im Dunkeln stärker, sonst verschwänden sie auf dem Anthrazit-Grund
+    static let darkShadowFactor: Double = 3.5
     /// Hinterlegung der gewählten Zeile in Listen
     static let rowHighlight = Color.accentColor.opacity(0.14)
 
@@ -96,13 +103,17 @@ struct FloatingShape<S: InsettableShape, Fill: ShapeStyle>: View {
     let fill: Fill
     var elevation: Elevation = .raised
 
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
+        let factor: Double = colorScheme == .dark ? Theme.darkShadowFactor : 1
+        let opacity: Double = min(elevation.shadowOpacity * factor, 0.6)
         shape
             .fill(fill)
             .overlay {
                 shape.strokeBorder(elevation.hasBorder ? Theme.hairline : Color.clear, lineWidth: Theme.hairlineWidth)
             }
-            .shadow(color: .black.opacity(elevation.shadowOpacity), radius: elevation.shadowRadius, y: elevation.shadowY)
+            .shadow(color: .black.opacity(opacity), radius: elevation.shadowRadius, y: elevation.shadowY)
     }
 }
 

@@ -300,8 +300,8 @@ final class ViewportView: MTKView {
         tapGesture = tap
 
         valueLabel.font = .monospacedDigitSystemFont(ofSize: 15, weight: .semibold)
-        valueLabel.textColor = .black
-        valueLabel.backgroundColor = .white
+        valueLabel.textColor = SketchTheme.UI.valueText
+        valueLabel.backgroundColor = SketchTheme.UI.valueBackground
         valueLabel.layer.cornerRadius = 9
         valueLabel.layer.borderWidth = 1.5
         valueLabel.layer.borderColor = UIColor(red: 0.2, green: 0.55, blue: 0.95, alpha: 1).cgColor
@@ -442,8 +442,8 @@ final class ViewportView: MTKView {
         }
         if snapHintLabel.superview == nil {
             snapHintLabel.font = .systemFont(ofSize: 12, weight: .semibold)
-            snapHintLabel.textColor = .white
-            snapHintLabel.backgroundColor = UIColor(red: 0.98, green: 0.45, blue: 0.05, alpha: 0.92)
+            snapHintLabel.textColor = SketchTheme.UI.snapHintText
+            snapHintLabel.backgroundColor = SketchTheme.UI.snapHintBackground
             snapHintLabel.layer.cornerRadius = 8
             snapHintLabel.layer.masksToBounds = true
             snapHintLabel.isUserInteractionEnabled = false
@@ -490,25 +490,67 @@ final class ViewportView: MTKView {
 
     // MARK: Linien und Bereiche
 
-    private static let sketchInk = SIMD3<Float>(0.05, 0.06, 0.09)
-    /// Skizzenlinien in Graphit (Kai, Variante 1): sRGB #2F3440, hier linear (Ausgabe ist sRGB).
-    /// Gilt beim Zeichnen und für freie fertige Linien, mit 1,6 pt Strich und Endpunkten r 2,6 pt.
-    private static let sketchGraphite = SIMD3<Float>(0.0284, 0.0343, 0.0513)
+    // Farben hell (bisher, Shapr3D) bzw. dunkel (Anthrazit nach SolidCraft, SketchTheme.swift) je nach „Helles Design“.
+    private static func themed(_ light: SIMD3<Float>, _ dark: SIMD3<Float>) -> SIMD3<Float> {
+        AppTheme.isDark ? dark : light
+    }
+
+    /// Fadenkreuz des schwebenden Stifts (dunkel: Text #DEE2E8)
+    private static var sketchInk: SIMD3<Float> { themed(SIMD3<Float>(0.05, 0.06, 0.09), SketchTheme.Metal.text) }
+    /// Freie (unterbestimmte) Skizzenlinien: hell Graphit #2F3440 (Kai, Variante 1), dunkel SolidCraft-Blau #5C96FF
+    /// (Graphit wäre auf Anthrazit unsichtbar). Linear (Ausgabe ist sRGB). Gilt beim Zeichnen und für freie
+    /// fertige Linien, mit 1,6 pt Strich und Endpunkten r 2,6 pt.
+    private static var sketchGraphite: SIMD3<Float> {
+        themed(SIMD3<Float>(0.0284, 0.0343, 0.0513), SketchTheme.Metal.sketch)
+    }
     /// Gleicher bzw. gespiegelter Winkel beim Zeichnen (Vorschau und Bezugslinie)
-    private static let angleMatchGreen = SIMD3<Float>(0.08, 0.62, 0.2)
+    private static var angleMatchGreen: SIMD3<Float> {
+        themed(SIMD3<Float>(0.08, 0.62, 0.2), SketchTheme.Metal.sketchLocked)
+    }
     private static let sketchLineWidth: Float = 1.6
     private static let sketchPointRadius: Float = 2.6
-    /// Profilfläche: Graphit mit 14 % Deckkraft statt der blauen Tönung
-    private static let profileTint = SIMD4<Float>(0.0284, 0.0343, 0.0513, 0.14)
-    private static let definedGreen = SIMD3<Float>(0.08, 0.55, 0.22)
-    private static let previewBlue = SIMD3<Float>(0.05, 0.4, 0.98)
-    private static let snapOrange = SIMD3<Float>(0.98, 0.45, 0.05)
-    private static let constructionGray = SIMD3<Float>(0.4, 0.42, 0.48)
-    private static let selectionOrange = SIMD3<Float>(0.98, 0.5, 0.06)
-    private static let helperOrange = SIMD3<Float>(0.93, 0.55, 0.16)
-    private static let dimensionInk = SIMD3<Float>(0.18, 0.2, 0.26)
+    /// Profilfläche: hell Graphit mit 14 % Deckkraft, dunkel SolidCraft profile_fill (120,150,200, α 40)
+    private static var profileTint: SIMD4<Float> {
+        AppTheme.isDark ? SketchTheme.Metal.profileFill : SIMD4<Float>(0.0284, 0.0343, 0.0513, 0.14)
+    }
+    /// Vollständig bestimmt: hell grün, dunkel weiß #E8EAEE (SolidCraft sketch_fixed)
+    private static var definedGreen: SIMD3<Float> {
+        themed(SIMD3<Float>(0.08, 0.55, 0.22), SketchTheme.Metal.sketchFixed)
+    }
+    /// Griffe, Hilfspunkte, Knoten: dunkel rubber_band #5CA0FF
+    private static var previewBlue: SIMD3<Float> {
+        themed(SIMD3<Float>(0.05, 0.4, 0.98), SketchTheme.Metal.rubberBand)
+    }
+    /// Fang: dunkel grün #46BE78 (SolidCraft sketch_ink), damit es sich von der orangen Konstruktion abhebt
+    private static var snapOrange: SIMD3<Float> {
+        themed(SIMD3<Float>(0.98, 0.45, 0.05), SketchTheme.Metal.snap)
+    }
+    /// Konstruktion: dunkel orange gestrichelt #E68228
+    private static var constructionGray: SIMD3<Float> {
+        themed(SIMD3<Float>(0.4, 0.42, 0.48), SketchTheme.Metal.construction)
+    }
+    /// Gewählt: dunkel #007FFF (SolidCraft sel_edge)
+    private static var selectionOrange: SIMD3<Float> {
+        themed(SIMD3<Float>(0.98, 0.5, 0.06), SketchTheme.Metal.selection)
+    }
+    /// Hilfslinien (Tangentengriffe, Mittellinien gemerkter Punkte): dunkel Bernstein #ECAA46
+    private static var helperOrange: SIMD3<Float> {
+        themed(SIMD3<Float>(0.93, 0.55, 0.16), SketchTheme.Metal.warning)
+    }
+    /// Maßlinien: dunkel #E0E4EA
+    private static var dimensionInk: SIMD3<Float> {
+        themed(SIMD3<Float>(0.18, 0.2, 0.26), SketchTheme.Metal.dimension)
+    }
     /// Spur beim Beschneiden per Wischen
-    private static let cutRed = SIMD3<Float>(0.9, 0.15, 0.12)
+    private static var cutRed: SIMD3<Float> { themed(SIMD3<Float>(0.9, 0.15, 0.12), SketchTheme.Metal.error) }
+    /// Fertige Skizzen im 3D-Modus: dunkel weiß #E8EAEE (sketch_fixed)
+    private static var storedSketchInk: SIMD3<Float> {
+        themed(SIMD3<Float>(0.12, 0.14, 0.2), SketchTheme.Metal.sketchFixed)
+    }
+    /// Andere fertige Skizzen, während eine Skizze bearbeitet wird (gedämpft)
+    private static var otherSketchInk: SIMD3<Float> {
+        themed(SIMD3<Float>(0.36, 0.38, 0.44), SketchTheme.Metal.otherSketch)
+    }
     private static let axes: [(SIMD3<Float>, SIMD3<Float>)] = [
         ([1, 0, 0], [0.78, 0.16, 0.11]),
         ([0, 1, 0], [0.17, 0.52, 0.2]),
@@ -538,7 +580,7 @@ final class ViewportView: MTKView {
             let origin = SIMD3<Float>(sketch.plane.origin)
             for (axis, color) in Self.axes where abs(simd_dot(axis, normal)) < 1e-4 && abs(simd_dot(origin, normal)) < 1e-3 {
                 // Aufgehellt zum Hintergrund hin, damit die Linien nicht mit Skizzenlinien verwechselt werden
-                let soft = color * 0.55 + SIMD3<Float>(repeating: 0.845) * 0.45
+                let soft = AppTheme.towardBackground(color, 0.45)
                 groups.append(LineGroup(polylines: [[-axis * reach, axis * reach]], color: soft, width: 1, onTop: false))
             }
         }
@@ -562,7 +604,7 @@ final class ViewportView: MTKView {
                 ? SIMD3<Float>(model.moveOffset) : SIMD3<Float>(0, 0, 0)
             let move = { (line: [SIMD3<Float>]) in line.map { $0 + shift } }
             groups.append(LineGroup(polylines: stored.lines.map(move),
-                                    color: sketching ? SIMD3(0.36, 0.38, 0.44) : SIMD3(0.12, 0.14, 0.2),
+                                    color: sketching ? Self.otherSketchInk : Self.storedSketchInk,
                                     width: 1.8, onTop: false))
             if !stored.constructionLines.isEmpty {
                 groups.append(LineGroup(polylines: stored.constructionLines.flatMap { dashed(move($0), dash: Float(4 * perPoint)) },
@@ -1518,7 +1560,7 @@ final class ViewportView: MTKView {
                 let isStepAngle = dimension.id == "live-angle" && dimension.value.isFinite
                     && abs(dimension.value) < 1e6 && Int(dimension.value.rounded()) % 15 == 0
                 field.textColor = isStepAngle || (dimension.id == "live-angle" && sketch.angleCandidate)
-                    ? .systemRed : .black
+                    ? UIColor.systemRed : SketchTheme.UI.fieldText
             }
             field.lockState = dimension.lockState
             let id = dimension.id
@@ -1823,11 +1865,11 @@ final class ViewportView: MTKView {
             let label = PaddedLabel()
             label.insets = UIEdgeInsets(top: 1, left: 4, bottom: 1, right: 4)
             label.font = .systemFont(ofSize: 9, weight: .medium)
-            label.textColor = UIColor(white: 0.35, alpha: 1)
-            label.backgroundColor = UIColor(white: 1, alpha: 0.8)
+            label.textColor = SketchTheme.UI.glyphText
+            label.backgroundColor = SketchTheme.UI.glyphBackground
             label.layer.cornerRadius = 4
             label.layer.borderWidth = 0.5
-            label.layer.borderColor = UIColor(white: 0.75, alpha: 1).cgColor
+            label.layer.borderColor = SketchTheme.UI.glyphEdge.resolvedColor(with: traitCollection).cgColor
             label.layer.masksToBounds = true
             label.isUserInteractionEnabled = false
             addSubview(label)
@@ -2988,8 +3030,8 @@ final class DimensionField: UITextField {
         inputView = UIView(frame: .zero)
         inputAssistantItem.leadingBarButtonGroups = []
         inputAssistantItem.trailingBarButtonGroups = []
-        backgroundColor = .white
-        textColor = .black
+        backgroundColor = SketchTheme.UI.field
+        textColor = SketchTheme.UI.fieldText
         layer.cornerRadius = 5
         layer.borderWidth = 0.75
         prefixLabel.font = .systemFont(ofSize: 11, weight: .regular)
@@ -3027,15 +3069,17 @@ final class DimensionField: UITextField {
             // Nur das Schloss: kein Rahmen, leicht hinterlegt, damit es auf Linien lesbar bleibt
             layer.borderWidth = 0
             layer.cornerRadius = 9
-            backgroundColor = UIColor.white.withAlphaComponent(0.75)
+            backgroundColor = SketchTheme.UI.fieldCollapsed
             isUserInteractionEnabled = true
             return
         }
         layer.cornerRadius = 5
         layer.borderWidth = isFine ? 0.5 : 0.75
-        backgroundColor = UIColor.white.withAlphaComponent(isFine ? 0.8 : 0.92)
+        let fieldColor: UIColor = lockState == true ? SketchTheme.UI.fieldLocked : SketchTheme.UI.field
+        backgroundColor = fieldColor.withAlphaComponent(isFine ? 0.8 : 0.92)
+        let neutralBorder: UIColor = SketchTheme.UI.fieldBorder.resolvedColor(with: traitCollection)
         layer.borderColor = (lockState == false ? UIColor.systemRed.withAlphaComponent(0.7)
-            : allowsEditing ? UIColor.systemBlue.withAlphaComponent(0.55) : UIColor.systemGray4).cgColor
+            : allowsEditing ? UIColor.systemBlue.withAlphaComponent(0.55) : neutralBorder).cgColor
         isUserInteractionEnabled = allowsEditing || lockState != nil
     }
 

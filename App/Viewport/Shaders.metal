@@ -331,6 +331,28 @@ fragment float4 fragment_flat(VertexOut in [[stage_in]],
     return color;
 }
 
+/// Raster: Farbe und Ausblenden zum Rand (SolidCraft GridFade). center.xyz = Mitte der Ansicht auf der
+/// Rasterebene (Welt), range.x = Abstand, ab dem das Raster dimmt, range.y = Abstand, ab dem es verschwunden ist.
+struct GridStyle {
+    float4 color;
+    float4 center;
+    float4 range;
+};
+
+/// Rasterlinien mit weichem Rand statt hartem Abbruch (linear zwischen range.x und range.y).
+fragment float4 fragment_grid(VertexOut in [[stage_in]],
+                              constant GridStyle &style [[buffer(2)]]) {
+    float d = distance(in.world, style.center.xyz);
+    float start = style.range.x;
+    float end = style.range.y;
+    float alpha = 1.0f;
+    if (end > start) {
+        alpha = saturate((end - d) / (end - start));
+    }
+    if (alpha < 0.004f) discard_fragment();
+    return float4(style.color.rgb, style.color.a * alpha);
+}
+
 /// Einfarbig in Vertexfarbe (breite Linien, Fangsymbole).
 fragment float4 fragment_color(VertexOut in [[stage_in]]) {
     return float4(in.color, 1.0);
