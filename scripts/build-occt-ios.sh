@@ -3,11 +3,12 @@
 # und packt sie nach Vendor/OCCT.xcframework.
 #
 # Voraussetzungen: Xcode, cmake (brew install cmake), git.
-# Gebaut werden nur die Module FoundationClasses, ModelingData und ModelingAlgorithms.
-# DataExchange (STEP) folgt in Phase 3, Visualization brauchen wir nicht (eigener Metal-Renderer).
+# Gebaut werden die Module FoundationClasses, ModelingData und ModelingAlgorithms plus TKSTEP für
+# STEP-Import/-Export. Visualization brauchen wir nicht (eigener Metal-Renderer).
+# Version 7.7.2, weil TKSTEP dort noch ohne XCAF/Visualization auskommt.
 set -euo pipefail
 
-OCCT_TAG="${OCCT_TAG:-V7_8_1}"
+OCCT_TAG="${OCCT_TAG:-V7_7_2}"
 DEPLOYMENT_TARGET="${DEPLOYMENT_TARGET:-17.0}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="$ROOT/build/occt"
@@ -25,6 +26,9 @@ build_platform() {
   local build_dir="$WORK/build-$name"
   local install_dir="$WORK/install-$name"
 
+  # Abgebrochene Konfiguration verwerfen, sonst bleiben alte Cache-Werte hängen
+  [ -f "$build_dir/CMakeCache.txt" ] && [ ! -f "$build_dir/Makefile" ] && rm -rf "$build_dir"
+
   cmake -S "$SRC" -B "$build_dir" \
     -DCMAKE_SYSTEM_NAME=iOS \
     -DCMAKE_OSX_SYSROOT="$sdk" \
@@ -32,6 +36,7 @@ build_platform() {
     -DCMAKE_OSX_DEPLOYMENT_TARGET="$DEPLOYMENT_TARGET" \
     -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
     -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     -DBUILD_LIBRARY_TYPE=Static \
     -DINSTALL_DIR="$install_dir" \
     -DBUILD_MODULE_FoundationClasses=ON \
@@ -41,6 +46,7 @@ build_platform() {
     -DBUILD_MODULE_ApplicationFramework=OFF \
     -DBUILD_MODULE_DataExchange=OFF \
     -DBUILD_MODULE_Draw=OFF \
+    -DBUILD_ADDITIONAL_TOOLKITS="TKSTEP" \
     -DBUILD_DOC_Overview=OFF \
     -DUSE_FREETYPE=OFF \
     -DUSE_TK=OFF
@@ -51,7 +57,7 @@ build_platform() {
   # Alle Teilbibliotheken zu einer libOCCT.a zusammenfassen
   local libs
   libs=$(find "$install_dir" -name "libTK*.a")
-  libtool -static -o "$install_dir/libOCCT.a" $libs
+  libtool -static -no_warning_for_no_symbols -o "$install_dir/libOCCT.a" $libs
 }
 
 build_platform iphoneos device
