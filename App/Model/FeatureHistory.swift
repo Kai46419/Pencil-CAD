@@ -179,6 +179,10 @@ struct FeatureData: Codable {
     var divides: Bool?
     var closed: Bool?
     var snapshot: SnapshotInfo?
+    /// Neuer Körper: jeder Skizzenbereich ein eigener Körper (separatedParts). Fehlt in älteren Ständen: dort wurden
+    /// angrenzende Bereiche zusammengefasst und berührende Teile verschmolzen – beim Nachbau ebenso, damit die
+    /// Körpernummern späterer Schritte stimmen.
+    var separateParts: Bool?
 }
 
 /// Ein Schritt im parametrischen Verlauf.
@@ -291,6 +295,7 @@ extension ModelStore {
         feature.data.throughHoles = regionThroughHoles
         feature.data.onFace = plane.isOnFace
         feature.data.target = unionTarget(plane.sourceBody)
+        feature.data.separateParts = true
         featureRecorder.preview = PendingFeature(feature: feature, regions: selectedRegions)
     }
 
@@ -304,6 +309,7 @@ extension ModelStore {
         feature.data.origin = axisOrigin
         feature.data.axis = axis
         feature.data.target = unionTarget(sketches[first.sketch].plane.sourceBody)
+        feature.data.separateParts = true
         featureRecorder.preview = PendingFeature(feature: feature, regions: selectedRegions)
     }
 
@@ -865,7 +871,10 @@ extension ModelStore {
         var plane = sketch.plane
         if let onFace = feature.data.onFace { plane.isOnFace = onFace }
         let chosen: [SketchRegion] = entries.filter { $0.sketch.id == sketch.id }.map { $0.region }
-        let regions = feature.data.throughHoles == true ? Self.filledForFeature(chosen) : chosen
+        let filled = feature.data.throughHoles == true ? Self.filledForFeature(chosen) : chosen
+        let separate = feature.data.separateParts == true
+        // Ältere Stände: angrenzende Bereiche wie damals zu einem Profil zusammengefasst
+        let regions = separate || feature.data.thin == true ? filled : SketchRegionMerge.merged(filled)
         let mode = ExtrudeMode(rawValue: feature.data.mode ?? "") ?? .newBody
         let direction = ExtrudeDirection(rawValue: feature.data.direction ?? "") ?? .oneSide
         let distance = feature.value("distance") ?? 0
@@ -881,7 +890,8 @@ extension ModelStore {
                                    secondDistance: second, taper: feature.value("taper") ?? 0)
         }
         guard let solid else { throw FeatureError("Bereich lässt sich nicht extrudieren.") }
-        return try Self.combine(solid, into: state, target: feature.data.target, mode: mode, sketch: sketch.id)
+        return try Self.combine(solid, into: state, target: feature.data.target, mode: mode, sketch: sketch.id,
+                                separate: separate)
     }
 
     /// Wie thinExtrudeRegions, mit festen Werten statt der Werkzeugeinstellungen.
@@ -938,16 +948,19 @@ extension ModelStore {
         let combined: PCKShape? = shapes.count == 1 ? shapes.first : PCKShape.compound(shapes)
         guard let solid = combined else { throw FeatureError("Drehen nicht möglich.") }
         let mode = ExtrudeMode(rawValue: feature.data.mode ?? "") ?? .newBody
-        return try Self.combine(solid, into: state, target: feature.data.target, mode: mode, sketch: entries[0].sketch.id)
+        return try Self.combine(solid, into: state, target: feature.data.target, mode: mode, sketch: entries[0].sketch.id,
+                                separate: feature.data.separateParts == true)
     }
 
     /// Wie extrusionResult, aber auf einem Zwischenstand.
+    /// separate: jeder Teil des Verbunds ein eigener Körper (sonst berührende verschmolzen, ältere Stände).
     private static func combine(_ solid: PCKShape, into state: [SceneBody], target: Int?, mode: ExtrudeMode,
-                                sketch: UUID?) throws -> [SceneBody] {
+                                sketch: UUID?, separate: Bool) throws -> [SceneBody] {
         switch mode {
         case .newBody:
             var result = state
-            for part in solid.separatedParts() {
+            let parts: [PCKShape] = separate ? solid.separatedParts() : solid.separatedSolids()
+            for part in parts {
                 let color = SceneBody.palette[result.count % SceneBody.palette.count]
                 result.append(SceneBody(shape: part, name: "Körper \(result.count + 1)", color: color, sketchID: sketch))
             }
