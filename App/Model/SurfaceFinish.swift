@@ -44,6 +44,16 @@ struct SurfaceAppearance: Equatable {
         let codes = SIMD3<Float>(level, bits, Float(pattern.rawValue))
         return color + codes
     }
+
+    /// Anteil „matt“ 0…1 wie matteAmount in Shaders.metal (auf der kodierten Glanzstufe): matte Oberflächen
+    /// zeigen keine Umgebungsspiegelung, keinen Klarlack und nur einen schwachen, breiten Schimmer.
+    var matteAmount: Float {
+        if clearcoat { return 0 }
+        let level: Float = ((1 - min(max(roughness, 0), 1)) * 16).rounded()
+        let rough: Float = 1 - level / 16
+        let t: Float = min(max((rough - 0.43) / 0.06, 0), 1)
+        return t * t * (3 - 2 * t)
+    }
 }
 
 /// Glanzstufe für eigene Farben.

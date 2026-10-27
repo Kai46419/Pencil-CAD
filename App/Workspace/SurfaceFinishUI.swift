@@ -50,7 +50,8 @@ struct FinishSwatch: View {
 
     private var baseFill: AnyShapeStyle {
         let albedo = appearance.albedo
-        if appearance.metallic {
+        // Matte Metalle wie in Shaders.metal diffus über ihre Farbe (keine Horizont-Spiegelung)
+        if appearance.metallic && appearance.matteAmount < 0.5 {
             // Metall: Spiegelung eines Horizonts (heller Himmel, dunkler Boden); matt = weicher, flauer Horizont
             let rough: Float = min(max(appearance.roughness, 0), 1)
             let half: Double = 0.05 + Double(rough) * 0.3
@@ -76,7 +77,10 @@ struct FinishSwatch: View {
     private var highlight: RadialGradient {
         let gloss: Double = Double(1 - appearance.roughness)
         let coat: Double = appearance.clearcoat ? 0.35 : 0
-        let strength: Double = min(gloss * gloss * 0.85 + coat, 0.95)
+        // Matt: nur ein schwacher, breiter Schimmer (höchstens wenige Prozent), wie im Shader
+        let matte: Double = Double(appearance.matteAmount)
+        let glossy: Double = min(gloss * gloss * 0.85 + coat, 0.95)
+        let strength: Double = glossy * (1 - matte) + 0.03 * gloss * matte
         let colors: [Color] = [Color.white.opacity(strength), Color.white.opacity(0)]
         return RadialGradient(colors: colors, center: UnitPoint(x: 0.32, y: 0.26), startRadius: 0,
                               endRadius: size * 0.32)

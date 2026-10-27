@@ -223,6 +223,13 @@ static float lampHighlight(float3 n, float3 h, float roughness, float3 tangent) 
     return highlight * strength;
 }
 
+/// Anteil „matt“ 0…1: ab Rauheit ~0,45 matt (weicher Übergang, damit Muster mit leicht schwankender Rauheit
+/// nicht flackern). Mit Klarlack nie matt – die Lackschicht glänzt. Muss zu SurfaceAppearance.matteAmount passen.
+static float matteAmount(Surface s) {
+    if (s.clearcoat > 0.5f) return 0.0f;
+    return smoothstep(0.43f, 0.49f, s.roughness);
+}
+
 /// Körper schattieren: matt ohne Muster wie bisher, sonst PBR-ähnlich mit Fresnel (Schlick, rauheitsabhängig),
 /// Spiegelung der Studio-Umgebung, Glanzlicht der Lampe und optionaler Klarlackschicht.
 static float3 shadeSurface(VertexOut in, constant Uniforms &uniforms, Surface s, float footprint) {
@@ -253,6 +260,19 @@ static float3 shadeSurface(VertexOut in, constant Uniforms &uniforms, Surface s,
     } else {
         float3 base = s.albedo * lambert * (float3(1.0f) - fresnel);
         color = base + env * fresnel * (1.0f - 0.5f * s.roughness) + float3(highlight * 0.6f);
+    }
+    // Matt (Kai: „bei mattem Werkstoff ohne Spiegelung“): keine Umgebungsspiegelung, Fresnel-Schlick-Roughness
+    // zusätzlich mit (1 − r)² gedämpft, nur ein breiter, schwacher Schimmer. Matte Metalle wirken über ihre
+    // Farbe diffus statt über die Spiegelung – sonst kippen sie je nach Blickwinkel nach schwarz oder weiß.
+    float matte = matteAmount(s);
+    if (matte > 0.0f) {
+        float gloss = 1.0f - s.roughness;
+        float3 dull = fresnel * (gloss * gloss);
+        float3 diffuseColor = s.albedo * (s.metallic > 0.5f ? 0.8f : 1.0f);
+        float3 sheenTint = mix(float3(1.0f), s.albedo, s.metallic);
+        float3 sheen = sheenTint * pow(saturate(dot(n, h)), 6.0f) * 0.03f * gloss;
+        float3 matteColor = diffuseColor * lambert * (float3(1.0f) - dull) + dull * lambert + sheen;
+        color = mix(color, matteColor, matte);
     }
     if (s.clearcoat > 0.5f) {
         // Klarlack: scharfe, farblose Spiegelung darüber
