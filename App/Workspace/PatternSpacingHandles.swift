@@ -59,8 +59,11 @@ extension Workspace {
         let middle: Point2 = (box.low + box.high) / 2
         let blue = Self.handleBlue
         let green = SIMD3<Float>(0.25, 0.7, 0.3)
-        let originX = SIMD3<Float>(plane.world(Point2(box.high.x, middle.y)))
-        let originY = SIMD3<Float>(plane.world(Point2(middle.x, box.high.y)))
+        // Negativer Abstand: Exemplare liegen auf der anderen Seite, Fuß dann an deren Außenkante
+        let edgeX: Double = sketch.patternSpacingX < 0 ? box.low.x : box.high.x
+        let edgeY: Double = sketch.patternSpacingY < 0 ? box.low.y : box.high.y
+        let originX = SIMD3<Float>(plane.world(Point2(edgeX, middle.y)))
+        let originY = SIMD3<Float>(plane.world(Point2(middle.x, edgeY)))
         let directionX = SIMD3<Float>(simd_normalize(plane.world(direction: Point2(1, 0))))
         let directionY = SIMD3<Float>(simd_normalize(plane.world(direction: Point2(0, 1))))
         return [
@@ -123,13 +126,16 @@ enum PatternRectHandles {
         let (d1, d2) = directions(cmd, ws.model)
         let w1 = PatternSpacingMath.width(half: box.half, along: d1)
         let w2 = PatternSpacingMath.width(half: box.half, along: d2)
-        let origin1: SIMD3<Double> = box.center + d1 * (w1 / 2)
-        let origin2: SIMD3<Double> = box.center + d2 * (w2 / 2)
+        let s1: Double = cmd.number(keySpacing, default: 20)
+        let s2: Double = cmd.number(keySpacing2, default: 20)
+        // Negativer Abstand: Exemplare liegen auf der anderen Seite, Fuß dann an deren Außenseite
+        let origin1: SIMD3<Double> = box.center + d1 * (s1 < 0 ? -w1 / 2 : w1 / 2)
+        let origin2: SIMD3<Double> = box.center + d2 * (s2 < 0 ? -w2 / 2 : w2 / 2)
         return [
             DragHandle(kind: .command(keySpacing), axisOrigin: SIMD3<Float>(origin1), direction: SIMD3<Float>(d1),
-                       value: cmd.number(keySpacing, default: 20), color: Workspace.handleBlue),
+                       value: s1, color: Workspace.handleBlue),
             DragHandle(kind: .command(keySpacing2), axisOrigin: SIMD3<Float>(origin2), direction: SIMD3<Float>(d2),
-                       value: cmd.number(keySpacing2, default: 20), color: SIMD3<Float>(0.25, 0.7, 0.3)),
+                       value: s2, color: SIMD3<Float>(0.25, 0.7, 0.3)),
         ]
     }
 
