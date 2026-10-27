@@ -621,7 +621,11 @@ final class SketchController: ObservableObject {
         var chainStart: Point2?
         var chainEnd: Point2?
     }
-    private var undoStack: [Snapshot] = []
+    private var undoStack: [Snapshot] = [] {
+        didSet { undoRevision &+= 1 }
+    }
+    /// Zählt jede Änderung des Rückgängig-Stapels (Formgenerator: Neuzeichnen nur, solange seit dem Setzen nichts geschah)
+    private(set) var undoRevision = 0
 
     private static let snapKindsKey = "snapKinds"
     /// Fangarten, die es beim letzten Speichern gab; neu hinzugekommene sind zunächst an

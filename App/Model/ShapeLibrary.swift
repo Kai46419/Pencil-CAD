@@ -140,6 +140,8 @@ struct ShapePlacement {
     var range: Range<Int>
     var fingerprint: [Point2]
     var constraintCount: Int
+    /// Stand des Rückgängig-Stapels nach dem Setzen (auch Änderungen ohne neue Punkte, z. B. Konstruktion, zählen)
+    var undoRevision: Int
 }
 
 /// Zustand des Formgenerators im Skizzen-Controller (`SketchController.generatedShape`).
@@ -448,7 +450,7 @@ enum ShapeGeometry {
     /// Kabelclip: C-Profil, oben offen (Öffnung etwas schmaler als der Innendurchmesser zum Einrasten).
     private static func cableClip(_ r: Double, inner: Double) -> [SketchEntity] {
         let ri = r * inner
-        let open = 0.7 * .pi / 2   // halber Öffnungswinkel ≈ 31,5°
+        let open = 0.7 * .pi / 2   // halber Öffnungswinkel 63° (Öffnung ≈ 0,89 × Innendurchmesser)
         func point(_ radius: Double, _ angle: Double) -> Point2 { radius * Point2(cos(angle), sin(angle)) }
         let a0 = .pi / 2 + open, a1 = .pi / 2 - open + 2 * .pi
         let mid = (a0 + a1) / 2

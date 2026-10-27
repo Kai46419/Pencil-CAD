@@ -86,7 +86,7 @@ extension SketchController {
         finishCommit(editable: nil)
         let range = base..<entities.count
         shape.placement = ShapePlacement(center: center, range: range, fingerprint: shapeFingerprint(range),
-                                         constraintCount: constraints.count)
+                                         constraintCount: constraints.count, undoRevision: undoRevision)
         generatedShape = shape
         var remembered = shape
         remembered.placement = nil
@@ -102,6 +102,7 @@ extension SketchController {
     var canEditPlacedShape: Bool {
         guard let placement = generatedShape?.placement else { return false }
         return placement.range.upperBound == entities.count && placement.constraintCount == constraints.count
+            && placement.undoRevision == undoRevision
             && shapeFingerprint(placement.range) == placement.fingerprint
     }
 
