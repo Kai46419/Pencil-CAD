@@ -10,12 +10,15 @@ struct WorkspaceView: View {
 
     var body: some View {
         WorkspaceContent(workspace: workspace, model: workspace.model, sketch: workspace.sketch, close: close)
+            // Anthrazit nach SolidCraft im ganzen Arbeitsbereich (Skizze und 3D), „Helles Design“ schaltet zurück
+            .appTheme()
     }
 }
 
 private struct WorkspaceContent: View {
     @EnvironmentObject private var projects: ProjectStore
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.colorScheme) private var colorScheme
     @ObservedObject var workspace: Workspace
     @ObservedObject var model: ModelStore
     @ObservedObject var sketch: SketchController
@@ -50,9 +53,12 @@ private struct WorkspaceContent: View {
         ZStack {
             Viewport(workspace: workspace, model: model, sketch: sketch)
                 .overlay {
-                    LinearGradient(colors: [Color.white.opacity(0.12), Color.white.opacity(0), Color.black.opacity(0.025)],
-                                   startPoint: .top, endPoint: .bottom)
-                        .allowsHitTesting(false)
+                    // Heller Schimmer nur im hellen Design; Anthrazit ohne Verlauf (SolidCraft: oben = unten)
+                    if colorScheme != .dark {
+                        LinearGradient(colors: [Color.white.opacity(0.12), Color.white.opacity(0), Color.black.opacity(0.025)],
+                                       startPoint: .top, endPoint: .bottom)
+                            .allowsHitTesting(false)
+                    }
                 }
                 .overlay {
                     if let location = workspace.quickToolsLocation {
