@@ -1459,6 +1459,9 @@ final class SketchController: ObservableObject {
     /// Stift drücken bzw. doppeltippen beim Schweben: liegt ein Fangpunkt (Ende, Mitte, Zentrum, Schnittpunkt,
     /// Hilfspunkt) unter dem Stift, wird er gemerkt. false = nichts in der Nähe.
     func captureHovered(at p: Point2, tolerance: Double) -> Bool {
+        // SolidCraft-Klickwerkzeug: ein einziger gemerkter Punkt liefert Objektfangspuren (SketchClickTool.swift),
+        // nochmal merken entmerkt ihn – keine Punktpaare für Abstand und Mitte
+        if options.isSolidCraft, clickKind != nil { return togglePinnedPoint(at: p, tolerance: tolerance) }
         // Auch Körperecken und Kantenmitten (3D-Leitpunkte): auf einer Körperfläche gibt es anfangs nur diese
         let kinds: Set<SnapKind> = [.endpoint, .midpoint, .center, .intersection, .modelPoint]
         guard snapIndex.snap(p, tolerance: tolerance * 1.5, kinds: kinds, extra: marks, gridStep: 0).kind != nil else {

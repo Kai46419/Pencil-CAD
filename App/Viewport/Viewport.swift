@@ -979,6 +979,18 @@ final class ViewportView: MTKView {
             let markers = tracked.flatMap { snapMarker($0.kind, at: $0.point, size: 3.5 * perPoint) }
             groups.append(LineGroup(polylines: markers.map { $0.map(world) }, color: Self.previewBlue, width: 1.2))
         }
+        // Spurpunkte (gemerkt bzw. Start des Linienzugs): kleines „+“, von dort laufen die Objektfangspuren
+        var spurPoints = sketch.click.pinned
+        if let first = sketch.click.chainFirst, !spurPoints.contains(where: { simd_distance($0, first) < 1e-9 }) {
+            spurPoints.append(first)
+        }
+        if !spurPoints.isEmpty {
+            let s = 4.5 * perPoint
+            let pluses = spurPoints.prefix(16).flatMap { p -> [[Point2]] in
+                [[p - Point2(s, 0), p + Point2(s, 0)], [p - Point2(0, s), p + Point2(0, s)]]
+            }
+            groups.append(LineGroup(polylines: pluses.map { $0.map(world) }, color: Self.previewBlue, width: 1.6))
+        }
         guard let candidate else { return }
         // Hilfslinien: Leitlinie (guide) wie früher orange 1,3 pt, weitere (guides) etwas dünner
         if let guide = candidate.guide, simd_distance(guide.0, guide.1) > 1e-9 {
@@ -3057,7 +3069,7 @@ final class ViewportView: MTKView {
         showQuickTools(at: location ?? lastHoverLocation)
     }
 
-    /// Stift schwebt 1 s ruhig (innerhalb weniger Punkte) über einem Fangpunkt: Punkt merken.
+    /// Stift schwebt 1 s (SolidCraft-Klickwerkzeug 0,5 s) ruhig über einem Fangpunkt: Punkt merken bzw. entmerken.
     private func updateHoverDwell(at location: CGPoint?) {
         guard let location else {
             hoverDwell?.cancel()
@@ -3082,7 +3094,9 @@ final class ViewportView: MTKView {
             }
         }
         hoverDwell = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: work)
+        // SolidCraft-Klickwerkzeug: Spurpunkt schon nach 0,5 s merken bzw. entmerken (Objektfangspur)
+        let solidClick = sketch?.options.isSolidCraft == true && sketch?.clickKind != nil
+        DispatchQueue.main.asyncAfter(deadline: .now() + (solidClick ? 0.5 : 1), execute: work)
     }
 
     /// Doppeltippen mit dem Finger auf einen Fangpunkt: Punkt merken (wie 1 s Schweben mit dem Stift).

@@ -106,6 +106,9 @@ struct SketchClickState {
     var mmPerPoint = 0.1
     /// Gemerkte Fangpunkte (zuletzt berührte bzw. gesetzte Punkte) für die Ausrichtung, die neuesten zuletzt
     var tracked: [(kind: SnapKind, point: Point2)] = []
+    /// Ausdrücklich gemerkte Spurpunkte (Stift 0,5 s schweben lassen, Stift drücken, Finger-Doppeltipp; nochmal
+    /// entmerkt): liefern Objektfangspuren (SketchInference.trackLeads), die neuesten zuletzt
+    var pinned: [Point2] = []
 
     var isEmpty: Bool { points.isEmpty && picks.isEmpty }
 }
@@ -181,7 +184,13 @@ extension SketchController {
             if tracking.angleSteps { tracking.previous = previousSegment() }
         }
         guard snapKinds.contains(.alignment) else { return tracking }
-        var points = click.tracked.map { $0.point } + click.points.map(\.point)
+        // Spurpunkte: Start des Linienzugs (immer) und die ausdrücklich gemerkten
+        var traces: [Point2] = []
+        var sources: [Point2] = Array(click.pinned.reversed())
+        if let first = click.chainFirst { sources.insert(first, at: 0) }
+        for p in sources where !traces.contains(where: { simd_distance($0, p) < 1e-9 }) { traces.append(p) }
+        tracking.traces = traces
+        var points = click.tracked.map { $0.point } + click.points.map(\.point) + click.pinned
         if let first = click.chainFirst { points.append(first) }
         points += inference.alignmentPoints(near: raw, reach: metrics.alignReach, kinds: snapKinds)
         var unique: [Point2] = []
@@ -212,6 +221,8 @@ extension SketchController {
     /// (z. B. nach Rückgängig) fallen weg; angezeigt werden die Fangpunkte in Stiftnähe und die gemerkten.
     private func updateTracking(_ snapped: SnapCandidate, raw: Point2, metrics: SnapMetrics) {
         click.tracked.removeAll { !inference.holds($0.point) }
+        let placed = click.points.map(\.point)
+        click.pinned.removeAll { q in !inference.holds(q) && !placed.contains { simd_distance($0, q) < 1e-9 } }
         if let kind = inference.trackKind(snapped.target, at: snapped.point) { rememberTracked(kind, snapped.point) }
         var shown = inference.trackedNodes(near: raw, radius: metrics.trackRadius, kinds: snapKinds,
                                            extra: click.points.map(\.point))
@@ -219,6 +230,37 @@ extension SketchController {
             shown.append(item)
         }
         clickTrackedPoints = shown
+    }
+
+    /// Höchstens so viele ausdrücklich gemerkte Spurpunkte
+    private static let pinnedLimit = 6
+
+    /// Spurpunkt unter dem Stift merken bzw. wieder entmerken (Stift 0,5 s schweben lassen, Stift drücken,
+    /// Finger-Doppeltipp; Sketch.captureHovered). Ein einziger gemerkter Punkt liefert sofort Spuren.
+    /// false = kein Punktfang (Ende, Mitte, Zentrum, Schnitt, Körperecke) in der Nähe.
+    func togglePinnedPoint(at raw: Point2, tolerance: Double) -> Bool {
+        let metrics = snapMetrics(tolerance)
+        let kinds = snapKinds.union([SnapKind.endpoint, .midpoint, .center, .intersection, .modelPoint])
+        let extra = click.points.map(\.point) + marks
+        let found = inference.refine(raw, prev: nil, lineTool: false, metrics: metrics, midOnly: false, kinds: kinds,
+                                     extra: extra, woken: wokenCenter, fineStep: 0, gridOn: false)
+        guard let kind = inference.trackKind(found.target, at: found.point) else { return false }
+        let p = found.point
+        if let index = click.pinned.firstIndex(where: { simd_distance($0, p) < 1e-9 }) {
+            click.pinned.remove(at: index)
+            notice = "Punkt nicht mehr gemerkt."
+        } else {
+            click.pinned.append(p)
+            if click.pinned.count > Self.pinnedLimit {
+                click.pinned.removeFirst(click.pinned.count - Self.pinnedLimit)
+            }
+            rememberTracked(kind, p)
+            notice = "Punkt gemerkt – Spuren aktiv (gestrichelt senkrecht zu den Linien daran, waagerecht und senkrecht)."
+        }
+        // Schwebt der Stift noch: Fang neu bestimmen, damit die Spur gleich erscheint
+        if click.press == nil, click.hover != nil, let last = click.raw { clickHover(at: last, tolerance: tolerance) }
+        changed()
+        return true
     }
 
     /// SolidCraft `wake_centre`: der Rand eines Kreises bzw. Bogens unter dem Stift weckt dessen Mitte; sie bleibt

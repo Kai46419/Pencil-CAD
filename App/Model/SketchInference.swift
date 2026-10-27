@@ -128,6 +128,9 @@ struct SnapTracking {
     var previous: (direction: Point2, ref: SketchCurveRef)?
     /// Punkte für die Ausrichtung waagerecht/senkrecht (gemerkte Fangpunkte, Punkte der laufenden Eingabe)
     var points: [Point2] = []
+    /// Spurpunkte (Objektfangspur): Start des laufenden Linienzugs und per Schweben, Drücken bzw. Doppeltippen
+    /// gemerkte Punkte – dort zusätzlich Spuren senkrecht zu jeder anliegenden schrägen Linie (trackLeads)
+    var traces: [Point2] = []
 }
 
 /// Leitlinie eines Fangs: Strahl ab origin in Richtung dir (Einheitsvektor, zum Stift hin), gültig ab minAlong,
@@ -591,6 +594,41 @@ struct SketchInference {
                                        weight: 1.1, target: .aligned, label: "↔", rounding: .coordinate))
                 result.append(SnapLead(origin: q, dir: Point2(0, lp.y < q.y ? -1 : 1), minAlong: tol, reach: tol,
                                        weight: 1.1, target: .aligned, label: "↕", rounding: .coordinate))
+            }
+            // Spuren an gemerkten Punkten (senkrecht zu anliegenden Linien)
+            result += trackLeads(lp, prev: prev, metrics: metrics, sources: tracking.traces)
+        }
+        return result
+    }
+
+    /// Objektfangspuren (wie AutoCAD „Objektfangspur“, Kai: gedrehtes Viereck mit 90° schließen): an jedem
+    /// Spurpunkt eine gestrichelte Spur senkrecht zu jeder dort anliegenden bzw. durchlaufenden schrägen Linie.
+    /// Waagerecht/senkrecht übernimmt die Ausrichtung (↔, ↕), parallel die Verlängerung („Ext“). Die Spur stellt
+    /// keine Bedingung (.aligned, rank 4): kreuzt sie die Leitlinie vom vorigen Punkt, bestimmt jene die Bedingung;
+    /// die Rechtwinkligkeit zur Spur entsteht erst mit dem nächsten Stück aus der genauen Lage. Höchstens 8
+    /// Spurpunkte, nur bis alignReach vom Stift.
+    func trackLeads(_ lp: Point2, prev: Point2?, metrics: SnapMetrics, sources: [Point2]) -> [SnapLead] {
+        let tol = metrics.refine
+        var result: [SnapLead] = []
+        for q in sources.prefix(8) {
+            guard simd_distance(q, lp) <= metrics.alignReach else { continue }
+            // Am vorigen Punkt übernimmt der Winkel zum vorigen Stück („⊥“)
+            if let prev, simd_distance(q, prev) < 1e-9 { continue }
+            var normals: [Point2] = []
+            for curve in curves where !curve.construction {
+                guard case .line(let a, let b) = curve.shape, curve.shape.distance(to: q) < 1e-6 else { continue }
+                let l = simd_distance(a, b)
+                guard l > 1e-9 else { continue }
+                let d = (b - a) / l
+                // Achsparallele Linie: die Senkrechte ist ↔ bzw. ↕
+                guard abs(d.x) >= 1e-9, abs(d.y) >= 1e-9 else { continue }
+                let n = Point2(-d.y, d.x)
+                // Gleiche Richtung schon da (zwei Linien auf einer Geraden)
+                if normals.contains(where: { abs($0.x * n.y - $0.y * n.x) < 1e-9 }) { continue }
+                normals.append(n)
+                let dir = simd_dot(lp - q, n) < 0 ? -n : n
+                result.append(SnapLead(origin: q, dir: dir, minAlong: tol, reach: tol, weight: 1.05, target: .aligned,
+                                       label: "⊥", rounding: .length))
             }
         }
         return result
