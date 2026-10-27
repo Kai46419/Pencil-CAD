@@ -68,6 +68,8 @@ final class ViewportView: MTKView {
     private var orbitGesture: UIPanGestureRecognizer?
     private var panGesture: UIPanGestureRecognizer?
     private var pinchGesture: UIPinchGestureRecognizer?
+    /// Weltpunkt, auf den die laufende Pinch-Geste zoomt
+    private var pinchAnchor: SIMD3<Float>?
     private var tapGesture: UITapGestureRecognizer?
     /// Finger doppeltippen = Punkt merken (im Zeichenwerkzeug mit zeichnendem Finger aus)
     private var doubleTapGesture: UITapGestureRecognizer?
@@ -3215,9 +3217,30 @@ final class ViewportView: MTKView {
     }
 
     @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
-        renderer?.camera.zoom(by: Float(gesture.scale))
+        guard let renderer else { return }
+        if gesture.state == .began { pinchAnchor = zoomAnchor(at: gesture.location(in: self)) }
+        if let anchor = pinchAnchor {
+            renderer.camera.zoom(by: Float(gesture.scale), toward: anchor)
+        } else {
+            renderer.camera.zoom(by: Float(gesture.scale))
+        }
         gesture.scale = 1
+        if gesture.state == .ended || gesture.state == .cancelled || gesture.state == .failed { pinchAnchor = nil }
         refresh()
+    }
+
+    /// Punkt unter den Fingern beim Ansetzen des Zooms: getroffene Körperfläche, sonst die Ebene durch das Ziel
+    /// quer zur Blickrichtung. Einmal je Geste, das Treffen ist bei großen STL-Netzen teuer.
+    private func zoomAnchor(at location: CGPoint) -> SIMD3<Float>? {
+        guard let renderer else { return nil }
+        let camera = renderer.camera
+        guard let ray = camera.ray(through: location, viewSize: bounds.size) else { return nil }
+        if let hit = model?.pick(origin: ray.origin, direction: ray.direction),
+           camera.isOrthographic || simd_dot(hit.point - camera.position, camera.forward) > 0 {
+            return hit.point
+        }
+        return camera.intersect(screenPoint: location, viewSize: bounds.size,
+                                planeOrigin: camera.target, planeNormal: camera.forward)
     }
 }
 

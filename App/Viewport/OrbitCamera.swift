@@ -10,6 +10,10 @@ struct OrbitCamera {
     let fieldOfView: Float = 45 * .pi / 180
     /// Parallelprojektion statt Perspektive (Schalter „Projektion“).
     var isOrthographic = false
+    /// Hüllkugel aller Körper (Renderer.update). Nah- und Fernebene richten sich danach, sonst schneidet die
+    /// Fernebene nah herangezoomt große Körper weg (Kai: STL nach Rein- und Rauszoomen „komplett verschwunden“).
+    var sceneCenter = SIMD3<Float>(repeating: 0)
+    var sceneRadius: Float = 0
 
     var position: SIMD3<Float> {
         let cp = cos(pitch)
@@ -21,12 +25,16 @@ struct OrbitCamera {
     }
 
     func projectionMatrix(aspect: Float) -> float4x4 {
+        // Fernebene hinter dem entferntesten Punkt der Körper, mindestens wie bisher 20 × Abstand
+        let sceneReach = sceneRadius > 0 ? simd_distance(position, sceneCenter) + sceneRadius * 1.05 : 0
+        let far = max(distance * 20, sceneReach)
         if isOrthographic {
             let halfHeight = distance * tan(fieldOfView / 2)
-            return .orthographic(halfWidth: halfHeight * aspect, halfHeight: halfHeight, near: -distance * 20,
-                                 far: distance * 20)
+            return .orthographic(halfWidth: halfHeight * aspect, halfHeight: halfHeight, near: -far, far: far)
         }
-        return .perspective(fovY: fieldOfView, aspect: aspect, near: max(distance * 0.01, 0.0005), far: distance * 20)
+        // Nahebene nicht beliebig klein gegenüber der Fernebene (Tiefengenauigkeit)
+        let near = max(distance * 0.01, 0.0005, far * 1e-6)
+        return .perspective(fovY: fieldOfView, aspect: aspect, near: near, far: far)
     }
 
     /// Richtung von der Kamera zum Ziel.
@@ -93,8 +101,26 @@ struct OrbitCamera {
         target += (-right * dx + up * dy) * unitsPerPoint
     }
 
+    /// Größter Abstand: auch sehr große Körper (z. B. STL in µm) lassen sich ganz ins Bild holen
+    var maxDistance: Float { max(5000, sceneRadius * 50) }
+
+    /// Zoomt um den Zielpunkt.
     mutating func zoom(by scale: Float) {
-        distance = min(max(distance / scale, 0.05), 5000)
+        guard scale.isFinite, scale > 0 else { return }
+        distance = min(max(distance / scale, 0.05), maxDistance)
+    }
+
+    /// Zoomt auf einen Weltpunkt zu (bzw. von ihm weg): er bleibt unter den Fingern stehen, das Ziel wandert
+    /// dorthin. So nähert sich die Kamera der Oberfläche statt durch sie hindurch in die Körpermitte zu fahren,
+    /// wo man nur noch Innenseiten bzw. nichts mehr sieht.
+    mutating func zoom(by scale: Float, toward anchor: SIMD3<Float>) {
+        guard scale.isFinite, scale > 0, anchor.x.isFinite, anchor.y.isFinite, anchor.z.isFinite else { return }
+        let old = distance
+        zoom(by: scale)
+        // Tatsächlicher Faktor nach der Begrenzung, sonst liefe das Ziel am Anschlag weiter
+        let applied = old / distance
+        guard abs(applied - 1) > 1e-6 else { return }
+        target = anchor + (target - anchor) / applied
     }
 
     mutating func frame(min lo: SIMD3<Float>, max hi: SIMD3<Float>) {
