@@ -359,6 +359,28 @@ final class ModelStore: ObservableObject {
             if regionValue != 0, regionThin { setRegionValue(regionValue) }
         }
     }
+    /// Dünn „Zwei Seiten“ (SolidCraft): Stärke der äußeren Wand; nil = eine Wand nach regionThinSide
+    @Published var regionThinThickness2: Double? {
+        didSet {
+            if regionValue != 0, regionThin { setRegionValue(regionValue) }
+        }
+    }
+    /// Start versetzt (SolidCraft „Start: Versatz“): Profil um diesen Wert entlang der Skizzennormale verschoben
+    @Published var regionStartOffset: Double = 0 {
+        didSet {
+            if regionValue != 0 { setRegionValue(regionValue) }
+        }
+    }
+    /// Symmetrisch als Gesamtabstand (SolidCraft, neue Extrusionen aus dem Eigenschaften-Panel): je Seite die
+    /// Hälfte des Werts. false = alter PencilCAD-Weg (Wert je Seite)
+    @Published var regionSymmetricTotal = false {
+        didSet {
+            if regionValue != 0, regionDirection == .symmetric { setRegionValue(regionValue) }
+        }
+    }
+    /// Offener Modellbefehl (Workspace.command): eine neue Auswahl übernimmt die Vorschau nicht still, sondern
+    /// verwirft sie (übernommen wird nur mit OK). Vom Workspace gesetzt.
+    var commitsOnSelect = true
 
     // Vorschau und Verlauf
     @Published private(set) var previewName: String?
@@ -414,7 +436,7 @@ final class ModelStore: ObservableObject {
 
     /// Wählt eine Fläche (nil = nichts). Eine offene Vorschau wird vorher übernommen.
     func select(face: FaceRef?) {
-        commitPreview()
+        if commitsOnSelect { commitPreview() } else { dropPreview() }
         clearSelectionState()
         selection = face
         if let face, let plane = plane(of: face), let center = mesh.centroid(of: face) {
@@ -430,7 +452,7 @@ final class ModelStore: ObservableObject {
             if commitsPreview { select(face: face) } else { selectForTool(face) }
             return
         }
-        if commitsPreview { commitPreview() } else { dropPreview() }
+        if commitsPreview, commitsOnSelect { commitPreview() } else { dropPreview() }
         var faces = selectedFaces
         if let index = faces.firstIndex(of: face) {
             faces.remove(at: index)
@@ -463,7 +485,7 @@ final class ModelStore: ObservableObject {
     /// Kante antippen: zur Auswahl hinzufügen bzw. wieder entfernen.
     /// Kanten eines anderen Körpers beginnen eine neue Auswahl.
     func toggleEdge(_ edge: EdgeRef) {
-        commitPreview()
+        if commitsOnSelect { commitPreview() } else { dropPreview() }
         var edges = selectedEdges
         if edges.first?.body != edge.body {
             edges = []
@@ -501,7 +523,7 @@ final class ModelStore: ObservableObject {
 
     /// Mehrere Körper auf einmal wählen (Rahmenauswahl).
     func selectBodies(_ list: [Int]) {
-        commitPreview()
+        if commitsOnSelect { commitPreview() } else { dropPreview() }
         var chosen: [Int] = []
         for body in list where bodies.indices.contains(body) && !chosen.contains(body) {
             chosen.append(body)
@@ -512,7 +534,7 @@ final class ModelStore: ObservableObject {
     }
 
     func clearSelection() {
-        commitPreview()
+        if commitsOnSelect { commitPreview() } else { dropPreview() }
         clearSelectionState()
         refreshHighlight()
     }
@@ -556,7 +578,9 @@ final class ModelStore: ObservableObject {
         }
         let value = regionValue
         let keepPreview = previewName == Self.regionPreviewName && !selectedRegions.isEmpty && !chosen.isEmpty
-        if !keepPreview { commitPreview() }
+        if !keepPreview {
+            if commitsOnSelect { commitPreview() } else { dropPreview() }
+        }
         clearSelectionState()
         selectedRegions = chosen
         if sketches.indices.contains(ref.sketch), sketches[ref.sketch].plane.isOnFace, !keepPreview {
@@ -807,9 +831,20 @@ final class ModelStore: ObservableObject {
             mode = .cut
             distance = -value
         }
+        // Symmetrisch als Gesamtabstand (SolidCraft): je Seite die Hälfte
+        if regionDirection == .symmetric, regionSymmetricTotal { distance /= 2 }
+        // Start versetzt: Profil entlang der Normale verschoben (Bereiche bleiben in Skizzenkoordinaten)
+        var plane = sketch.plane
+        if regionStartOffset != 0 {
+            plane.origin += plane.normal * regionStartOffset
+            plane.anchor += plane.normal * regionStartOffset
+        }
         guard mode == .newBody || requireKernel() else { return }
         if regionThin {
-            guard let solid = thinExtrudeRegions(regions, plane: sketch.plane, distance: distance, mode: mode) else {
+            let thinSolid: PCKShape? = regionThinThickness2.map {
+                thinBothSides(regions, plane: plane, distance: distance, mode: mode, outer: $0)
+            } ?? thinExtrudeRegions(regions, plane: plane, distance: distance, mode: mode)
+            guard let solid = thinSolid else {
                 message = "Dünne Wand mit \(regionThinThickness.formatted()) mm hier nicht möglich."
                 return
             }
@@ -820,7 +855,7 @@ final class ModelStore: ObservableObject {
             noteExtrude(mode: mode, distance: distance)
             return
         }
-        guard let solid = extrudeRegions(regions, plane: sketch.plane, distance: distance, mode: mode,
+        guard let solid = extrudeRegions(regions, plane: plane, distance: distance, mode: mode,
                                          direction: regionDirection, secondDistance: regionSecondValue,
                                          taper: regionTaper) else {
             message = regionTaper != 0 ? "Mit diesem Verjüngungswinkel nicht möglich – kleineren Winkel versuchen."
@@ -832,6 +867,44 @@ final class ModelStore: ObservableObject {
         message = SketchRegionMerge.newBodyNote(regions, mode: mode)
         showPreview(result, name: Self.regionPreviewName)
         noteExtrude(mode: mode, distance: distance)
+    }
+
+    /// Dünn „Zwei Seiten“ (SolidCraft): innen die Wandstärke, außen eine eigene Stärke – zwei Wände vereinigt.
+    private func thinBothSides(_ regions: [SketchRegion], plane: SketchPlane, distance: Double, mode: ExtrudeMode,
+                               outer: Double) -> PCKShape? {
+        guard !regions.isEmpty, distance != 0, regionThinThickness > 0, outer > 0, PCKShape.kernelAvailable else { return nil }
+        let sign = plane.extrusionSign(mode: mode)
+        let main = sign * distance
+        let from: Double
+        let length: Double
+        switch regionDirection {
+        case .oneSide:
+            from = mode == .cut ? -sign * 0.01 : 0
+            length = main - from
+        case .symmetric:
+            from = -main
+            length = 2 * main
+        case .twoSides:
+            let second = abs(regionSecondValue) * (main >= 0 ? -1 : 1)
+            from = second
+            length = main - second
+        }
+        guard length != 0 else { return nil }
+        let start: SIMD3<Double> = plane.origin + plane.normal * from
+        let vector: SIMD3<Double> = plane.normal * length
+        var shapes: [PCKShape] = []
+        for region in regions {
+            let wires = profileWires(region, plane: plane, offset: from)
+            guard let inner = PCKShape.thinPrism(profileWires: wires, planeOrigin: start, planeNormal: plane.normal,
+                                                 thickness: regionThinThickness, side: ThinSide.inside.kernelValue,
+                                                 direction: vector),
+                  let outerWall = PCKShape.thinPrism(profileWires: wires, planeOrigin: start, planeNormal: plane.normal,
+                                                     thickness: outer, side: ThinSide.outside.kernelValue,
+                                                     direction: vector),
+                  let wall = inner.fusing(outerWall) else { return nil }
+            shapes.append(wall)
+        }
+        return shapes.count == 1 ? shapes[0] : PCKShape.compound(shapes)
     }
 
     /// Gewählte Körper verschieben (Vorschau).
