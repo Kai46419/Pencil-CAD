@@ -1916,6 +1916,7 @@ final class ViewportView: MTKView {
         } else {
             valueLabel.text = LengthUnit.current.format(active.value)
         }
+        if let text = commandValueText(active) { valueLabel.text = text }
         valueLabel.sizeToFit()
         // Wie in Fusion 360: Wertfeld neben dem Pfeil (seitlich auf Höhe der Spitze), nicht auf der Spitze
         var dx = tip.x - foot.x, dy = tip.y - foot.y
@@ -2313,6 +2314,7 @@ final class ViewportView: MTKView {
                 }
                 if drag.handle.kind == .scale { snapped = limitedScaleValue(snapped, handle: drag.handle) }
                 workspace?.apply(drag.handle.kind, value: snapped)
+                commandDragTick(drag.handle, value: snapped, at: drag.touch.location(in: self))
                 refresh()
             }
             return
@@ -2455,6 +2457,8 @@ final class ViewportView: MTKView {
     /// Fläche einer leeren Skizze zur Skizzenebene; Tippen ins Leere ändert die Ebene nicht.
     @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
         let location = gesture.location(in: self)
+        // Wert am Pfeil eines offenen Modellbefehls: Wertfeld im Panel fokussieren (CommandManipulators.swift)
+        if commandValueLabelTapped(at: location, label: valueLabel) { return }
         guard handleHit(at: location) == nil,
               let renderer, let model, let sketch, let workspace,
               let ray = renderer.camera.ray(through: location, viewSize: bounds.size) else { return }

@@ -162,7 +162,7 @@ enum ExtrudeCommand: ModelCommandDriver {
         let sketch = model.sketches[regions[0].sketch]
         let plane = sketch.plane
         let direction = CommandDirection.direction(cmd)
-        let extent = extent(cmd)
+        let extent = Self.extent(cmd)
         let thin = cmd.flag("thin")
         let flip = cmd.flag("flip")
         // selectRegions setzt den Wert auf 0: die Einstellungen danach rechnen nicht zwischendurch
