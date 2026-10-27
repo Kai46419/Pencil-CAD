@@ -178,6 +178,8 @@ struct ToolRail: View {
     /// Kachelgröße der Werkzeuggruppen: die größte, mit der alle Gruppen in die Höhe passen
     /// (iPad 11"/13", hoch und quer); die gewählte merkt sich die Leiste für die Lage des Untermenüs.
     @State private var groupSize = GroupSize.sizes[0]
+    /// Gemessene Breite der Gruppenleiste (Kacheln + Beschriftung), Ankerpunkt des Untermenüs
+    @State private var railWidth: CGFloat = 0
     /// Platz unten links für Rückgängig/Wiederholen
     private let bottomReserve: CGFloat = 70
 
@@ -721,11 +723,21 @@ struct ToolRail: View {
             groupColumn(smallest)
             ScrollView(showsIndicators: false) { groupColumn(smallest) }
         }
-        // Untermenü rechts neben der Leiste; es verbreitert die Leiste nicht
-        .overlay(alignment: .topTrailing) {
+        // Breite der Leiste samt Beschriftungen messen: das Untermenü beginnt rechts daneben
+        .background {
+            GeometryReader { proxy in
+                Color.clear
+                    .onAppear { railWidth = proxy.size.width }
+                    .onChange(of: proxy.size.width) { _, width in railWidth = width }
+            }
+        }
+        // Untermenü rechts neben der Leiste; es verbreitert die Leiste nicht.
+        // Fester Versatz statt Ausrichtungslinie: die wurde im Overlay ignoriert, das Fenster lag
+        // dann über der Leiste und links aus dem Bild (Build 134).
+        .overlay(alignment: .topLeading) {
             if let openGroup {
                 groupFlyout(openGroup)
-                    .alignmentGuide(.trailing) { d in d[.leading] - 12 }
+                    .offset(x: railWidth + 12)
                     .transition(.opacity.combined(with: .move(edge: .leading)))
             }
         }
