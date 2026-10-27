@@ -148,7 +148,9 @@ extension SketchTrim {
         }
         let span = hit.span, t = hit.t
         let q: Point2 = SplineFit.bezier(poles, span: span, t: t)
-        let effective: [Point2] = (0..<n).map { fitSplineTangent(points, closed: closed, index: $0, tangents: tangents) }
+        let effective: [Point2] = fitSplineTangents(points, closed: closed, tangents: tangents)
+        // Tangenten der einzelnen Stücke: wird ein Fit-Punkt zum neuen Ende, behält die Kurve dort genau ihre Form
+        let sides = fitSplineSideTangents(points, closed: closed, tangents: tangents)
         func custom(_ i: Int) -> Point2? {
             guard let list = tangents, list.indices.contains(i) else { return nil }
             return list[i]
@@ -169,17 +171,17 @@ extension SketchTrim {
                 let order: [Int] = (0...n).map { (k + $0) % n }
                 let opened: [Point2] = order.map { points[$0] }
                 var list: [Point2?] = order.map { custom($0) }
-                list[0] = usable(effective[k])
-                list[n] = usable(effective[k])
+                list[0] = usable(sides.outgoing[k])
+                list[n] = usable(sides.incoming[k])
                 return [.spline(points: opened, kind: .fit, closed: false, tangents: list)]
             }
             guard k > 0, k < n - 1 else { return nil }
             let leftPoints = Array(points[0...k])
             var leftTangents: [Point2?] = (0...k).map { custom($0) }
-            leftTangents[k] = usable(effective[k])
+            leftTangents[k] = usable(sides.incoming[k])
             let rightPoints = Array(points[k...])
             var rightTangents: [Point2?] = (k..<n).map { custom($0) }
-            rightTangents[0] = usable(effective[k])
+            rightTangents[0] = usable(sides.outgoing[k])
             return [.spline(points: leftPoints, kind: .fit, closed: false, tangents: leftTangents),
                     .spline(points: rightPoints, kind: .fit, closed: false, tangents: rightTangents)]
         }
@@ -204,13 +206,16 @@ extension SketchTrim {
         var leftPoints: [Point2] = Array(points[0...span])
         leftPoints.append(q)
         var leftTangents: [Point2?] = (0...span).map { custom($0) }
-        leftTangents[span] = usable(effective[span])
+        // Wird der Nachbarpunkt zum Ende (zwei Punkte übrig), bleibt das Teilstück genau gleich
+        let leftNeighbor: Point2 = span == 0 ? sides.outgoing[span] * t : effective[span]
+        leftTangents[span] = usable(leftNeighbor)
         leftTangents.append(intoCut)
         var rightPoints: [Point2] = [q]
         rightPoints += points[(span + 1)...]
         var rightTangents: [Point2?] = [outOfCut]
         rightTangents += ((span + 1)..<n).map { custom($0) }
-        rightTangents[1] = usable(effective[span + 1])
+        let rightNeighbor: Point2 = span + 1 == n - 1 ? sides.incoming[span + 1] * (1 - t) : effective[span + 1]
+        rightTangents[1] = usable(rightNeighbor)
         return [.spline(points: leftPoints, kind: .fit, closed: false, tangents: leftTangents),
                 .spline(points: rightPoints, kind: .fit, closed: false, tangents: rightTangents)]
     }

@@ -28,38 +28,7 @@ func circleThrough(_ a: Point2, _ b: Point2, _ c: Point2) -> (center: Point2, ra
     return (center, simd_distance(center, a))
 }
 
-/// Tangente (Hermite-Form, in mm) am Fit-Punkt i: eigene Vorgabe (Tangentengriff), sonst Catmull-Rom.
-/// Dieselbe Rechnung gilt für Anzeige und Kernel, beide nutzen die Pole aus fitBezierPoles.
-func fitSplineTangent(_ points: [Point2], closed: Bool, index i: Int, tangents: [Point2?]? = nil) -> Point2 {
-    let n = points.count
-    guard n >= 2, i >= 0, i < n else { return .zero }
-    if let tangents, tangents.indices.contains(i), let custom = tangents[i] { return custom }
-    if closed {
-        let prev = points[(i - 1 + n) % n], next = points[(i + 1) % n]
-        return (next - prev) / 2
-    }
-    if i == 0 { return points[1] - points[0] }
-    if i == n - 1 { return points[n - 1] - points[n - 2] }
-    return (points[i + 1] - points[i - 1]) / 2
-}
-
-/// Pole einer Kette kubischer Bézierkurven durch die Punkte (Catmull-Rom, wie ein Fit-Spline). tangents: je
-/// Fit-Punkt optional eine eigene Tangente (nil = automatisch).
-func fitBezierPoles(_ points: [Point2], closed: Bool, tangents: [Point2?]? = nil) -> [Point2] {
-    let n = points.count
-    guard n >= 2 else { return points }
-    let count = closed ? n + 1 : n
-    let p = closed ? points + [points[0]] : points
-    var poles = [p[0]]
-    for i in 0..<(count - 1) {
-        let t0: Point2 = fitSplineTangent(points, closed: closed, index: i % n, tangents: tangents)
-        let t1: Point2 = fitSplineTangent(points, closed: closed, index: (i + 1) % n, tangents: tangents)
-        let out: Point2 = p[i] + t0 / 3
-        let into: Point2 = p[i + 1] - t1 / 3
-        poles += [out, into, p[i + 1]]
-    }
-    return poles
-}
+// Fit-Splines (fitBezierPoles, fitSplineTangent): siehe SketchSplineInterpolation.swift.
 
 /// Punkt auf einer kubischen Bézierkurve.
 private func bezierPoint(_ p0: Point2, _ p1: Point2, _ p2: Point2, _ p3: Point2, _ t: Double) -> Point2 {
