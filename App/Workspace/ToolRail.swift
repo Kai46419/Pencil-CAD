@@ -646,7 +646,8 @@ struct ToolRail: View {
             ToolItem(id: "polygon.\(mode.rawValue)", title: "Radius bis \(mode.rawValue)",
                      subtitle: mode == .inscribed ? "Innen (Umkreis)" : "Außen (Inkreis)",
                      systemImage: SketchTool.polygon.systemImage,
-                     isActive: sketch.tool == .polygon && sketch.polygonMode == mode) {
+                     isActive: sketch.tool == .polygon && sketch.generatedShape == nil && sketch.polygonMode == mode) {
+                sketch.generatedShape = nil
                 sketch.tool = .polygon
                 sketch.polygonMode = mode
             }
@@ -745,8 +746,12 @@ struct ToolRail: View {
                       systemImage: sketch.arcMode.systemImage, category: .create, isActive: sketch.tool == .arc,
                       flyout: arcItems, primary: { sketch.tool = .arc }),
             RailEntry(id: "sketch.polygon", title: "Polygon", subtitle: polygonSubtitle,
-                      systemImage: SketchTool.polygon.systemImage, category: .create, isActive: sketch.tool == .polygon,
-                      flyout: polygonItems, primary: { sketch.tool = .polygon }),
+                      systemImage: SketchTool.polygon.systemImage, category: .create,
+                      isActive: sketch.tool == .polygon && sketch.generatedShape == nil,
+                      flyout: polygonItems, primary: {
+                          sketch.generatedShape = nil
+                          sketch.tool = .polygon
+                      }),
             RailEntry(id: "sketch.slot", title: "Langloch", subtitle: sketch.slotMode.rawValue,
                       systemImage: sketch.slotMode.systemImage, category: .create, isActive: sketch.tool == .slot,
                       flyout: slotItems, primary: { sketch.tool = .slot }),
@@ -781,6 +786,12 @@ struct ToolRail: View {
             toolEntry(.mirror, category: .sketchPattern),
             toolEntry(.circPattern, category: .sketchPattern),
             toolEntry(.rectPattern, category: .sketchPattern),
+            // Formgenerator: Bibliothek fertiger Formen rechts, im Viewport aufziehen wie ein Polygon
+            RailEntry(id: "sketch.shapes", title: "Formen", subtitle: sketch.isGeneratingShape ? sketch.generatedShape?.title : "Bibliothek",
+                      systemImage: "star.square.on.square", category: .sketchPattern,
+                      isActive: sketch.isGeneratingShape, action: {
+                sketch.startShapeGenerator()
+            }),
             // BEDINGEN: Bemaßung und Trennen in einer Zeile, dann das Raster der Bedingungen
             RailEntry(id: "sketch.dimension", title: ConstraintKind.dimension.rawValue, subtitle: "Element antippen",
                       systemImage: ConstraintKind.dimension.systemImage, category: .constrain, isEnabled: planeReady,

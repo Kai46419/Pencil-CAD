@@ -836,6 +836,11 @@ extension SketchController {
             } else if let h {
                 lines.append([points[0], h])
             }
+        case (.polygon, 1) where generatedShape != nil:
+            if let h {
+                shapes += generatedShapePreview(center: points[0], through: h)
+                lines.append([points[0], h])
+            }
         case (.polygon, 1):
             if let h, let polygon = SketchShapes.polygon(center: points[0], through: h, sides: polygonSideCount,
                                                          mode: polygonMode) {
@@ -1010,6 +1015,8 @@ extension SketchController {
             }
         case .rectangleThreePoint:
             return n < 2 ? "3-Punkt-Rechteck: zwei Punkte einer Kante antippen" : "3-Punkt-Rechteck: Breite antippen"
+        case .polygon where generatedShape != nil:
+            return n == 0 ? "Form: Mitte antippen, dann Größe und Drehung" : "Form: Größe und Drehung antippen"
         case .polygon:
             return n == 0 ? "Polygon: Mitte antippen, dann eine Ecke" : "Polygon: Ecke antippen (Radius, Seiten eintippbar)"
         case .slot:

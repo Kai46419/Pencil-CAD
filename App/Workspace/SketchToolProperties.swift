@@ -17,6 +17,9 @@ struct SketchToolSection: View {
                     PrimaryWideButton(title: "Beenden", systemImage: "xmark", isPrimary: false, action: sketch.cancelPending)
                 }
             }
+        } else if sketch.isGeneratingShape {
+            // Formgenerator: Bibliothek und Werte der Form statt der Polygon-Eigenschaften (ShapeGeneratorPanel.swift)
+            ShapeGeneratorSection(sketch: sketch, library: ShapeLibrary.shared)
         } else {
             PaletteSection("Werkzeug", detail: sketch.tool.rawValue) {
                 VStack(alignment: .leading, spacing: PaletteStyle.spacing) {

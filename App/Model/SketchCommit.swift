@@ -214,6 +214,9 @@ extension SketchController {
         case .arcTangent:
             guard placed.count >= 2 else { return }
             commitTangentArc(placed)
+        case .polygon where generatedShape != nil:
+            guard placed.count >= 2 else { return }
+            placeGeneratedShape(center: placed[0].point, through: placed[1].point)
         case .polygon:
             guard placed.count >= 2,
                   let polygon = SketchShapes.polygon(center: placed[0].point, through: placed[1].point,

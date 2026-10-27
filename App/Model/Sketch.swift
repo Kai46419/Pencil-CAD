@@ -324,6 +324,8 @@ final class SketchController: ObservableObject {
             if tool == .polyline || tool == .arc { lineVariant = tool }
             // Werkzeugwechsel beendet Verformen bzw. Pfad wählen (Änderungen bleiben)
             if tool != .select, textDeformMode != nil { textDeformMode = nil }
+            // Formgenerator gilt nur, solange er selbst das Polygon-Werkzeug gestartet hat (ShapeGenerator.swift)
+            if oldValue != tool, generatedShape != nil { generatedShape = nil }
             finishInput()
         }
     }
@@ -419,6 +421,14 @@ final class SketchController: ObservableObject {
     }
     @Published var polygonMode: PolygonMode = .inscribed {
         didSet { if oldValue != polygonMode { cancelClickShape() } }
+    }
+    /// Formgenerator (ShapeLibrary.swift, ShapeGenerator.swift): gewählte Form, gezeichnet mit dem Ablauf des
+    /// Polygons (Mitte, dann Größe/Drehung). nil = gewöhnliches Polygon.
+    @Published var generatedShape: GeneratedShape? {
+        didSet {
+            if oldValue?.choice != generatedShape?.choice { cancelClickShape() }
+            changed()
+        }
     }
     @Published var slotMode: SlotMode = .centerToCenter {
         didSet {
@@ -898,6 +908,8 @@ final class SketchController: ObservableObject {
                 add(.ellipse(center: start, radii: radii), editable: true)
                 inferConstraints(forNew: entities.count - 1, center: start, inference: nil)
             }
+        case .polygon where generatedShape != nil:
+            placeGeneratedShape(center: start, through: end)
         case .polygon:
             if let polygon = SketchShapes.polygon(center: start, through: end, sides: polygonSides, mode: polygonMode) {
                 add(polygon, editable: true)
@@ -3997,6 +4009,11 @@ final class SketchController: ObservableObject {
             }
         case .mirror, .rectPattern, .circPattern:
             polylines += transformPreview.flatMap(\.drawing)
+        case .polygon where generatedShape != nil:
+            if let start = dragStart, let current = dragCurrent {
+                polylines += generatedShapePreview(center: start, through: current).flatMap(\.drawing)
+                polylines.append([start, current])
+            }
         case .rectangle, .circle, .ellipse, .polygon:
             if let start = dragStart, let current = dragCurrent, let preview = shapePreview(from: start, to: current) {
                 polylines += preview.drawing
@@ -4059,6 +4076,9 @@ final class SketchController: ObservableObject {
             return .circle(center: start, radius: simd_distance(start, current))
         case .ellipse:
             return .ellipse(center: start, radii: simd_abs(current - start))
+        case .polygon where generatedShape != nil:
+            // Formgenerator: Maß am Stift = Durchmesser des Umkreises
+            return .circle(center: start, radius: simd_distance(start, current))
         case .polygon:
             return SketchShapes.polygon(center: start, through: current, sides: polygonSides, mode: polygonMode)
         default:
@@ -4474,6 +4494,8 @@ final class SketchController: ObservableObject {
         if clickKind != nil { return nil }
         if dragStart != nil {
             switch tool {
+            case .polygon where generatedShape != nil:
+                return generatedShape?.title
             case .polygon:
                 return "\(polygonSides) Seiten"
             case .spline:
