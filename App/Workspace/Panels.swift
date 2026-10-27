@@ -1786,7 +1786,9 @@ struct LayersPanel: View {
     }
 
     var body: some View {
-        SidePanelFrame(title: "Ebenen", close: close) {
+        // Kopf wie der SolidCraft-Browser: „Browser · N Körper“
+        SidePanelFrame(title: model.bodies.count == 1 ? "Browser · 1 Körper" : "Browser · \(model.bodies.count) Körper",
+                       close: close) {
             Picker("Filter", selection: $filter) {
                 ForEach(LayerFilter.allCases) { Text($0.rawValue).tag($0) }
             }
@@ -1798,6 +1800,8 @@ struct LayersPanel: View {
                     folder("settings", title: "Dokumenteinstellungen", systemImage: "gearshape", visible: nil) {
                         unitsRow
                     }
+                    // Variablen des Projekts (SolidCraft „Parameter (n)“): antippen öffnet die Liste
+                    variablesRow
                     folder("origin", title: "Ursprung", systemImage: "move.3d", visible: workspace.showsOrigin,
                            toggle: { workspace.showsOrigin.toggle() }, hasChildren: false) {
                         EmptyView()
@@ -1811,7 +1815,7 @@ struct LayersPanel: View {
                 if filter == .all || filter == .bodies, !looseBodies.isEmpty {
                     // Jeder Körper ein eigener Eintrag, auch mehrere aus einer Skizze (wie Fusion 360)
                     let anyVisible = looseBodies.contains { !model.bodies[$0].isHidden }
-                    folder("solids", title: "Volumenkörper", systemImage: "folder", count: looseBodies.count,
+                    folder("solids", title: "Körper", systemImage: "folder", count: looseBodies.count,
                            visible: anyVisible, toggle: { model.setBodiesHidden(anyVisible, bodies: looseBodies) }) {
                         ForEach(looseBodies, id: \.self) { index in
                             bodyRow(index)
@@ -1925,6 +1929,33 @@ struct LayersPanel: View {
         }
     }
 
+    /// Zeile „Variablen (n)“: öffnet die Variablen des Projekts.
+    private var variablesRow: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.bold))
+                .frame(width: 16, height: 30)
+                .opacity(0)
+            Image(systemName: "function")
+                .foregroundStyle(.secondary)
+                .frame(width: 20)
+            Text("Variablen")
+                .lineLimit(1)
+            Text("\(model.variables.count)")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 1)
+                .background(Color(.secondarySystemBackground), in: Capsule())
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 2)
+        .contentShape(Rectangle())
+        .onTapGesture { workspace.showsVariables = true }
+        .accessibilityAddTraits(.isButton)
+        .hoverTip("Variablen", "Name = Wert, in jedem Zahlenfeld als Formel nutzbar.")
+    }
+
     private func infoRow(_ title: String, systemImage: String) -> some View {
         HStack(spacing: 8) {
             Image(systemName: systemImage)
@@ -2000,6 +2031,8 @@ struct LayersPanel: View {
             }
             .padding(.horizontal, 2)
             .contentShape(Rectangle())
+            // Doppeltippen öffnet die Skizze (SolidCraft-Browser), einfaches Tippen klappt auf bzw. zu
+            .onTapGesture(count: 2) { workspace.editSketch(index) }
             .onTapGesture {
                 withAnimation(.easeOut(duration: 0.15)) {
                     if isOpen { collapsed.insert(item.id) } else { collapsed.remove(item.id) }
@@ -2100,6 +2133,8 @@ struct LayersPanel: View {
                     in: RoundedRectangle(cornerRadius: 8))
         .contentShape(Rectangle())
         .onTapGesture { select(index) }
+        // Schweben (Stift, Zeiger): Name und Maße des Körpers
+        .hoverTip(item.name, workspace.bodySizeText(index))
         .contextMenu {
             exportMenu(title: "Exportieren", bodies: [index], name: item.name)
             Divider()
@@ -2168,7 +2203,9 @@ struct LayersPanel: View {
         .background(model.selectedRegions.first?.sketch == index ? Color.accentColor.opacity(0.15) : Color.clear,
                     in: RoundedRectangle(cornerRadius: 8))
         .contentShape(Rectangle())
-        // Wie im Fusion-Browser: antippen wählt die Skizze (alle Bereiche, danach am Pfeil extrudieren)
+        // Wie im Fusion-Browser: antippen wählt die Skizze (alle Bereiche, danach am Pfeil extrudieren),
+        // Doppeltippen öffnet sie (SolidCraft)
+        .onTapGesture(count: 2) { workspace.editSketch(index) }
         .onTapGesture { model.selectSketch(index) }
         .contextMenu {
             Button("Bearbeiten", systemImage: "pencil") { workspace.editSketch(index) }

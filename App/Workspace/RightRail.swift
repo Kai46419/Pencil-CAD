@@ -340,6 +340,7 @@ struct RightRail: View {
         }
         Divider()
         Toggle("Orthografisch", systemImage: "cube.transparent", isOn: $workspace.isOrthographic)
+        AppearanceToggle()
     }
 
     private func mainColumn(spacing: CGFloat, showsLabels: Bool) -> some View {
