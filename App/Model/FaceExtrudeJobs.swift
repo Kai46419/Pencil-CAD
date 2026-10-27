@@ -31,7 +31,9 @@ enum KernelThread {
     /// Stapelgröße (Vielfaches von 4 KB)
     static let stackSize = 32 << 20
 
-    static func start(_ name: String, _ work: @escaping () -> Void) {
+    /// work ist @Sendable: die Closure darf nicht die Isolation des Aufrufers (Main Actor) erben, sie läuft ja auf
+    /// diesem Thread (sonst Absturz, sobald die Laufzeit Actor-Isolation prüft).
+    static func start(_ name: String, _ work: @escaping @Sendable () -> Void) {
         let job = UncheckedBox(work)
         let thread = Thread { job.value() }
         thread.name = name
@@ -43,7 +45,7 @@ enum KernelThread {
     /// Arbeit auf dem großen Stapel ausführen und auf das Ergebnis warten. limit nil = ohne Zeitlimit (nur für Arbeit
     /// an Körpern, die auch der Aufrufer benutzt: er wartet ja, also rechnet nie jemand gleichzeitig daran).
     /// nil = Zeitlimit überschritten (die Arbeit läuft weiter, ihr Ergebnis verfällt).
-    static func wait<Value>(_ name: String, limit: Double?, _ work: @escaping () -> Value) -> Value? {
+    static func wait<Value>(_ name: String, limit: Double?, _ work: @escaping @Sendable () -> Value) -> Value? {
         let box = KernelResultBox<Value>()
         let done = DispatchSemaphore(value: 0)
         start(name) {
