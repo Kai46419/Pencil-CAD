@@ -505,8 +505,11 @@ enum SheetUnfoldedGuard {
     /// „Wieder falten“ für diesen Körper starten (schließt das offene Werkzeug)
     static func refold(_ body: Int, _ ws: Workspace) {
         guard ws.model.bodies.indices.contains(body) else { return }
-        ws.model.selectBodies([body])
+        // Erst starten, dann den Körper ins Feld setzen: der Start setzt die Auswahl zurück
         SheetUI.start(.sheetRefold, ws)
+        guard let cmd = ws.command, cmd.id == .sheetRefold else { return }
+        cmd.setItems(SheetBodyPick.input, [.body(body)])
+        ws.refreshCommandPreview()
     }
 }
 

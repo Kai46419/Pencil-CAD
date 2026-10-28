@@ -392,13 +392,13 @@ enum SheetKantenDriver: MainCommandDriver {
               let a = line.world.first, let b = line.world.last else { return (nil, nil, nil) }
         guard !line.isPolyline else { return (nil, nil, "Biegelinie: eine einzelne Linie wählen.") }
         let plane = model.sketches[sketch].plane
-        let body: Int?
+        let target: Int?
         if let source = plane.sourceBody, model.isSheetBody(source) {
-            body = source
+            target = source
         } else {
-            body = SheetUI.targetSheetBody(model)
+            target = SheetUI.targetSheetBody(model)
         }
-        guard let body else { return (nil, nil, "Kein Blechkörper im Projekt.") }
+        guard let body = target else { return (nil, nil, "Kein Blechkörper im Projekt.") }
         let normal = simd_normalize(plane.normal)
         let thickness = thicknessDirection(body, normal: normal, point: (a + b) / 2, model) ?? normal
         let flip = simd_dot(legSide(thickness, cmd), thickness) < 0
@@ -669,17 +669,21 @@ extension ModelStore {
 /// Zuschnittmaß je Rezept gemerkt (das Flachmuster braucht eine Wiedergabe in SolidCraft).
 @MainActor
 enum SheetPropertyCache {
-    private static var sizes: [Int: SIMD2<Double>] = [:]
+    /// nil = Flachmuster ging nicht (auch merken, sonst bei jedem Neuaufbau eine neue Wiedergabe)
+    private static var sizes: [Int: SIMD2<Double>?] = [:]
 
     static func flatSize(_ body: Int, _ info: SheetBodyInfo, _ model: ModelStore) -> SIMD2<Double>? {
         guard model.sheetAvailable else { return nil }
         let key = ModelStore.sheetCacheKey(info)
         if let size = sizes[key] { return size }
-        guard let pattern = try? model.flatPattern(of: body) else { return nil }
+        if sizes.count > 64 { sizes.removeAll() }
+        guard let pattern = try? model.flatPattern(of: body) else {
+            sizes[key] = .some(nil)
+            return nil
+        }
         let bounds = pattern.bounds
         let size = bounds.max - bounds.min
-        if sizes.count > 64 { sizes.removeAll() }
-        sizes[key] = size
+        sizes[key] = .some(size)
         return size
     }
 }
