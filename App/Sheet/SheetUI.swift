@@ -27,7 +27,7 @@ extension ModelCommands {
         // Der freie „Flansch“ (SheetFlangeDriver, Typ folgt der Auswahl) steht nicht mehr im Ribbon: an seiner Stelle
         // die drei Werkzeuge mit festem Typ (Punkt 6); sie öffnen auch die Flansche aus der Zeitleiste.
         let list: [ModelCommandDriver.Type] = [
-            SheetBaseFlangeDriver.self, SheetEdgeFlangeDriver.self, SheetContourFlangeDriver.self,
+            SheetBaseFlangeDriver.self, SheetEdgeFlangeDriver.self, SheetContourFlangeDriver.self, SheetKantenDriver.self,
             SheetPathFlangeDriver.self, SheetHemDriver.self, SheetFoldDriver.self,
             SheetPerforateDriver.self, SheetConvertDriver.self,
             SheetUnfoldDriver.self, SheetRefoldDriver.self, SheetFlatPatternDriver.self,

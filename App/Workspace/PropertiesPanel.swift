@@ -356,6 +356,10 @@ struct PropertiesPanel: View {
             let size = SIMD3<Double>(box.max - box.min)
             rows.append(.init(label: "L × B × H", value: "\(unit.number(size.x)) × \(unit.number(size.y)) × \(unit.format(size.z))"))
         }
+        // Blechteil: Dicke, Außenmaße gekantet, Zuschnitt aus dem Flachmuster (Punkt 9, SheetUIKanten.swift)
+        for row in model.sheetPropertyRows(body) {
+            rows.append(.init(label: row.label, value: row.value))
+        }
         let volume = model.volume(ofBody: body)
         if volume > 0 {
             rows.append(.init(label: "Volumen", value: cubicCentimeters(volume)))

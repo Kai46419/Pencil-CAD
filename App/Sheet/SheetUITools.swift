@@ -53,6 +53,12 @@ enum SheetTools {
                        keywords: "konturflansch contour flange profil z-profil u-profil winkelprofil kantteil",
                        capsule: "Offene Linien einer Skizze wählen: jede Linie wird eine Blechwand, jede Ecke eine "
                            + "Biegung. Breite am Pfeil ziehen oder eingeben."),
+        SheetToolEntry(id: .sheetKanten, title: "Kanten", subtitle: "Flanke am Blech hochkanten",
+                       icon: "arrow.turn.right.up", heading: "ERSTELLEN", featured: true,
+                       search: "Blech: vorhandenes Blech an einer Linie parallel zur Kante hochkanten (Flankenlänge)",
+                       keywords: "kanten kantung abkanten hochkanten flanke biegen falten biegelinie fold",
+                       capsule: "Außenkante eines Blechteils antippen und die Flankenlänge eingeben: an der gestrichelten "
+                           + "Linie wird das Blech hochgekantet. Mehrere Kanten zugleich gehen auch."),
         SheetToolEntry(id: .sheetPathFlange, title: "Pfadflansch", subtitle: "Profil entlang einer Blechkante",
                        icon: "sc.path_flange", heading: "ERSTELLEN",
                        search: "Blech: Flansche entlang einer Linienkette an einer Kante", keywords: "path flange pfad"),
@@ -269,7 +275,7 @@ struct SheetConvertQuestionRow: View {
 
 /// Schematische Skizze des Ergebnisses je Werkzeug.
 enum SheetToolSketch {
-    case base, edge, contour, pathFlange, hem, fold, perforate, unfold
+    case base, edge, contour, pathFlange, hem, fold, perforate, unfold, kanten
 
     init(_ kind: SheetFlangeKind) {
         switch kind {
@@ -289,6 +295,7 @@ enum SheetToolSketch {
         case .fold: "Blech entlang einer Linie gebogen"
         case .perforate: "Blech mit Lochfeld"
         case .unfold: "Gebogenes Blech wird flach"
+        case .kanten: "Flaches Blech, an der gestrichelten Linie hochgekantet"
         }
     }
 }
@@ -452,6 +459,15 @@ private struct SheetSketchPainter {
             let right = CGPoint(x: 60, y: 56)
             box(right, 0, 0, 0, 44, 22, 3, .new)
             dashed([point(right, 24, 0, 3), point(right, 24, 22, 3)])
+        case .kanten:
+            // Flaches Blech mit gestrichelter Linie parallel zur vorderen Kante → vorderer Streifen hochgekantet
+            let left = CGPoint(x: 4, y: 54)
+            box(left, 0, 0, 0, 34, 26, 3, .old)
+            dashed([point(left, 0, 8, 3), point(left, 34, 8, 3)])
+            arrow(flat(48, 40), flat(58, 40))
+            let right = CGPoint(x: 62, y: 60)
+            box(right, 0, 8, 0, 34, 18, 3, .old)
+            box(right, 0, 8, 3, 34, 3, 16, .new)
         }
     }
 }

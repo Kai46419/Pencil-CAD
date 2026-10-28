@@ -56,6 +56,8 @@ enum ModelCommandID: String, CaseIterable {
     case sheetUnfold, sheetRefold, sheetFlatPattern, sheetRules, sheetRuleList
     // Blech-Werkzeuge mit festem Flanschtyp (Punkt 6): Blechteil aus Skizze, Lasche, Profil biegen
     case sheetBaseFlange, sheetEdgeFlange, sheetContourFlange
+    // Kanten: vorhandenes Blech an einer Linie hochkanten (Punkt 9)
+    case sheetKanten
 }
 
 /// Offener Modellbefehl nach SolidCraft-Vorbild: gehört dem Workspace (`workspace.command`), nil = kein Panel.

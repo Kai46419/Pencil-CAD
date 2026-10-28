@@ -258,5 +258,7 @@ enum ToolTips {
         "Blechteil aus Skizze": "Geschlossenen Bereich einer Skizze antippen: er wird ein flaches Blechteil mit der Dicke der Blechregel (Grundflansch).",
         "Lasche": "Kante eines Blechteils antippen: dort wird eine Lasche angekantet – Länge am Pfeil oder als Zahl, Winkel im Panel (Kantenflansch). Ein Vollkörper lässt sich vorher in Blech umwandeln.",
         "Profil biegen": "Offene Linien einer Skizze (z. B. Z- oder U-Profil) werden ein gebogenes Blechprofil: jede Linie eine Wand, jede Ecke eine Biegung (Konturflansch).",
+        // Blech (Punkt 9)
+        "Kanten": "Außenkante eines flachen Blechteils antippen und die Flankenlänge eingeben: an der gestrichelten Linie wird das vorhandene Blech hochgekantet (der Zuschnitt bleibt gleich). Außen- oder Innenmaß, Winkel und Richtung im Panel.",
     ]
 }

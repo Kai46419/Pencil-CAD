@@ -38,6 +38,10 @@ enum SheetUIOverlay {
             addEdges(SheetEdgePicks.list(cmd, SheetHemDriver.edgesKey), to: &groups)
         case .sheetFold:
             addSketchLines(cmd, model, to: &groups)
+        case .sheetKanten:
+            // Gewählte Kanten und gestrichelte Biegelinien (Punkt 9); Biegelinie aus Skizze wie bei Falten
+            groups += SheetKantenDriver.overlay(cmd, model, perPoint: perPoint)
+            addSketchLines(cmd, model, to: &groups)
         case .sheetConvert:
             addConvert(cmd, model, to: &groups, fills: &fills, perPoint: perPoint)
         default:
