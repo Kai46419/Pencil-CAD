@@ -45,7 +45,7 @@ struct SketchPalette: View {
                 }
                 LineTypeSection(sketch: sketch, options: sketch.options)
                 PaletteRule()
-                PaletteToggles(sketch: sketch, options: sketch.options)
+                PaletteToggles(sketch: sketch)
                 PaletteRule()
                 PaletteMoreSection(sketch: sketch, options: sketch.options)
             }
@@ -330,22 +330,17 @@ private struct LineTypeSection: View {
 
 // MARK: Schalter
 
-/// Häufige Schalter als kompakte Zeilen, darunter der Konstruktionsmodus (SolidCraft `:453-465`). Eine Spalte:
-/// zu zweit nebeneinander brächen die Namen im schmalen Fenster um. Fang schaltet das „U“ oben.
+/// Häufige Schalter als kompakte Zeilen (SolidCraft `:453-465`). Eine Spalte: zu zweit nebeneinander brächen die
+/// Namen im schmalen Fenster um. Fang schaltet das „U“ oben. Konstruktion schaltet nur noch der Linientyp darüber
+/// (Kai: der eigene Schalter „Konstruktion (X)“ wirkte doppelt bzw. funktionslos).
 private struct PaletteToggles: View {
     @ObservedObject var sketch: SketchController
-    @ObservedObject var options: SketchToolOptions
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             CheckRow(title: "Bedingungen", isOn: $sketch.showsConstraintBadges)
             CheckRow(title: "Bemaßungen", isOn: $sketch.showsDimensions)
             CheckRow(title: "Punkte", isOn: $sketch.showsPoints)
-            CheckRow(title: "Konstruktion (X)", icon: "sc.construction",
-                     isOn: Binding(get: { sketch.constructionMode }, set: { on in
-                         sketch.constructionMode = on
-                         options.lineType = on ? .construction : .normal
-                     }))
         }
     }
 }
