@@ -1,6 +1,7 @@
 import PhotosUI
 import QuickLook
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 
 /// Arbeitsbereich eines Projekts: Viewport mit schwebenden Leisten (Aufbau wie bei Shapr3D).
@@ -44,6 +45,10 @@ private struct WorkspaceContent: View {
     @State private var arPreview: URL?
     /// Zeitleiste des Verlaufs: automatisch, ein- oder ausgeblendet (TimelineBar.swift)
     @AppStorage(TimelineVisibility.storageKey) private var timelineVisibility = TimelineVisibility.automatic.rawValue
+    /// Wie weit die Bildschirmtastatur die Leisten von unten verdeckt (über dem unteren sicheren Rand). Eigener Wert
+    /// statt SwiftUI-Tastaturausweichen: Nach einem App-Wechsel mit offener Tastatur blieb der Tastaturbereich
+    /// sonst stehen – Verlaufsleiste mitten im Bild, rechtes Fenster abgeschnitten (Kai).
+    @State private var keyboardLift: CGFloat = 0
 
     private var projectName: String {
         projects.project(workspace.project.id)?.name ?? workspace.project.name
@@ -138,8 +143,25 @@ private struct WorkspaceContent: View {
                 }
                 .overlay(alignment: .bottom) { bottomArea }
                 .overlay(alignment: .bottomLeading) { undoRedo }
+                // Tastatur selbst verfolgen (keyboardLift); das SwiftUI-Ausweichen ist aus
+                .padding(.bottom, keyboardLift)
+                .ignoresSafeArea(.keyboard)
         }
+        // Auch der Rahmen selbst schrumpft nicht mit der Tastatur (sonst wirkt das Ausweichen von außen weiter)
+        .ignoresSafeArea(.keyboard)
         .hoverTipLayer()
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
+            updateKeyboardLift(note)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { note in
+            setKeyboardLift(0, note: note)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
+            dismissKeyboard()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            setKeyboardLift(0, note: nil)
+        }
         .onChange(of: workspace.tool) { openGroup = nil }
         .onChange(of: model.selectionRevision) {
             openGroup = nil
@@ -171,8 +193,11 @@ private struct WorkspaceContent: View {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active {
+                // Tastatur vor dem Wechsel schließen: kommt die App zurück, steht kein Versatz mehr
+                dismissKeyboard()
                 workspace.saveThumbnail()
             } else {
+                setKeyboardLift(0, note: nil)
                 // Mehrere Fenster (iPad) teilen sich LengthUnit.current: das aktive Projekt bestimmt die Einheit
                 workspace.activateLengthUnit()
             }
@@ -507,6 +532,45 @@ private struct WorkspaceContent: View {
         } else {
             model.undo()
         }
+    }
+
+    // MARK: Tastatur
+
+    /// Tastaturrahmen (Bildschirmkoordinaten) ins eigene Fenster umrechnen. Schwebende bzw. geteilte Tastatur
+    /// (schmaler als das halbe Fenster) verdeckt keine Leiste fest: dann nichts anheben.
+    private func updateKeyboardLift(_ note: Notification) {
+        guard let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
+              let window = Self.activeWindow, let screenSpace = window.windowScene?.screen.coordinateSpace else {
+            setKeyboardLift(0, note: note)
+            return
+        }
+        let local = window.convert(frame, from: screenSpace)
+        guard local.width >= window.bounds.width * 0.5, local.height > 0 else {
+            setKeyboardLift(0, note: note)
+            return
+        }
+        let overlap = window.bounds.maxY - local.minY - window.safeAreaInsets.bottom
+        setKeyboardLift(max(0, overlap), note: note)
+    }
+
+    private func setKeyboardLift(_ lift: CGFloat, note: Notification?) {
+        guard abs(lift - keyboardLift) > 0.5 else { return }
+        let duration = note?.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0.25
+        withAnimation(.easeOut(duration: duration)) { keyboardLift = lift }
+    }
+
+    /// Eingabefeld abgeben (Tastatur zu) und den Versatz sofort auf null.
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        keyboardLift = 0
+    }
+
+    /// Schlüsselfenster der Szene im Vordergrund (mehrere Fenster auf dem iPad möglich).
+    @MainActor private static var activeWindow: UIWindow? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let active = scenes.filter { $0.activationState == .foregroundActive }
+        let windows = (active.isEmpty ? scenes : active).flatMap(\.windows)
+        return windows.first(where: \.isKeyWindow) ?? windows.first
     }
 
     private func takeScreenshot() {
