@@ -644,7 +644,8 @@ enum FlatDrawing {
 
     /// Fertigungs-DXF (R12, 1:1, mm). source = DXF von sheet.export_dxf (exakte Kontur, ohne Biegelinien);
     /// leer bzw. unlesbar → Kontur aus dem Flachmuster (Linienzüge).
-    static func dxf(_ plan: FlatDrawingPlan, source: Data, title: String, material: String?) -> Data {
+    static func dxf(_ plan: FlatDrawingPlan, source: Data, title: String, material: String?,
+                    bendLines: Bool = true) -> Data {
         let u = dxfUnit(plan)
         // Kontur: exakte Elemente je SolidCraft-Ebene, gedreht und verschoben wie der Plan
         var contour: [(layer: String, entity: SketchEntity)] = []
@@ -666,7 +667,10 @@ enum FlatDrawing {
                 return false
             }
         }
-        for bend in plan.bends { marks.append(.line([bend.start, bend.end], bend.up ? .bendUp : .bendDown)) }
+        // Schalter „Biegelinien“ im Panel gilt auch hier (z. B. Laser, der sonst die Linien schneidet)
+        if bendLines {
+            for bend in plan.bends { marks.append(.line([bend.start, bend.end], bend.up ? .bendUp : .bendDown)) }
+        }
         marks += annotations(plan, unit: u)
         // Kopfzeile über der Bemaßung, Biegetabelle darunter
         let box = bounds(marks) ?? (Point2(0, 0), plan.size)
@@ -723,7 +727,7 @@ enum FlatDrawing {
             ("0", "7", "CONTINUOUS"), ("KONTUR", "7", "CONTINUOUS"), ("BIEGUNG", "1", "DASHED"),
             ("BEMASSUNG", "3", "CONTINUOUS"), ("BIEGETABELLE", "7", "CONTINUOUS"),
         ]
-        for name in contour.map { $0.layer } where !layers.contains(where: { $0.name == name }) {
+        for name in contour.map({ $0.layer }) where !layers.contains(where: { $0.name == name }) {
             layers.append((name, name == "GRAVUR" ? "6" : "4", "CONTINUOUS"))
         }
         out.pair(0, "TABLE")
@@ -851,7 +855,8 @@ extension ModelStore {
         try? FileManager.default.removeItem(at: source)
         let plan = FlatDrawingPlan(flat)
         let name = bodies[body].name
-        let dxf = FlatDrawing.dxf(plan, source: data, title: name, material: bodies[body].bodyMaterial?.name)
+        let dxf = FlatDrawing.dxf(plan, source: data, title: name, material: bodies[body].bodyMaterial?.name,
+                                   bendLines: options.bendLines)
         let url = SheetKernel.temporaryURL("dxf", name: Self.sheetFileName(name) + " Abwicklung")
         try? FileManager.default.removeItem(at: url)
         try dxf.write(to: url)

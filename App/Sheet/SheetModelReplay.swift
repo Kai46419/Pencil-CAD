@@ -76,8 +76,9 @@ extension ModelStore {
                     foldedCenter = SIMD2((box[0] + box[3]) / 2, (box[1] + box[4]) / 2)
                 }
             }
+            // (auch der Kopierschritt einer Kopie: er verschiebt genau diesen Körper)
             if let lastUnfold, index > lastUnfold, step.command.command == "solid.move",
-               step.command.params["copy"]?.asBool != true, let moved = step.command.params["translate"]?.asPoint3 {
+               let moved = step.command.params["translate"]?.asPoint3 {
                 movedAfterUnfold += moved
             }
             let result: SheetJSON
@@ -136,7 +137,8 @@ extension ModelStore {
             }
         }
         guard let box = result.boundingBox?.map(\.doubleValue), box.count == 6 else { return result }
-        let target = (center ?? SIMD2((box[0] + box[3]) / 2, (box[1] + box[4]) / 2)) + SIMD2(lift.x, lift.y)
+        // Ohne center steckt die Verschiebung schon in der eigenen Mitte
+        let target = center.map { $0 + SIMD2(lift.x, lift.y) } ?? SIMD2((box[0] + box[3]) / 2, (box[1] + box[4]) / 2)
         let offset = SIMD3(target.x - (box[0] + box[3]) / 2, target.y - (box[1] + box[4]) / 2, -box[2] + lift.z)
         guard simd_length(offset) > 1e-9 else { return result }
         return result.translated(by: offset) ?? result
