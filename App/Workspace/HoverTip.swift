@@ -145,7 +145,7 @@ enum ToolTips {
         "Tools": "Kanten abrunden/fasen, Schale, boolesche Verknüpfung, Drehen, Sweep, Loft, Körper teilen.",
         "Visualisieren": "Anzeigemodus, Farbe, Schnittansicht, Messen und Isolieren.",
         "Extrudieren": "Geschlossenen Skizzenbereich oder ebene Fläche antippen und am Pfeil ziehen bzw. Abstand eingeben.",
-        "Ebenen": "Browser wie in Fusion 360: Skizzen mit den Körpern daraus, Konstruktion und Bilder – ein- und ausblenden, wählen, bearbeiten.",
+        "Ebenen": "Browser wie in Fusion 360: Ordner für Skizzen, Körper, Blechteile, Konstruktion und Importe – ein- und ausblenden, wählen, bearbeiten.",
         // Skizzenwerkzeuge nach Fusion 360
         "Langloch": "Mitte zu Mitte: von einem Bogenmittelpunkt zum anderen ziehen, dann die Breite. Gesamt: von Ende zu Ende. Mittelpunkt: von der Mitte zu einem Bogenmittelpunkt.",
         "Mitte zu Mitte": "Langloch: Abstand der beiden Bogenmittelpunkte ziehen, dann die Breite.",
