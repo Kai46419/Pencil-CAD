@@ -121,8 +121,14 @@ struct ParameterCard: View {
     @ObservedObject var sketch: SketchController
 
     var body: some View {
-        if sketch.isActive {
-            sketchCard
+        if workspace.command != nil {
+            // Offener Modellbefehl: Werte stehen im Eigenschaften-Panel rechts (FeaturePanel.swift); die Karten
+            // bleiben als Rückfall für Werkzeuge ohne Treiber
+            EmptyView()
+        } else if sketch.isActive {
+            // Skizzenmodus: Ebenenwahl und Werkzeug-Einstellungen stehen rechts in der Skizzenpalette
+            // (SketchPalette.swift). sketchCard/toolOptions bleiben bis zum Abgleich als Quelle stehen.
+            EmptyView()
         } else {
             switch workspace.tool {
             case .select:
@@ -302,7 +308,8 @@ struct ParameterCard: View {
         .fixedSize()
     }
 
-    /// Einstellungen des aktiven Skizzenwerkzeugs.
+    /// Einstellungen des aktiven Skizzenwerkzeugs (früher waagerecht unten; jetzt senkrecht in
+    /// SketchToolProperties.swift). Wird gelöscht, sobald die Palette alles abdeckt.
     @ViewBuilder
     private var toolOptions: some View {
         switch sketch.tool {
@@ -449,7 +456,7 @@ struct ParameterCard: View {
             HStack(spacing: 14) {
                 // Bogen ohne Finger: der nächste Strich wird ein tangentialer Bogen
                 Toggle(isOn: $sketch.arcNext) {
-                    Label("Bogen", systemImage: SketchTool.arc.systemImage)
+                    ToolLabel("Bogen", icon: SketchTool.arc.systemImage)
                 }
                 .toggleStyle(.button)
                 .hoverTip("Bogen", "Der nächste Strich wird ein tangentialer Bogen am Linienende – ohne Finger. Danach geht es mit Linien weiter. Auch im Werkzeugrad (Stift drücken).")
@@ -492,10 +499,7 @@ struct ParameterCard: View {
             }
         case .text:
             HStack(spacing: 14) {
-                Picker("Schrift", selection: $sketch.textFont) {
-                    ForEach(SketchText.fonts) { Text($0.title).tag($0.name) }
-                }
-                .fixedSize()
+                FontPickerButton(selection: $sketch.textFont, fullWidth: false)
                 NumberField(title: "Höhe", value: sketch.textHeight, width: 56) { value in
                     if value > 0 { sketch.textHeight = value }
                 }
@@ -548,7 +552,7 @@ struct ParameterCard: View {
                         NumberField(title: "Ende", value: end) { model.setEdgeEndValue($0) }
                         Button("Tauschen", systemImage: "arrow.left.arrow.right") {
                             let start = model.edgeValue
-                            model.setEdgeEndValue(max(start, 0.01))
+                            model.setEdgeEndValue(max(start, 0.01), update: false)
                             model.setEdgeValue(end)
                         }
                         .labelStyle(.iconOnly)
@@ -588,7 +592,7 @@ struct ParameterCard: View {
         Card {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 12) {
-                    Label("Extrudieren", systemImage: "square.stack.3d.up")
+                    ToolLabel("Extrudieren", icon: ToolGroup.extrude.systemImage)
                         .font(.callout.weight(.semibold))
                         .fixedSize()
                     Picker("Modus", selection: $model.regionMode) {
@@ -658,7 +662,7 @@ struct ParameterCard: View {
     private var faceCard: some View {
         Card {
             HStack(spacing: 16) {
-                Label("Extrudieren", systemImage: "square.stack.3d.up")
+                ToolLabel("Extrudieren", icon: ToolGroup.extrude.systemImage)
                     .font(.callout.weight(.semibold))
                 NumberField(title: "Abstand", value: model.faceValue) { model.setFaceValue($0) }
                 lastValueButton { model.setFaceValue($0) }
@@ -686,8 +690,10 @@ struct ParameterCard: View {
                       systemImage: "cube")
                     .font(.callout.weight(.semibold))
                 ForEach(BooleanKind.allCases) { kind in
-                    Button(kind.rawValue, systemImage: kind.systemImage) {
+                    Button {
                         workspace.combineSelectedBodies(kind)
+                    } label: {
+                        ToolLabel(kind.rawValue, icon: kind.systemImage)
                     }
                     .buttonStyle(.bordered)
                     .tint(kind == .union ? .accentColor : .secondary)
@@ -703,7 +709,7 @@ struct ParameterCard: View {
     private func insertCard(_ primitive: Primitive) -> some View {
         Card {
             HStack(spacing: 16) {
-                Label(primitive.rawValue, systemImage: primitive.systemImage)
+                ToolLabel(primitive.rawValue, icon: primitive.systemImage)
                     .font(.callout.weight(.semibold))
                 switch primitive {
                 case .box:
@@ -781,7 +787,7 @@ struct ParameterCard: View {
         Card {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 16) {
-                    Label("Fläche versetzen", systemImage: "arrow.up.and.down.square")
+                    ToolLabel("Fläche versetzen", icon: "sc.offset_face")
                         .font(.callout.weight(.semibold))
                     Picker("Art", selection: Binding(get: { workspace.offsetFaceMode }, set: { mode in
                         workspace.offsetFaceMode = mode
@@ -830,7 +836,7 @@ struct ParameterCard: View {
     private var replaceFaceCard: some View {
         Card {
             HStack(spacing: 16) {
-                Label("Fläche ersetzen", systemImage: "rectangle.portrait.and.arrow.forward")
+                ToolLabel("Fläche ersetzen", icon: "sc.replace_face")
                     .font(.callout.weight(.semibold))
                 Picker("Wählen", selection: $workspace.pickingReplaceTarget) {
                     Text("Flächen (\(model.selectedFaces.count))").tag(false)
@@ -846,7 +852,7 @@ struct ParameterCard: View {
         Card {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 16) {
-                    Label("Umhüllen und Prägen", systemImage: "cylinder.split.1x2")
+                    ToolLabel("Umhüllen und Prägen", icon: "sc.emboss")
                         .font(.callout.weight(.semibold))
                     Picker("Art", selection: Binding(get: { workspace.wrapDepth >= 0 }, set: { emboss in
                         workspace.wrapDepth = emboss ? abs(workspace.wrapDepth) : -abs(workspace.wrapDepth)
@@ -925,7 +931,7 @@ struct ParameterCard: View {
         Card {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 14) {
-                    Label("Bohrung", systemImage: "circle.circle")
+                    ToolLabel("Bohrung", icon: "sc.hole")
                         .font(.callout.weight(.semibold))
                     Picker("Art", selection: holeBinding(\.kind)) {
                         ForEach(HoleKind.allCases) { Text($0.rawValue).tag($0) }
@@ -1093,7 +1099,7 @@ struct ParameterCard: View {
     private var mirrorCard: some View {
         Card {
             HStack(spacing: 16) {
-                Label("Spiegeln", systemImage: "arrow.left.and.right.righttriangle.left.righttriangle.right")
+                ToolLabel("Spiegeln", icon: "sc.mirror")
                     .font(.callout.weight(.semibold))
                 if let name = workspace.mirrorReferenceName {
                     Label("An \(name)", systemImage: "square.split.diagonal")
@@ -1147,7 +1153,7 @@ struct ParameterCard: View {
     private var shellCard: some View {
         Card {
             HStack(spacing: 16) {
-                Label("Schale", systemImage: "shippingbox")
+                ToolLabel("Schale", icon: "sc.shell")
                     .font(.callout.weight(.semibold))
                 NumberField(title: "Wandstärke", value: workspace.shellThickness) { value in
                     guard value > 0 else { return }
@@ -1172,7 +1178,7 @@ struct ParameterCard: View {
     private var colorCard: some View {
         Card {
             HStack(spacing: 10) {
-                Label("Farbe", systemImage: "paintpalette")
+                ToolLabel("Farbe", icon: "sc.appearance")
                     .font(.callout.weight(.semibold))
                     .padding(.trailing, 6)
                 ForEach(SceneBody.palette.indices, id: \.self) { index in
@@ -1256,7 +1262,7 @@ extension ParameterCard {
     func patternCard(_ kind: PatternKind) -> some View {
         Card {
             HStack(spacing: 14) {
-                Label(kind.rawValue, systemImage: kind.systemImage)
+                ToolLabel(kind.rawValue, icon: kind.systemImage)
                     .font(.callout.weight(.semibold))
                 if kind == .linear {
                     // Zwei Richtungen (Kai: X und Y); Anzahl 1 in Richtung 2 = einfache Reihe
@@ -1298,7 +1304,7 @@ extension ParameterCard {
     var scaleCard: some View {
         Card {
             HStack(spacing: 14) {
-                Label("Skalieren", systemImage: "arrow.up.left.and.arrow.down.right")
+                ToolLabel("Skalieren", icon: "sc.scale")
                     .font(.callout.weight(.semibold))
                 // Immer gleichmäßig (Kai); Ziehpfeil am Körper oder Faktor eintippen
                 if workspace.scaleUniform {
@@ -1325,7 +1331,7 @@ extension ParameterCard {
     var alignCard: some View {
         Card {
             HStack(spacing: 14) {
-                Label("Ausrichten", systemImage: "align.horizontal.center")
+                ToolLabel("Ausrichten", icon: "sc.align")
                     .font(.callout.weight(.semibold))
                 ForEach(0..<3, id: \.self) { axis in
                     Picker(Self.axisNames[axis], selection: Binding(get: { workspace.alignModes[axis] }, set: { mode in
@@ -1362,7 +1368,7 @@ extension ParameterCard {
     var revolveCard: some View {
         Card {
             HStack(spacing: 14) {
-                Label("Achsendrehung", systemImage: "arrow.triangle.2.circlepath")
+                ToolLabel("Achsendrehung", icon: "sc.revolve")
                     .font(.callout.weight(.semibold))
                 axisPicker("Achse", selection: preview(\.revolveAxis), sketchIndex: model.selectedRegions.first?.sketch)
                 NumberField(title: "Winkel", value: workspace.revolveAngle, unit: "°", width: 56) { value in
@@ -1378,7 +1384,7 @@ extension ParameterCard {
     var sweepCard: some View {
         Card {
             HStack(spacing: 14) {
-                Label("Sweep", systemImage: "point.3.connected.trianglepath.dotted")
+                ToolLabel("Sweep", icon: "sc.sweep")
                     .font(.callout.weight(.semibold))
                 Picker("Pfad", selection: preview(\.sweepPath)) {
                     Text("Pfad wählen").tag(Int?.none)
@@ -1405,7 +1411,7 @@ extension ParameterCard {
         Card {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 14) {
-                    Label("Loft", systemImage: "square.3.layers.3d")
+                    ToolLabel("Loft", icon: "sc.loft")
                         .font(.callout.weight(.semibold))
                     Text(model.selectedRegions.isEmpty ? "Querschnitte nacheinander antippen"
                          : "\(model.selectedRegions.count) Querschnitte")
@@ -1427,7 +1433,7 @@ extension ParameterCard {
     var splitCard: some View {
         Card {
             HStack(spacing: 14) {
-                Label("Körper teilen", systemImage: "rectangle.split.2x1")
+                ToolLabel("Körper teilen", icon: "sc.split_body")
                     .font(.callout.weight(.semibold))
                 Picker("Mit", selection: Binding(get: { workspace.splitMode }, set: { workspace.setSplitMode($0) })) {
                     ForEach(SplitMode.allCases) { Text($0.rawValue).tag($0) }
@@ -1468,7 +1474,7 @@ extension ParameterCard {
     var sectionCard: some View {
         Card {
             HStack(spacing: 14) {
-                Label("Schnittansicht", systemImage: "square.split.diagonal.2x2")
+                ToolLabel("Schnittansicht", icon: "sc.section")
                     .font(.callout.weight(.semibold))
                 planePicker("Ebene", selection: Binding(get: { workspace.section?.plane ?? .world(1) },
                                                          set: { workspace.section?.plane = $0 }))
@@ -1490,7 +1496,7 @@ extension ParameterCard {
         Card {
             HStack(alignment: .top, spacing: 14) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Label("Messen", systemImage: "ruler")
+                    ToolLabel("Messen", icon: "sc.measure")
                         .font(.callout.weight(.semibold))
                     Picker("Art", selection: $workspace.measureMode) {
                         ForEach(MeasureMode.allCases) { Text($0.rawValue).tag($0) }
@@ -1524,7 +1530,7 @@ extension ParameterCard {
     func constructCard(_ kind: ConstructionKind) -> some View {
         Card {
             HStack(spacing: 14) {
-                Label("\(kind.rawValue) erstellen", systemImage: kind.systemImage)
+                ToolLabel("\(kind.rawValue) erstellen", icon: kind.systemImage)
                     .font(.callout.weight(.semibold))
                 switch kind {
                 case .plane:
@@ -1669,7 +1675,7 @@ extension ParameterCard {
     var sketchScaleCard: some View {
         Card {
             HStack(spacing: 14) {
-                Label("Skizze skalieren", systemImage: "arrow.up.left.and.arrow.down.right")
+                ToolLabel("Skizze skalieren", icon: "sc.sketch_scale")
                     .font(.callout.weight(.semibold))
                 NumberField(title: "Faktor", value: workspace.sketchScaleFactor, unit: "×", width: 56) { value in
                     if value > 0 { workspace.sketchScaleFactor = value }
@@ -1740,8 +1746,8 @@ struct HistoryPanel: View {
 // MARK: Elemente
 
 /// Reiter „Ebenen“ links, aufgebaut wie der Browser in Fusion 360: Projekt, Dokumenteinstellungen,
-/// Ursprung, Ordner „Skizzen“ (jede Skizze ist eine Ebene, darunter die Skizze selbst und alle Körper,
-/// die aus ihr extrudiert wurden), weitere Körper, Konstruktion und Bilder – jeweils mit Auge.
+/// Ursprung, genau ein Ordner „Körper“ (alle Körper, Mehrfachauswahl und Kombinieren), genau ein Ordner
+/// „Skizzen“ (Skizze 1, 2 …), Konstruktion und Bilder – jeweils mit Auge.
 struct LayersPanel: View {
     @ObservedObject var workspace: Workspace
     @ObservedObject var model: ModelStore
@@ -1755,16 +1761,14 @@ struct LayersPanel: View {
         case sketch(Int)
     }
 
-    @State private var collapsed: Set<UUID> = []
     /// Zugeklappte Ordner (Dokumenteinstellungen anfangs zu, wie in Fusion 360)
     @State private var closedFolders: Set<String> = ["settings"]
     @State private var renaming: Renaming?
     @State private var newName = ""
     /// Filter wie bei Shapr3D: Alle, Körper, Skizzen, Konstruktion
     @State private var filter: LayerFilter = .all
-    /// Körper, die in einen neuen Ordner sollen (Name wird abgefragt)
-    @State private var folderBodies: [Int]?
-    @State private var folderName = ""
+    /// Auswählen-Modus des Ordners „Körper“: Häkchen vor jedem Körper, Antippen nimmt hinzu bzw. heraus
+    @State private var picksBodies = false
 
     enum LayerFilter: String, CaseIterable, Identifiable {
         case all = "Alle"
@@ -1781,7 +1785,9 @@ struct LayersPanel: View {
     }
 
     var body: some View {
-        SidePanelFrame(title: "Ebenen", close: close) {
+        // Kopf wie der SolidCraft-Browser: „Browser · N Körper“
+        SidePanelFrame(title: model.bodies.count == 1 ? "Browser · 1 Körper" : "Browser · \(model.bodies.count) Körper",
+                       close: close) {
             Picker("Filter", selection: $filter) {
                 ForEach(LayerFilter.allCases) { Text($0.rawValue).tag($0) }
             }
@@ -1793,27 +1799,18 @@ struct LayersPanel: View {
                     folder("settings", title: "Dokumenteinstellungen", systemImage: "gearshape", visible: nil) {
                         unitsRow
                     }
+                    // Variablen des Projekts (SolidCraft „Parameter (n)“): antippen öffnet die Liste
+                    variablesRow
                     folder("origin", title: "Ursprung", systemImage: "move.3d", visible: workspace.showsOrigin,
                            toggle: { workspace.showsOrigin.toggle() }, hasChildren: false) {
                         EmptyView()
                     }
                 }
                 if filter == .all || filter == .bodies {
-                    ForEach(model.bodyFolders) { entry in
-                        userFolder(entry.name, bodies: entry.bodies)
-                    }
-                }
-                if filter == .all || filter == .bodies, !looseBodies.isEmpty {
-                    // Jeder Körper ein eigener Eintrag, auch mehrere aus einer Skizze (wie Fusion 360)
-                    let anyVisible = looseBodies.contains { !model.bodies[$0].isHidden }
-                    folder("solids", title: "Volumenkörper", systemImage: "folder", count: looseBodies.count,
-                           visible: anyVisible, toggle: { model.setBodiesHidden(anyVisible, bodies: looseBodies) }) {
-                        ForEach(looseBodies, id: \.self) { index in
-                            bodyRow(index)
-                        }
-                    }
+                    bodiesFolder
                 }
                 if filter == .all || filter == .sketches {
+                    // Genau ein Ordner „Skizzen“: Skizze 1, 2 … direkt darin (Kai, keine Ebenen-Zwischenstufe)
                     folder("sketches", title: "Skizzen", systemImage: "folder",
                            count: model.sketches.count, visible: model.sketches.isEmpty ? nil : model.showsSketches,
                            toggle: { model.setSketchesHidden(model.showsSketches) }) {
@@ -1821,7 +1818,7 @@ struct LayersPanel: View {
                             infoRow("Noch keine Skizze", systemImage: "pencil.and.outline")
                         }
                         ForEach(model.sketches.indices, id: \.self) { index in
-                            layer(index)
+                            sketchEntry(index)
                         }
                     }
                 }
@@ -1844,17 +1841,7 @@ struct LayersPanel: View {
                 }
             }
         }
-        .alert("Neuer Ordner", isPresented: Binding(get: { folderBodies != nil }, set: { if !$0 { folderBodies = nil } })) {
-            TextField("Name", text: $folderName)
-            Button("Abbrechen", role: .cancel) {}
-            Button("Anlegen") {
-                let name = folderName.trimmingCharacters(in: .whitespaces)
-                if !name.isEmpty, let chosen = folderBodies { model.setFolder(name, bodies: chosen) }
-            }
-        } message: {
-            Text("Die Körper kommen in den neuen Ordner im Browser.")
-        }
-        .alert(isRenamingSketch ? "Ebene umbenennen" : "Körper umbenennen",
+        .alert(isRenamingSketch ? "Skizze umbenennen" : "Körper umbenennen",
                isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("Name", text: $newName)
             Button("Abbrechen", role: .cancel) {}
@@ -1920,6 +1907,33 @@ struct LayersPanel: View {
         }
     }
 
+    /// Zeile „Variablen (n)“: öffnet die Variablen des Projekts.
+    private var variablesRow: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.bold))
+                .frame(width: 16, height: 30)
+                .opacity(0)
+            Image(systemName: "function")
+                .foregroundStyle(.secondary)
+                .frame(width: 20)
+            Text("Variablen")
+                .lineLimit(1)
+            Text("\(model.variables.count)")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 1)
+                .background(Color(.secondarySystemBackground), in: Capsule())
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 2)
+        .contentShape(Rectangle())
+        .onTapGesture { workspace.showsVariables = true }
+        .accessibilityAddTraits(.isButton)
+        .hoverTip("Variablen", "Name = Wert, in jedem Zahlenfeld als Formel nutzbar.")
+    }
+
     private func infoRow(_ title: String, systemImage: String) -> some View {
         HStack(spacing: 8) {
             Image(systemName: systemImage)
@@ -1933,22 +1947,22 @@ struct LayersPanel: View {
         .frame(height: 30)
     }
 
-    /// Alle Körper, die in keinem eigenen Ordner liegen (aus Skizzen, Grundkörper, Importe).
-    private var looseBodies: [Int] { model.bodies.indices.filter { model.bodies[$0].folder == nil } }
-
-    /// Eigener Ordner mit Körpern (Kontextmenü: auflösen, exportieren).
-    private func userFolder(_ name: String, bodies: [Int]) -> some View {
-        let anyVisible = bodies.contains { !model.bodies[$0].isHidden }
-        return folder("user.\(name)", title: name, systemImage: "folder.fill", count: bodies.count, visible: anyVisible,
-                      toggle: { model.setBodiesHidden(anyVisible, bodies: bodies) }) {
-            ForEach(bodies, id: \.self) { index in
+    /// Genau ein Ordner „Körper“ mit allen Körpern (Kai: keine doppelten oder verschachtelten Ordner),
+    /// darüber „Auswählen“ und – ab zwei gewählten Körpern – Vereinigen, Subtrahieren, Schneiden.
+    private var bodiesFolder: some View {
+        let all = Array(model.bodies.indices)
+        let anyVisible = all.contains { !model.bodies[$0].isHidden }
+        return folder("solids", title: "Körper", systemImage: "folder", count: all.count,
+                      visible: all.isEmpty ? nil : anyVisible,
+                      toggle: { model.setBodiesHidden(anyVisible, bodies: all) }) {
+            if all.isEmpty {
+                infoRow("Noch kein Körper", systemImage: "cube")
+            } else {
+                BrowserBooleanBar(workspace: workspace, model: model, picking: $picksBodies)
+            }
+            ForEach(all, id: \.self) { index in
                 bodyRow(index)
             }
-        }
-        .contextMenu {
-            exportMenu(title: "Ordner exportieren", bodies: bodies, name: name)
-            Button("Alle wählen", systemImage: "checkmark.circle") { model.selectBodies(bodies) }
-            Button("Ordner auflösen", systemImage: "folder.badge.minus") { model.setFolder(nil, bodies: bodies) }
         }
     }
 
@@ -1962,73 +1976,17 @@ struct LayersPanel: View {
         return true
     }
 
-    // MARK: Ebene
+    // MARK: Skizze
 
-    /// Kopfzeile der Ebene (auf- und zuklappbar, Auge für alles) und darunter die Skizze;
-    /// die Körper stehen im Ordner „Volumenkörper“.
-    private func layer(_ index: Int) -> some View {
+    /// Eintrag im Ordner „Skizzen“: die Skizze selbst und darunter ihre Texte (ohne Ebenen-Zwischenstufe).
+    private func sketchEntry(_ index: Int) -> some View {
         let item = model.sketches[index]
-        let bodies = model.bodies(fromSketch: index)
-        let isOpen = !collapsed.contains(item.id)
-        let isVisible = model.isLayerVisible(index)
         return VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 6) {
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.secondary)
-                    .rotationEffect(.degrees(isOpen ? 90 : 0))
-                    .frame(width: 16, height: 30)
-                eye(isVisible) { model.setLayerHidden(isVisible, sketch: index) }
-                Image(systemName: "square.3.layers.3d")
-                    .foregroundStyle(isVisible ? Color.accentColor : Color.secondary)
-                    .frame(width: 20)
-                Text(Self.layerName(item.name))
-                    .fontWeight(.semibold)
-                    .lineLimit(1)
-                    .foregroundStyle(isVisible ? Color.primary : Color.secondary)
-                if !bodies.isEmpty {
-                    Text(bodies.count == 1 ? "1 Körper" : "\(bodies.count) Körper")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 2)
-            .contentShape(Rectangle())
-            .onTapGesture {
-                withAnimation(.easeOut(duration: 0.15)) {
-                    if isOpen { collapsed.insert(item.id) } else { collapsed.remove(item.id) }
-                }
-            }
-            .contextMenu {
-                Button("Umbenennen", systemImage: "pencil") {
-                    newName = item.name
-                    renaming = .sketch(index)
-                }
-                Button("Skizze bearbeiten", systemImage: "pencil.and.outline") { workspace.editSketch(index) }
-                Menu {
-                    Button("SVG – Laser, Plotter, Grafik", systemImage: "scribble") { workspace.exportSketch(index, svg: true) }
-                    Button("DXF – CAD, CNC", systemImage: "doc.plaintext") { workspace.exportSketch(index, svg: false) }
-                } label: {
-                    Label("Skizze exportieren", systemImage: "square.and.arrow.up")
-                }
-                if !bodies.isEmpty {
-                    exportMenu(title: "Körper der Ebene exportieren", bodies: bodies, name: Self.layerName(item.name))
-                }
-                Button(isVisible ? "Ebene ausblenden" : "Ebene einblenden", systemImage: isVisible ? "eye.slash" : "eye") {
-                    model.setLayerHidden(isVisible, sketch: index)
-                }
-                Button("Skizze löschen", systemImage: "trash", role: .destructive) { model.deleteSketch(index) }
-            }
-            if isOpen {
-                sketchRow(index)
-                    .padding(.leading, 18)
-                // Texte der Skizze als eigene Einträge (SketchTextPanel.swift)
-                SketchTextLayerList(workspace: workspace, sketch: workspace.sketch, sketchIndex: index, stored: item)
-                    .padding(.leading, 36)
-            }
+            sketchRow(index)
+            // Texte der Skizze als eigene Einträge (SketchTextPanel.swift)
+            SketchTextLayerList(workspace: workspace, sketch: workspace.sketch, sketchIndex: index, stored: item)
+                .padding(.leading, 18)
         }
-        .padding(.vertical, 2)
     }
 
     /// Lange drücken auf Körper bzw. Ebene: Export als 3MF, STL, OBJ oder STEP.
@@ -2061,6 +2019,9 @@ struct LayersPanel: View {
         let item = model.bodies[index]
         let isSelected = model.selectedBodies.contains(index) || model.selectedBody == index
         return HStack(spacing: 6) {
+            if picksBodies {
+                pickMark(index)
+            }
             eye(!item.isHidden) { model.setHidden(!item.isHidden, body: index) }
             // Komponente (verknüpfte Kopien) mit eigenem Symbol
             // Textkörper mit Textsymbol (SketchTextEdit.swift)
@@ -2070,6 +2031,11 @@ struct LayersPanel: View {
             Text(item.name)
                 .lineLimit(1)
                 .foregroundStyle(item.isHidden ? Color.secondary : Color.primary)
+            if isBooleanTarget(index) {
+                Text("Ziel")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.orange)
+            }
             Spacer(minLength: 0)
             // Stift neben dem Körper (Kai): Export als 3MF oder STL mit einem Tippen
             Menu {
@@ -2094,7 +2060,13 @@ struct LayersPanel: View {
         .background(isSelected ? Color.accentColor.opacity(0.15) : Color.clear,
                     in: RoundedRectangle(cornerRadius: 8))
         .contentShape(Rectangle())
-        .onTapGesture { select(index) }
+        .onTapGesture {
+            // Auswählen-Modus: Antippen nimmt den Körper hinzu bzw. heraus (wie das Häkchen);
+            // select hält dabei die Vorschau eines offenen Befehls (z. B. Boolesch) aktuell
+            select(index)
+        }
+        // Schweben (Stift, Zeiger): Name und Maße des Körpers
+        .hoverTip(item.name, workspace.bodySizeText(index))
         .contextMenu {
             exportMenu(title: "Exportieren", bodies: [index], name: item.name)
             Divider()
@@ -2102,31 +2074,41 @@ struct LayersPanel: View {
                 newName = item.name
                 renaming = .body(index)
             }
-            Menu {
-                ForEach(model.bodyFolders.map(\.name).filter { $0 != item.folder }, id: \.self) { name in
-                    Button(name, systemImage: "folder") { model.setFolder(name, bodies: folderTargets(index)) }
-                }
-                Button("Neuer Ordner …", systemImage: "folder.badge.plus") {
-                    folderName = ""
-                    folderBodies = folderTargets(index)
-                }
-                if item.folder != nil {
-                    Button("Aus Ordner nehmen", systemImage: "folder.badge.minus") {
-                        model.setFolder(nil, bodies: folderTargets(index))
-                    }
-                }
-            } label: {
-                Label("In Ordner", systemImage: "folder")
+            Button(picksBodies ? "Auswählen beenden" : "Auswählen", systemImage: "checkmark.circle") {
+                if !picksBodies, !model.selectedBodies.contains(index) { model.toggleBody(index) }
+                picksBodies.toggle()
             }
             Button("In Einzelkörper trennen", systemImage: "square.split.2x1") { model.separateBody(index) }
             ComponentMenuItems(model: model, index: index)
             MaterialMenuItems(model: model, index: index, targets: folderTargets(index))
             FinishMenuItems(model: model, index: index, targets: folderTargets(index))
-            Button("Löschen", systemImage: "trash", role: .destructive) {
-                model.toggleBody(index, exclusive: true)
-                model.deleteSelected()
+            // Gehört die Zeile zur Mehrfachauswahl, gehen alle gewählten Körper (ein Rückgängig-Schritt, BodyDelete.swift)
+            Button(ModelStore.deleteTitle(count: folderTargets(index).count), systemImage: "trash", role: .destructive) {
+                // Ziele vor dem Werkzeugwechsel festhalten (activate setzt die Auswahl zurück)
+                let targets: [Int] = folderTargets(index)
+                if workspace.tool != .select { workspace.activate(.select) }
+                model.deleteBodies(targets)
             }
         }
+    }
+
+    /// Häkchen im Auswählen-Modus: gefüllt = gewählt (gleiche Auswahl wie im Viewport).
+    private func pickMark(_ index: Int) -> some View {
+        let chosen = model.selectedBodies.contains(index)
+        return Button {
+            select(index)
+        } label: {
+            Image(systemName: chosen ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(chosen ? Color.accentColor : Color.secondary)
+                .frame(width: 26, height: 30)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Der zuerst gewählte Körper ist bei Subtrahieren das Ziel (nur im Auswählen-Modus markiert).
+    private func isBooleanTarget(_ index: Int) -> Bool {
+        picksBodies && model.selectedBodies.count > 1 && model.selectedBodies.first == index
     }
 
     private func sectionTitle(_ title: String) -> some View {
@@ -2163,19 +2145,40 @@ struct LayersPanel: View {
         .background(model.selectedRegions.first?.sketch == index ? Color.accentColor.opacity(0.15) : Color.clear,
                     in: RoundedRectangle(cornerRadius: 8))
         .contentShape(Rectangle())
-        // Wie im Fusion-Browser: antippen wählt die Skizze (alle Bereiche, danach am Pfeil extrudieren)
+        // Wie im Fusion-Browser: antippen wählt die Skizze (alle Bereiche, danach am Pfeil extrudieren),
+        // Doppeltippen öffnet sie (SolidCraft)
+        .onTapGesture(count: 2) { workspace.editSketch(index) }
         .onTapGesture { model.selectSketch(index) }
-        .contextMenu {
-            Button("Bearbeiten", systemImage: "pencil") { workspace.editSketch(index) }
-            Button("Löschen", systemImage: "trash", role: .destructive) { model.deleteSketch(index) }
+        .contextMenu { sketchMenu(index) }
+    }
+
+    /// Lange drücken auf eine Skizze: umbenennen, bearbeiten, exportieren, löschen.
+    @ViewBuilder
+    private func sketchMenu(_ index: Int) -> some View {
+        let item = model.sketches[index]
+        let bodies = model.bodies(fromSketch: index)
+        Button("Umbenennen", systemImage: "pencil") {
+            newName = item.name
+            renaming = .sketch(index)
         }
+        Button("Skizze bearbeiten", systemImage: "pencil.and.outline") { workspace.editSketch(index) }
+        Menu {
+            Button("SVG – Laser, Plotter, Grafik", systemImage: "scribble") { workspace.exportSketch(index, svg: true) }
+            Button("DXF – CAD, CNC", systemImage: "doc.plaintext") { workspace.exportSketch(index, svg: false) }
+        } label: {
+            Label("Skizze exportieren", systemImage: "square.and.arrow.up")
+        }
+        if !bodies.isEmpty {
+            exportMenu(title: "Körper der Skizze exportieren", bodies: bodies, name: item.name)
+        }
+        Button("Skizze löschen", systemImage: "trash", role: .destructive) { model.deleteSketch(index) }
     }
 
     /// Konstruktionsebene, -achse oder -punkt: Ebenen lassen sich direkt als Skizzenebene nutzen.
     private func constructionRow(_ item: ConstructionItem) -> some View {
         HStack(spacing: 6) {
             eye(!item.isHidden) { model.setConstructionHidden(!item.isHidden, id: item.id) }
-            Image(systemName: item.kind.systemImage)
+            ToolIcon(item.kind.systemImage, size: 20)
                 .foregroundStyle(.orange)
                 .frame(width: 20)
             Text(item.name)
@@ -2306,9 +2309,7 @@ struct TextEntrySheet: View {
             Form {
                 TextField("Inhalt", text: $content)
                     .focused($isFocused)
-                Picker("Schrift", selection: $sketch.textFont) {
-                    ForEach(SketchText.fonts) { Text($0.title).tag($0.name) }
-                }
+                FontPickerFormRow(selection: $sketch.textFont)
                 HStack {
                     Text("Höhe")
                     Spacer()

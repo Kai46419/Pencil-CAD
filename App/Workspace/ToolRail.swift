@@ -1,56 +1,57 @@
 import SwiftUI
 
-/// Gruppen der linken Werkzeugleiste im 3D-Modus (Kai: kleinere, eindeutige Gruppen statt weniger großer Menüs).
-/// Reihenfolge wie der Arbeitsablauf: zeichnen, Körper erzeugen, bearbeiten, kombinieren, bewegen, prüfen.
-/// Schnittansicht, Isolieren und Löschen liegen als direkte Knöpfe in der rechten Leiste.
+/// Gruppen der linken Werkzeugleiste im 3D-Modus nach dem SolidCraft-Ribbon (B.1): Skizze · Erstellen · Ändern ·
+/// Anordnen · Konstruieren · Prüfen · Einfügen · Ansicht. Inhalt der Gruppen: ModelRibbon.swift.
+/// Schnittansicht, Isolieren und Löschen liegen zusätzlich als direkte Knöpfe in der rechten Leiste.
 enum ToolGroup: String, CaseIterable, Identifiable {
     case sketch = "Skizze"
-    case extrude = "Extrudieren"
-    case shapes = "Formen"
-    case fillets = "Abrundungen"
-    case holes = "Löcher"
-    case faces = "Flächen"
-    case combine = "Kombinieren"
-    case move = "Verschieben"
-    case pattern = "Vervielfältigen"
+    case create = "Erstellen"
+    case modify = "Ändern"
+    case arrange = "Anordnen"
     case construct = "Konstruieren"
     case inspect = "Prüfen"
     case insert = "Einfügen"
     case visualize = "Ansicht"
+    /// Blech (Punkt 16, App/Sheet/SheetUI.swift)
+    case sheetMetal = "Blech"
+
+    // Frühere Gruppen (PartTools, Befehlssuche, Karten): zeigen auf die neue Gruppe
+    static let extrude = ToolGroup.create
+    static let shapes = ToolGroup.create
+    static let holes = ToolGroup.create
+    static let fillets = ToolGroup.modify
+    static let faces = ToolGroup.modify
+    static let combine = ToolGroup.modify
+    static let move = ToolGroup.arrange
+    static let pattern = ToolGroup.arrange
 
     var id: Self { self }
 
     var systemImage: String {
         switch self {
-        case .sketch: "square.and.pencil"
-        case .extrude: "square.stack.3d.up.fill"
-        case .shapes: "cube.fill"
-        case .fillets: "rectangle.roundedtop.fill"
-        case .holes: "circle.circle.fill"
-        case .faces: "arrow.up.and.down.square.fill"
-        case .combine: "square.fill.on.circle.fill"
-        case .move: "move.3d"
-        case .pattern: "circle.grid.3x3.fill"
-        case .construct: "square.dashed"
-        case .inspect: "ruler"
-        case .insert: "square.and.arrow.down"
-        case .visualize: "eye"
+        case .sketch: "sc.sketch"
+        case .create: "sc.extrude"
+        case .modify: "sc.fillet"
+        case .arrange: "sc.move"
+        case .construct: "sc.plane"
+        case .inspect: "sc.measure"
+        case .insert: "sc.import"
+        case .visualize: "sc.appearance"
+        case .sheetMetal: "sc.sheet"
         }
     }
 
-    /// Farbfamilie: Erzeugen blau, Ändern orange, Bewegen violett
+    /// Farbfamilie: Erzeugen blau, Ändern orange, Anordnen violett
     var category: ToolCategory {
         switch self {
-        case .sketch, .extrude, .shapes: .create
-        case .holes: .hole
-        case .fillets, .faces: .modify
-        case .combine: .combine
-        case .move: .arrange
-        case .pattern: .pattern
+        case .sketch, .create: .create
+        case .modify: .modify
+        case .arrange: .arrange
         case .construct: .construct
         case .inspect: .inspect
         case .insert: .insert
         case .visualize: .view
+        case .sheetMetal: .create
         }
     }
 
@@ -58,22 +59,18 @@ enum ToolGroup: String, CaseIterable, Identifiable {
     var tip: String {
         switch self {
         case .sketch: "Neue Skizze beginnen: Ebene oder ebene Körperfläche antippen, dann mit dem Stift zeichnen."
-        case .extrude: "Extrudieren (Bereich oder ebene Fläche am Pfeil ziehen) und Dünn extrudieren (Linien als Wand)."
-        case .shapes: "Körper aus Skizzen formen – Achsendrehung, Sweep, Loft, Helix – oder Grundkörper wie Quader, Zylinder und Kugel einfügen."
-        case .fillets: "Kanten abrunden oder fasen."
-        case .holes: "Bohrung mit Senkung oder Senkkopf, Gewindebohrung und Gewinde an Bolzen, Bohrungen oder jeder Fläche."
-        case .faces: "Flächen versetzen, ersetzen oder neigen, Körper aushöhlen, Kanten versetzen oder abdrücken, Umhüllen und Prägen."
-        case .combine: "Körper vereinigen, abziehen, schneiden oder teilen, Negativform um einen Körper."
-        case .move: "Körper oder Skizzen verschieben, drehen, kopieren, von Punkt zu Punkt übersetzen, ausrichten oder skalieren."
-        case .pattern: "Körper spiegeln oder als Muster in Reihe bzw. im Kreis vervielfältigen."
+        case .create: "Körper erzeugen: Extrudieren, Drehen, Sweep, Loft, Bohrung und Gewinde, Grundkörper."
+        case .modify: "Kanten abrunden oder fasen, Flächen ziehen, versetzen, ersetzen oder neigen, Schale, Körper kombinieren, teilen oder skalieren."
+        case .arrange: "Körper verschieben, drehen, kopieren, ausrichten, spiegeln oder als Muster vervielfältigen."
         case .construct: "Hilfsebenen, -achsen und -punkte, z. B. eine versetzte Ebene zum Skizzieren."
-        case .inspect: "Messen und Druckprüfung (Überhang, dünne Wände). Schnittansicht und Isolieren liegen rechts."
+        case .inspect: "Messen, Schnittansicht, Druckprüfung (Überhang, dünne Wände) und Isolieren."
         case .insert: "Normteile (Schrauben, Muttern, Lager), Vorlagen (Gehäuse, Stirnrad), STEP-, STL- und 3MF-Dateien, Bild als Vorlage (aus Fotos, Dateien oder direkt mit der Kamera), Körper eines anderen Projekts, eine Variable, Netze bearbeiten."
-        case .visualize: "Anzeigemodus, orthografische Projektion, Körperfarbe und Zeichnung."
+        case .visualize: "Anzeigemodus, orthografische Projektion, Körperfarbe, Zeichnung und Kontextvorschläge."
+        case .sheetMetal: "Blech wie SolidCraft: Flansche, Umkantung, Falten, Perforieren, In Blech umwandeln (offene Kanten wählbar), Entfalten, Flachmuster mit DXF und Biegetabelle, Blechregeln."
         }
     }
 
-    /// Skizze ist eine direkte Aktion ohne Untermenü; jede andere Kachel öffnet ihre Werkzeuge.
+    /// Skizze ist eine direkte Aktion ohne Untermenü; jede andere Gruppe öffnet ihre vollständige Liste.
     var hasFlyout: Bool { self != .sketch }
 }
 
@@ -91,6 +88,10 @@ enum ToolCategory: String {
     case inspect = "Prüfen"
     case insert = "Einfügen"
     case view = "Ansicht"
+    // Skizzenmodus nach SolidCraft (Create / Modify / Pattern / Constrain / Reference / Inspect)
+    case sketchPattern = "Muster"
+    case constrain = "Bedingen"
+    case reference = "Referenz"
 
     /// Symbolfarbe (inaktiv) und Füllung (aktiv)
     var color: Color {
@@ -106,6 +107,10 @@ enum ToolCategory: String {
         case .construct: Color(red: 0.80, green: 0.56, blue: 0.0)
         case .inspect: Color(red: 0.0, green: 0.56, blue: 0.60)
         case .insert, .view: Color(red: 0.38, green: 0.44, blue: 0.53)
+        case .sketchPattern: Color(red: 0.68, green: 0.32, blue: 0.78)
+        // SolidCraft-Akzent der Bedingungen #C16358 bzw. der projizierten Geometrie #963CBE
+        case .constrain: Color(red: 0.76, green: 0.39, blue: 0.35)
+        case .reference: Color(red: 0.59, green: 0.24, blue: 0.75)
         }
     }
 
@@ -121,19 +126,26 @@ struct ToolItem: Identifiable {
     var isEnabled = true
     var isActive = false
     var action: () -> Void = {}
+    /// Zwischenüberschrift im Untermenü (ÄNDERN: KANTEN, FLÄCHEN, KÖRPER, SPEZIAL)
+    var heading: String?
+    /// Tastenkürzel rechts
+    var shortcut: String?
+    /// Stecknadel: Schlüssel zum Anheften in die Leiste (nil = nicht anheftbar)
+    var pinID: String?
 }
 
-/// Kachelgröße und Abstand der Werkzeuggruppen im 3D-Modus.
-private struct GroupSize: Equatable {
+/// Größe der senkrechten Ribbon-Leiste im 3D-Modus: Kachelgröße und Kacheln je Gruppe.
+private struct RibbonSize: Equatable {
     let tile: CGFloat
     let gap: CGFloat
+    /// Höchstens so viele Kacheln je Gruppe (hervorgehobene und angeheftete)
+    let tiles: Int
 
     /// Von groß nach klein; die Leiste nimmt die erste, die in die Höhe passt.
-    static let sizes: [GroupSize] = [
-        GroupSize(tile: 52, gap: 10),
-        GroupSize(tile: 46, gap: 8),
-        GroupSize(tile: 42, gap: 6),
-        GroupSize(tile: 38, gap: 5),
+    static let sizes: [RibbonSize] = [
+        RibbonSize(tile: 44, gap: 6, tiles: 4),
+        RibbonSize(tile: 40, gap: 5, tiles: 2),
+        RibbonSize(tile: 38, gap: 4, tiles: 1),
     ]
 }
 
@@ -153,6 +165,50 @@ private struct RailEntry: Identifiable {
     /// langes Drücken öffnet die Varianten. Ohne primary öffnet Antippen das Untermenü (Gruppen wie „Mehr“).
     var primary: (() -> Void)?
     var action: () -> Void = {}
+    /// Statt einer Kachel ein Raster aus Bildknöpfen in zwei Spalten (Bedingungen wie im SolidCraft-Mockup)
+    var grid: [RailGridCell]?
+    /// Kurze Beschriftung unter der Kachel in der Skizzenleiste (nil = title)
+    var label: String?
+}
+
+/// Knopf im Raster der linken Leiste (Bedingung): passend = farbig, wartend = getönt mit Rahmen.
+private struct RailGridCell: Identifiable {
+    let id: String
+    let title: String
+    let icon: String
+    var detail: String?
+    var isApplicable = false
+    var isPending = false
+    var action: () -> Void = {}
+}
+
+/// Abschnitt der Skizzenleiste (category nil = obere Zeile mit „Beenden“ und „Auswählen“).
+private struct RailSection: Identifiable {
+    let id: String
+    let category: ToolCategory?
+    var entries: [RailEntry]
+}
+
+/// Zelle im Zwei-Spalten-Raster der Skizzenleiste: Werkzeugkachel oder Bedingungsknopf.
+private enum RailCell: Identifiable {
+    case entry(RailEntry)
+    case grid(RailGridCell, isEnabled: Bool)
+
+    var id: String {
+        switch self {
+        case .entry(let entry): "entry.\(entry.id)"
+        case .grid(let cell, _): "grid.\(cell.id)"
+        }
+    }
+}
+
+/// Lage der Kacheln mit Untermenü in der Skizzenleiste
+private struct RailEntryFramesKey: PreferenceKey {
+    static let defaultValue: [String: CGRect] = [:]
+
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue()) { _, new in new }
+    }
 }
 
 /// Linke Werkzeugleiste (Aufbau wie bei Shapr3D, Symbole und Abschnitte wie Fusion 360):
@@ -165,10 +221,6 @@ struct ToolRail: View {
     let importSTEP: () -> Void
 
     @State private var openEntry: String?
-    /// Zuletzt gewähltes Werkzeug unter „Ändern“ (Antippen startet es wieder)
-    @State private var modifyTool: SketchTool = .fillet
-    /// Zuletzt gewähltes Werkzeug unter „Mehr“
-    @State private var moreTool: SketchTool = .project
     /// Zuletzt gewählte Variante unter „Schneiden“ (Antippen startet sie wieder)
     @State private var cutTool: SketchTool = .trim
     /// Zugeklappte Abschnitte im Skizzenmodus. „Ändern“ ist anfangs offen (Kai fand „Beschneiden“ im zugeklappten
@@ -178,17 +230,24 @@ struct ToolRail: View {
     @AppStorage(LassoSelection.key) private var lassoSelects = false
 
     private let headerHeight: CGFloat = 18
-    /// Kachelgröße der Werkzeuggruppen: die größte, mit der alle Gruppen in die Höhe passen
-    /// (iPad 11"/13", hoch und quer); die gewählte merkt sich die Leiste für die Lage des Untermenüs.
-    @State private var groupSize = GroupSize.sizes[0]
     /// Gemessene Breite der Gruppenleiste (Kacheln + Beschriftung), Ankerpunkt des Untermenüs
     @State private var railWidth: CGFloat = 0
+    /// Gemessene Höhe der Leiste und Lage jeder Gruppe darin (Koordinatenraum „ribbon“), für die Lage des Untermenüs
+    @State private var railHeight: CGFloat = 0
+    @State private var groupFrames: [ToolGroup: CGRect] = [:]
+    /// Lage der Skizzenkacheln mit Untermenü (Koordinatenraum „sketchRail“) und Höhe der Skizzenleiste
+    @State private var sketchFrames: [String: CGRect] = [:]
+    @State private var sketchRailHeight: CGFloat = 0
+    /// Angeheftete Befehle (Stecknadel im Gruppenmenü, ModelRibbon.pinsKey)
+    @AppStorage("ribbon.pins") private var pinsText = ""
+    /// Kontextvorschläge (Shapr3D): mit Auswahl Aktionen statt Gruppen links (Std. aus, ModelRibbon.contextKey)
+    @AppStorage("model.contextSuggestions") private var contextSuggestions = false
     /// Platz unten links für Rückgängig/Wiederholen
     private let bottomReserve: CGFloat = 70
 
     var body: some View {
         if sketch.isActive {
-            entryRail(sketchEntries, tile: 44, header: sketchHeader, collapsible: true)
+            sketchRail
         } else if showsContext {
             entryRail(contextEntries, tile: 44, header: nil)
         } else {
@@ -223,51 +282,16 @@ struct ToolRail: View {
             }
             ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
                 if let section = sectionStart(entries, index) {
-                    if collapsible, section != .create {
-                        SectionHeader(category: section, isCollapsed: collapsedSections.contains(section))
-                            .frame(height: headerHeight)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                if collapsedSections.contains(section) {
-                                    collapsedSections.remove(section)
-                                } else {
-                                    collapsedSections.insert(section)
-                                }
-                            }
-                            .accessibilityAddTraits(.isButton)
-                            .hoverTip(collapsedSections.contains(section) ? "Aufklappen" : "Zuklappen")
-                    } else {
-                        SectionHeader(category: section)
-                            .frame(height: headerHeight)
-                    }
+                    sectionHeader(section, collapsible: collapsible && section != .create)
                 }
-                if !isHidden(entry, collapsible: collapsible) {
+                if !isHidden(entry, collapsible: collapsible), let cells = entry.grid {
+                    RailGrid(cells: cells, size: tile, isEnabled: entry.isEnabled)
+                } else if !isHidden(entry, collapsible: collapsible) {
                 RailTile(title: entry.title, subtitle: entry.subtitle, systemImage: entry.systemImage,
                          category: entry.category, isActive: entry.isActive, isOpen: openEntry == entry.id,
                          size: tile, hasVariants: entry.flyout != nil && entry.primary != nil)
-                    .onTapGesture {
-                        if let primary = entry.primary {
-                            openEntry = nil
-                            primary()
-                        } else if entry.flyout != nil {
-                            openEntry = openEntry == entry.id ? nil : entry.id
-                        } else {
-                            openEntry = nil
-                            entry.action()
-                        }
-                    }
-                    .onLongPressGesture(minimumDuration: 0.35) {
-                        guard entry.flyout != nil else {
-                            // Ohne Varianten: kurze Erklärung als Kapsel unten
-                            if let text = ToolTips.detail(for: entry.title) {
-                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                                workspace.explain(ToolExplanation(title: entry.title, text: text))
-                            }
-                            return
-                        }
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                        openEntry = entry.id
-                    }
+                    .onTapGesture { tapEntry(entry) }
+                    .onLongPressGesture(minimumDuration: 0.35) { pressEntry(entry) }
                     .allowsHitTesting(entry.isEnabled)
                     .opacity(entry.isEnabled ? 1 : 0.45)
                     .accessibilityAddTraits(.isButton)
@@ -279,34 +303,293 @@ struct ToolRail: View {
         return HStack(alignment: .top, spacing: 12) {
             ViewThatFits(in: .vertical) {
                 list
+                // Nur so breit wie die Leiste: sonst nimmt die ScrollView die ganze Bildschirmbreite ein und fängt
+                // jeden Strich auf der Zeichenfläche als Scrollen ab
                 ScrollView(showsIndicators: false) { list }
+                    .fixedSize(horizontal: true, vertical: false)
             }
             if let openEntry, let index = entries.firstIndex(where: { $0.id == openEntry }),
                let items = entries[index].flyout {
                 let sections = (0...index).filter { sectionStart(entries, $0) != nil }.count
-                let tilesAbove = (0..<index).filter { !isHidden(entries[$0], collapsible: collapsible) }.count
+                let heightAbove = (0..<index).filter { !isHidden(entries[$0], collapsible: collapsible) }
+                    .reduce(CGFloat(0)) { sum, k in sum + entryHeight(entries[k], tile: tile) + gap }
                 Flyout(title: entries[index].title, category: entries[index].category, items: items) {
                     self.openEntry = nil
                 }
-                .padding(.top, CGFloat(tilesAbove) * (tile + gap) + CGFloat(sections) * (headerHeight + gap)
-                         + (header == nil ? 0 : 30))
+                .padding(.top, heightAbove + CGFloat(sections) * (headerHeight + gap) + (header == nil ? 0 : 30))
                 .transition(.opacity.combined(with: .move(edge: .leading)))
             }
         }
         .animation(Theme.spring, value: openEntry)
     }
 
+    /// Abschnittskopf (ERSTELLEN, ÄNDERN …), auf Wunsch zuklappbar.
+    @ViewBuilder private func sectionHeader(_ section: ToolCategory, collapsible: Bool) -> some View {
+        if collapsible {
+            SectionHeader(category: section, isCollapsed: collapsedSections.contains(section))
+                .frame(height: headerHeight)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    if collapsedSections.contains(section) {
+                        collapsedSections.remove(section)
+                    } else {
+                        collapsedSections.insert(section)
+                    }
+                }
+                .accessibilityAddTraits(.isButton)
+                .hoverTip(collapsedSections.contains(section) ? "Aufklappen" : "Zuklappen")
+        } else {
+            SectionHeader(category: section)
+                .frame(height: headerHeight)
+        }
+    }
+
+    /// Antippen: Werkzeug starten (zuletzt gewählte Variante), Untermenü öffnen bzw. Aktion ausführen.
+    private func tapEntry(_ entry: RailEntry) {
+        if let primary = entry.primary {
+            openEntry = nil
+            primary()
+        } else if entry.flyout != nil {
+            openEntry = openEntry == entry.id ? nil : entry.id
+        } else {
+            openEntry = nil
+            entry.action()
+        }
+    }
+
+    /// Langes Drücken: Varianten zeigen; ohne Varianten eine kurze Erklärung als Kapsel unten.
+    private func pressEntry(_ entry: RailEntry) {
+        guard entry.flyout != nil else {
+            if let text = ToolTips.detail(for: entry.title) {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                workspace.explain(ToolExplanation(title: entry.title, text: text))
+            }
+            return
+        }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        openEntry = entry.id
+    }
+
+    /// Höhe eines Eintrags in der Leiste (Kachel bzw. Raster), für die Lage des Untermenüs.
+    private func entryHeight(_ entry: RailEntry, tile: CGFloat) -> CGFloat {
+        guard let cells = entry.grid else { return tile }
+        return RailGrid.height(count: cells.count, size: tile)
+    }
+
     // MARK: Skizzenmodus
 
-    /// Skizzenname und Ebene (ersetzt die frühere Kachel „Aktive Ebene“)
-    private var sketchHeader: String {
-        let name: String
+    /// Kachelgröße, Spaltenbreite (Kachel + Platz für die Beschriftung), Abstand und Innenabstand der Skizzenleiste
+    private let sketchTile: CGFloat = 44
+    private let sketchColumn: CGFloat = 48
+    private let sketchGap: CGFloat = 4
+    private let sketchPadding: CGFloat = 5
+
+    /// Feste Breite der Skizzenleiste: zwei Spalten. Breiter wird sie nie (sonst fängt sie Striche über dem Viewport ab).
+    private var sketchRailWidth: CGFloat { 2 * sketchColumn + sketchGap + 2 * sketchPadding }
+
+    /// Skizzenname (ersetzt die frühere Kachel „Aktive Ebene“)
+    private var sketchName: String {
         if let index = workspace.editingSketchIndex, model.sketches.indices.contains(index) {
-            name = model.sketches[index].name
-        } else {
-            name = "Skizze \(model.sketches.count + 1)"
+            return model.sketches[index].name
         }
-        return "\(name) · \(sketch.isChoosingPlane ? "Ebene wählen" : activePlaneName)"
+        return "Skizze \(model.sketches.count + 1)"
+    }
+
+    /// Skizzenname und Ebene, zweizeilig in Leistenbreite
+    private var sketchTitle: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(sketchName)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.primary)
+            Text(sketch.isChoosingPlane ? "Ebene wählen" : activePlaneName)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .lineLimit(1)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 4)
+        .floatingSurface(.regularMaterial, in: RoundedRectangle(cornerRadius: Theme.Radius.label, style: .continuous),
+                         elevation: .flat)
+    }
+
+    /// Skizzenleiste: zwei Kacheln je Zeile auf einer gemeinsamen schmalen Fläche, Abschnitte zuklappbar.
+    /// Das Untermenü (Varianten) liegt rechts daneben auf Höhe der Kachel und verbreitert die Leiste nicht.
+    private var sketchRail: some View {
+        let entries = sketchEntries
+        let sections = railSections(entries)
+        let list = VStack(alignment: .leading, spacing: 8) {
+            ForEach(sections) { section in
+                sketchSection(section)
+            }
+        }
+        .padding(sketchPadding)
+        .frame(width: sketchRailWidth, alignment: .leading)
+        return VStack(alignment: .leading, spacing: 6) {
+            sketchTitle
+            ViewThatFits(in: .vertical) {
+                list
+                ScrollView(showsIndicators: false) { list }
+                    .frame(width: sketchRailWidth)
+            }
+            .frame(width: sketchRailWidth)
+            .floatingSurface(in: RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
+        }
+        .frame(width: sketchRailWidth, alignment: .leading)
+        .coordinateSpace(name: "sketchRail")
+        .onPreferenceChange(RailEntryFramesKey.self) { frames in
+            sketchFrames = frames
+        }
+        .background {
+            GeometryReader { proxy in
+                Color.clear
+                    .onAppear { sketchRailHeight = proxy.size.height }
+                    .onChange(of: proxy.size.height) { _, height in
+                        sketchRailHeight = height
+                    }
+            }
+        }
+        .overlay(alignment: .topLeading) {
+            sketchFlyout(entries)
+        }
+        .animation(Theme.spring, value: openEntry)
+    }
+
+    /// Untermenü des offenen Eintrags: obere Kacheln öffnen es nach unten, untere nach oben.
+    @ViewBuilder private func sketchFlyout(_ entries: [RailEntry]) -> some View {
+        if let openEntry, let entry = entries.first(where: { $0.id == openEntry }), let items = entry.flyout {
+            let frame = sketchFrames[openEntry] ?? .zero
+            let fromTop = frame.midY * 2 < max(sketchRailHeight, 1)
+            Flyout(title: entry.title, category: entry.category, items: items) {
+                self.openEntry = nil
+            }
+            .padding(.top, fromTop ? max(frame.minY, 0) : 0)
+            .padding(.bottom, fromTop ? 0 : max(sketchRailHeight - frame.maxY, 0))
+            .frame(maxHeight: .infinity, alignment: fromTop ? .top : .bottom)
+            .offset(x: sketchRailWidth + 10)
+            .transition(.opacity.combined(with: .move(edge: .leading)))
+        }
+    }
+
+    /// Aufeinanderfolgende Einträge gleicher Kategorie bilden einen Abschnitt; „Beenden“ und „Auswählen“ die obere Zeile.
+    private func railSections(_ entries: [RailEntry]) -> [RailSection] {
+        var result: [RailSection] = []
+        for entry in entries {
+            let category: ToolCategory? = entry.category == .neutral || entry.category == .finish ? nil : entry.category
+            let id = category?.rawValue ?? "top"
+            if let last = result.last, last.id == id {
+                result[result.count - 1].entries.append(entry)
+            } else {
+                result.append(RailSection(id: id, category: category, entries: [entry]))
+            }
+        }
+        return result
+    }
+
+    /// Zeilen zu je zwei Zellen; ein Raster (Bedingungen) beginnt in einer neuen Zeile.
+    private func sketchRows(_ entries: [RailEntry]) -> [[RailCell]] {
+        var rows: [[RailCell]] = []
+        var current: [RailCell] = []
+        for entry in entries where !isHidden(entry, collapsible: true) {
+            if let cells = entry.grid {
+                if !current.isEmpty {
+                    rows.append(current)
+                    current = []
+                }
+                for cell in cells {
+                    current.append(.grid(cell, isEnabled: entry.isEnabled))
+                    if current.count == 2 {
+                        rows.append(current)
+                        current = []
+                    }
+                }
+                if !current.isEmpty {
+                    rows.append(current)
+                    current = []
+                }
+            } else {
+                current.append(.entry(entry))
+                if current.count == 2 {
+                    rows.append(current)
+                    current = []
+                }
+            }
+        }
+        if !current.isEmpty {
+            rows.append(current)
+        }
+        return rows
+    }
+
+    private func sketchSection(_ section: RailSection) -> some View {
+        let rows = sketchRows(section.entries)
+        return VStack(alignment: .leading, spacing: sketchGap) {
+            if let category = section.category {
+                sectionHeader(category, collapsible: category != .create)
+            }
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                HStack(spacing: sketchGap) {
+                    ForEach(row) { cell in
+                        railCell(cell)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private func railCell(_ cell: RailCell) -> some View {
+        switch cell {
+        case .entry(let entry):
+            compactTile(entry)
+        case .grid(let item, let isEnabled):
+            Button(action: item.action) {
+                RailGridIcon(cell: item, size: sketchTile, isEnabled: isEnabled)
+            }
+            .buttonStyle(.pressable)
+            .disabled(!isEnabled)
+            .accessibilityLabel(item.title)
+            .accessibilityAddTraits(item.isPending ? .isSelected : [])
+            .hoverTip(item.title, item.detail)
+            .frame(width: sketchColumn)
+        }
+    }
+
+    /// Kachel mit kleiner Beschriftung darunter; Variante und Erklärung im Schild.
+    private func compactTile(_ entry: RailEntry) -> some View {
+        RailTile(title: entry.label ?? entry.title, subtitle: entry.subtitle, systemImage: entry.systemImage,
+                 category: entry.category, isActive: entry.isActive, isOpen: openEntry == entry.id,
+                 size: sketchTile, hasVariants: entry.flyout != nil && entry.primary != nil, labelBelow: true)
+            .frame(width: sketchColumn)
+            .contentShape(Rectangle())
+            .onTapGesture { tapEntry(entry) }
+            .onLongPressGesture(minimumDuration: 0.35) { pressEntry(entry) }
+            .allowsHitTesting(entry.isEnabled)
+            .opacity(entry.isEnabled ? 1 : 0.45)
+            .accessibilityLabel(entry.title)
+            .accessibilityAddTraits(.isButton)
+            .hoverTip(entry.title, entryTip(entry))
+            .background {
+                if entry.flyout != nil {
+                    GeometryReader { proxy in
+                        Color.clear.preference(key: RailEntryFramesKey.self,
+                                               value: [entry.id: proxy.frame(in: .named("sketchRail"))])
+                    }
+                }
+            }
+    }
+
+    /// Schild: gewählte Variante, Erklärung und Hinweis auf die Varianten
+    private func entryTip(_ entry: RailEntry) -> String? {
+        var parts: [String] = []
+        if let subtitle = entry.subtitle {
+            parts.append(subtitle + ".")
+        }
+        if let detail = ToolTips.detail(for: entry.title) {
+            parts.append(detail)
+        }
+        if entry.primary != nil {
+            parts.append("Lange drücken: alle Varianten.")
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " ")
     }
 
     private func toolEntry(_ tool: SketchTool, category: ToolCategory, subtitle: String? = nil) -> RailEntry {
@@ -316,10 +599,10 @@ struct ToolRail: View {
         })
     }
 
-    private func toolItem(_ tool: SketchTool, title: String? = nil, subtitle: String? = nil,
+    private func toolItem(_ tool: SketchTool, title: String? = nil, subtitle: String? = nil, icon: String? = nil,
                           isActive: Bool? = nil, then: @escaping () -> Void = {}) -> ToolItem {
         ToolItem(id: "item.\(tool.rawValue).\(title ?? "")", title: title ?? tool.rawValue,
-                 subtitle: subtitle ?? tool.subtitle, systemImage: tool.systemImage,
+                 subtitle: subtitle ?? tool.subtitle, systemImage: icon ?? tool.systemImage,
                  isActive: isActive ?? (sketch.tool == tool)) {
             sketch.tool = tool
             then()
@@ -368,7 +651,8 @@ struct ToolRail: View {
             ToolItem(id: "polygon.\(mode.rawValue)", title: "Radius bis \(mode.rawValue)",
                      subtitle: mode == .inscribed ? "Innen (Umkreis)" : "Außen (Inkreis)",
                      systemImage: SketchTool.polygon.systemImage,
-                     isActive: sketch.tool == .polygon && sketch.polygonMode == mode) {
+                     isActive: sketch.tool == .polygon && sketch.generatedShape == nil && sketch.polygonMode == mode) {
+                sketch.generatedShape = nil
                 sketch.tool = .polygon
                 sketch.polygonMode = mode
             }
@@ -385,23 +669,30 @@ struct ToolRail: View {
         }
     }
 
-    /// Aufteilung wie die Registerkarte „Skizze“ in Fusion 360: Fertig stellen, Erstellen, Ändern, Prüfen.
-    /// Einschränkungen stehen rechts, 3D-Werkzeuge erst nach dem Beenden der Skizze.
+    /// Bedingungen als Raster 2 × 6 wie im SolidCraft-Mockup (`sketch.png`): erst Symbol, dann Elemente antippen;
+    /// passt die Auswahl schon, wirkt die Bedingung sofort (Ablauf wie die frühere ConstraintColumn rechts).
+    private var constraintCells: [RailGridCell] {
+        let kinds = [ConstraintKind.lock] + ConstraintKind.allCases.filter { $0 != .lock && $0 != .dimension }
+        return kinds.map { kind in
+            RailGridCell(id: kind.rawValue, title: kind.rawValue, icon: kind.systemImage, detail: kind.selectionHint,
+                         isApplicable: sketch.canApply(kind), isPending: sketch.pendingAction == .constraint(kind)) {
+                sketch.start(.constraint(kind))
+            }
+        }
+    }
+
+    /// Aufteilung wie die Registerkarte SKETCH in SolidCraft: Fertig stellen, Erstellen, Ändern, Muster, Bedingen,
+    /// Referenz, Prüfen. Die Eigenschaften des gewählten Werkzeugs stehen rechts in der Skizzenpalette.
     private var sketchEntries: [RailEntry] {
-        let lineTool = sketch.lineVariant
-        let lineItems: [ToolItem] = [toolItem(.polyline, title: "Linie")] + arcItems
-        let lineSubtitle = lineTool == .arc ? "Bogen \(sketch.arcMode.rawValue)" : lineTool.subtitle
         let polygonSubtitle = "\(Self.polygonName(sketch.polygonSides)) · \(sketch.polygonMode.rawValue)"
-        let roundTool: SketchTool = sketch.tool == .ellipse ? .ellipse : .circle
-        let modifyTools: [SketchTool] = [.fillet, .chamfer, .scale]
         // Schneiden: Beschneiden (antippen oder wischen), Teilen an Punkt, Unterbrechen, Verlängern
         let cutTools: [SketchTool] = [.trim, .splitAtPoint, .breakCurve, .extend]
         let shownCut: SketchTool = cutTools.contains(sketch.tool) ? sketch.tool : cutTool
-        let moreTools: [SketchTool] = [.project, .mirror, .rectPattern, .circPattern, .point, .text]
         // Spline: Fit-/Kontrollpunkte setzen, Freihand, Punkt einfügen
-        let splineKindItems: [ToolItem] = SplineKind.allCases.map { kind in
-            toolItem(.spline, title: kind.rawValue, subtitle: "Spline",
-                     isActive: sketch.tool == .spline && sketch.splineInput == .points && sketch.splineKind == kind) {
+        let splineKindItems: [ToolItem] = SplineKind.allCases.map { kind -> ToolItem in
+            let icon: String? = kind == .control ? "sc.spline_cv" : nil
+            return toolItem(.spline, title: kind.rawValue, subtitle: "Spline", icon: icon,
+                            isActive: sketch.tool == .spline && sketch.splineInput == .points && sketch.splineKind == kind) {
                 sketch.splineInput = .points
                 sketch.splineKind = kind
             }
@@ -416,10 +707,12 @@ struct ToolRail: View {
             }
         }
         let splineItems = splineKindItems + splineInputItems
+        let planeReady = !sketch.isChoosingPlane
+        let detachPending = sketch.pendingAction == .detach
         return [
             RailEntry(id: "sketch.finish", title: "Skizzieren beenden", systemImage: "checkmark", category: .finish, action: {
                 workspace.finishSketch()
-            }),
+            }, label: "Beenden"),
             // Pfeil: zeichnet nicht, sondern wählt, verschiebt und zieht Eck- und Endpunkte
             // Ins Leere ziehen wählt mit Rahmen bzw. Lasso (lange drücken: Variante wählen)
             RailEntry(id: "sketch.select", title: SketchTool.select.rawValue,
@@ -438,12 +731,9 @@ struct ToolRail: View {
                           },
                       ], primary: { sketch.tool = .select }),
             // ERSTELLEN
-            RailEntry(id: "sketch.line", title: "Linie/Bogen", subtitle: lineSubtitle,
-                      systemImage: lineTool.systemImage, category: .create,
-                      isActive: sketch.tool == .polyline || sketch.tool == .arc,
-                      flyout: lineItems, primary: { sketch.tool = sketch.lineVariant }),
+            toolEntry(.polyline, category: .create),
             RailEntry(id: "sketch.rectangle", title: "Rechteck", subtitle: sketch.rectangleMode.rawValue,
-                      systemImage: SketchTool.rectangle.systemImage, category: .create,
+                      systemImage: sketch.rectangleMode.systemImage, category: .create,
                       isActive: sketch.tool == .rectangle,
                       flyout: RectangleMode.allCases.map { mode in
                           ToolItem(id: "rect.\(mode.rawValue)", title: mode.rawValue, subtitle: "Rechteck",
@@ -453,56 +743,84 @@ struct ToolRail: View {
                               sketch.rectangleMode = mode
                           }
                       }, primary: { sketch.tool = .rectangle }),
-            // Ellipse liegt wie in Fusion 360 bei den Kreisen
-            RailEntry(id: "sketch.circle", title: roundTool == .ellipse ? "Ellipse" : "Kreis",
-                      subtitle: roundTool == .ellipse ? nil : sketch.circleMode.rawValue,
-                      systemImage: roundTool.systemImage, category: .create,
-                      isActive: sketch.tool == .circle || sketch.tool == .ellipse,
-                      flyout: circleItems + [toolItem(.ellipse, subtitle: "Mitte zur Ecke")],
-                      primary: { sketch.tool = roundTool }),
+            RailEntry(id: "sketch.circle", title: "Kreis", subtitle: sketch.circleMode.rawValue,
+                      systemImage: sketch.circleMode.systemImage, category: .create, isActive: sketch.tool == .circle,
+                      flyout: circleItems, primary: { sketch.tool = .circle }),
+            // Bogen als eigene Familie (Kai: „von A nach B, dann den Bogen aufziehen“)
+            RailEntry(id: "sketch.arc", title: "Bogen", subtitle: sketch.arcMode.rawValue,
+                      systemImage: sketch.arcMode.systemImage, category: .create, isActive: sketch.tool == .arc,
+                      flyout: arcItems, primary: { sketch.tool = .arc }),
             RailEntry(id: "sketch.polygon", title: "Polygon", subtitle: polygonSubtitle,
-                      systemImage: SketchTool.polygon.systemImage, category: .create, isActive: sketch.tool == .polygon,
-                      flyout: polygonItems, primary: { sketch.tool = .polygon }),
+                      systemImage: SketchTool.polygon.systemImage, category: .create,
+                      isActive: sketch.tool == .polygon && sketch.generatedShape == nil,
+                      flyout: polygonItems, primary: {
+                          sketch.generatedShape = nil
+                          sketch.tool = .polygon
+                      }),
             RailEntry(id: "sketch.slot", title: "Langloch", subtitle: sketch.slotMode.rawValue,
-                      systemImage: SketchTool.slot.systemImage, category: .create, isActive: sketch.tool == .slot,
+                      systemImage: sketch.slotMode.systemImage, category: .create, isActive: sketch.tool == .slot,
                       flyout: slotItems, primary: { sketch.tool = .slot }),
             RailEntry(id: "sketch.spline", title: "Spline",
                       subtitle: sketch.splineInput == .points ? sketch.splineKind.rawValue : sketch.splineInput.rawValue,
                       systemImage: sketch.splineInput.systemImage, category: .create, isActive: sketch.tool == .spline,
                       flyout: splineItems, primary: { sketch.tool = .spline }),
-            // Projizieren, Spiegeln, Muster, Punkt, Text: Antippen startet das zuletzt gewählte
-            RailEntry(id: "sketch.more", title: moreTools.contains(sketch.tool) ? sketch.tool.rawValue : "Mehr",
-                      subtitle: moreTools.contains(sketch.tool) ? nil : moreTool.rawValue,
-                      systemImage: moreTool.systemImage, category: .create, isActive: moreTools.contains(sketch.tool),
-                      flyout: moreTools.map { tool in toolItem(tool) { moreTool = tool } },
-                      primary: { sketch.tool = moreTool }),
+            toolEntry(.ellipse, category: .create),
+            toolEntry(.point, category: .create),
+            toolEntry(.text, category: .create),
             RailEntry(id: "sketch.construction", title: "Konstruktion", subtitle: sketch.constructionMode ? "Ein" : "Aus",
-                      systemImage: "line.diagonal.arrow", category: .create, isActive: sketch.constructionMode, action: {
+                      systemImage: "sc.construction", category: .create, isActive: sketch.constructionMode, action: {
                 sketch.constructionMode.toggle()
+                sketch.options.lineType = sketch.constructionMode ? .construction : .normal
             }),
             // ÄNDERN
             // Schneiden mit der Schere zuoberst: Antippen startet die zuletzt gewählte Variante, lange drücken zeigt alle
             RailEntry(id: "sketch.cut", title: "Schneiden", subtitle: shownCut.rawValue,
-                      systemImage: SketchTool.trim.systemImage, category: .modify,
+                      systemImage: shownCut.systemImage, category: .modify,
                       isActive: cutTools.contains(sketch.tool),
                       flyout: cutTools.map { tool in toolItem(tool) { cutTool = tool } },
                       primary: { sketch.tool = cutTool }),
             toolEntry(.offset, category: .modify),
-            RailEntry(id: "sketch.modify", title: modifyTools.contains(sketch.tool) ? sketch.tool.rawValue : "Ändern",
-                      subtitle: modifyTools.contains(sketch.tool) ? nil : modifyTool.rawValue,
-                      systemImage: modifyTool.systemImage, category: .modify, isActive: modifyTools.contains(sketch.tool),
-                      flyout: modifyTools.map { tool in toolItem(tool) { modifyTool = tool } },
-                      primary: { sketch.tool = modifyTool }),
+            toolEntry(.fillet, category: .modify),
+            toolEntry(.chamfer, category: .modify),
+            toolEntry(.scale, category: .modify),
             RailEntry(id: "sketch.delete", title: "Löschen", subtitle: sketch.selection.isEmpty ? nil : "Auswahl",
-                      systemImage: "trash", category: .modify, isEnabled: !sketch.selection.isEmpty, action: {
+                      systemImage: "sc.delete", category: .modify, isEnabled: !sketch.selection.isEmpty, action: {
                 sketch.deleteSelection()
             }),
+            // MUSTER
+            toolEntry(.mirror, category: .sketchPattern),
+            toolEntry(.circPattern, category: .sketchPattern),
+            toolEntry(.rectPattern, category: .sketchPattern),
+            // Formgenerator: Bibliothek fertiger Formen rechts, im Viewport aufziehen wie ein Polygon
+            RailEntry(id: "sketch.shapes", title: "Formen", subtitle: sketch.isGeneratingShape ? sketch.generatedShape?.title : "Bibliothek",
+                      systemImage: "star.square.on.square", category: .sketchPattern,
+                      isActive: sketch.isGeneratingShape, action: {
+                sketch.startShapeGenerator()
+            }),
+            // BEDINGEN: Bemaßung und Trennen in einer Zeile, dann das Raster der Bedingungen
+            RailEntry(id: "sketch.dimension", title: ConstraintKind.dimension.rawValue, subtitle: "Element antippen",
+                      systemImage: ConstraintKind.dimension.systemImage, category: .constrain, isEnabled: planeReady,
+                      action: {
+                // Maße erscheinen zur Auswahl im Viewport (Maßfeld mit Schloss)
+                if sketch.pendingAction != nil { sketch.cancelPending() }
+                sketch.tool = .select
+                sketch.notice = ConstraintKind.dimension.selectionHint
+            }),
+            RailEntry(id: "sketch.detach", title: "Trennen", subtitle: detachPending ? "Aktiv" : nil,
+                      systemImage: "link.badge.plus", category: .constrain, isActive: detachPending,
+                      isEnabled: planeReady, action: {
+                sketch.start(.detach)
+            }),
+            RailEntry(id: "sketch.constraints", title: "Bedingungen", systemImage: "sc.c_hv", category: .constrain,
+                      isEnabled: planeReady, grid: constraintCells),
+            // REFERENZ
+            toolEntry(.project, category: .reference),
             // PRÜFEN
             toolEntry(.measure, category: .inspect),
             RailEntry(id: "sketch.section", title: "Schnittansicht", subtitle: workspace.sketchSection ? "Ein" : "Aus",
-                      systemImage: "square.split.diagonal.2x2", category: .inspect, isActive: workspace.sketchSection, action: {
+                      systemImage: "sc.section", category: .inspect, isActive: workspace.sketchSection, action: {
                 workspace.sketchSection.toggle()
-            }),
+            }, label: "Schnitt"),
         ]
     }
 
@@ -513,8 +831,10 @@ struct ToolRail: View {
             || !model.selectedRegions.isEmpty
     }
 
+    /// Frühere Kontextleiste nur mit der Einstellung „Kontextvorschläge (Shapr3D)“; sonst stehen die Aktionen im
+    /// Kontextmenü bzw. Werkzeugrad (ModelRibbon.contextCommands).
     private var showsContext: Bool {
-        workspace.tool == .select && hasSelection && !workspace.showsAllTools
+        contextSuggestions && workspace.tool == .select && hasSelection && !workspace.showsAllTools
     }
 
     private var selectionSummary: String {
@@ -558,15 +878,15 @@ struct ToolRail: View {
         }
         if hasRegions {
             entries.append(RailEntry(id: "context.revolve", title: "Achsendrehung",
-                                     systemImage: "arrow.triangle.2.circlepath", category: .create, action: {
+                                     systemImage: "sc.revolve", category: .create, action: {
                 workspace.activate(.revolve)
             }))
             // Wie Shapr3D nach beendeter Skizze: Profil weiterverarbeiten oder die Skizze öffnen
             entries.append(RailEntry(id: "context.sweep", title: "Sweep",
-                                     systemImage: "point.3.connected.trianglepath.dotted", category: .create, action: {
+                                     systemImage: "sc.sweep", category: .create, action: {
                 workspace.activate(.sweep)
             }))
-            entries.append(RailEntry(id: "context.loft", title: "Loft", systemImage: "square.3.layers.3d",
+            entries.append(RailEntry(id: "context.loft", title: "Loft", systemImage: "sc.loft",
                                      category: .create, action: {
                 workspace.activate(.loft)
             }))
@@ -576,7 +896,7 @@ struct ToolRail: View {
             workspace.startSketch()
         }))
         if hasRegions || planarFace {
-            entries.append(RailEntry(id: "context.text", title: "Text", systemImage: "textformat", category: .create, action: {
+            entries.append(RailEntry(id: "context.text", title: "Text", systemImage: "sc.text", category: .create, action: {
                 if let region = model.selectedRegions.first, model.sketches.indices.contains(region.sketch) {
                     workspace.startSketch(on: model.sketches[region.sketch].plane)
                 } else {
@@ -601,13 +921,13 @@ struct ToolRail: View {
         if face != nil {
             entries.append(RailEntry(id: "context.offsetFace", title: "Fläche versetzen",
                                      subtitle: model.selectedFaces.count > 1 ? "\(model.selectedFaces.count) Flächen" : nil,
-                                     systemImage: "arrow.up.and.down.square", category: .modify, action: {
+                                     systemImage: "sc.offset_face", category: .modify, action: {
                 workspace.activate(.offsetFace)
             }))
         }
         if planarFace {
             entries.append(RailEntry(id: "context.replaceFace", title: "Fläche ersetzen",
-                                     systemImage: "rectangle.portrait.and.arrow.forward", category: .modify, action: {
+                                     systemImage: "sc.replace_face", category: .modify, action: {
                 workspace.activate(.replaceFace)
             }))
             entries.append(RailEntry(id: "context.offsetEdges", title: "Kante versetzen",
@@ -617,23 +937,23 @@ struct ToolRail: View {
         }
         if hasRegions {
             entries.append(RailEntry(id: "context.wrap", title: "Umhüllen und Prägen",
-                                     systemImage: "cylinder.split.1x2", category: .modify, action: {
+                                     systemImage: "sc.emboss", category: .modify, action: {
                 workspace.activate(.wrap)
             }))
             entries.append(RailEntry(id: "context.imprint", title: "Kante abdrücken",
-                                     systemImage: "square.on.square.dashed", category: .modify, action: {
+                                     systemImage: "sc.project_surface", category: .modify, action: {
                 workspace.activate(.imprint)
             }))
         }
 
         // VERSCHIEBEN (mit Kopieren)
-        entries.append(RailEntry(id: "context.move", title: "Verschieben/Rotieren", systemImage: "move.3d",
+        entries.append(RailEntry(id: "context.move", title: "Verschieben/Rotieren", systemImage: "sc.move",
                                  category: .arrange, action: {
             startMove(copies: false)
         }))
         if model.selectedBody != nil, !hasRegions {
             entries.append(RailEntry(id: "context.copy", title: "Kopieren", subtitle: "Verschieben mit Kopie",
-                                     systemImage: "plus.square.on.square", category: .arrange, action: {
+                                     systemImage: "sc.copy", category: .arrange, action: {
                 startMove(copies: true)
             }))
         }
@@ -646,12 +966,12 @@ struct ToolRail: View {
         }
         if hasRegions {
             entries.append(RailEntry(id: "context.scaleSketch", title: "Skizze skalieren",
-                                     systemImage: "arrow.up.left.and.arrow.down.right", category: .arrange, action: {
+                                     systemImage: "sc.sketch_scale", category: .arrange, action: {
                 workspace.activate(.scaleSketch)
             }))
         } else {
             entries.append(RailEntry(id: "context.scale", title: "Skalieren",
-                                     systemImage: "arrow.up.left.and.arrow.down.right", category: .arrange, action: {
+                                     systemImage: "sc.scale", category: .arrange, action: {
                 workspace.activate(.scale)
             }))
         }
@@ -666,11 +986,11 @@ struct ToolRail: View {
 
         // KONSTRUIEREN
         if planarFace {
-            entries.append(RailEntry(id: "context.axis", title: "Achse senkrecht", systemImage: "line.diagonal.arrow",
+            entries.append(RailEntry(id: "context.axis", title: "Achse senkrecht", systemImage: "sc.axis_normal_to_face",
                                      category: .construct, action: {
                 workspace.createNormalAxis()
             }))
-            entries.append(RailEntry(id: "context.plane", title: "Ebene Versatz", systemImage: "square.dashed",
+            entries.append(RailEntry(id: "context.plane", title: "Ebene Versatz", systemImage: ConstructionKind.plane.systemImage,
                                      category: .construct, action: {
                 workspace.activate(.construct(.plane))
             }))
@@ -678,11 +998,11 @@ struct ToolRail: View {
 
         // PRÜFEN
         entries += [
-            RailEntry(id: "context.measure", title: "Messen", systemImage: "ruler", category: .inspect, action: {
+            RailEntry(id: "context.measure", title: "Messen", systemImage: "sc.measure", category: .inspect, action: {
                 workspace.activate(.measure)
             }),
             RailEntry(id: "context.section", title: "Schnittansicht", subtitle: workspace.section == nil ? "Aus" : "Ein",
-                      systemImage: "square.split.diagonal.2x2", category: .inspect, isActive: workspace.section != nil, action: {
+                      systemImage: "sc.section", category: .inspect, isActive: workspace.section != nil, action: {
                 workspace.activate(.section)
             }),
             RailEntry(id: "context.isolate", title: "Isolieren", subtitle: model.isIsolated ? "Ein" : "Aus",
@@ -701,50 +1021,55 @@ struct ToolRail: View {
             RailEntry(id: "context.more", title: "Alle Werkzeuge", systemImage: "square.grid.2x2", action: {
                 workspace.showsAllTools = true
             }),
-            RailEntry(id: "context.delete", title: "Löschen", systemImage: "trash", action: {
+            RailEntry(id: "context.delete", title: "Löschen", systemImage: "sc.delete", action: {
                 if let region = model.selectedRegions.first {
                     model.deleteSketch(region.sketch)
                 } else {
-                    model.deleteSelected()
+                    model.deleteBodies(model.deletableBodies)
                 }
             }),
         ]
         return entries
     }
 
-    // MARK: Werkzeuggruppen
+    // MARK: Werkzeuggruppen (senkrechtes Ribbon)
 
-    /// „Zurück“ (zur Auswahl) steht über den Gruppen
-    private var showsBackTile: Bool { workspace.showsAllTools && hasSelection }
+    /// „Zurück“ (zur Auswahl) steht über den Gruppen, wenn die Kontextvorschläge an sind
+    private var showsBackTile: Bool { contextSuggestions && workspace.showsAllTools && hasSelection }
 
-    /// Zahl der Kacheln über der Gruppe (mit „Zurück“, falls angezeigt)
-    private func row(of group: ToolGroup) -> Int {
-        let index = ToolGroup.allCases.firstIndex(of: group) ?? 0
-        return showsBackTile ? index + 1 : index
+    private var pins: Set<String> { ModelRibbon.pins(pinsText) }
+
+    private func ribbonCommands(_ group: ToolGroup) -> [RibbonCommand] {
+        ModelRibbon.commands(for: group, ws: workspace, importFile: importSTEP)
     }
 
     private var modelTools: some View {
-        let sizes = GroupSize.sizes
+        let sizes = RibbonSize.sizes
         let smallest = sizes[sizes.count - 1]
-        // Größte Kachel, mit der alles in die Höhe passt; sonst kleinste Kachel und scrollen
+        // Größte Form, mit der alles in die Höhe passt; sonst die kleinste und scrollen
         return ViewThatFits(in: .vertical) {
-            groupColumn(sizes[0])
-            groupColumn(sizes[1])
-            groupColumn(sizes[2])
-            groupColumn(smallest)
-            ScrollView(showsIndicators: false) { groupColumn(smallest) }
+            ribbonColumn(sizes[0])
+            ribbonColumn(sizes[1])
+            ribbonColumn(smallest)
+            ScrollView(showsIndicators: false) { ribbonColumn(smallest) }
+                .fixedSize(horizontal: true, vertical: false)
         }
-        // Breite der Leiste samt Beschriftungen messen: das Untermenü beginnt rechts daneben
+        .coordinateSpace(name: "ribbon")
+        // Größe der Leiste samt Beschriftungen messen: das Untermenü beginnt rechts daneben
         .background {
             GeometryReader { proxy in
                 Color.clear
-                    .onAppear { railWidth = proxy.size.width }
-                    .onChange(of: proxy.size.width) { _, width in railWidth = width }
+                    .onAppear {
+                        railWidth = proxy.size.width
+                        railHeight = proxy.size.height
+                    }
+                    .onChange(of: proxy.size) { _, size in
+                        railWidth = size.width
+                        railHeight = size.height
+                    }
             }
         }
-        // Untermenü rechts neben der Leiste; es verbreitert die Leiste nicht.
-        // Fester Versatz statt Ausrichtungslinie: die wurde im Overlay ignoriert, das Fenster lag
-        // dann über der Leiste und links aus dem Bild (Build 134).
+        // Untermenü rechts neben der Leiste auf Höhe der Gruppe; es verbreitert die Leiste nicht.
         .overlay(alignment: .topLeading) {
             if let openGroup {
                 groupFlyout(openGroup)
@@ -756,25 +1081,31 @@ struct ToolRail: View {
         .animation(Theme.spring, value: openGroup)
     }
 
-    /// Obere Gruppen: Untermenü beginnt auf Höhe der Kachel; untere: es endet dort und wächst nach oben,
-    /// damit es auch bei den letzten Gruppen genug Platz hat.
+    /// Obere Gruppen: Untermenü beginnt auf Höhe des Gruppenkopfs; untere: es endet dort und wächst nach oben.
     private func groupFlyout(_ group: ToolGroup) -> some View {
-        let rows: Int = ToolGroup.allCases.count + (showsBackTile ? 1 : 0)
-        let row: Int = self.row(of: group)
-        let step: CGFloat = groupSize.tile + groupSize.gap
-        let fromTop = row * 2 < rows
-        let top: CGFloat = fromTop ? CGFloat(row) * step : 0
-        let bottom: CGFloat = fromTop ? 0 : CGFloat(rows - 1 - row) * step
-        return Flyout(title: group.rawValue, category: group.category, items: items(for: group)) {
+        let frame = groupFrames[group] ?? .zero
+        let fromTop = frame.midY * 2 < max(railHeight, 1)
+        let top: CGFloat = fromTop ? max(frame.minY, 0) : 0
+        let bottom: CGFloat = fromTop ? 0 : max(railHeight - frame.maxY, 0)
+        let items = ribbonCommands(group).map { ribbonItem($0) }
+        return Flyout(title: group.rawValue, category: group.category, items: items, close: {
             self.openGroup = nil
-        }
+        }, pins: pins, togglePin: { id in
+            pinsText = ModelRibbon.toggled(id, in: pinsText)
+        })
         .padding(.top, top)
         .padding(.bottom, bottom)
         .frame(maxHeight: .infinity, alignment: fromTop ? .top : .bottom)
     }
 
-    private func groupColumn(_ size: GroupSize) -> some View {
-        VStack(alignment: .leading, spacing: size.gap) {
+    private func ribbonItem(_ command: RibbonCommand) -> ToolItem {
+        ToolItem(id: command.id, title: command.title, subtitle: command.subtitle, systemImage: command.icon,
+                 isEnabled: command.isEnabled, isActive: command.isActive, action: command.run,
+                 heading: command.heading, shortcut: command.shortcut, pinID: command.id)
+    }
+
+    private func ribbonColumn(_ size: RibbonSize) -> some View {
+        VStack(alignment: .leading, spacing: size.gap + 4) {
             if showsBackTile {
                 Button {
                     workspace.showsAllTools = false
@@ -783,19 +1114,81 @@ struct ToolRail: View {
                 }
                 .buttonStyle(.plain)
             }
+            // Kontextmenü zur Auswahl (früher die Kontextleiste): Aktionen nach ModelRibbon.contextCommands
+            if hasSelection, !showsBackTile, workspace.command == nil {
+                selectionMenu(size)
+            }
             ForEach(ToolGroup.allCases) { group in
-                Button {
-                    tapped(group)
-                } label: {
-                    RailTile(title: group.rawValue, systemImage: group.systemImage, category: group.category,
-                             isActive: isActive(group), isOpen: openGroup == group, size: size.tile)
-                }
-                .buttonStyle(.plain)
-                .hoverTip(group.rawValue, group.tip)
+                ribbonGroup(group, size: size)
+                    .background {
+                        GeometryReader { proxy in
+                            Color.clear
+                                .onAppear { groupFrames[group] = proxy.frame(in: .named("ribbon")) }
+                                .onChange(of: proxy.frame(in: .named("ribbon"))) { _, frame in
+                                    groupFrames[group] = frame
+                                }
+                        }
+                    }
             }
         }
-        // Nur die angezeigte Variante erscheint: ihre Größe gilt für die Lage des Untermenüs
-        .onAppear { groupSize = size }
+    }
+
+    /// Kachel „Auswahl“: Menü mit den Befehlen zur jetzigen Auswahl (Extrudieren, Abrunden, Verschieben …).
+    private func selectionMenu(_ size: RibbonSize) -> some View {
+        let actions = ModelRibbon.contextCommands(workspace)
+        return Menu {
+            Section(selectionSummary) {
+                ForEach(actions) { command in
+                    Button {
+                        openGroup = nil
+                        command.run()
+                    } label: {
+                        ToolLabel(command.title, icon: command.icon)
+                    }
+                    .disabled(!command.isEnabled)
+                }
+            }
+            Button(role: .destructive) {
+                model.resetSelection()
+            } label: {
+                Label("Alle abwählen", systemImage: "xmark.circle")
+            }
+        } label: {
+            RailTile(title: "Auswahl", subtitle: selectionSummary, systemImage: "contextualmenu.and.cursorarrow",
+                     isActive: true, size: size.tile)
+        }
+        .accessibilityLabel("Aktionen zur Auswahl")
+        .hoverTip("Auswahl", "Befehle zur gewählten Auswahl")
+    }
+
+    /// Gruppe: Kopf „NAME ▾“ (öffnet die vollständige Liste) und darunter die hervorgehobenen bzw. angehefteten Befehle
+    /// als Kacheln (SolidCraft-Ribbon senkrecht für das iPad).
+    private func ribbonGroup(_ group: ToolGroup, size: RibbonSize) -> some View {
+        let commands = ribbonCommands(group)
+        let tiles = ModelRibbon.tiles(commands, pins: pins, limit: size.tiles)
+        return VStack(alignment: .leading, spacing: size.gap) {
+            RibbonGroupHeader(group: group, isOpen: openGroup == group,
+                              isActive: isActive(group) || commands.contains(where: \.isActive))
+                .contentShape(Rectangle())
+                .onTapGesture { tapped(group) }
+                .accessibilityAddTraits(.isButton)
+                .hoverTip(group.rawValue, group.tip)
+            ForEach(tiles) { command in
+                Button {
+                    openGroup = nil
+                    command.run()
+                } label: {
+                    RailTile(title: command.title, subtitle: nil, systemImage: command.icon,
+                             category: group.category, isActive: command.isActive, size: size.tile)
+                }
+                .buttonStyle(.plain)
+                .disabled(!command.isEnabled)
+                .opacity(command.isEnabled ? 1 : 0.45)
+                .accessibilityLabel(command.title)
+                .hoverTip(command.shortcut.map { "\(command.title) (\($0))" } ?? command.title,
+                          ToolTips.detail(for: command.title) ?? command.subtitle)
+            }
+        }
     }
 
     private func tapped(_ group: ToolGroup) {
@@ -809,226 +1202,72 @@ struct ToolRail: View {
 
     private func isActive(_ group: ToolGroup) -> Bool {
         switch workspace.tool {
-        case .insert, .revolve, .sweep, .loft:
-            return group == .shapes
+        case .insert, .revolve, .sweep, .loft, .hole:
+            return group == .create
         case .part(let kind):
             return group == kind.group
-        case .hole:
-            return group == .holes
-        case .boolean, .split, .mold:
-            return group == .combine
-        case .shell, .offsetEdges, .offsetFace, .replaceFace, .wrap, .imprint:
-            return group == .faces
-        case .move, .translate, .scale, .align, .scaleSketch:
-            return group == .move
-        case .mirror, .pattern:
-            return group == .pattern
+        case .boolean, .split, .mold, .shell, .offsetEdges, .offsetFace, .replaceFace, .wrap, .imprint:
+            return group == .modify
+        case .scale:
+            return group == .modify
+        case .move, .translate, .align, .scaleSketch, .mirror, .pattern:
+            return group == .arrange
         case .construct:
             return group == .construct
-        case .measure, .printCheck:
+        case .measure, .printCheck, .section:
             return group == .inspect
         case .canvas, .meshSculpt:
             return group == .insert
         case .color:
             return group == .visualize
-        case .section:
-            // Schnittansicht liegt in der rechten Leiste
-            return false
         case .select:
             switch group {
             case .sketch: return sketch.isActive
-            case .fillets: return !model.selectedEdges.isEmpty
-            case .extrude: return !model.selectedRegions.isEmpty || model.faceHandle != nil
+            case .modify: return !model.selectedEdges.isEmpty
+            case .create: return !model.selectedRegions.isEmpty || model.faceHandle != nil
             default: return false
             }
         }
     }
 
-    /// Wie bei Shapr3D: Skizzenbereich oder ebene Fläche antippen, dann am Pfeil ziehen.
-    private func startExtrude() {
-        if workspace.tool != .select {
-            workspace.activate(.select)
-        }
-        if model.faceHandle == nil, model.selectedRegions.isEmpty {
-            model.message = model.sketches.isEmpty
-                ? "Erst eine Skizze mit geschlossenem Profil zeichnen, oder eine ebene Fläche antippen."
-                : "Skizzenbereich oder ebene Fläche antippen, dann am blauen Pfeil ziehen."
-        }
-    }
-
-    /// Verschieben ohne bzw. mit Kopie (Kai: „Kopieren kommt beim Verschieben rein“).
+    /// Verschieben ohne bzw. mit Kopie aus der Kontextleiste (Kai: „Kopieren kommt beim Verschieben rein“).
     private func startMove(copies: Bool) {
-        workspace.activate(.move)
-        // Skizzen werden nur verschoben, nie kopiert
-        model.moveCopies = copies && model.movingSketch == nil
+        workspace.startCommand(copies ? .copy : .move)
     }
+}
 
-    /// Bohrung ohne bzw. mit Gewinde (Schalter „Gewinde“ in der Bohrungskarte).
-    private func startHole(threaded: Bool) {
-        workspace.activate(.hole)
-        if threaded {
-            workspace.setHoleThread(workspace.holeSpec.thread ?? HoleThread())
-        } else if workspace.holeSpec.thread != nil {
-            workspace.setHoleThread(nil)
+/// Kopf einer Ribbon-Gruppe: Kategoriefarbe, Name in Großbuchstaben und ▾ (öffnet die vollständige Liste).
+private struct RibbonGroupHeader: View {
+    let group: ToolGroup
+    var isOpen = false
+    var isActive = false
+
+    var body: some View {
+        let color = group.category.color
+        HStack(spacing: 5) {
+            Circle()
+                .fill(color)
+                .frame(width: 6, height: 6)
+            Text(group.rawValue.uppercased())
+                .font(.system(size: 10, weight: .bold))
+                .tracking(0.7)
+                .foregroundStyle(isActive ? Color.primary : color)
+            if group.hasFlyout {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(color)
+                    .rotationEffect(.degrees(isOpen ? 180 : 0))
+            }
         }
-    }
-
-    // MARK: Einträge
-
-    private func item(_ tool: ModelTool, _ title: String, subtitle: String? = nil, _ systemImage: String) -> ToolItem {
-        ToolItem(id: "tool.\(title)", title: title, subtitle: subtitle, systemImage: systemImage,
-                 isActive: workspace.tool == tool) {
-            workspace.activate(tool)
+        .padding(.horizontal, 8)
+        .frame(minHeight: 22)
+        .floatingSurface(.regularMaterial, in: Capsule(), elevation: .flat)
+        .overlay {
+            if isOpen {
+                Capsule().strokeBorder(group.category.fill, lineWidth: 1.5)
+            }
         }
-    }
-
-    private func items(for group: ToolGroup) -> [ToolItem] {
-        switch group {
-        case .sketch:
-            return []
-        case .extrude:
-            let extruding = workspace.tool == .select && (!model.selectedRegions.isEmpty || model.faceHandle != nil)
-            return [
-                ToolItem(id: "extrude.extrude", title: "Extrudieren", subtitle: "Bereich oder Fläche, Pfeil ziehen",
-                         systemImage: "square.stack.3d.up", isActive: extruding) {
-                    startExtrude()
-                },
-                item(.part(.thinLines), "Dünn extrudieren", subtitle: "Linien als Wand", PartTool.thinLines.systemImage),
-            ]
-        case .shapes:
-            var items: [ToolItem] = [
-                item(.revolve, "Achsendrehung", subtitle: "Bereich um Achse", "arrow.triangle.2.circlepath"),
-                item(.sweep, "Sweep", subtitle: "Bereich entlang Pfad", "point.3.connected.trianglepath.dotted"),
-                item(.loft, "Loft", subtitle: "Durch Querschnitte", "square.3.layers.3d"),
-                item(.part(.helix), "Helix", subtitle: "Feder, Spirale", PartTool.helix.systemImage),
-            ]
-            items += Primitive.allCases.map { primitive in
-                item(.insert(primitive), primitive.rawValue, subtitle: "Grundkörper", primitive.systemImage)
-            }
-            return items
-        case .fillets:
-            return EdgeOperation.allCases.map { operation in
-                ToolItem(id: "tools.\(operation.rawValue)", title: operation.rawValue, subtitle: "Kanten",
-                         systemImage: operation == .fillet ? "app" : "octagon",
-                         isActive: workspace.tool == .select && !model.selectedEdges.isEmpty
-                             && model.edgeOperation == operation) {
-                    workspace.startEdgeOperation(operation)
-                }
-            }
-        case .holes:
-            let drilling = workspace.tool == .hole
-            let threaded = workspace.holeSpec.thread != nil
-            return [
-                ToolItem(id: "holes.hole", title: "Bohrung", subtitle: "Senkung, Senkkopf, Einsätze",
-                         systemImage: "circle.circle", isActive: drilling && !threaded) {
-                    startHole(threaded: false)
-                },
-                ToolItem(id: "holes.tapped", title: "Gewindebohrung", subtitle: "Kernloch mit Gewinde",
-                         systemImage: "circle.dashed.inset.filled", isActive: drilling && threaded) {
-                    startHole(threaded: true)
-                },
-                item(.part(.thread), "Gewinde", subtitle: "Bolzen, Bohrung, jede Fläche", PartTool.thread.systemImage),
-            ]
-        case .faces:
-            return [
-                item(.offsetFace, "Fläche versetzen", subtitle: "Auch Bohrungen", "arrow.up.and.down.square"),
-                item(.replaceFace, "Fläche ersetzen", subtitle: "Bis Zielfläche", "rectangle.portrait.and.arrow.forward"),
-                item(.part(.draft), "Verjüngung", subtitle: "Flächen neigen", PartTool.draft.systemImage),
-                item(.shell, "Schale", subtitle: "Fläche öffnen", "shippingbox"),
-                item(.offsetEdges, "Kante versetzen", subtitle: "Fläche antippen", "square.dashed.inset.filled"),
-                item(.imprint, "Kante abdrücken", subtitle: "Skizze auf Fläche", "square.on.square.dashed"),
-                item(.wrap, "Umhüllen und Prägen", subtitle: "Auf Zylinder", "cylinder.split.1x2"),
-            ]
-        case .combine:
-            var items: [ToolItem] = BooleanKind.allCases.map { kind in
-                item(.boolean(kind), kind.rawValue, subtitle: "Körper", kind.systemImage)
-            }
-            items.append(item(.split, "Körper teilen", subtitle: "Ebene, Körper, Skizze", "rectangle.split.2x1"))
-            items.append(item(.mold, "Negativform", subtitle: "Form aus Block", "cube.transparent"))
-            return items
-        case .move:
-            let moving = workspace.tool == .move
-            return [
-                ToolItem(id: "move.move", title: "Verschieben/Rotieren", subtitle: "Körper oder Skizze",
-                         systemImage: "move.3d", isActive: moving && !model.moveCopies) {
-                    startMove(copies: false)
-                },
-                ToolItem(id: "move.copy", title: "Kopieren", subtitle: "Verschieben mit Kopie",
-                         systemImage: "plus.square.on.square", isActive: moving && model.moveCopies) {
-                    startMove(copies: true)
-                },
-                item(.translate, "Übersetzen", subtitle: "Punkt zu Punkt", "point.topleft.down.to.point.bottomright.curvepath"),
-                item(.align, "Ausrichten", subtitle: "Körper", "align.horizontal.center"),
-                item(.scale, "Skalieren", subtitle: "Körper", "arrow.up.left.and.arrow.down.right"),
-                item(.scaleSketch, "Skizze skalieren", subtitle: "Bereich antippen", "arrow.up.left.and.arrow.down.right"),
-            ]
-        case .pattern:
-            return [
-                item(.mirror, "Spiegeln", subtitle: "Körper", "arrow.left.and.right.righttriangle.left.righttriangle.right"),
-                item(.pattern(.linear), "Muster linear", subtitle: "Körper in Reihe", PatternKind.linear.systemImage),
-                item(.pattern(.circular), "Muster kreisförmig", subtitle: "Körper im Kreis", PatternKind.circular.systemImage),
-            ]
-        case .construct:
-            return ConstructionKind.allCases.map { kind in
-                item(.construct(kind), kind.rawValue, subtitle: "Konstruktion", kind.systemImage)
-            }
-        case .inspect:
-            return [
-                item(.measure, "Messen", subtitle: "Länge, Fläche, Abstand", "ruler"),
-                item(.printCheck, "Druckprüfung", subtitle: "Überhang, Wände", "printer"),
-            ]
-        case .insert:
-            return [
-                item(.part(.standard), "Normteile", subtitle: "Schrauben, Muttern, Lager", PartTool.standard.systemImage),
-                item(.part(.template), "Vorlagen", subtitle: "Gehäuse, Stirnrad", PartTool.template.systemImage),
-                ToolItem(id: "insert.step", title: "STEP-Datei", subtitle: ".step / .stp",
-                         systemImage: "square.and.arrow.down", action: importSTEP),
-                ToolItem(id: "insert.mesh", title: "STL / 3MF", subtitle: "Netz als Körper (3D-Druck)",
-                         systemImage: "triangle", action: importSTEP),
-                ToolItem(id: "insert.vector", title: "SVG / DXF", subtitle: "Als Skizze (Laser, CNC, Logos)",
-                         systemImage: "scribble.variable", action: importSTEP),
-                item(.meshSculpt, "Netz bearbeiten", subtitle: "Pinsel, STL/3MF", "paintbrush.pointed"),
-                // Bild als Vorlage aus drei Quellen; danach gleich kalibrieren (WorkspaceView.insertImage)
-                ToolItem(id: "insert.image", title: "Bild aus Fotos", subtitle: "Fotoalbum, als Vorlage",
-                         systemImage: "photo.on.rectangle") {
-                    workspace.isPickingImage = true
-                },
-                ToolItem(id: "insert.imageFile", title: "Bild aus Dateien", subtitle: "PNG, JPEG, HEIC, PDF",
-                         systemImage: "folder") {
-                    workspace.isImportingImageFile = true
-                },
-                ToolItem(id: "insert.camera", title: "Foto aufnehmen",
-                         subtitle: CameraCapture.isAvailable ? "Kamera, als Vorlage" : "Keine Kamera verfügbar",
-                         systemImage: "camera", isEnabled: CameraCapture.isAvailable) {
-                    workspace.isTakingPhoto = true
-                },
-                ToolItem(id: "insert.project", title: "Projekt", subtitle: "Körper eines anderen Projekts",
-                         systemImage: "folder.badge.plus") {
-                    workspace.showsProjectPicker = true
-                },
-                ToolItem(id: "insert.variable", title: "Variable", subtitle: model.variables.isEmpty ? "Name = Wert"
-                             : "\(model.variables.count) im Projekt", systemImage: "x.squareroot") {
-                    workspace.showsVariables = true
-                },
-            ]
-        case .visualize:
-            var items = DisplayMode.allCases.map { mode in
-                ToolItem(id: "visualize.\(mode.rawValue)", title: mode.rawValue, systemImage: mode.systemImage,
-                         isActive: workspace.displayMode == mode) {
-                    workspace.displayMode = mode
-                }
-            }
-            items.append(ToolItem(id: "visualize.ortho", title: "Orthografisch", subtitle: "Projektion",
-                                  systemImage: "cube.transparent", isActive: workspace.isOrthographic) {
-                workspace.isOrthographic.toggle()
-            })
-            items.append(item(.color, "Farbe", subtitle: "Körper", "paintpalette"))
-            items.append(ToolItem(id: "visualize.drawing", title: "Zeichnung", subtitle: "PDF, DXF",
-                                  systemImage: "doc.richtext") {
-                workspace.showsDrawing = true
-            })
-            return items
-        }
+        .animation(Theme.snappy, value: isOpen)
     }
 }
 
@@ -1061,7 +1300,8 @@ private struct SectionHeader: View {
 }
 
 /// Kachel der Werkzeugleiste mit Beschriftung daneben.
-/// Symbole zweifarbig in der Kategoriefarbe (wie die Werkzeugsymbole in Fusion 360), aktiv farbig gefüllt.
+/// SF Symbols zweifarbig in der Kategoriefarbe (wie die Werkzeugsymbole in Fusion 360), aktiv farbig gefüllt;
+/// mehrfarbige SolidCraft-Bilder („sc.“) aktiv auf hellem Grund in Kategoriefarbe mit Rahmen, damit sie lesbar bleiben.
 struct RailTile: View {
     let title: String
     var subtitle: String?
@@ -1072,48 +1312,41 @@ struct RailTile: View {
     var size: CGFloat = 52
     /// Kleines Dreieck unten rechts: lange drücken zeigt weitere Varianten (wie Shapr3D/Fusion 360)
     var hasVariants = false
+    /// Schmale Form (Skizzenleiste): kleine Beschriftung unter der Kachel statt der Kapsel daneben
+    var labelBelow = false
 
-    /// „Skizzieren beenden“ ist wie in Fusion 360 immer ein grüner Haken
-    private var filled: Bool { isActive || category == .finish }
+    private var isCustom: Bool { ToolIcon.isCustom(systemImage) }
+
+    /// Vollfarbe mit weißem Symbol: aktives SF Symbol bzw. „Skizzieren beenden“ (wie in Fusion 360 immer ein grüner Haken)
+    private var filled: Bool { category == .finish || (isActive && !isCustom) }
+
+    /// Aktives SolidCraft-Bild: heller Grund in Kategoriefarbe und kräftiger Rahmen
+    private var tinted: Bool { isActive && isCustom && category != .finish }
+
+    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: size * 0.27, style: .continuous) }
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: size * 0.27, style: .continuous)
+        if labelBelow {
+            VStack(spacing: 2) {
+                tile
+                Text(title)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(isActive ? category.fill : Color.primary.opacity(0.7))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .minimumScaleFactor(0.85)
+                    .frame(width: size + 4)
+            }
+            .contentShape(Rectangle())
+            .animation(Theme.snappy, value: isActive)
+        } else {
+            besideBody
+        }
+    }
+
+    private var besideBody: some View {
         HStack(spacing: 8) {
-            Image(systemName: systemImage)
-                .symbolRenderingMode(.hierarchical)
-                .font(.system(size: size * 0.4, weight: category == .finish ? .bold : .medium))
-                .frame(width: size, height: size)
-                .foregroundStyle(filled ? Color.white : category.color)
-                .background {
-                    if filled {
-                        shape.fill(LinearGradient(colors: [category.fill.opacity(0.82), category.fill],
-                                                  startPoint: .top, endPoint: .bottom))
-                    } else {
-                        shape.fill(Color(.systemBackground))
-                            .overlay(shape.fill(LinearGradient(colors: [category.color.opacity(0.0),
-                                                                        category.color.opacity(0.10)],
-                                                               startPoint: .top, endPoint: .bottom)))
-                    }
-                }
-                .overlay(alignment: .bottomTrailing) {
-                    if hasVariants {
-                        Image(systemName: "arrowtriangle.down.fill")
-                            .font(.system(size: 6, weight: .bold))
-                            .rotationEffect(.degrees(-45))
-                            .foregroundStyle(filled ? Color.white.opacity(0.85) : category.color.opacity(0.8))
-                            .padding(5)
-                    }
-                }
-                .overlay {
-                    if isOpen {
-                        shape.strokeBorder(category.fill, lineWidth: 2)
-                    } else if !filled, category != .neutral {
-                        shape.strokeBorder(category.color.opacity(0.18), lineWidth: 1)
-                    } else if !filled {
-                        shape.strokeBorder(Theme.hairline, lineWidth: Theme.hairlineWidth)
-                    }
-                }
-                .tileShadow(filled ? category.fill : nil)
+            tile
             VStack(alignment: .leading, spacing: 0) {
                 Text(title)
                     .font(Theme.labelFont)
@@ -1130,7 +1363,132 @@ struct RailTile: View {
                              elevation: .flat)
         }
         .contentShape(Rectangle())
-        .animation(Theme.snappy, value: filled)
+        .animation(Theme.snappy, value: isActive)
+    }
+
+    private var tile: some View {
+        glyph
+            .frame(width: size, height: size)
+            .background { tileBackground }
+            .overlay(alignment: .bottomTrailing) { variantMark }
+            .overlay { border }
+            .tileShadow(filled || tinted ? category.fill : nil)
+    }
+
+    @ViewBuilder private var glyph: some View {
+        if isCustom {
+            ToolIcon(systemImage, size: size * 0.62)
+        } else {
+            Image(systemName: systemImage)
+                .symbolRenderingMode(.hierarchical)
+                .font(.system(size: size * 0.4, weight: category == .finish ? .bold : .medium))
+                .foregroundStyle(filled ? Color.white : category.color)
+        }
+    }
+
+    @ViewBuilder private var tileBackground: some View {
+        if filled {
+            shape.fill(LinearGradient(colors: [category.fill.opacity(0.82), category.fill],
+                                      startPoint: .top, endPoint: .bottom))
+        } else if tinted {
+            shape.fill(Color(.systemBackground))
+                .overlay(shape.fill(category.fill.opacity(0.22)))
+        } else {
+            shape.fill(Color(.systemBackground))
+                .overlay(shape.fill(LinearGradient(colors: [category.color.opacity(0.0), category.color.opacity(0.10)],
+                                                   startPoint: .top, endPoint: .bottom)))
+        }
+    }
+
+    @ViewBuilder private var variantMark: some View {
+        if hasVariants {
+            Image(systemName: "arrowtriangle.down.fill")
+                .font(.system(size: 6, weight: .bold))
+                .rotationEffect(.degrees(-45))
+                .foregroundStyle(filled ? Color.white.opacity(0.85) : category.color.opacity(0.8))
+                .padding(5)
+        }
+    }
+
+    @ViewBuilder private var border: some View {
+        if isOpen || tinted {
+            shape.strokeBorder(category.fill, lineWidth: 2)
+        } else if !filled, category != .neutral {
+            shape.strokeBorder(category.color.opacity(0.18), lineWidth: 1)
+        } else if !filled {
+            shape.strokeBorder(Theme.hairline, lineWidth: Theme.hairlineWidth)
+        }
+    }
+}
+
+/// Raster aus Bildknöpfen in zwei Spalten auf gemeinsamem Grund (Bedingungen im Skizzenmodus).
+private struct RailGrid: View {
+    let cells: [RailGridCell]
+    let size: CGFloat
+    var isEnabled = true
+
+    static let spacing: CGFloat = 4
+
+    /// Höhe für count Knöpfe in zwei Spalten (mit Innenabstand)
+    static func height(count: Int, size: CGFloat) -> CGFloat {
+        let rows = CGFloat((count + 1) / 2)
+        return rows * size + max(0, rows - 1) * spacing + 2 * spacing
+    }
+
+    var body: some View {
+        let columns = [GridItem(.fixed(size), spacing: Self.spacing), GridItem(.fixed(size), spacing: Self.spacing)]
+        LazyVGrid(columns: columns, alignment: .leading, spacing: Self.spacing) {
+            ForEach(cells) { cell in
+                Button(action: cell.action) {
+                    RailGridIcon(cell: cell, size: size, isEnabled: isEnabled)
+                }
+                .buttonStyle(.pressable)
+                .accessibilityLabel(cell.title)
+                .accessibilityAddTraits(cell.isPending ? .isSelected : [])
+                .hoverTip(cell.title, cell.detail)
+            }
+        }
+        // Feste Breite: ein LazyVGrid nimmt sonst die ganze angebotene Breite ein (dunkles Band bis unters rechte
+        // Panel, das Berührungen über dem Viewport abfängt)
+        .frame(width: 2 * size + Self.spacing)
+        .padding(Self.spacing)
+        .fixedSize(horizontal: true, vertical: false)
+        .floatingSurface(in: RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
+        .disabled(!isEnabled)
+    }
+}
+
+/// Symbol im Raster: passend farbig, sonst grau und blass; wartend getönt mit Rahmen.
+private struct RailGridIcon: View {
+    let cell: RailGridCell
+    let size: CGFloat
+    let isEnabled: Bool
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: Theme.Radius.label, style: .continuous)
+        let active = isEnabled && (cell.isApplicable || cell.isPending)
+        glyph(active: active)
+            .frame(width: size, height: size)
+            .background(cell.isPending ? Color.accentColor.opacity(0.22) : Color.clear, in: shape)
+            .overlay {
+                if cell.isPending {
+                    shape.strokeBorder(Color.accentColor, lineWidth: 2)
+                }
+            }
+            .contentShape(shape)
+    }
+
+    @ViewBuilder private func glyph(active: Bool) -> some View {
+        if ToolIcon.isCustom(cell.icon) {
+            ToolIcon(cell.icon, size: size * 0.58)
+                .saturation(active ? 1 : 0)
+                .opacity(active ? 1 : (isEnabled ? 0.55 : 0.3))
+        } else {
+            Image(systemName: cell.icon)
+                .symbolRenderingMode(.hierarchical)
+                .font(.system(size: size * 0.36, weight: .medium))
+                .foregroundStyle(active ? Color.accentColor : Color.primary.opacity(isEnabled ? 0.6 : 0.3))
+        }
     }
 }
 
@@ -1140,6 +1498,9 @@ private struct Flyout: View {
     var category: ToolCategory = .neutral
     let items: [ToolItem]
     let close: () -> Void
+    /// Angeheftete Einträge (Stecknadel gefüllt); nil-Schalter = keine Stecknadeln (Skizzenmodus)
+    var pins: Set<String> = []
+    var togglePin: ((String) -> Void)? = nil
 
     var body: some View {
         // Lange Listen scrollen, wenn sie nicht auf den Bildschirm passen.
@@ -1147,7 +1508,7 @@ private struct Flyout: View {
             list
             ScrollView { list }
         }
-        .frame(width: 240)
+        .frame(width: 264)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.panel, style: .continuous))
         .overlay(alignment: .top) {
             // Farbstreifen der Kategorie oben
@@ -1169,40 +1530,109 @@ private struct Flyout: View {
                 .padding(.horizontal, 10)
                 .padding(.top, 4)
                 .padding(.bottom, 4)
-            ForEach(items) { item in
-                Button {
-                    item.action()
-                    close()
-                } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: item.systemImage)
-                            .symbolRenderingMode(.hierarchical)
-                            .font(.system(size: 17, weight: .medium))
-                            .frame(width: 36, height: 36)
-                            .foregroundStyle(item.isActive ? Color.white : category.color)
-                            .background(item.isActive ? category.fill : category.color.opacity(category == .neutral ? 0.06 : 0.1),
-                                        in: RoundedRectangle(cornerRadius: Theme.Radius.label, style: .continuous))
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(item.title)
-                                .font(.subheadline.weight(.medium))
-                            if let subtitle = item.subtitle {
-                                Text(subtitle)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 4)
-                    .contentShape(Rectangle())
+            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                if let heading = item.heading, index == 0 || items[index - 1].heading != heading {
+                    // Zwischenüberschrift (ÄNDERN: KANTEN, FLÄCHEN, KÖRPER, SPEZIAL)
+                    Text(heading)
+                        .font(.system(size: 9.5, weight: .bold))
+                        .tracking(0.6)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.top, index == 0 ? 0 : 6)
                 }
-                .buttonStyle(.plain)
-                .disabled(!item.isEnabled)
-                .opacity(item.isEnabled ? 1 : 0.4)
-                .hoverTip(item.title, ToolTips.detail(for: item.title) ?? item.subtitle)
+                row(item)
             }
         }
         .padding(10)
+    }
+
+    private func row(_ item: ToolItem) -> some View {
+        let pinned = item.pinID.map { pins.contains($0) } ?? false
+        return HStack(spacing: 4) {
+            Button {
+                item.action()
+                close()
+            } label: {
+                HStack(spacing: 12) {
+                    itemIcon(item)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(item.title)
+                            .font(.subheadline.weight(.medium))
+                        if let subtitle = item.subtitle {
+                            Text(subtitle)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                    if let shortcut = item.shortcut {
+                        Text(shortcut)
+                            .font(.caption.monospaced().weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                    .strokeBorder(Theme.hairline, lineWidth: 1)
+                            }
+                    }
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 4)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!item.isEnabled)
+            .opacity(item.isEnabled ? 1 : 0.4)
+            .hoverTip(item.shortcut.map { "\(item.title) (\($0))" } ?? item.title,
+                      ToolTips.detail(for: item.title) ?? item.subtitle)
+            .contextMenu {
+                if let togglePin, let id = item.pinID {
+                    Button(pinned ? "Von der Leiste lösen" : "An die Leiste heften",
+                           systemImage: pinned ? "pin.slash" : "pin") {
+                        togglePin(id)
+                    }
+                }
+            }
+            if let togglePin, let id = item.pinID {
+                // Stecknadel: Befehl als Kachel in die Leiste heften (auch lange drücken)
+                Button {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    togglePin(id)
+                } label: {
+                    Image(systemName: pinned ? "pin.fill" : "pin")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(pinned ? category.fill : Color.secondary.opacity(0.6))
+                        .rotationEffect(.degrees(45))
+                        .frame(width: 32, height: 36)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(pinned ? "Von der Leiste lösen" : "An die Leiste heften")
+            }
+        }
+    }
+
+    /// Symbol eines Eintrags: SF Symbol aktiv weiß auf Vollfarbe; SolidCraft-Bild aktiv auf hellem Grund mit Rahmen.
+    @ViewBuilder private func itemIcon(_ item: ToolItem) -> some View {
+        let shape = RoundedRectangle(cornerRadius: Theme.Radius.label, style: .continuous)
+        let idle: Color = category.color.opacity(category == .neutral ? 0.06 : 0.1)
+        if ToolIcon.isCustom(item.systemImage) {
+            ToolIcon(item.systemImage, size: 26)
+                .frame(width: 36, height: 36)
+                .background(item.isActive ? category.fill.opacity(0.22) : idle, in: shape)
+                .overlay {
+                    if item.isActive {
+                        shape.strokeBorder(category.fill, lineWidth: 2)
+                    }
+                }
+        } else {
+            Image(systemName: item.systemImage)
+                .symbolRenderingMode(.hierarchical)
+                .font(.system(size: 17, weight: .medium))
+                .frame(width: 36, height: 36)
+                .foregroundStyle(item.isActive ? Color.white : category.color)
+                .background(item.isActive ? category.fill : idle, in: shape)
+        }
     }
 }

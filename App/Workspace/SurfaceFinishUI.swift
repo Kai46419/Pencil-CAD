@@ -50,12 +50,16 @@ struct FinishSwatch: View {
 
     private var baseFill: AnyShapeStyle {
         let albedo = appearance.albedo
-        if appearance.metallic {
-            // Metall: Spiegelung eines Horizonts (heller Himmel, dunkler Boden)
+        // Matte Metalle wie in Shaders.metal diffus über ihre Farbe (keine Horizont-Spiegelung)
+        if appearance.metallic && appearance.matteAmount < 0.5 {
+            // Metall: Spiegelung eines Horizonts (heller Himmel, dunkler Boden); matt = weicher, flauer Horizont
+            let rough: Float = min(max(appearance.roughness, 0), 1)
+            let half: Double = 0.05 + Double(rough) * 0.3
+            let groundScale: Float = 0.22 + rough * 0.4
             let stops: [Gradient.Stop] = [
-                .init(color: FinishColors.color(albedo, scale: 1, lift: 0.15), location: 0),
-                .init(color: FinishColors.color(albedo, scale: 0.9), location: 0.44),
-                .init(color: FinishColors.color(albedo, scale: 0.22), location: 0.54),
+                .init(color: FinishColors.color(albedo, scale: 1 - rough * 0.15, lift: 0.15 * (1 - rough)), location: 0),
+                .init(color: FinishColors.color(albedo, scale: 0.9 - rough * 0.1), location: 0.49 - half),
+                .init(color: FinishColors.color(albedo, scale: groundScale), location: 0.49 + half),
                 .init(color: FinishColors.color(albedo, scale: 0.55), location: 1),
             ]
             return AnyShapeStyle(LinearGradient(stops: stops, startPoint: .top, endPoint: .bottom))
@@ -73,7 +77,10 @@ struct FinishSwatch: View {
     private var highlight: RadialGradient {
         let gloss: Double = Double(1 - appearance.roughness)
         let coat: Double = appearance.clearcoat ? 0.35 : 0
-        let strength: Double = min(gloss * gloss * 0.85 + coat, 0.95)
+        // Matt: nur ein schwacher, breiter Schimmer (höchstens wenige Prozent), wie im Shader
+        let matte: Double = Double(appearance.matteAmount)
+        let glossy: Double = min(gloss * gloss * 0.85 + coat, 0.95)
+        let strength: Double = glossy * (1 - matte) + 0.03 * gloss * matte
         let colors: [Color] = [Color.white.opacity(strength), Color.white.opacity(0)]
         return RadialGradient(colors: colors, center: UnitPoint(x: 0.32, y: 0.26), startRadius: 0,
                               endRadius: size * 0.32)
@@ -128,6 +135,8 @@ struct FinishSwatch: View {
 struct SurfaceFinishSection: View {
     @ObservedObject var model: ModelStore
     let bodyIndex: Int
+    /// Gleich aufgeklappt (Liste „Mehr …“ aus dem rechten Fenster)
+    var initiallyExpanded = false
 
     @State private var expanded = false
     @State private var customColor = Color.gray
@@ -149,6 +158,9 @@ struct SurfaceFinishSection: View {
                     Divider().padding(.vertical, 2)
                     customControls(item)
                 }
+            }
+            .onAppear {
+                if initiallyExpanded { expanded = true }
             }
         }
     }

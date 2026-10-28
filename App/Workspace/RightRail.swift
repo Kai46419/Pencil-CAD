@@ -66,27 +66,30 @@ struct SnapMenu: View {
     let gridSteps: [Double]
     @State private var showsDetails = false
 
-    /// Gruppen wie in Shapr3D; jede schaltet mehrere Fangarten
+    /// Gruppen wie in Shapr3D; jede schaltet mehrere Fangarten (einzeln unter „Einzelne Fangarten“)
     private static let groups: [(title: String, detail: String, systemImage: String, kinds: Set<SnapKind>)] = [
-        ("Raster", "Punkte rasten im Rastermaß ein", "grid", [.grid]),
-        ("Skizzenleitlinien", "Waagerecht, senkrecht und 15°-Winkel zu vorhandenen Punkten", "line.diagonal",
-         [.alignment, .angle]),
-        ("Skizzenleitpunkte", "Enden, Mitten, Zentren, Schnittpunkte und Kurven", "smallcircle.filled.circle",
-         [.endpoint, .midpoint, .center, .intersection, .onCurve]),
-        ("3D-Leitpunkte", "Ecken und Kantenmitten der Körper", "cube", [.modelPoint]),
-        ("Entfernte Kanten", "Körperkanten außerhalb der Skizzenebene", "cube.transparent", [.distantEdge]),
+        ("Raster", "Punkte und Längen rasten im Rastermaß ein", "grid", [.grid]),
+        ("Skizzenleitlinien",
+         "Gestrichelte Hilfslinien: waagerecht/senkrecht, 15°, parallel, rechtwinklig, Verlängerung "
+            + "und Spuren an gemerkten Punkten",
+         "line.diagonal", [.alignment, .angle, .parallel, .lineExtension]),
+        ("Skizzenleitpunkte", "Einrasten auf Enden, Mitten, Zentren, Schnittpunkten, Kurven und Tangenten",
+         "smallcircle.filled.circle", [.endpoint, .midpoint, .center, .intersection, .onCurve, .tangent]),
+        ("3D-Leitpunkte", "Ecken der Körper, auf die Skizze projiziert", "cube", [.modelPoint]),
+        ("Entfernte Kanten", "Körperkanten außerhalb der Skizzenebene, projiziert", "cube.transparent", [.distantEdge]),
     ]
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
                 Toggle(isOn: $sketch.snapEnabled) {
-                    Text("Fang")
-                        .font(.headline)
-                }
-                // Maßband-Ticken beim Ziehen; das Klicken beim Einrasten bleibt immer an (Kai)
-                Toggle(isOn: $sketch.drawHaptics) {
-                    row("Haptik beim Zeichnen", "Feines Ticken beim Ziehen von Linien und Formen", "hand.tap")
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Fang")
+                            .font(.headline)
+                        Text("Aus: der Stift setzt Punkte frei, ohne Einrasten und Hilfslinien")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 Divider()
                 Text("EINRASTEN")
@@ -108,7 +111,7 @@ struct SnapMenu: View {
                 }
                 .pickerStyle(.segmented)
                 DisclosureGroup("Einzelne Fangarten", isExpanded: $showsDetails) {
-                    ForEach(SnapKind.allCases) { kind in
+                    ForEach(SnapKind.menuOrder) { kind in
                         Toggle(isOn: Binding(get: { sketch.snapKinds.contains(kind) }, set: { on in
                             if on { sketch.snapKinds.insert(kind) } else { sketch.snapKinds.remove(kind) }
                         })) {
@@ -122,13 +125,10 @@ struct SnapMenu: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                 Toggle(isOn: $sketch.showsGuidePoints) {
-                    row("Leitpunkte", "Knoten in Stiftnähe beim Schweben", "circle.dotted")
+                    row("Leitpunkte", "Fangpunkte in Stiftnähe beim Schweben anzeigen", "circle.dotted")
                 }
                 Toggle(isOn: $sketch.showsSnapHints) {
-                    row("Einrasthinweise", "Art des Fangs als Schild am Stift", "text.bubble")
-                }
-                Toggle(isOn: $sketch.snapHaptics) {
-                    row("Fühlbares Einrasten", "Kurzes Klicken, wenn ein Fangpunkt greift", "hand.tap")
+                    row("Einrasthinweise", "Kürzel des Fangs am Stift (Pt, Mid, X, H, V, //, ⊥, Ext …)", "text.bubble")
                 }
                 Toggle(isOn: $sketch.autoConstrain) {
                     row("Automatisch einschränken", "Waagerecht, senkrecht, parallel und rechtwinklig beim Zeichnen festhalten", "link")
@@ -156,8 +156,9 @@ struct SnapMenu: View {
     }
 }
 
-/// Rechte Leiste: Fang, Rastergröße, ViewCube, Einpassen, Anzeigemodus, Screenshot, Verlauf, Elemente;
-/// im 3D-Modus unten Schnittansicht, Isolieren und Löschen.
+/// Rechte Leiste im 3D-Modus ohne offenen Befehl: Fang, Rastergröße, ViewCube, Einpassen, Anzeigemodus,
+/// Screenshot, Verlauf, Elemente, unten Schnittansicht, Isolieren und Löschen. Im Skizzenmodus und bei offenem
+/// Modellbefehl stehen Würfel und Knöpfe oben im schlanken Fenster (PaletteViewControls).
 struct RightRail: View {
     @ObservedObject var workspace: Workspace
     @ObservedObject var sketch: SketchController
@@ -170,8 +171,6 @@ struct RightRail: View {
     /// Rahmenauswahl als Lasso (lange drücken auf „Rahmenauswahl“)
     @AppStorage(LassoSelection.key) private var lassoSelects = false
 
-    @State private var showsConstraints = true
-
     /// Eigenschaften öffnen bzw. schließen; beim Öffnen gilt das Auswahlwerkzeug.
     private func toggleProperties() {
         if panel == .properties {
@@ -183,136 +182,18 @@ struct RightRail: View {
     }
 
     var body: some View {
-        if sketch.isActive {
-            ViewThatFits(in: .vertical) {
-                sketchColumn
-                ScrollView(showsIndicators: false) { sketchColumn }
-            }
-        } else {
-            // Passt die Säule nicht in die Höhe (iPad 11" quer): enger, sonst scrollen (dann ohne Schilder,
-            // die die Scrollfläche abschneiden würde)
-            ViewThatFits(in: .vertical) {
-                mainColumn(spacing: 10, showsLabels: true)
-                mainColumn(spacing: 6, showsLabels: true)
-                ScrollView(showsIndicators: false) { mainColumn(spacing: 6, showsLabels: false) }
-            }
+        // Passt die Säule nicht in die Höhe (iPad 11" quer): enger, sonst scrollen (dann ohne Schilder,
+        // die die Scrollfläche abschneiden würde)
+        ViewThatFits(in: .vertical) {
+            mainColumn(spacing: 10, showsLabels: true)
+            mainColumn(spacing: 6, showsLabels: true)
+            ScrollView(showsIndicators: false) { mainColumn(spacing: 6, showsLabels: false) }
+                .fixedSize(horizontal: true, vertical: false)
         }
     }
 
-    /// Skizzenmodus wie bei Shapr3D: Fang, Raster, Ausrichten und Finger in einer Säule, daneben der Würfel;
-    /// darunter Anzeigemodi, Screenshot, Verlauf und die Einschränkungen (vor der Ebenenwahl ausgegraut).
-    private var sketchColumn: some View {
-        VStack(alignment: .trailing, spacing: 10) {
-            HStack(alignment: .top, spacing: 8) {
-                ViewCube(camera: workspace.camera, motion: workspace.cameraMotion) { normal in
-                    workspace.send(.look(normal))
-                }
-                // Nach der Ebenenwahl bleibt die Ansicht senkrecht auf der Skizzenebene
-                .disabled(!sketch.isChoosingPlane)
-                .opacity(sketch.isChoosingPlane ? 1 : 0.4)
-                RailGroup {
-                    Button {
-                        isSnapMenuShown = true
-                    } label: {
-                        MagnetRailIcon(isActive: sketch.snapEnabled, shadowed: false)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Fang")
-                    .hoverTip("Fang")
-                    .popover(isPresented: $isSnapMenuShown, arrowEdge: .trailing) {
-                        SnapMenu(sketch: sketch, gridSteps: Self.gridSteps)
-                    }
-                    gridMenu(stacked: true)
-                        .hoverTip("Raster")
-                    Button {
-                        workspace.send(.alignToSketchPlane)
-                    } label: {
-                        RailIcon(systemImage: "cube.transparent", shadowed: false)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Normal zu Skizze")
-                    .hoverTip("Normal zu Skizze")
-                    .disabled(sketch.isChoosingPlane)
-                    .opacity(sketch.isChoosingPlane ? 0.4 : 1)
-                    Button {
-                        sketch.fingerDraws.toggle()
-                    } label: {
-                        RailIcon(systemImage: sketch.fingerDraws ? "hand.draw.fill" : "hand.draw",
-                                 isActive: sketch.fingerDraws, shadowed: false)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Finger zeichnet")
-                    .hoverTip("Finger zeichnet")
-                }
-            }
-
-            Menu {
-                displayModePicker
-            } label: {
-                HStack(spacing: 8) {
-                    RailLabel(title: "Anzeigemodi", subtitle: workspace.displayMode.rawValue)
-                    RailIcon(systemImage: workspace.displayMode.systemImage)
-                }
-            }
-            .accessibilityLabel("Anzeigemodus")
-            .hoverTip("Anzeigemodi")
-            labeledButton("Screenshot", systemImage: "camera", action: screenshot)
-            labeledButton("Verlauf", systemImage: "clock.arrow.circlepath", isActive: panel == .history) {
-                panel = panel == .history ? nil : .history
-            }
-            labeledButton("Eigenschaften", systemImage: "info.circle", isActive: panel == .properties) {
-                toggleProperties()
-            }
-            Menu {
-                visibilityItems
-            } label: {
-                HStack(spacing: 8) {
-                    RailLabel(title: "Sichtbarkeit")
-                    RailIcon(systemImage: "eye")
-                }
-            }
-            .accessibilityLabel("Sichtbarkeit")
-            .hoverTip("Sichtbarkeit")
-            Menu {
-                sketchPaletteItems
-            } label: {
-                HStack(spacing: 8) {
-                    RailLabel(title: "Skizzenpalette")
-                    RailIcon(systemImage: "slider.horizontal.3")
-                }
-            }
-            .accessibilityLabel("Skizzenpalette")
-            .hoverTip("Skizzenpalette")
-
-            Capsule()
-                .fill(Color.secondary.opacity(0.35))
-                .frame(width: 30, height: 3)
-                .frame(width: 44)
-            labeledButton("Einschränkungen", systemImage: "gearshape.fill", isActive: false) {
-                withAnimation(.easeOut(duration: 0.15)) { showsConstraints.toggle() }
-            }
-            if showsConstraints {
-                ConstraintColumn(sketch: sketch, isEnabled: !sketch.isChoosingPlane)
-            }
-        }
-    }
-
-    private func labeledButton(_ title: String, subtitle: String? = nil, systemImage: String, isActive: Bool = false,
-                               action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                RailLabel(title: title, subtitle: subtitle)
-                RailIcon(systemImage: systemImage, isActive: isActive)
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(title)
-        .hoverTip(title)
-    }
-
-    /// Rastermaß; im Skizzenmodus wie bei Shapr3D zweizeilig („50“ über „mm“).
-    private func gridMenu(stacked: Bool) -> some View {
+    /// Rastermaß als runder Knopf.
+    private var gridMenu: some View {
         Menu {
             Picker("Raster", selection: $sketch.gridStep) {
                 ForEach(Self.gridSteps, id: \.self) { step in
@@ -320,71 +201,13 @@ struct RightRail: View {
                 }
             }
         } label: {
-            Group {
-                if stacked {
-                    VStack(spacing: -1) {
-                        Text(LengthUnit.current.gridNumber(sketch.gridStep))
-                            .font(.system(size: 12, weight: .semibold).monospacedDigit())
-                        Text(LengthUnit.current.symbol)
-                            .font(.system(size: 10, weight: .semibold))
-                    }
-                    .frame(width: 44, height: 44)
-                } else {
-                    Text(LengthUnit.current.gridNumber(sketch.gridStep))
-                        .font(.system(size: 13, weight: .semibold).monospacedDigit())
-                        .frame(width: 44, height: 44)
-                        .floatingSurface(in: Circle())
-                }
-            }
-            .foregroundStyle(.primary)
-            .accessibilityLabel("Rastergröße")
+            Text(LengthUnit.current.gridNumber(sketch.gridStep))
+                .font(.system(size: 13, weight: .semibold).monospacedDigit())
+                .frame(width: 44, height: 44)
+                .floatingSurface(in: Circle())
+                .foregroundStyle(.primary)
+                .accessibilityLabel("Rastergröße")
         }
-    }
-
-    /// Skizzen, Bilder und Konstruktionsgeometrie gesammelt ein- und ausblenden; einzeln unter „Elemente“.
-    @ViewBuilder
-    private var visibilityItems: some View {
-        let model = workspace.model
-        Toggle("Skizzen", systemImage: "pencil.and.outline",
-               isOn: Binding(get: { model.showsSketches }, set: { model.setSketchesHidden(!$0) }))
-            .disabled(model.sketches.isEmpty)
-        Toggle("Bilder", systemImage: "photo",
-               isOn: Binding(get: { model.showsCanvases }, set: { model.setCanvasesHidden(!$0) }))
-            .disabled(model.canvases.isEmpty)
-        Toggle("Konstruktion", systemImage: "square.dashed",
-               isOn: Binding(get: { model.showsConstructions }, set: { model.setConstructionsHidden(!$0) }))
-            .disabled(model.constructions.isEmpty)
-        Divider()
-        Button("Einzeln in „Ebenen“ …", systemImage: "square.3.layers.3d") {
-            workspace.showsLayers = true
-        }
-    }
-
-    /// Skizzenpalette wie in Fusion 360: was beim Skizzieren angezeigt wird.
-    @ViewBuilder
-    private var sketchPaletteItems: some View {
-        Toggle("Skizzierraster", systemImage: "grid", isOn: $sketch.showsGrid)
-        Toggle("Fang", systemImage: "scope", isOn: $sketch.snapEnabled)
-        Divider()
-        Toggle("Profil (Bereiche)", systemImage: "square.fill.on.square", isOn: $sketch.showsProfiles)
-        Toggle("Punkte", systemImage: "circle.grid.cross", isOn: $sketch.showsPoints)
-        Toggle("Bemaßungen", systemImage: "ruler", isOn: $sketch.showsDimensions)
-        Toggle("Feste Maße als Schloss", systemImage: "lock", isOn: $sketch.collapsesLockedDimensions)
-        Toggle("Abhängigkeiten", systemImage: "link", isOn: $sketch.showsConstraintBadges)
-        Toggle("Bestimmtheit (grün = fest)", systemImage: "checkmark.seal", isOn: $sketch.showsDefinition)
-        Toggle("Automatisch einschränken", systemImage: "wand.and.rays", isOn: $sketch.autoConstrain)
-        Toggle("Konstruktionsgeometrie", systemImage: "square.dashed", isOn: $sketch.showsConstruction)
-    }
-
-    @ViewBuilder
-    private var displayModePicker: some View {
-        Picker("Anzeigemodus", selection: $workspace.displayMode) {
-            ForEach(DisplayMode.allCases) { mode in
-                Label(mode.rawValue, systemImage: mode.systemImage).tag(mode)
-            }
-        }
-        Divider()
-        Toggle("Orthografisch", systemImage: "cube.transparent", isOn: $workspace.isOrthographic)
     }
 
     private func mainColumn(spacing: CGFloat, showsLabels: Bool) -> some View {
@@ -400,7 +223,7 @@ struct RightRail: View {
             .popover(isPresented: $isSnapMenuShown, arrowEdge: .trailing) {
                 SnapMenu(sketch: sketch, gridSteps: Self.gridSteps)
             }
-            gridMenu(stacked: false)
+            gridMenu
                 .hoverTip("Raster")
 
             ViewCube(camera: workspace.camera, motion: workspace.cameraMotion) { normal in
@@ -412,70 +235,300 @@ struct RightRail: View {
             RailButton(systemImage: "arrow.up.left.and.arrow.down.right", label: "Einpassen") {
                 workspace.send(.fitAll)
             }
-            Menu {
-                Button("Aktuelle Ansicht speichern", systemImage: "plus", action: workspace.saveCurrentView)
-                if !workspace.savedViews.isEmpty {
-                    Divider()
-                    ForEach(workspace.savedViews) { view in
-                        Button(view.name, systemImage: "camera.viewfinder") { workspace.restoreView(view) }
-                    }
-                    Menu("Löschen", systemImage: "trash") {
+            // Offener Modellbefehl (FeaturePanel): darunter stehen OK/Abbrechen, die übrigen Knöpfe ruhen
+            if workspace.command == nil {
+                Menu {
+                    Button("Aktuelle Ansicht speichern", systemImage: "plus", action: workspace.saveCurrentView)
+                    if !workspace.savedViews.isEmpty {
+                        Divider()
                         ForEach(workspace.savedViews) { view in
-                            Button(view.name, role: .destructive) { workspace.deleteView(view.id) }
+                            Button(view.name, systemImage: "camera.viewfinder") { workspace.restoreView(view) }
+                        }
+                        Menu("Löschen", systemImage: "trash") {
+                            ForEach(workspace.savedViews) { view in
+                                Button(view.name, role: .destructive) { workspace.deleteView(view.id) }
+                            }
                         }
                     }
+                } label: {
+                    RailIcon(systemImage: "camera.viewfinder")
+                        .accessibilityLabel("Ansichten")
                 }
-            } label: {
-                RailIcon(systemImage: "camera.viewfinder")
-                    .accessibilityLabel("Ansichten")
-            }
-            .hoverTip("Ansichten", "Blickwinkel und Zoom speichern und später mit einem Tipp wiederherstellen.")
-            Menu {
-                displayModePicker
-            } label: {
-                RailIcon(systemImage: workspace.displayMode.systemImage)
-                    .accessibilityLabel("Anzeigemodus")
-            }
-            .hoverTip("Anzeigemodi")
-            RailButton(systemImage: "camera", label: "Screenshot", action: screenshot)
-            RailButton(systemImage: "clock.arrow.circlepath", label: "Verlauf", isActive: panel == .history) {
-                panel = panel == .history ? nil : .history
-            }
-            RailButton(systemImage: "info.circle", label: "Eigenschaften", isActive: panel == .properties) {
-                toggleProperties()
-            }
-            Menu {
-                visibilityItems
-            } label: {
-                RailIcon(systemImage: "eye")
-                    .accessibilityLabel("Sichtbarkeit")
-            }
-            .hoverTip("Sichtbarkeit")
-            RailButton(systemImage: "square.3.layers.3d", label: "Ebenen", isActive: workspace.showsLayers) {
-                workspace.showsLayers.toggle()
-            }
-            RailButton(systemImage: "cube", label: "Körper wählen", isActive: workspace.selectsBodies) {
-                workspace.selectsBodies.toggle()
-                if workspace.selectsBodies, workspace.tool != .select { workspace.activate(.select) }
-            }
-            RailButton(systemImage: lassoSelects ? "lasso" : "rectangle.dashed",
-                       label: lassoSelects ? "Lassoauswahl" : "Rahmenauswahl", isActive: workspace.boxSelects) {
-                workspace.boxSelects.toggle()
-                if workspace.boxSelects, !workspace.acceptsBoxSelection { workspace.activate(.select) }
-            }
-            // Lange drücken: Rahmen oder Lasso (gilt auch für den Stift und in der Skizze)
-            .contextMenu {
-                Picker("Auswahlform", selection: $lassoSelects) {
-                    Label("Rahmen", systemImage: "rectangle.dashed").tag(false)
-                    Label("Lasso", systemImage: "lasso").tag(true)
+                .hoverTip("Ansichten", "Blickwinkel und Zoom speichern und später mit einem Tipp wiederherstellen.")
+                Menu {
+                    DisplayModeMenuItems(workspace: workspace)
+                } label: {
+                    RailIcon(systemImage: workspace.displayMode.systemImage)
+                        .accessibilityLabel("Anzeigemodus")
                 }
+                .hoverTip("Anzeigemodi")
+                RailButton(systemImage: "camera", label: "Screenshot", action: screenshot)
+                RailButton(systemImage: "clock.arrow.circlepath", label: "Verlauf", isActive: panel == .history) {
+                    panel = panel == .history ? nil : .history
+                }
+                RailButton(systemImage: "info.circle", label: "Eigenschaften", isActive: panel == .properties) {
+                    toggleProperties()
+                }
+                Menu {
+                    VisibilityMenuItems(workspace: workspace, model: workspace.model)
+                } label: {
+                    RailIcon(systemImage: "eye")
+                        .accessibilityLabel("Sichtbarkeit")
+                }
+                .hoverTip("Sichtbarkeit")
+                RailButton(systemImage: "square.3.layers.3d", label: "Ebenen", isActive: workspace.showsLayers) {
+                    workspace.showsLayers.toggle()
+                }
+                RailButton(systemImage: "cube", label: "Körper wählen", isActive: workspace.selectsBodies) {
+                    workspace.selectsBodies.toggle()
+                    if workspace.selectsBodies, workspace.tool != .select { workspace.activate(.select) }
+                }
+                RailButton(systemImage: lassoSelects ? "lasso" : "rectangle.dashed",
+                           label: lassoSelects ? "Lassoauswahl" : "Rahmenauswahl", isActive: workspace.boxSelects) {
+                    workspace.boxSelects.toggle()
+                    if workspace.boxSelects, !workspace.acceptsBoxSelection { workspace.activate(.select) }
+                }
+                // Lange drücken: Rahmen oder Lasso (gilt auch für den Stift und in der Skizze)
+                .contextMenu {
+                    Picker("Auswahlform", selection: $lassoSelects) {
+                        Label("Rahmen", systemImage: "rectangle.dashed").tag(false)
+                        Label("Lasso", systemImage: "lasso").tag(true)
+                    }
+                }
+                // Direkte Knöpfe (vorher unter Prüfen bzw. Ändern links)
+                Capsule()
+                    .fill(Color.secondary.opacity(0.35))
+                    .frame(width: 30, height: 3)
+                ModelRailButtons(workspace: workspace, model: workspace.model, showsLabels: showsLabels && panel == nil)
             }
-            // Direkte Knöpfe (vorher unter Prüfen bzw. Ändern links)
-            Capsule()
-                .fill(Color.secondary.opacity(0.35))
-                .frame(width: 30, height: 3)
-            ModelRailButtons(workspace: workspace, model: workspace.model, showsLabels: showsLabels && panel == nil)
         }
+    }
+}
+
+/// Anzeigemodus, Orthografisch und helles bzw. dunkles Design (Menü der rechten Leiste und des Fensters).
+struct DisplayModeMenuItems: View {
+    @ObservedObject var workspace: Workspace
+
+    var body: some View {
+        Picker("Anzeigemodus", selection: $workspace.displayMode) {
+            ForEach(DisplayMode.allCases) { mode in
+                Label(mode.rawValue, systemImage: mode.systemImage).tag(mode)
+            }
+        }
+        Divider()
+        Toggle("Orthografisch", systemImage: "cube.transparent", isOn: $workspace.isOrthographic)
+        AppearanceToggle()
+    }
+}
+
+/// Skizzen, Bilder und Konstruktionsgeometrie gesammelt ein- und ausblenden; einzeln unter „Ebenen“.
+struct VisibilityMenuItems: View {
+    let workspace: Workspace
+    @ObservedObject var model: ModelStore
+
+    var body: some View {
+        Toggle("Skizzen", systemImage: "pencil.and.outline",
+               isOn: Binding(get: { model.showsSketches }, set: { model.setSketchesHidden(!$0) }))
+            .disabled(model.sketches.isEmpty)
+        Toggle("Bilder", systemImage: "photo",
+               isOn: Binding(get: { model.showsCanvases }, set: { model.setCanvasesHidden(!$0) }))
+            .disabled(model.canvases.isEmpty)
+        Toggle("Konstruktion", systemImage: "square.dashed",
+               isOn: Binding(get: { model.showsConstructions }, set: { model.setConstructionsHidden(!$0) }))
+            .disabled(model.constructions.isEmpty)
+        Divider()
+        // Vorschau-Look für alle Körper (Kupfer, Gold, Silber, Schwarz … glänzend oder matt), SurfaceQuickPalette.swift
+        SurfacePreviewMenu(model: model)
+        Divider()
+        Button("Einzeln in „Ebenen“ …", systemImage: "square.3.layers.3d") {
+            workspace.showsLayers = true
+        }
+    }
+}
+
+/// Kopf des schlanken rechten Fensters (Kai: „ganz oben der Würfel, darunter das U als Fangsymbol“):
+/// Ansichtswürfel, darunter die früheren Knöpfe der Säule RightRail als kompakte Symbolreihen.
+/// Skizze: Fang, Raster, Finger, Anzeigemodus · Screenshot, Verlauf, Eigenschaften, Sichtbarkeit.
+/// Offener Modellbefehl: Fang, Raster, Einpassen, Anzeigemodus.
+struct PaletteViewControls: View {
+    @ObservedObject var workspace: Workspace
+    @ObservedObject var sketch: SketchController
+    @Binding var panel: SidePanel?
+    let screenshot: () -> Void
+
+    @State private var isSnapMenuShown = false
+
+    private static var gridSteps: [Double] { LengthUnit.current.gridSteps }
+
+    /// Nach der Ebenenwahl bleibt die Ansicht senkrecht auf der Skizzenebene (wie bisher)
+    private var cubeLocked: Bool { sketch.isActive && !sketch.isChoosingPlane }
+
+    var body: some View {
+        VStack(spacing: 6) {
+            ViewCube(camera: workspace.camera, motion: workspace.cameraMotion) { normal in
+                workspace.send(.look(normal))
+            }
+            .disabled(cubeLocked)
+            .opacity(cubeLocked ? 0.4 : 1)
+            .hoverTip("Ansichtswürfel", "Seite, Kante oder Ecke antippen: Ansicht dorthin drehen. Ziehen dreht frei.")
+            HStack(spacing: 3) {
+                snapButton
+                gridMenu
+                if sketch.isActive {
+                    fingerButton
+                } else {
+                    cell("Einpassen", systemImage: "arrow.up.left.and.arrow.down.right") {
+                        workspace.send(.fitAll)
+                    }
+                }
+                displayMenu
+            }
+            if sketch.isActive {
+                HStack(spacing: 3) {
+                    cell("Screenshot", systemImage: "camera", action: screenshot)
+                    cell("Verlauf", systemImage: "clock.arrow.circlepath", isActive: panel == .history) {
+                        panel = panel == .history ? nil : .history
+                    }
+                    cell("Eigenschaften", systemImage: "info.circle", isActive: panel == .properties) {
+                        toggleProperties()
+                    }
+                    visibilityMenu
+                }
+            }
+        }
+        .frame(width: PaletteStyle.contentWidth)
+    }
+
+    /// Eigenschaften öffnen bzw. schließen; beim Öffnen gilt das Auswahlwerkzeug.
+    private func toggleProperties() {
+        if panel == .properties {
+            panel = nil
+            return
+        }
+        panel = .properties
+        if workspace.tool != .select { workspace.activate(.select) }
+    }
+
+    /// Fang „U“: Hufeisenmagnet, Antippen öffnet die Fangeinstellungen
+    private var snapButton: some View {
+        Button {
+            isSnapMenuShown = true
+        } label: {
+            let active = sketch.snapEnabled
+            ZStack {
+                MagnetShape()
+                    .stroke(active ? Color.white : Color.primary, style: StrokeStyle(lineWidth: 3.5, lineCap: .butt))
+                MagnetPoles()
+                    .stroke(active ? Color.white.opacity(0.55) : Color.red.opacity(0.8),
+                            style: StrokeStyle(lineWidth: 3.5, lineCap: .butt))
+            }
+            .frame(width: 15, height: 17)
+            .modifier(PaletteCellStyle(isActive: active))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Fang")
+        .hoverTip("Fang")
+        .popover(isPresented: $isSnapMenuShown, arrowEdge: .trailing) {
+            SnapMenu(sketch: sketch, gridSteps: Self.gridSteps)
+        }
+    }
+
+    /// Rastermaß zweizeilig („50“ über „mm“); in der Skizze mit Rasterweite 1-2-5 nach Zoom
+    private var gridMenu: some View {
+        Menu {
+            if sketch.isActive {
+                Toggle("Automatisch (1-2-5)", systemImage: "square.grid.3x3",
+                       isOn: Binding(get: { sketch.options.gridAuto }, set: { sketch.options.gridAuto = $0 }))
+                Divider()
+            }
+            Picker("Raster", selection: $sketch.gridStep) {
+                ForEach(Self.gridSteps, id: \.self) { step in
+                    Text(LengthUnit.current.gridLabel(step)).tag(step)
+                }
+            }
+        } label: {
+            VStack(spacing: -1) {
+                Text(LengthUnit.current.gridNumber(sketch.gridStep))
+                    .font(.system(size: 11, weight: .semibold).monospacedDigit())
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                Text(LengthUnit.current.symbol)
+                    .font(.system(size: 9, weight: .semibold))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(Color.primary)
+            .modifier(PaletteCellStyle(isActive: false))
+            .accessibilityLabel("Rastergröße")
+        }
+        .hoverTip("Raster")
+    }
+
+    private var fingerButton: some View {
+        cell("Finger zeichnet", systemImage: sketch.fingerDraws ? "hand.draw.fill" : "hand.draw",
+             isActive: sketch.fingerDraws) {
+            sketch.fingerDraws.toggle()
+        }
+    }
+
+    private var displayMenu: some View {
+        Menu {
+            DisplayModeMenuItems(workspace: workspace)
+        } label: {
+            PaletteCellIcon(systemImage: workspace.displayMode.systemImage, isActive: false)
+        }
+        .accessibilityLabel("Anzeigemodus")
+        .hoverTip("Anzeigemodi")
+    }
+
+    private var visibilityMenu: some View {
+        Menu {
+            VisibilityMenuItems(workspace: workspace, model: workspace.model)
+        } label: {
+            PaletteCellIcon(systemImage: "eye", isActive: false)
+        }
+        .accessibilityLabel("Sichtbarkeit")
+        .hoverTip("Sichtbarkeit")
+    }
+
+    private func cell(_ title: String, systemImage: String, isActive: Bool = false,
+                      action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            PaletteCellIcon(systemImage: systemImage, isActive: isActive)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .hoverTip(title)
+    }
+}
+
+/// Symbol in einer Zelle der kompakten Knopfreihe.
+private struct PaletteCellIcon: View {
+    let systemImage: String
+    let isActive: Bool
+
+    var body: some View {
+        Image(systemName: systemImage)
+            .font(.system(size: 15, weight: .medium))
+            .foregroundStyle(isActive ? Color.white : Color.primary)
+            .modifier(PaletteCellStyle(isActive: isActive))
+    }
+}
+
+/// Zelle der Knopfreihe: volle Spaltenbreite, 36 pt hoch, aktiv in Akzentfarbe.
+private struct PaletteCellStyle: ViewModifier {
+    let isActive: Bool
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: PaletteStyle.controlRadius, style: .continuous)
+        content
+            .frame(maxWidth: .infinity)
+            .frame(height: PaletteStyle.iconButton)
+            .background(isActive ? Color.accentColor : PaletteStyle.field, in: shape)
+            .overlay {
+                shape.strokeBorder(isActive ? Color.accentColor : PaletteStyle.controlBorder, lineWidth: 1)
+            }
+            .contentShape(shape)
+            .animation(Theme.snappy, value: isActive)
     }
 }
 
@@ -486,6 +539,11 @@ private struct ModelRailButtons: View {
     /// Eigenes Beobachten: Auswahl und Isolieren ändern sich im Modell
     @ObservedObject var model: ModelStore
     var showsLabels: Bool
+
+    /// Daneben steht bei gewähltem Körper die Schnellwahl „Oberfläche“ (BodySurfacePalette): dann keine Schilder
+    private var labelsVisible: Bool {
+        showsLabels && !(workspace.tool == .select && model.selectedBody != nil)
+    }
 
     var body: some View {
         let sectionOn = workspace.section != nil
@@ -500,9 +558,11 @@ private struct ModelRailButtons: View {
         }
         button("Löschen", subtitle: canDelete ? "Gewählte Körper" : "Nichts gewählt", systemImage: "trash",
                isActive: false) {
-            model.deleteSelected()
-            // Andere Werkzeuge halten Körpernummern (Ziel, Werkzeuge, Vorschau): danach zurück zur Auswahl
+            let targets: [Int] = model.deletableBodies
+            // Andere Werkzeuge halten Körpernummern (Ziel, Werkzeuge, Vorschau): zurück zur Auswahl
             if workspace.tool != .select { workspace.activate(.select) }
+            // Ein Rückgängig-Schritt mit Hinweis (BodyDelete.swift)
+            model.deleteBodies(targets)
         }
         .disabled(!canDelete)
         .opacity(canDelete ? 1 : 0.4)
@@ -523,7 +583,7 @@ private struct ModelRailButtons: View {
         Button(action: action) {
             RailIcon(systemImage: systemImage, isActive: isActive)
                 .overlay(alignment: .trailing) {
-                    if showsLabels {
+                    if labelsVisible {
                         RailLabel(title: title, subtitle: subtitle)
                             .fixedSize()
                             .offset(x: -52)
@@ -563,7 +623,7 @@ struct ConstraintColumn: View {
             kinds,
             [Row(id: "Trennen", systemImage: "link.badge.plus", action: .detach,
                  applicable: hasSelection && sketch.selectionHasConstraints)],
-            [Row(id: "Konstruktion erstellen", systemImage: "square.dashed", action: .construction, applicable: hasSelection)],
+            [Row(id: "Konstruktion erstellen", systemImage: "sc.construction", action: .construction, applicable: hasSelection)],
         ]
     }
 
@@ -604,6 +664,32 @@ struct ConstraintColumn: View {
         .disabled(!isEnabled)
     }
 
+    /// SF Symbol: aktiv weiß auf Akzentfarbe, passend blau, sonst grau. SolidCraft-Bild: aktiv heller Grund mit
+    /// Rahmen, nicht passend grau und blass.
+    @ViewBuilder private func rowIcon(_ row: Row, pending: Bool, active: Bool) -> some View {
+        let shape = RoundedRectangle(cornerRadius: Theme.Radius.label, style: .continuous)
+        if ToolIcon.isCustom(row.systemImage) {
+            ToolIcon(row.systemImage, size: 24)
+                .saturation(active ? 1 : 0)
+                .opacity(active ? 1 : (isEnabled ? 0.55 : 0.3))
+                .frame(width: 38, height: 34)
+                .background(pending ? Color.accentColor.opacity(0.22) : Color.clear, in: shape)
+                .overlay {
+                    if pending {
+                        shape.strokeBorder(Color.accentColor, lineWidth: 2)
+                    }
+                }
+        } else {
+            Image(systemName: row.systemImage)
+                .symbolRenderingMode(.hierarchical)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(pending ? Color.white
+                                 : active ? Color.accentColor : Color.primary.opacity(isEnabled ? 0.75 : 0.35))
+                .frame(width: 38, height: 34)
+                .background(pending ? Color.accentColor : Color.clear, in: shape)
+        }
+    }
+
     private func rowView(_ row: Row) -> some View {
         let pending = sketch.pendingAction == row.action
         let active = isEnabled && (row.applicable || pending)
@@ -612,14 +698,7 @@ struct ConstraintColumn: View {
         } label: {
             HStack(spacing: 8) {
                 RailLabel(title: row.id, dimmed: !active && !isEnabled)
-                Image(systemName: row.systemImage)
-                    .symbolRenderingMode(.hierarchical)
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(pending ? Color.white
-                                     : active ? Color.accentColor : Color.primary.opacity(isEnabled ? 0.75 : 0.35))
-                    .frame(width: 38, height: 34)
-                    .background(pending ? Color.accentColor : Color.clear,
-                                in: RoundedRectangle(cornerRadius: Theme.Radius.label, style: .continuous))
+                rowIcon(row, pending: pending, active: active)
                     .frame(width: 44, height: 38)
             }
             .contentShape(Rectangle())

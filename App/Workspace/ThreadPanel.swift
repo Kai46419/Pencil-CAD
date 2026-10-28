@@ -182,7 +182,7 @@ struct ThreadCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
-                Label("Gewinde", systemImage: PartTool.thread.systemImage)
+                ToolLabel("Gewinde", icon: PartTool.thread.systemImage)
                     .font(.callout.weight(.semibold))
                     .fixedSize()
                 Picker("Art", selection: Binding(get: { parts.thread.family }, set: { workspace.setThreadFamily($0) })) {

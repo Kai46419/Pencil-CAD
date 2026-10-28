@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <exception>
 #include <utility>
 #include <vector>
 
@@ -24,6 +25,7 @@
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepOffset_MakeOffset.hxx>
 #include <BRepBuilderAPI_GTransform.hxx>
+#include <BRepBuilderAPI_Copy.hxx>
 #include <BRepGProp.hxx>
 #include <BRepTools.hxx>
 #include <BRepOffsetAPI_MakePipe.hxx>
@@ -117,6 +119,14 @@
 #include <Interface_Static.hxx>
 #include <STEPControl_Reader.hxx>
 #include <STEPControl_Writer.hxx>
+#include <mutex>
+// STEP-Lesen/-Schreiben nutzt globale Zustände von OCCT (Interface_Static, Steuerung der Schnittstelle) und ist nicht
+// threadsicher. Der Vordergrund (Speichern, Import, Verlauf) und die Warteschlange des Blechmoduls (SheetWorker; nach
+// einem Zeitlimit läuft deren Rechnung weiter) dürfen deshalb nie gleichzeitig STEP lesen oder schreiben.
+static std::recursive_mutex &pckSTEPMutex() {
+    static std::recursive_mutex mutex;
+    return mutex;
+}
 #else
 #define PCK_HAS_STEP 0
 #endif
@@ -1555,6 +1565,8 @@ static TopoDS_Shape applyFaceExtrusionTools(const TopoDS_Shape &body, const TopT
         BRepAlgoAPI_Fuse op;
         op.SetArguments(arguments);
         op.SetTools(tools);
+        // Eingangskörper nicht verändern (Toleranzen): er wird im Verlauf und in der Anzeige weiter benutzt
+        op.SetNonDestructive(Standard_True);
         op.Build();
         if (!op.IsDone() || op.HasErrors()) return TopoDS_Shape();
         result = op.Shape();
@@ -1562,6 +1574,7 @@ static TopoDS_Shape applyFaceExtrusionTools(const TopoDS_Shape &body, const TopT
         BRepAlgoAPI_Cut op;
         op.SetArguments(arguments);
         op.SetTools(tools);
+        op.SetNonDestructive(Standard_True);
         op.Build();
         if (!op.IsDone() || op.HasErrors()) return TopoDS_Shape();
         result = op.Shape();
@@ -1583,15 +1596,25 @@ static TopoDS_Shape applyFaceExtrusionTools(const TopoDS_Shape &body, const TopT
         // Alle Prismen entstehen aus dem Ausgangskörper, daher bleiben die Flächennummern gültig
         TopTools_ListOfShape tools;
         for (NSNumber *number in indices) {
+            // Nummer außerhalb des Körpers (veraltete Auswahl): nicht ungeprüft in die Flächenliste greifen
+            if (number.integerValue < 1 || number.integerValue > _faces.Extent()) return nil;
             NSArray<NSNumber *> *plane = [self planeOfFace:number.integerValue];
-            if (plane == nil) return nil;
+            if (plane == nil || plane.count < 6) return nil;
             const gp_Vec normal(plane[3].doubleValue, plane[4].doubleValue, plane[5].doubleValue);
             const TopoDS_Face face = TopoDS::Face(_faces(number.intValue));
             if (!appendFaceExtrusionTools(_shape, face, normal, distance, tools)) return nil;
         }
+        if (tools.IsEmpty()) return nil;
         const TopoDS_Shape result = applyFaceExtrusionTools(_shape, tools, distance);
         if (result.IsNull()) return nil;
+        // Ergebnis ohne Flächen nicht weitergeben (nichts zu vernetzen, Folgefehler)
+        TopExp_Explorer anyFace(result, TopAbs_FACE);
+        if (!anyFace.More()) return nil;
         return [[PCKShape alloc] initWithShape:result];
+    } catch (const Standard_Failure &) {
+        return nil;
+    } catch (const std::exception &) {
+        return nil;
     } catch (...) {
         return nil;
     }
@@ -2406,6 +2429,37 @@ static TopoDS_Shape variableFilletOnce(const TopoDS_Shape &shape, const std::vec
     return TopoDS_Shape();
 }
 
+- (nullable PCKShape *)independentCopy {
+    return [self independentCopyWithMesh:NO];
+}
+
+- (nullable PCKShape *)independentCopyKeepingMesh {
+    return [self independentCopyWithMesh:YES];
+}
+
+- (nullable PCKShape *)independentCopyWithMesh:(BOOL)withMesh {
+    try {
+        // Geometrie mitkopieren (auf Wunsch auch das Netz als eigene Kopie): die Kopie teilt nichts mehr mit diesem
+        // Körper (Vernetzen im Vordergrund schreibt sonst gleichzeitig in dieselben Flächen und Kanten, während der
+        // Hintergrund rechnet)
+        BRepBuilderAPI_Copy copier(_shape, Standard_True, withMesh ? Standard_True : Standard_False);
+        const TopoDS_Shape copied = copier.Shape();
+        if (copied.IsNull()) return nil;
+        PCKShape *copy = [[PCKShape alloc] initWithShape:copied];
+        if (copy->_edges.Extent() != _edges.Extent() || copy->_faces.Extent() != _faces.Extent()) return nil;
+        // Nummern müssen übereinstimmen (Kante i der Kopie = Kopie der Kante i)
+        for (int i = 1; i <= _edges.Extent(); ++i) {
+            if (!copier.ModifiedShape(_edges(i)).IsSame(copy->_edges(i))) return nil;
+        }
+        for (int i = 1; i <= _faces.Extent(); ++i) {
+            if (!copier.ModifiedShape(_faces(i)).IsSame(copy->_faces(i))) return nil;
+        }
+        return copy;
+    } catch (...) {
+        return nil;
+    }
+}
+
 - (nullable PCKShape *)filletingEdges:(NSArray<NSNumber *> *)numbers radius:(double)radius endRadius:(double)endRadius {
     if (radius <= 0 || endRadius <= 0) return nil;
     if (std::abs(radius - endRadius) < 1e-9) return [self filletingEdges:numbers radius:radius];
@@ -2523,10 +2577,14 @@ static TopoDS_Shape variableFilletOnce(const TopoDS_Shape &shape, const std::vec
         const std::vector<TopoDS_Edge> mergedEdges = matchEdges(edges, merged);
         const bool useMerged = !mergedEdges.empty();
         double lo = 0, hi = limit;
-        for (int i = 0; i < 9 && hi - lo > limit * 0.01; ++i) {
+        // Hart begrenzt: höchstens 8 Rundungsversuche insgesamt (jeder kann bei schwierigen Ecken lange dauern).
+        // Mit zusammengefasster Form nur diese (sie geht mindestens so weit wie die zerteilte)
+        int attempts = 0;
+        while (attempts < 8 && hi - lo > limit * 0.02) {
             const double mid = 0.5 * (lo + hi);
-            const bool ok = !blendOnce(_shape, edges, mid, chamfer).IsNull()
-                || (useMerged && !blendOnce(merged, mergedEdges, mid, chamfer).IsNull());
+            attempts += 1;
+            const bool ok = useMerged ? !blendOnce(merged, mergedEdges, mid, chamfer).IsNull()
+                                      : !blendOnce(_shape, edges, mid, chamfer).IsNull();
             if (ok) lo = mid; else hi = mid;
         }
         return lo;
@@ -2974,6 +3032,7 @@ static bool isSoftMeshEdge(const TopTools_ListOfShape &faces) {
 
 + (nullable NSArray<PCKShape *> *)shapesFromSTEPFile:(NSString *)path {
 #if PCK_HAS_STEP
+    std::lock_guard<std::recursive_mutex> stepLock(pckSTEPMutex());
     try {
         STEPControl_Reader reader;
         if (reader.ReadFile(path.fileSystemRepresentation) != IFSelect_RetDone) return nil;
@@ -2998,6 +3057,7 @@ static bool isSoftMeshEdge(const TopTools_ListOfShape &faces) {
 
 + (BOOL)writeShapes:(NSArray<PCKShape *> *)shapes toSTEPFile:(NSString *)path {
 #if PCK_HAS_STEP
+    std::lock_guard<std::recursive_mutex> stepLock(pckSTEPMutex());
     try {
         STEPControl_Writer writer;
         Interface_Static::SetCVal("write.step.unit", "MM");
@@ -3198,6 +3258,14 @@ static bool isSoftMeshEdge(const TopTools_ListOfShape &faces) {
 }
 
 - (nullable PCKShape *)validatedSolid {
+    return self;
+}
+
+- (nullable PCKShape *)independentCopy {
+    return self;
+}
+
+- (nullable PCKShape *)independentCopyKeepingMesh {
     return self;
 }
 

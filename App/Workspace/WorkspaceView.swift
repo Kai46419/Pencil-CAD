@@ -10,12 +10,15 @@ struct WorkspaceView: View {
 
     var body: some View {
         WorkspaceContent(workspace: workspace, model: workspace.model, sketch: workspace.sketch, close: close)
+            // Anthrazit nach SolidCraft im ganzen Arbeitsbereich (Skizze und 3D), „Helles Design“ schaltet zurück
+            .appTheme()
     }
 }
 
 private struct WorkspaceContent: View {
     @EnvironmentObject private var projects: ProjectStore
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.colorScheme) private var colorScheme
     @ObservedObject var workspace: Workspace
     @ObservedObject var model: ModelStore
     @ObservedObject var sketch: SketchController
@@ -50,9 +53,12 @@ private struct WorkspaceContent: View {
         ZStack {
             Viewport(workspace: workspace, model: model, sketch: sketch)
                 .overlay {
-                    LinearGradient(colors: [Color.white.opacity(0.12), Color.white.opacity(0), Color.black.opacity(0.025)],
-                                   startPoint: .top, endPoint: .bottom)
-                        .allowsHitTesting(false)
+                    // Heller Schimmer nur im hellen Design; Anthrazit ohne Verlauf (SolidCraft: oben = unten)
+                    if colorScheme != .dark {
+                        LinearGradient(colors: [Color.white.opacity(0.12), Color.white.opacity(0), Color.black.opacity(0.025)],
+                                       startPoint: .top, endPoint: .bottom)
+                            .allowsHitTesting(false)
+                    }
                 }
                 .overlay {
                     if let location = workspace.quickToolsLocation {
@@ -60,6 +66,8 @@ private struct WorkspaceContent: View {
                     }
                 }
                 .animation(.spring(duration: 0.2), value: workspace.quickToolsLocation)
+                // Blech › Flachmuster: 2D-Ansicht über dem Ansichtsfenster (App/Sheet/FlatPatternView.swift)
+                .overlay { SheetFlatOverlay(workspace: workspace) }
                 .ignoresSafeArea()
             // Leisten innerhalb des sicheren Bereichs; die leere Fläche lässt Berührungen zum Viewport durch.
             Color.clear
@@ -99,10 +107,34 @@ private struct WorkspaceContent: View {
                         case nil:
                             EmptyView()
                         }
-                        RightRail(workspace: workspace, sketch: sketch, panel: $panel, screenshot: takeScreenshot)
+                        // Ein schlankes Fenster rechts (Kai): oben Ansichtswürfel, Fang „U“ und Ansichtsknöpfe, darunter
+                        // die Eigenschaften von Werkzeug bzw. Auswahl (SketchPalette) oder des offenen Modellbefehls
+                        // (FeaturePanel); unten bleibt Platz für Hinweise und Rückgängig. Ohne beides die Säule RightRail.
+                        if sketch.isActive {
+                            SketchPalette(workspace: workspace, model: model, sketch: sketch, panel: $panel,
+                                          screenshot: takeScreenshot)
+                                .padding(.bottom, 84)
+                                .transition(.opacity.combined(with: .move(edge: .trailing)))
+                        } else if let command = workspace.command {
+                            FeaturePanel(workspace: workspace, model: model, command: command, panel: $panel,
+                                         screenshot: takeScreenshot)
+                                .id(ObjectIdentifier(command))
+                                .padding(.bottom, 84)
+                                .transition(.opacity.combined(with: .move(edge: .trailing)))
+                        } else {
+                            // Körper gewählt: Schnellwahl „Oberfläche“ links neben der Leiste (SurfaceQuickPalette.swift);
+                            // bei offenem Eigenschaften-Fenster steht sie dort
+                            if panel == nil, workspace.tool == .select {
+                                BodySurfacePalette(model: model)
+                                    .transition(.opacity.combined(with: .move(edge: .trailing)))
+                            }
+                            RightRail(workspace: workspace, sketch: sketch, panel: $panel, screenshot: takeScreenshot)
+                        }
                     }
                     .padding(.trailing, 16)
                     .padding(.top, 76)
+                    .animation(Theme.spring, value: sketch.isActive)
+                    .animation(Theme.spring, value: workspace.command == nil)
                 }
                 .overlay(alignment: .bottom) { bottomArea }
                 .overlay(alignment: .bottomLeading) { undoRedo }
@@ -405,12 +437,16 @@ private struct WorkspaceContent: View {
             if sketch.isActive, let calibration = workspace.canvasCalibration {
                 CanvasTraceCard(workspace: workspace, model: model, canvasID: calibration.canvas)
             }
-            ParameterCard(workspace: workspace, model: model, sketch: sketch)
-            if workspace.showsDoneBar {
+            // Im Skizzenmodus stehen die Werkzeug-Eigenschaften rechts in der Skizzenpalette, bei offenem
+            // Modellbefehl im Eigenschaften-Panel rechts
+            if !sketch.isActive, workspace.command == nil {
+                ParameterCard(workspace: workspace, model: model, sketch: sketch)
+            }
+            if workspace.showsDoneBar, workspace.command == nil {
                 doneBar
             }
             if timelineSetting, !sketch.isActive {
-                TimelineBar(model: model)
+                TimelineBar(model: model, workspace: workspace, editingFeature: workspace.editingFeatureID)
             }
         }
         .padding(.horizontal, 120)

@@ -316,6 +316,14 @@ struct SketchText: Codable {
     var alignment: TextAlignmentOption
     /// Drehung um den Ankerpunkt (Bogenmaß, gegen den Uhrzeigersinn); fehlt in älteren Projekten (= 0)
     var rotation: Double
+    /// Verformen (Breite/Höhe, Verzerren, Perspektive, Hülle, am Pfad ausrichten; SketchTextDeform.swift);
+    /// fehlt in älteren Projekten (= unverformt)
+    var deform: SketchTextDeform?
+    /// Verschieben, Skalieren, Drehen über die Auswahlgriffe (SketchTextTransform.swift); nil = unverändert.
+    /// Wirkt nach Anker und Drehung, Drehpunkt ist transformPivot.
+    var transform: SketchTextTransform?
+    /// Mitte des Schriftsatzes in der Skizze (vor transform): Drehpunkt der Griffe
+    private(set) var transformPivot: Point2
     var loops: [SketchLoop]
 
     struct Font: Identifiable {
@@ -332,7 +340,7 @@ struct SketchText: Codable {
     ]
 
     private enum CodingKeys: String, CodingKey {
-        case string, anchor, height, fontName, alignment, rotation
+        case string, anchor, height, fontName, alignment, rotation, deform, transform
     }
 
     /// Die Umrisse werden nicht gespeichert, sondern beim Laden aus der Schrift neu erzeugt.
@@ -343,7 +351,9 @@ struct SketchText: Codable {
                   height: try container.decode(Double.self, forKey: .height),
                   fontName: try container.decode(String.self, forKey: .fontName),
                   alignment: try container.decode(TextAlignmentOption.self, forKey: .alignment),
-                  rotation: (try? container.decodeIfPresent(Double.self, forKey: .rotation)) ?? 0)
+                  rotation: (try? container.decodeIfPresent(Double.self, forKey: .rotation)) ?? 0,
+                  deform: try? container.decodeIfPresent(SketchTextDeform.self, forKey: .deform),
+                  transform: try? container.decodeIfPresent(SketchTextTransform.self, forKey: .transform))
     }
 
     func encode(to encoder: Encoder) throws {
@@ -355,24 +365,49 @@ struct SketchText: Codable {
         try container.encode(alignment, forKey: .alignment)
         // Nur gedrehten Text mit Winkel speichern (sonst bleibt die Datei wie bisher)
         if rotation != 0 { try container.encode(rotation, forKey: .rotation) }
+        // Nur verformten Text mit Verformung speichern
+        if let deform { try container.encode(deform, forKey: .deform) }
+        if let transform { try container.encode(transform, forKey: .transform) }
     }
 
     init(string: String, anchor: Point2, height: Double, fontName: String, alignment: TextAlignmentOption,
-         rotation: Double = 0) {
+         rotation: Double = 0, deform: SketchTextDeform? = nil, transform: SketchTextTransform? = nil) {
         self.string = string
         self.anchor = anchor
         self.height = height
         self.fontName = fontName
         self.alignment = alignment
         self.rotation = rotation
-        loops = Self.outlines(string: string, anchor: anchor, height: height, fontName: fontName, alignment: alignment,
-                              rotation: rotation)
+        // Unverformt gespeichert wie bisher (nil statt einer neutralen Verformung)
+        self.deform = deform?.isIdentity == true ? nil : deform
+        // Unveränderte Lage wird nicht gespeichert („Zurücksetzen“ übergibt .identity)
+        let shaped: SketchTextTransform? = transform.flatMap { $0.isIdentity ? nil : $0 }
+        let center = Self.layoutCenter(string: string, height: height, fontName: fontName, alignment: alignment)
+        transformPivot = Self.placedBase(center, anchor: anchor, rotation: rotation)
+        self.transform = shaped
+        loops = []
+        loops = makeOutlines()
     }
 
-    /// Buchstabenumrisse als geschlossene Ketten aus Linien und Bézierkurven.
-    /// height = Höhe der Großbuchstaben; anchor liegt auf der Grundlinie, rotation dreht um anchor.
-    private static func outlines(string: String, anchor: Point2, height: Double, fontName: String,
-                                 alignment: TextAlignmentOption, rotation: Double) -> [SketchLoop] {
+    /// Buchstabenumrisse als geschlossene Ketten aus Linien und Bézierkurven: Glyphen im System des Texts, dann
+    /// verformt (Hülle bzw. Pfad, SketchTextDeform.swift), zuletzt in die Skizze gelegt (placed: Anker, Drehung,
+    /// Lage aus den Griffen, SketchTextTransform.swift).
+    private func makeOutlines() -> [SketchLoop] {
+        let glyphs = Self.localGlyphs(string: string, height: height, fontName: fontName, alignment: alignment)
+        guard !glyphs.isEmpty else { return [] }
+        let shaped: [SketchLoop]
+        if let deform {
+            shaped = deform.shaped(glyphs, height: height, toLocal: { q in local(q) })
+        } else {
+            shaped = glyphs.flatMap(\.loops)
+        }
+        return shaped.map { loop in loop.mapped { p in placed(p) } }
+    }
+
+    /// Buchstabenumrisse je Zeichen im System des Texts (Grundlinie = x-Achse, mm, Ausrichtung berücksichtigt).
+    /// height = Höhe der Großbuchstaben. Zeichen ohne Umriss (Leerzeichen) fehlen.
+    static func localGlyphs(string: String, height: Double, fontName: String,
+                            alignment: TextAlignmentOption) -> [SketchTextGlyph] {
         let text = string.replacingOccurrences(of: "\n", with: " ")
         guard !text.isEmpty, height > 0 else { return [] }
         let font = CTFontCreateWithName(fontName as CFString, 100, nil)
@@ -388,16 +423,17 @@ struct SketchText: Codable {
         case .right: -width
         }
 
-        let cosR: Double = cos(rotation), sinR: Double = sin(rotation)
-        var loops: [SketchLoop] = []
+        var result: [SketchTextGlyph] = []
         let runs = (CTLineGetGlyphRuns(line) as? [CTRun]) ?? []
         for run in runs {
             let count = CTRunGetGlyphCount(run)
             guard count > 0 else { continue }
             var glyphs = [CGGlyph](repeating: 0, count: count)
             var positions = [CGPoint](repeating: .zero, count: count)
+            var advances = [CGSize](repeating: .zero, count: count)
             CTRunGetGlyphs(run, CFRange(location: 0, length: count), &glyphs)
             CTRunGetPositions(run, CFRange(location: 0, length: count), &positions)
+            CTRunGetAdvances(run, CFRange(location: 0, length: count), &advances)
             let attributes = CTRunGetAttributes(run) as NSDictionary
             let runFont = attributes[kCTFontAttributeName as String].map { $0 as! CTFont } ?? font
             for index in 0..<count {
@@ -406,12 +442,15 @@ struct SketchText: Codable {
                 let map = { (p: CGPoint) -> Point2 in
                     let x: Double = scale * (Double(p.x + origin.x) + shift)
                     let y: Double = scale * Double(p.y + origin.y)
-                    return anchor + Point2(cosR * x - sinR * y, sinR * x + cosR * y)
+                    return Point2(x, y)
                 }
-                loops += Self.loops(of: path, map: map)
+                let loops = Self.loops(of: path, map: map)
+                guard !loops.isEmpty else { continue }
+                let start: Double = scale * (Double(origin.x) + shift)
+                result.append(SketchTextGlyph(loops: loops, x: start, advance: scale * Double(advances[index].width)))
             }
         }
-        return loops
+        return result
     }
 
     private static func loops(of path: CGPath, map: @escaping (CGPoint) -> Point2) -> [SketchLoop] {
@@ -883,7 +922,9 @@ func extrudeRegions(_ chosen: [SketchRegion], plane: SketchPlane, distance: Doub
     let length: Double
     switch direction {
     case .oneSide:
-        from = mode == .cut ? -sign * 0.01 : 0
+        // Werkzeug beginnt 0,01 mm entgegen der Schnittrichtung (vorher -sign: bei negativem Abstand lag der
+        // Überstand im Material und die koplanare Startfläche ließ eine Haut stehen)
+        from = mode == .cut ? (main >= 0 ? -0.01 : 0.01) : 0
         length = main - from
     case .symmetric:
         from = -main

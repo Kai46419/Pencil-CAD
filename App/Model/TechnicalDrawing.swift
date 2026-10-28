@@ -105,6 +105,8 @@ struct DrawingOptions: Equatable {
     var method: ProjectionMethod = .first
     var showsIso = true
     var showsHidden = true
+    /// Winkelmaße an schrägen Kanten und Fasen automatisch (Punkt 15)
+    var showsAngles = true
     /// Nur die gewählten Körper (sonst alle sichtbaren)
     var onlySelection = true
     /// Ersteller im Schriftfeld („Created by …“, Kai); bleibt für alle Zeichnungen gespeichert
@@ -292,13 +294,17 @@ enum TechnicalDrawing {
         let topOrigin = Point2(column1, options.method == .first ? lowerRow : upperRow)
         let sideOrigin = Point2(column2, frontOrigin.y)
 
+        // Sichtbare Linien der Normansichten auf dem Blatt, für die automatischen Winkelmaße
+        var angleViews: [(lines: [[Point2]], scale: Double)] = []
         func place(_ view: DrawingView, at origin: Point2, scale: Double, bounds: (min: Point2, max: Point2)) {
             guard let projection = projections[view] else { return }
             let map = { (p: Point2) in origin + (p - bounds.min) * scale }
             if options.showsHidden {
                 for line in projection.hidden { out.elements.append(.polyline(line.map(map), .hidden)) }
             }
-            for line in projection.visible { out.elements.append(.polyline(line.map(map), .visible)) }
+            let lines = projection.visible.map { $0.map(map) }
+            for line in lines { out.elements.append(.polyline(line, .visible)) }
+            if view != .iso { angleViews.append((lines: lines, scale: scale)) }
         }
         place(.front, at: frontOrigin, scale: s, bounds: front)
         place(.top, at: topOrigin, scale: s, bounds: top)
@@ -346,6 +352,11 @@ enum TechnicalDrawing {
                 place(.iso, at: origin, scale: isoScale, bounds: iso)
                 label("\(DrawingView.iso.rawValue) (\(scaleText(isoScale)))", origin: origin, viewHeight: isoScale * isoHeight)
             }
+        }
+
+        // Winkelmaße zuletzt: sie weichen den Längenmaßen, Texten und dem Schriftfeld aus
+        if options.showsAngles {
+            automaticAngles(views: angleViews, into: &out.elements)
         }
 
         titleBlock(title: title, subtitle: subtitle, author: options.author, scale: out.scaleText,

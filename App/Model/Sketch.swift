@@ -43,30 +43,30 @@ enum SketchTool: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
-        case .select: "cursorarrow"
-        case .polyline: "line.diagonal"
-        case .rectangle: "rectangle"
-        case .circle: "circle.circle"
-        case .ellipse: "oval"
-        case .polygon: "pentagon"
-        case .arc: "point.topleft.down.curvedto.point.bottomright.up"
-        case .spline: "scribble.variable"
-        case .point: "smallcircle.filled.circle"
-        case .text: "textformat"
-        case .offset: "square.on.square.dashed"
-        case .project: "square.and.arrow.down.on.square"
-        case .trim: "scissors"
-        case .fillet: "app"
-        case .scale: "arrow.up.left.and.arrow.down.right"
-        case .slot: "capsule"
-        case .chamfer: "octagon"
-        case .extend: "arrow.right.to.line"
-        case .breakCurve: "divide"
+        case .select: "sc.select"
+        case .polyline: "sc.line"
+        case .rectangle: "sc.rect"
+        case .circle: "sc.circle"
+        case .ellipse: "sc.ellipse"
+        case .polygon: "sc.polygon"
+        case .arc: "sc.arc3"
+        case .spline: "sc.spline"
+        case .point: "sc.point"
+        case .text: "sc.sketch_text"
+        case .offset: "sc.offset"
+        case .project: "sc.project"
+        case .trim: "sc.trim"
+        case .fillet: "sc.sketch_fillet"
+        case .scale: "sc.sketch_scale"
+        case .slot: "sc.slot"
+        case .chamfer: "sc.sketch_chamfer"
+        case .extend: "sc.extend"
+        case .breakCurve: "sc.sketch_break"
         case .splitAtPoint: "scissors.badge.ellipsis"
-        case .mirror: "arrow.left.and.right.righttriangle.left.righttriangle.right"
-        case .rectPattern: "square.grid.3x3"
-        case .circPattern: "circle.grid.cross"
-        case .measure: "ruler"
+        case .mirror: "sc.sketch_mirror"
+        case .rectPattern: "sc.sketch_rect_pattern"
+        case .circPattern: "sc.sketch_circ_pattern"
+        case .measure: "sc.measure"
         }
     }
 
@@ -99,14 +99,17 @@ enum RectangleMode: String, CaseIterable, Identifiable {
     case center = "Mitte"
     case diagonal = "Diagonal"
     case threePoint = "3 Punkte"
+    /// Diagonal mit abgerundeten Ecken (SolidCraft „Rounded rectangle“, Eckradius eintippbar)
+    case rounded = "Abgerundet"
 
     var id: Self { self }
 
     var systemImage: String {
         switch self {
-        case .center: "rectangle.center.inset.filled"
-        case .diagonal: "rectangle"
-        case .threePoint: "rectangle.portrait.rotate"
+        case .center: "sc.rect_center"
+        case .diagonal: "sc.rect"
+        case .threePoint: "sc.rect3"
+        case .rounded: "sc.rect_rounded"
         }
     }
 }
@@ -233,6 +236,8 @@ struct SketchDimension: Identifiable {
         case constraint(Int)
         /// Neues treibendes Maß aus der Auswahl
         case create(SketchConstraint.Variant)
+        /// Wertfeld der SolidCraft-Klickfolge (Schlüssel wie in SketchToolOptions.locked)
+        case live(String)
     }
 
     var kind: Kind
@@ -317,6 +322,10 @@ final class SketchController: ObservableObject {
     @Published var tool: SketchTool = .select {
         didSet {
             if tool == .polyline || tool == .arc { lineVariant = tool }
+            // Werkzeugwechsel beendet Verformen bzw. Pfad wählen (Änderungen bleiben)
+            if tool != .select, textDeformMode != nil { textDeformMode = nil }
+            // Formgenerator gilt nur, solange er selbst das Polygon-Werkzeug gestartet hat (ShapeGenerator.swift)
+            if oldValue != tool, generatedShape != nil { generatedShape = nil }
             finishInput()
         }
     }
@@ -371,9 +380,21 @@ final class SketchController: ObservableObject {
     var splineHandleDrag: SplineHandleDrag?
     /// Radiusgriff an Bogen bzw. Kreis, der gerade gezogen wird (SketchArcHandle.swift)
     var radiusHandleDrag: RadiusHandleDrag?
+    /// Verschiebe-, Skalier- bzw. Drehgriff eines Texts, der gerade gezogen wird (SketchTextTransform.swift)
+    var textTransformDrag: TextTransformDrag?
+    /// Verformen eines gewählten Texts (SketchTextDeformHandles.swift): aktiver Griffmodus (nil = keine
+    /// Verformungsgriffe) und der Griff, der gerade gezogen wird
+    @Published var textDeformMode: SketchTextDeformMode? {
+        didSet { textDeformModeChanged(from: oldValue) }
+    }
+    var textDeformDrag: TextDeformDrag?
+    /// Stand der Skizze beim Einschalten eines Verformungs- bzw. Pfadmodus: „Abbrechen“ kehrt dorthin zurück
+    /// (Ende der Datei, „Verformen bzw. Pfad: Fertig und Abbrechen“)
+    private var textDeformSession: (snapshot: Snapshot, undoCount: Int, text: Int?)?
     @Published var rectangleMode: RectangleMode = .diagonal {
         didSet {
             rectangleBase = nil
+            cancelClickShape()
             changed()
         }
     }
@@ -386,20 +407,33 @@ final class SketchController: ObservableObject {
     @Published var circleMode: CircleMode = .center {
         didSet {
             stepBase = nil
+            cancelClickShape()
             changed()
         }
     }
     @Published var arcMode: ArcMode = .threePoint {
         didSet {
             stepBase = nil
+            cancelClickShape()
             arcChord = nil
             changed()
         }
     }
-    @Published var polygonMode: PolygonMode = .inscribed
+    @Published var polygonMode: PolygonMode = .inscribed {
+        didSet { if oldValue != polygonMode { cancelClickShape() } }
+    }
+    /// Formgenerator (ShapeLibrary.swift, ShapeGenerator.swift): gewählte Form, gezeichnet mit dem Ablauf des
+    /// Polygons (Mitte, dann Größe/Drehung). nil = gewöhnliches Polygon.
+    @Published var generatedShape: GeneratedShape? {
+        didSet {
+            if oldValue?.choice != generatedShape?.choice { cancelClickShape() }
+            changed()
+        }
+    }
     @Published var slotMode: SlotMode = .centerToCenter {
         didSet {
             stepBase = nil
+            cancelClickShape()
             changed()
         }
     }
@@ -412,6 +446,33 @@ final class SketchController: ObservableObject {
     @Published var circularAngle: Double = 360 { didSet { changed() } }
     /// Neue Elemente als Konstruktionsgeometrie (zählen nicht als Profil).
     @Published var constructionMode = false
+    /// Werkzeug-Eigenschaften und Eingabestil (SolidCraft-Palette)
+    lazy var options: SketchToolOptions = {
+        let options = SketchToolOptions()
+        options.onLockedChange = { [weak self] in self?.changed() }
+        return options
+    }()
+    /// SolidCraft-Klickfolge der Zeichenwerkzeuge (SketchClickTool.swift)
+    var click = SketchClickState()
+    /// Eingabeart des aktuellen Fangs (Stift, Finger, Schweben) – setzt der Viewport
+    var snapInput: SnapInput = .pencil
+    /// Halbe Bildhöhe des Viewports in mm (für das feine Raster nach SolidCraft `grid_step`) – setzt der Viewport
+    var viewHalfHeight = 0.0
+    /// Werte der Projektvariablen für getippte Ausdrücke in den Wertfeldern – setzt der Viewport
+    var variableValues: [String: Double] = [:]
+    /// SolidCraft-Fang während eines Strichs bzw. beim Schweben
+    var activeCandidate: SnapCandidate?
+    var hoverCandidate: SnapCandidate?
+    /// Fang-Bestand nach SolidCraft (Punkte, Kurven, Schnitte), neu bei jeder Geometrieänderung
+    var inference = SketchInference()
+    /// Geweckter Kreismittelpunkt (SolidCraft `woken_centre`)
+    var wokenCenter: Point2?
+    /// SolidCraft-Fang: gemerkte Fangpunkte (Ende, Mitte, Schnitt, Zentrum) nahe dem Stift, die die Anzeige markiert.
+    var clickTrackedPoints: [(kind: SnapKind, point: Point2)] = []
+    /// Zählt gesetzte Punkte der Klickfolge (der Viewport gibt dabei einen leichten Klick)
+    var placedPointCount = 0
+    /// Freiheitsgrade, zwischengespeichert je Geometrie- und Bedingungsstand
+    var dofCache: (revision: Int, constraints: Int, value: (remaining: Int, total: Int, ok: Bool))?
     // Skizzenpalette (wie in Fusion 360): was beim Skizzieren angezeigt wird
     @Published var showsGrid = true
     @Published var showsProfiles = true
@@ -523,7 +584,8 @@ final class SketchController: ObservableObject {
         strokeShape = nil
     }
     /// Bogen-Modus für den laufenden Strich
-    var arcActive: Bool { arcModifier || arcLatched }
+    /// (nur im klassischen Eingabestil; im SolidCraft-Stil unterdrückt ein aufgelegter Finger den Fang)
+    var arcActive: Bool { !options.isSolidCraft && (arcModifier || arcLatched) }
     /// Fangradius des laufenden Strichs
     private var strokeTolerance = 1.0
     /// Hilfslinien zu gemerkten Punktpaaren: Verbindung und Mittelsenkrechte („Mittellinie“), nur Anzeige
@@ -540,10 +602,10 @@ final class SketchController: ObservableObject {
     /// Bogen um Mittelpunkt: überstrichener Winkel des zweiten Zugs (folgt dem Stift, auch über 180°)
     private var arcSweep = 0.0
     private var arcLastAngle = 0.0
-    private var splinePoints: [Point2] = []
+    private(set) var splinePoints: [Point2] = []
     private var offsetTarget: OffsetTarget?
     /// Zuletzt gezeichnetes Element, dessen Maße noch änderbar sind.
-    private var editableIndex: Int?
+    var editableIndex: Int?
     /// Rechteck mit 3 Punkten: erste Kante steht, Höhe folgt.
     private var rectangleBase: (start: Point2, end: Point2)?
     /// Pfeil-Werkzeug: Element unter dem Stift, das gezogen wird
@@ -559,7 +621,11 @@ final class SketchController: ObservableObject {
         var chainStart: Point2?
         var chainEnd: Point2?
     }
-    private var undoStack: [Snapshot] = []
+    private var undoStack: [Snapshot] = [] {
+        didSet { undoRevision &+= 1 }
+    }
+    /// Zählt jede Änderung des Rückgängig-Stapels (Formgenerator: Neuzeichnen nur, solange seit dem Setzen nichts geschah)
+    private(set) var undoRevision = 0
 
     private static let snapKindsKey = "snapKinds"
     /// Fangarten, die es beim letzten Speichern gab; neu hinzugekommene sind zunächst an
@@ -575,7 +641,10 @@ final class SketchController: ObservableObject {
 
     /// Projizierte Körpergeometrie für 3D-Leitpunkte und entfernte Kanten (beim Öffnen der Skizze gesetzt).
     var modelGuides = SketchGuides() {
-        didSet { snapIndex = SnapIndex(entities: entities, guides: modelGuides) }
+        didSet {
+            snapIndex = SnapIndex(entities: entities, guides: modelGuides)
+            inference = SketchInference(entities: entities, construction: construction, modelPoints: modelGuides.points)
+        }
     }
     /// Shapr3D „Zeigen › Leitpunkte“: Knoten in Stiftnähe anzeigen
     @Published var showsGuidePoints = UserDefaults.standard.object(forKey: "showsGuidePoints") as? Bool ?? true {
@@ -615,7 +684,7 @@ final class SketchController: ObservableObject {
     var canUndo: Bool { !undoStack.isEmpty || isInProgress || offsetTarget != nil }
     var isInProgress: Bool {
         dragStart != nil || hasOpenChain || arcChord != nil || !splinePoints.isEmpty || rectangleBase != nil
-            || stepBase != nil
+            || stepBase != nil || !click.isEmpty || click.press != nil
     }
     /// Zweiter Schritt eines zweistufigen Werkzeugs steht aus
     var isWaitingForSecondStep: Bool { stepBase != nil }
@@ -676,9 +745,21 @@ final class SketchController: ObservableObject {
         hoverSnap = nil
         hoverNodes = []
         if tool == .select {
-            if beginSplineHandleDrag(at: point, tolerance: tolerance) { return }  // Spline-Tangentengriffe
-            if beginRadiusHandleDrag(at: point, tolerance: tolerance) { return }  // Radiusgriff Bogen/Kreis
+            // Wartet eine Bedingung, wählt der Stift nur (Griffe ziehen erst danach wieder)
+            if pendingAction == nil {
+                // Griffe des gewählten Elements zuerst: Textgriffe greifen auch nicht gewählte Texte und
+                // überdeckten sonst Spline- und Radiusgriffe, die über einem Text liegen
+                if beginSplineHandleDrag(at: point, tolerance: tolerance) { return }  // Spline-Tangentengriffe
+                if beginRadiusHandleDrag(at: point, tolerance: tolerance) { return }  // Radiusgriff Bogen/Kreis
+                if beginTextTransformDrag(at: point, tolerance: tolerance) { return }  // Textgriffe
+                if beginTextDeformDrag(at: point, tolerance: tolerance) { return }  // Text verformen
+            }
             beginSelectDrag(at: point, tolerance: tolerance)
+            return
+        }
+        // SolidCraft: Klickfolge (SketchClickTool.swift)
+        if clickKind != nil {
+            clickBegan(at: point, tolerance: tolerance)
             return
         }
         let anchor: Point2? = switch tool {
@@ -705,9 +786,15 @@ final class SketchController: ObservableObject {
 
     func moved(to point: Point2, tolerance: Double) {
         if tool == .select {
+            if moveTextTransformDrag(to: point, tolerance: tolerance) { return }  // Textgriffe
+            if moveTextDeformDrag(to: point, tolerance: tolerance) { return }  // Text verformen
             if moveSplineHandleDrag(to: point, tolerance: tolerance) { return }  // Spline-Tangentengriffe
             if moveRadiusHandleDrag(to: point, tolerance: tolerance) { return }  // Radiusgriff Bogen/Kreis
             moveSelectDrag(to: point, tolerance: tolerance)
+            return
+        }
+        if clickKind != nil {
+            clickMoved(to: point, tolerance: tolerance)
             return
         }
         guard let start = dragStart else { return }
@@ -745,9 +832,17 @@ final class SketchController: ObservableObject {
 
     func ended(at point: Point2, tolerance: Double) {
         if tool == .select {
+            if endTextTransformDrag(at: point, tolerance: tolerance) { return }  // Textgriffe
+            if endTextDeformDrag(at: point, tolerance: tolerance) { return }  // Text verformen
             if endSplineHandleDrag(at: point, tolerance: tolerance) { return }  // Spline-Tangentengriffe
             if endRadiusHandleDrag(at: point, tolerance: tolerance) { return }  // Radiusgriff Bogen/Kreis
             endSelectDrag(at: point, tolerance: tolerance)
+            return
+        }
+        if clickKind != nil {
+            clickEnded(at: point, tolerance: tolerance)
+            // „Fang aus“ (Stift drücken) gilt nur für diesen Strich – blieb in der Klickfolge sonst dauerhaft aus
+            resetStrokeSnapState()
             return
         }
         guard let start = dragStart else { return }
@@ -775,6 +870,7 @@ final class SketchController: ObservableObject {
         dragStart = nil
         dragCurrent = nil
         activeSnap = nil
+        activeCandidate = nil
         parallelLines = []
         // Die Sperre gilt für einen Strich (wie die Werkzeugmodi in SketchUp für iPad)
         directionLock = nil
@@ -816,6 +912,8 @@ final class SketchController: ObservableObject {
                 add(.ellipse(center: start, radii: radii), editable: true)
                 inferConstraints(forNew: entities.count - 1, center: start, inference: nil)
             }
+        case .polygon where generatedShape != nil:
+            placeGeneratedShape(center: start, through: end)
         case .polygon:
             if let polygon = SketchShapes.polygon(center: start, through: end, sides: polygonSides, mode: polygonMode) {
                 add(polygon, editable: true)
@@ -919,7 +1017,7 @@ final class SketchController: ObservableObject {
     /// Rechteck je nach Variante: Diagonal (Ecke zu Ecke), Mitte (Mitte zu Ecke), 3 Punkte (Kante, dann Höhe).
     private func endRectangleStroke(start: Point2, end: Point2) {
         switch rectangleMode {
-        case .diagonal:
+        case .diagonal, .rounded:
             let size = end - start
             if size.x != 0, size.y != 0 { add(.rectangle(corner: start, size: size), editable: true) }
         case .center:
@@ -937,7 +1035,7 @@ final class SketchController: ObservableObject {
     }
 
     /// Ecken eines gedrehten Rechtecks: Kante a–b, Höhe bis zur Lotlinie durch p.
-    private static func threePointCorners(_ a: Point2, _ b: Point2, _ p: Point2) -> [Point2] {
+    static func threePointCorners(_ a: Point2, _ b: Point2, _ p: Point2) -> [Point2] {
         let n = rightNormal(b - a)
         let h = simd_dot(p - a, n)
         return [a, b, b + n * h, a + n * h]
@@ -965,6 +1063,8 @@ final class SketchController: ObservableObject {
         selectStart = nil
         // Radiusgriff: bis dahin Gezogenes bleibt (ein Rückgängig-Schritt)
         radiusHandleDrag = nil
+        cancelTextTransformDrag()  // Textgriffe: Gezogenes bleibt
+        cancelTextDeformDrag()  // Verformungsgriffe: Gezogenes bleibt
         dragStart = nil
         dragCurrent = nil
         strokeSamples = []
@@ -972,6 +1072,9 @@ final class SketchController: ObservableObject {
         circleInference = nil
         arcLatched = false
         activeSnap = nil
+        activeCandidate = nil
+        // Klickfolge: abgebrochene Berührung setzt nichts (schon gesetzte Punkte bleiben)
+        click.press = nil
         parallelLines = []
         changed()
     }
@@ -980,14 +1083,14 @@ final class SketchController: ObservableObject {
 
     /// Erkannte Abhängigkeit beim Aufziehen eines Kreises: Radius rastet ein, beim Loslassen wird die
     /// passende Einschränkung gesetzt (variant bekommt die Kurve des neuen Kreises).
-    private struct CircleInference {
+    struct CircleInference {
         var point: Point2
         var radius: Double
         var label: String
         var variant: ((SketchCurveRef) -> SketchConstraint.Variant)?
     }
 
-    private static func isPointSnap(_ kind: SnapKind?) -> Bool {
+    static func isPointSnap(_ kind: SnapKind?) -> Bool {
         guard let kind else { return false }
         return [.endpoint, .midpoint, .center, .intersection, .modelPoint].contains(kind)
     }
@@ -997,7 +1100,7 @@ final class SketchController: ObservableObject {
     /// Kai: „er snappt überall ein, er soll nur da einsnappen, wo auch der Stift ist“. Daher zählt ein Berühr-
     /// bzw. Durchgangspunkt nur, wenn er nah an der Stiftspitze liegt (nicht irgendwo sonst auf dem Kreis), und
     /// „Gleicher Radius“ (ohne festen Punkt) nur sehr knapp.
-    private func inferCircle(center: Point2, raw: Point2, tolerance rawTolerance: Double) -> CircleInference? {
+    func inferCircle(center: Point2, raw: Point2, tolerance rawTolerance: Double) -> CircleInference? {
         let current = simd_distance(center, raw)
         let tolerance = rawTolerance * Self.snapSensitivity
         guard snapEnabled, current > tolerance else { return nil }
@@ -1117,7 +1220,7 @@ final class SketchController: ObservableObject {
     var suggestionNodes: [(point: Point2, kind: SnapKind)] {
         let centered = tool == .circle || tool == .ellipse || tool == .polygon
             || (tool == .rectangle && rectangleMode == .center)
-        guard snapEnabled, centered, dragStart == nil else { return [] }
+        guard snapEnabled, centered, dragStart == nil, !options.isSolidCraft else { return [] }
         return snapIndex.centers.map { ($0, SnapKind.center) } + snapIndex.midpoints.map { ($0, SnapKind.midpoint) }
     }
 
@@ -1125,7 +1228,7 @@ final class SketchController: ObservableObject {
 
     /// Richtung, in der ein Linienzug an point weiterläuft: Linie bzw. Bogen, die dort enden (neueste zuerst).
     /// Zeigt vom Element weg, damit der Bogen glatt anschließt.
-    private func outwardTangent(at point: Point2, tolerance: Double) -> (direction: Point2, entity: Int)? {
+    func outwardTangent(at point: Point2, tolerance: Double) -> (direction: Point2, entity: Int)? {
         for index in entities.indices.reversed() {
             switch entities[index] {
             case .line(let a, let b) where simd_distance(a, b) > 1e-9:
@@ -1191,7 +1294,7 @@ final class SketchController: ObservableObject {
 
     /// Bogen von start nach end, der in start in Richtung direction losläuft. nil, wenn end (fast) auf der
     /// Verlängerung liegt.
-    private static func tangentArcShape(start: Point2, direction: Point2, end: Point2) -> SketchEntity? {
+    static func tangentArcShape(start: Point2, direction: Point2, end: Point2) -> SketchEntity? {
         let d = end - start
         let normal = Point2(-direction.y, direction.x)
         let side = simd_dot(d, normal)
@@ -1389,6 +1492,9 @@ final class SketchController: ObservableObject {
     /// Stift drücken bzw. doppeltippen beim Schweben: liegt ein Fangpunkt (Ende, Mitte, Zentrum, Schnittpunkt,
     /// Hilfspunkt) unter dem Stift, wird er gemerkt. false = nichts in der Nähe.
     func captureHovered(at p: Point2, tolerance: Double) -> Bool {
+        // SolidCraft-Klickwerkzeug: ein einziger gemerkter Punkt liefert Objektfangspuren (SketchClickTool.swift),
+        // nochmal merken entmerkt ihn – keine Punktpaare für Abstand und Mitte
+        if options.isSolidCraft, clickKind != nil { return togglePinnedPoint(at: p, tolerance: tolerance) }
         // Auch Körperecken und Kantenmitten (3D-Leitpunkte): auf einer Körperfläche gibt es anfangs nur diese
         let kinds: Set<SnapKind> = [.endpoint, .midpoint, .center, .intersection, .modelPoint]
         guard snapIndex.snap(p, tolerance: tolerance * 1.5, kinds: kinds, extra: marks, gridStep: 0).kind != nil else {
@@ -1584,6 +1690,10 @@ final class SketchController: ObservableObject {
     private func beginSelectDrag(at p: Point2, tolerance: Double) {
         selectStart = (point: p, tolerance: tolerance)
         selectDrag = nil
+        // Wartende Bedingung (Mittelpunkt, parallel …): Antippen wählt nur. Kai: mit dem Stift ging „Punkt + Linie“
+        // nicht – schon ein paar Punkte Zittern beim Andrücken machten aus dem Tippen ein Ziehen, der Punkt
+        // verrutschte und wurde nicht gewählt (der Finger tippt über die Tipp-Geste und kannte das nicht)
+        guard pendingAction == nil else { return }
         guard let ref = pick(at: p, tolerance: tolerance, includeText: true), entities.indices.contains(ref.entity) else {
             return
         }
@@ -1638,6 +1748,7 @@ final class SketchController: ObservableObject {
             notice = nil
             selectDrag = drag
             entities = result
+            followTextPaths()
             changed(publish: false)
             return
         }
@@ -1663,6 +1774,7 @@ final class SketchController: ObservableObject {
         notice = nil
         selectDrag = drag
         entities = result
+        followTextPaths()
         changed(publish: false)
     }
 
@@ -1908,6 +2020,20 @@ final class SketchController: ObservableObject {
     /// Stift schwebt über der Ebene: Fangpunkt und Knoten in der Nähe zeigen.
     func hover(at point: Point2, tolerance: Double) {
         guard dragStart == nil else { return }
+        if clickKind != nil || options.isSolidCraft && (tool == .spline || tool == .text) {
+            hoverSnap = nil
+            hoverNodes = []
+            if clickKind != nil {
+                guard click.press == nil else { return }
+                clickHover(at: point, tolerance: tolerance)
+            } else {
+                let anchor = tool == .spline ? splinePoints.last : nil
+                let candidate = solidCraftSnap(point, tolerance: tolerance, prev: anchor, lineTool: false)
+                hoverCandidate = candidate.target == nil ? nil : candidate
+                hoverSnap = SnapResult(point: candidate.point, kind: nil)
+            }
+            return
+        }
         let anchor: Point2? = switch tool {
         case .polyline: chainEnd
         case .spline: splinePoints.last
@@ -1932,6 +2058,12 @@ final class SketchController: ObservableObject {
     func endHover() {
         hoverSnap = nil
         hoverNodes = []
+        hoverCandidate = nil
+        if click.press == nil {
+            click.hover = nil
+            // Fangpunkte in Stiftnähe aus, die gemerkten bleiben sichtbar (SketchClickTool.swift)
+            clickTrackedPoints = click.tracked
+        }
         if dragStart == nil { parallelLines = [] }
     }
 
@@ -2060,6 +2192,7 @@ final class SketchController: ObservableObject {
     /// „Abbrechen“ unten im Skizzenmodus: laufende Eingabe verwerfen, die Skizze bleibt offen.
     func cancelCurrentInput() {
         if dragStart != nil { cancelStroke() }
+        cancelClickShape()
         splinePoints = []
         finishInput()
         pendingAction = nil
@@ -2080,6 +2213,8 @@ final class SketchController: ObservableObject {
     // MARK: Zurücksetzen und Rückgängig
 
     func reset() {
+        cancelClickShape()
+        wokenCenter = nil
         dragStart = nil
         dragCurrent = nil
         chainStart = nil
@@ -2111,6 +2246,7 @@ final class SketchController: ObservableObject {
     /// Laufende Eingabe beim Werkzeugwechsel abschließen.
     private func finishInput() {
         if tool != .select { pendingAction = nil }
+        cancelClickShape()
         arcNext = false
         if splinePoints.count >= 2 {
             add(.spline(points: splinePoints, kind: splineKind, closed: false))
@@ -2133,6 +2269,11 @@ final class SketchController: ObservableObject {
     func undo() {
         if dragStart != nil {
             cancelStroke()
+            return
+        }
+        // SolidCraft: zuerst die halbe Form verwerfen
+        if cancelClickShape() {
+            changed()
             return
         }
         if !splinePoints.isEmpty {
@@ -2163,7 +2304,11 @@ final class SketchController: ObservableObject {
     private func remember() {
         undoStack.append(Snapshot(entities: entities, constraints: constraints, construction: construction,
                                   chainStart: chainStart, chainEnd: chainEnd))
-        if undoStack.count > 200 { undoStack.removeFirst() }
+        if undoStack.count > 200 {
+            undoStack.removeFirst()
+            // Volle Liste: der für „Abbrechen“ gemerkte Stapelstand rückt mit nach vorn
+            if let count = textDeformSession?.undoCount { textDeformSession?.undoCount = max(0, count - 1) }
+        }
     }
 
     // MARK: Maße am Element
@@ -2179,7 +2324,7 @@ final class SketchController: ObservableObject {
             if copy.lockState == nil, copy.isEditable {
                 switch copy.target {
                 case .entity, .create: copy.lockState = false
-                case .display, .constraint: break
+                case .display, .constraint, .live: break
                 }
             }
             return copy
@@ -2237,6 +2382,8 @@ final class SketchController: ObservableObject {
     }
 
     private var rawDimensions: [SketchDimension] {
+        // SolidCraft: Wertfelder der Klickfolge (SketchDimBoxes.swift)
+        if clickKind != nil, !click.points.isEmpty { return liveDimensions }
         if let start = dragStart, let current = dragCurrent {
             if tool == .polyline, arcActive, let arc = arcPreview(to: current) {
                 return Self.dimensions(of: arc.entity, editable: false)
@@ -2564,6 +2711,9 @@ final class SketchController: ObservableObject {
         case .entity:
             setDimension(id: id, to: dimension.value)
             return
+        case .live(let key):
+            toggleLiveLock(key, current: dimension.value)
+            return
         case .display, .constraint:
             break
         }
@@ -2583,9 +2733,14 @@ final class SketchController: ObservableObject {
     /// Wert eines Maßfelds übernehmen: Element ändern, treibendes Maß ändern oder neu anlegen.
     /// expression: Formel mit Projektvariablen; das Maß bleibt mit ihr verknüpft (nil = feste Zahl).
     func setDimension(id: String, to value: Double, expression: String? = nil) {
+        // Wertfeld der Klickfolge: auch negative Werte (Bogenwinkel im Uhrzeigersinn)
+        if let dimension = dimensions.first(where: { $0.id == id }), case .live(let key) = dimension.target {
+            lockLiveValue(key, text: expression ?? Self.liveText(value, key: key), variables: variableValues)
+            return
+        }
         guard value > 0, let dimension = dimensions.first(where: { $0.id == id }) else { return }
         switch dimension.target {
-        case .display:
+        case .display, .live:
             return
         case .entity(let index):
             setEntityDimension(dimension.kind, of: index, to: value)
@@ -2616,6 +2771,11 @@ final class SketchController: ObservableObject {
             return constraints.first { constraint in
                 fixedEntityKind(of: constraint).map { $0.entity == index && $0.kind == dimension.kind } ?? false
             }?.expression
+        case .live(let key):
+            // Nur eine Formel mit Variablen zeigt „ƒ“
+            guard let text = options.locked[key], Formula.names(in: text).contains(where: { variableValues[$0] != nil })
+            else { return nil }
+            return text
         case .display, .create:
             return nil
         }
@@ -3101,7 +3261,8 @@ final class SketchController: ObservableObject {
     @discardableResult
     private func replaceEntity(_ index: Int, with replacement: [SketchEntity]) -> Int {
         let wasConstruction = construction.contains(index)
-        removeEntities([index])
+        // Text am Pfad bleibt an einer Kurve, die durch genau ein neues Element ersetzt wird (z. B. Verlängern)
+        removeEntities([index], relink: replacement.count == 1 ? [index: entities.count - 1] : [:])
         let first = entities.count
         for entity in replacement {
             entities.append(entity)
@@ -3112,14 +3273,16 @@ final class SketchController: ObservableObject {
     }
 
     /// Elemente entfernen; Einschränkungen, Konstruktionsart und Auswahl werden angepasst.
-    private func removeEntities(_ removed: Set<Int>) {
+    /// relink: entfernte Kurve → Index ihres Nachfolgers für Text am Pfad (nach dem Entfernen gezählt).
+    private func removeEntities(_ removed: Set<Int>, relink: [Int: Int] = [:]) {
         var map: [Int: Int] = [:]
         var kept: [SketchEntity] = []
         for (index, entity) in entities.enumerated() where !removed.contains(index) {
             map[index] = kept.count
             kept.append(entity)
         }
-        entities = kept
+        // Text am Pfad behält seine Kurve, auch wenn sich ihr Index verschiebt (SketchTextPathLink.swift)
+        entities = SketchTextPathLink.remapped(kept) { map[$0] ?? relink[$0] }
         constraints = constraints.compactMap { $0.remapped { map[$0] } }
         construction = Set(construction.compactMap { map[$0] })
         selection = []
@@ -3194,6 +3357,8 @@ final class SketchController: ObservableObject {
             }
         }
         if let bestPoint { return .point(bestPoint.ref) }
+        // Direkt auf einem Buchstaben von Text am Pfad: der Text geht der Kurve vor, auf der er sitzt
+        if includeText, let index = pathTextIndex(onGlyphAt: p) { return .curve(SketchCurveRef(entity: index, index: 0)) }
         var bestCurve: (distance: Double, ref: SketchCurveRef)?
         for (index, entity) in entities.enumerated() {
             for k in 0..<entity.curveCount {
@@ -3229,8 +3394,9 @@ final class SketchController: ObservableObject {
         let ref = pick(at: p, tolerance: tolerance, includeText: pendingAction == nil)
         var pointRef = false
         if case .point? = ref { pointRef = true }
-        // Hilfspunkte vor Kurven, Elementpunkte vor Hilfspunkten
-        let mark: Int? = pointRef ? nil : markIndex(at: p, tolerance: tolerance, curveHit: ref != nil)
+        // Hilfspunkte vor Kurven, Elementpunkte vor Hilfspunkten. Wartet eine Bedingung, zählen nur Elemente:
+        // ein (z. B. per Schweben gemerkter) Hilfspunkt in der Linienmitte fing sonst das Antippen der Linie ab
+        let mark: Int? = pointRef || pendingAction != nil ? nil : markIndex(at: p, tolerance: tolerance, curveHit: ref != nil)
         if let mark {
             if let index = selectedMarks.firstIndex(of: mark) {
                 selectedMarks.remove(at: index)
@@ -3347,6 +3513,7 @@ final class SketchController: ObservableObject {
     /// „Skizze leeren“ im Menü „…“: alle Elemente der offenen Skizze entfernen (Rückgängig holt sie zurück).
     func clearAll() {
         if dragStart != nil { cancelStroke() }
+        cancelClickShape()
         splinePoints = []
         chainStart = nil
         chainEnd = nil
@@ -3803,6 +3970,11 @@ final class SketchController: ObservableObject {
     /// Linienzüge der laufenden Eingabe und der Versatz-Vorschau (lokal).
     var previewPolylines: [[Point2]] {
         var polylines = offsetPreview.flatMap(\.drawing)
+        // SolidCraft-Klickfolge: Vorschau ist genau die spätere Geometrie, dazu das Gummiband
+        if clickKind != nil {
+            let preview = clickPreview
+            return polylines + preview.shapes.flatMap(\.drawing) + preview.lines
+        }
         // Beim Schweben zeigt der Linienzug, Bogen bzw. Spline schon das nächste Stück
         let current = dragCurrent ?? hoverSnap?.point
         switch tool {
@@ -3841,6 +4013,11 @@ final class SketchController: ObservableObject {
             }
         case .mirror, .rectPattern, .circPattern:
             polylines += transformPreview.flatMap(\.drawing)
+        case .polygon where generatedShape != nil:
+            if let start = dragStart, let current = dragCurrent {
+                polylines += generatedShapePreview(center: start, through: current).flatMap(\.drawing)
+                polylines.append([start, current])
+            }
         case .rectangle, .circle, .ellipse, .polygon:
             if let start = dragStart, let current = dragCurrent, let preview = shapePreview(from: start, to: current) {
                 polylines += preview.drawing
@@ -3886,7 +4063,7 @@ final class SketchController: ObservableObject {
 
     /// Aktueller Fang (Strich hat Vorrang vor Schweben).
     var currentSnap: SnapResult? {
-        activeSnap ?? hoverSnap
+        activeSnap ?? textTransformSnap ?? hoverSnap
     }
 
     private func shapePreview(from start: Point2, to current: Point2) -> SketchEntity? {
@@ -3903,6 +4080,9 @@ final class SketchController: ObservableObject {
             return .circle(center: start, radius: simd_distance(start, current))
         case .ellipse:
             return .ellipse(center: start, radii: simd_abs(current - start))
+        case .polygon where generatedShape != nil:
+            // Formgenerator: Maß am Stift = Durchmesser des Umkreises
+            return .circle(center: start, radius: simd_distance(start, current))
         case .polygon:
             return SketchShapes.polygon(center: start, through: current, sides: polygonSides, mode: polygonMode)
         default:
@@ -3921,6 +4101,15 @@ final class SketchController: ObservableObject {
     }
 
     private func snap(_ p: Point2, tolerance pickTolerance: Double, anchor: Point2?) -> Point2 {
+        // SolidCraft-Stil: Spline und Text fangen wie die Klickfolge (SketchInference.swift)
+        if options.isSolidCraft, tool == .spline || tool == .text {
+            let candidate = solidCraftSnap(p, tolerance: pickTolerance, prev: anchor, lineTool: false)
+            activeSnap = nil
+            parallelLines = []
+            inferredRelation = nil
+            activeCandidate = candidate.target == nil ? nil : candidate
+            return candidate.point
+        }
         let tolerance = pickTolerance * Self.snapSensitivity
         guard snapEnabled, !snapSuspended else {
             activeSnap = nil
@@ -4021,8 +4210,9 @@ final class SketchController: ObservableObject {
     private func withParallel(_ snapped: SnapResult, raw p: Point2, anchor: Point2?, tolerance: Double) -> SnapResult {
         parallelLines = []
         inferredRelation = nil
+        // Eigener Schalter „Parallel/Rechtwinklig“ (bisher hing es an „Winkel 15°“)
         guard let anchor, tool == .polyline || tool == .rectangle && rectangleMode == .threePoint,
-              snapKinds.contains(.angle) else { return snapped }
+              snapKinds.contains(.parallel) else { return snapped }
         // Punktfang hat Vorrang
         if let kind = snapped.kind,
            ([.endpoint, .midpoint, .center, .intersection, .onCurve, .modelPoint, .distantEdge] as [SnapKind]).contains(kind) {
@@ -4270,19 +4460,31 @@ final class SketchController: ObservableObject {
         }
     }
 
+    /// Text am Pfad folgt der geänderten Kurve (SketchTextDeformHandles.swift), auch während des Ziehens.
+    private func followTextPaths() {
+        for update in textPathUpdates() { entities[update.index] = update.entity }
+    }
+
     private func entitiesChanged() {
+        followTextPaths()
         let profile = entities.indices.filter { !construction.contains($0) }.map { entities[$0] }
         let found = findRegions(in: profile)
         regions = found.regions
         loops = found.loops
         snapIndex = SnapIndex(entities: entities, guides: modelGuides)
+        inference = SketchInference(entities: entities, construction: construction, modelPoints: modelGuides.points)
         measureRefs = measureRefs.filter { entities.indices.contains($0.entity) }
         geometryRevision += 1
         changed()
     }
 
-    private func changed(publish: Bool = true) {
+    func changed(publish: Bool = true) {
+        // Verformungsmodus gilt nur für einen gewählten Text: sonst blieben die Textgriffe (Verschieben, Skalieren)
+        // aller Texte ausgeblendet bzw. „Pfad wählen“ finge jedes Antippen ab
+        if textDeformMode != nil, selectedTextIndex == nil { textDeformMode = nil }
         updateLabel()
+        // Panel-Wertfelder folgen dem Stift auch ohne veröffentlichte Änderung
+        options.noteLive(clickKind != nil ? clickLiveValues : [])
         if publish { revision += 1 }
     }
 
@@ -4293,8 +4495,11 @@ final class SketchController: ObservableObject {
     }
 
     private var currentLabel: String? {
+        if clickKind != nil { return nil }
         if dragStart != nil {
             switch tool {
+            case .polygon where generatedShape != nil:
+                return generatedShape?.title
             case .polygon:
                 return "\(polygonSides) Seiten"
             case .spline:
@@ -4341,7 +4546,12 @@ extension SketchController {
         guard entities.indices.contains(index) else { return }
         if begin { remember() }
         entities[index] = entity
-        if final { entitiesChanged() } else { changed(publish: false) }
+        if final {
+            entitiesChanged()
+        } else {
+            followTextPaths()
+            changed(publish: false)
+        }
     }
 
     /// Radiusgriff an Bogen und Kreis (SketchArcHandle.swift): Maß am Element beim Ziehen ändern wie beim Eintippen
@@ -4435,7 +4645,7 @@ extension SketchController {
         }
     }
 
-    private func slotEntities(base: (start: Point2, end: Point2), through p: Point2) -> [SketchEntity]? {
+    func slotEntities(base: (start: Point2, end: Point2), through p: Point2) -> [SketchEntity]? {
         let half = SketchShapes.slotHalfWidth(base.start, base.end, through: p)
         guard let centers = SketchShapes.slotCenters(base.start, base.end, half: half, mode: slotMode) else { return nil }
         return SketchShapes.slot(centers.0, centers.1, half: half)
@@ -4445,7 +4655,11 @@ extension SketchController {
     private func addGroup(_ shapes: [SketchEntity], keepConstruction source: [Int]? = nil) {
         guard !shapes.isEmpty else { return }
         remember()
-        for (k, shape) in shapes.enumerated() {
+        // Kopierter Text am Pfad folgt der mitkopierten Kurve, nicht dem Original (SketchTextPathLink.swift)
+        let linked: [SketchEntity] = source.map {
+            SketchTextPathLink.relinkedCopies(shapes, sources: $0, first: entities.count)
+        } ?? shapes
+        for (k, shape) in linked.enumerated() {
             entities.append(shape)
             let index = entities.count - 1
             let fromConstruction = source.map { construction.contains($0[k]) } ?? constructionMode
@@ -4508,7 +4722,8 @@ extension SketchController {
     }
 
     /// Elemente, die gespiegelt bzw. vervielfältigt werden (ohne Achse bzw. Mittelpunkt).
-    private var transformSources: [Int] {
+    /// Auch für die Abstandspfeile des Rechteckmusters (PatternSpacingHandles.swift)
+    var transformSources: [Int] {
         var refs = selection
         switch tool {
         case .mirror:
@@ -4597,6 +4812,130 @@ extension SketchController {
         selection = []
         selectedMarks = []
         notice = "\(copies.count) Element\(copies.count == 1 ? "" : "e") erstellt."
+        changed()
+    }
+}
+
+// MARK: Zugang für die SolidCraft-Klickfolge (SketchCommit.swift)
+
+extension SketchController {
+    /// Stand vor einer neuen Form merken (ein Rückgängig-Schritt für die Form samt Bedingungen).
+    func beginCommit() {
+        remember()
+    }
+
+    /// Neues Element der Form anhängen: Konstruktion je nach Modus bzw. Linientyp, gleiche Punkte verbinden.
+    @discardableResult
+    func appendCommitted(_ entity: SketchEntity) -> Int {
+        entities.append(entity)
+        let index = entities.count - 1
+        if constructionMode || options.lineType != .normal { construction.insert(index) }
+        connect(index)
+        return index
+    }
+
+    /// Bedingung aus dem Fang bzw. einem getippten Wert setzen. Doppelte fallen weg; eine schon erfüllte gilt sofort,
+    /// sonst nur, wenn der Löser sie hält, ohne ältere Elemente (Index < lockBelow) zu bewegen.
+    @discardableResult
+    func addCommitConstraint(_ variant: SketchConstraint.Variant, expression: String? = nil, lockBelow: Int) -> Bool {
+        guard !constraints.contains(where: { $0.variant == variant }) else { return false }
+        var constraint = SketchConstraint(variant: variant)
+        constraint.expression = expression
+        constraints.append(constraint)
+        let residual = ConstraintSolver.residual(constraint, entities).reduce(0) { max($0, abs($1)) }
+        if residual < 1e-6 { return true }
+        let old = Set(entities.indices.filter { $0 < lockBelow })
+        if let solved = ConstraintSolver.solve(entities, constraints: constraints, locked: old) {
+            entities = solved
+            return true
+        }
+        constraints.removeLast()
+        return false
+    }
+
+    /// Form fertig: Bereiche und Fang neu aufbauen; editable = Element, dessen Maße danach änderbar sind.
+    func finishCommit(editable: Int?) {
+        editableIndex = editable
+        selection = []
+        entitiesChanged()
+    }
+
+    /// Gelöste Geometrie der Form übernehmen (Tangentenkreis aus dem Löser).
+    func replaceCommitted(_ solved: [SketchEntity]) {
+        guard solved.count == entities.count else { return }
+        entities = solved
+    }
+
+    /// Form verwerfen (z. B. kein Tangentenkreis möglich): Stand vor beginCommit wiederherstellen.
+    func revertCommit() {
+        if let snapshot = undoStack.popLast() { restore(snapshot) }
+    }
+
+    /// Text für ein Wertfeld aus einem Zahlenwert (Länge in der Projekteinheit, Winkel in Grad).
+    static func liveText(_ value: Double, key: String) -> String {
+        switch key {
+        case "Winkel", "Bogenwinkel", "Seiten":
+            return value.formatted(.number.precision(.fractionLength(0...4)).grouping(.never))
+        default:
+            return LengthUnit.current.number(value)
+        }
+    }
+}
+
+// MARK: - Verformen bzw. Pfad: Fertig und Abbrechen
+
+// Kai: „Beim Ausrichten am Pfad reagieren Abbrechen/Fertig nicht.“ Die Knöpfe unten schlossen nur die laufende
+// Zeicheneingabe ab und wussten nichts vom Verformungsmodus. Jetzt gilt bei aktivem Modus (Pfad wählen, Am Pfad,
+// Frei transformieren …): „Fertig“ übernimmt und beendet den Modus, „Abbrechen“ stellt den Stand beim Einschalten
+// wieder her (auch einen per Bogen-Vorlage angelegten Hilfsbogen) und beendet den Modus. Der Text bleibt gewählt.
+extension SketchController {
+    /// Haken in textDeformMode.didSet: Ausgangsstand merken bzw. verwerfen.
+    fileprivate func textDeformModeChanged(from old: SketchTextDeformMode?) {
+        if textDeformMode == nil {
+            textDeformSession = nil
+        } else if old == nil, textDeformSession == nil {
+            beginTextDeformSession()
+        }
+    }
+
+    /// Ausgangsstand für „Abbrechen“ merken (vor der Bogen-Vorlage schon vor dem Anlegen des Hilfsbogens).
+    func beginTextDeformSession() {
+        let snapshot = Snapshot(entities: entities, constraints: constraints, construction: construction,
+                                chainStart: chainStart, chainEnd: chainEnd)
+        textDeformSession = (snapshot, undoStack.count, selectedTextIndex)
+    }
+
+    /// Ausgangsstand verwerfen, wenn danach doch kein Modus aktiv wurde (Bogen-Vorlage nicht möglich).
+    func dropTextDeformSessionIfIdle() {
+        if textDeformMode == nil { textDeformSession = nil }
+    }
+
+    /// „Fertig“: Verformung bzw. Pfad-Ausrichtung übernehmen, Modus beenden, Text bleibt gewählt.
+    func finishTextDeform() {
+        let index = selectedTextIndex ?? textDeformSession?.text
+        cancelTextDeformDrag()
+        textDeformMode = nil
+        if let index, sketchText(at: index) != nil, selectedTextIndex != index { selectText(at: index) }
+        notice = nil
+        changed()
+    }
+
+    /// „Abbrechen“: alles seit dem Einschalten des Modus verwerfen (ohne Zwischenschritte im Rückgängig-Stapel),
+    /// Modus beenden, Text bleibt gewählt.
+    func cancelTextDeform() {
+        textDeformDrag = nil
+        guard let session = textDeformSession else {
+            textDeformMode = nil
+            changed()
+            return
+        }
+        let index = session.text ?? selectedTextIndex
+        textDeformSession = nil
+        textDeformMode = nil
+        if undoStack.count > session.undoCount { undoStack.removeLast(undoStack.count - session.undoCount) }
+        restore(session.snapshot)
+        if let index, sketchText(at: index) != nil { selectText(at: index) }
+        notice = nil
         changed()
     }
 }

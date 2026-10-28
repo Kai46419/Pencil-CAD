@@ -1,8 +1,8 @@
 import SwiftUI
 
-// Zeitleiste des parametrischen Verlaufs (wie Fusion 360 unten): Features von links nach rechts, fehlgeschlagene
-// rot, unterdrückte ausgegraut. Antippen öffnet ein kleines Fenster zum Ändern der Werte (Zahl oder Formel mit
-// Projektvariablen), Unterdrücken und Löschen – jeweils mit Nachbau der folgenden Schritte.
+// Zeitleiste des parametrischen Verlaufs (SolidCraft/Fusion 360 unten): Features von links nach rechts, fehlgeschlagene
+// rot, unterdrückte durchgestrichen, hinter der Rückrollmarke blass. Doppeltippen bearbeitet die Werte (Zahl oder
+// Formel mit Projektvariablen), dazu Unterdrücken, Umbenennen und Löschen – jeweils mit Nachbau der folgenden Schritte.
 
 /// Ein- und Ausblenden der Zeitleiste (Menü „…“). Automatisch: sichtbar ab zwei Features.
 enum TimelineVisibility: Int {
@@ -21,17 +21,39 @@ enum TimelineVisibility: Int {
     }
 }
 
+/// Verlauf unten nach SolidCraft (B.3): links „Verlauf“ und |◀ ◀ ▶ ▶|, dann die Features in Reihenfolge mit
+/// Rückrollmarke (ziehbar, zeigt den Stand bis dorthin), rechts „N Features“. Antippen wählt, Doppeltippen bearbeitet
+/// (Eigenschaften-Panel, sonst das kleine Fenster), langes Drücken: Bearbeiten · Unterdrücken · Umbenennen · Löschen.
 struct TimelineBar: View {
     @ObservedObject var model: ModelStore
+    /// Für Bearbeiten im Panel und die Kapsel „· bearbeiten“.
+    var workspace: Workspace? = nil
+    /// Feature im Panel (workspace.editingFeatureID) als Wert, damit die Kapsel beim Öffnen/Schließen neu zeichnet
+    var editingFeature: UUID? = nil
+
+    /// Kleines Fenster mit den Werten (Fallback, feste Stände, „Schnell ändern“)
     @State private var editing: UUID?
+    /// Ausgewählter Schritt (Antippen)
+    @State private var selected: UUID?
+    /// Rückrollmarke: Zahl der Schritte davor; nil = am Ende (alles gilt)
+    @State private var marker: Int?
+    /// Marke beim Beginn des Ziehens
+    @State private var dragStart: Int?
+    /// Die angezeigte Vorschau ist der zurückgerollte Stand (nur Ansicht, wird nie übernommen)
+    @State private var showsRollback = false
+    @State private var renaming: UUID?
+    @State private var nameDraft = ""
+    @State private var deleting: Feature?
+
+    /// Breite eines Schritts samt Abstand (Ziehen der Marke rastet je Schritt)
+    private let step: CGFloat = 68
+
+    private var count: Int { model.features.count }
+    private var markerIndex: Int { min(marker ?? count, count) }
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: "clock.arrow.circlepath")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .padding(.leading, 12)
-                .accessibilityLabel("Verlauf")
+            header
             if model.features.isEmpty {
                 Text("Noch keine Schritte – Extrudieren, Abrunden … erscheinen hier.")
                     .font(.footnote)
@@ -43,74 +65,261 @@ struct TimelineBar: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 2) {
                             ForEach(Array(model.features.enumerated()), id: \.element.id) { index, feature in
+                                if index == markerIndex { rollbackMarker }
                                 chip(feature, number: index + 1)
+                                    .opacity(index >= markerIndex ? 0.42 : 1)
                                     .id(feature.id)
                             }
+                            if markerIndex >= count { rollbackMarker }
                         }
                         .padding(.horizontal, 6)
+                        .padding(.top, 14)
                     }
                     .onAppear { scrollToEnd(proxy) }
-                    .onChange(of: model.features.count) { scrollToEnd(proxy) }
+                    .onChange(of: model.features.count) {
+                        // Neuer bzw. gelöschter Schritt: Marke wieder ans Ende
+                        resetMarker()
+                        scrollToEnd(proxy)
+                    }
                 }
+                Text(count == 1 ? "1 Feature" : "\(count) Features")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .fixedSize()
+                    .padding(.trailing, 14)
+                    .hoverTip("Verlauf", "Marke ziehen zum Zurückrollen (nur Ansicht).")
             }
         }
-        .frame(height: 56)
+        .frame(height: 64)
         .floatingSurface(in: Capsule(), elevation: .floating)
+        .alert("Schritt umbenennen", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
+            TextField("Name", text: $nameDraft)
+            Button("Abbrechen", role: .cancel) { renaming = nil }
+            Button("Umbenennen") { rename() }
+        }
+        .confirmationDialog(deleting.map { "„\($0.name)“ aus dem Verlauf löschen?" } ?? "",
+                            isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+                            titleVisibility: .visible) {
+            Button("Löschen", role: .destructive) {
+                if let feature = deleting { model.deleteFeature(feature.id) }
+                deleting = nil
+            }
+            Button("Abbrechen", role: .cancel) { deleting = nil }
+        } message: {
+            Text("Die folgenden Schritte werden neu berechnet; was davon abhängt, kann fehlschlagen.")
+        }
     }
+
+    // MARK: Kopf
+
+    private var header: some View {
+        HStack(spacing: 2) {
+            Text("Verlauf")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.leading, 14)
+                .padding(.trailing, 4)
+            if !model.features.isEmpty {
+                stepButton("backward.end.fill", "Zum Anfang", enabled: markerIndex > 0) { moveMarker(to: 0) }
+                stepButton("backward.frame.fill", "Ein Schritt zurück", enabled: markerIndex > 0) {
+                    moveMarker(to: markerIndex - 1)
+                }
+                stepButton("forward.frame.fill", "Ein Schritt vor", enabled: markerIndex < count) {
+                    moveMarker(to: markerIndex + 1)
+                }
+                stepButton("forward.end.fill", "Zum Ende", enabled: markerIndex < count) { moveMarker(to: count) }
+            }
+        }
+    }
+
+    private func stepButton(_ icon: String, _ title: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .semibold))
+                .frame(width: 34, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(enabled ? Color.primary : Color.secondary.opacity(0.4))
+        .disabled(!enabled)
+        .accessibilityLabel(title)
+        .hoverTip(title)
+    }
+
+    // MARK: Rückrollmarke
+
+    private var rollbackMarker: some View {
+        VStack(spacing: 2) {
+            Image(systemName: "arrowtriangle.down.fill")
+                .font(.system(size: 7, weight: .bold))
+            Capsule()
+                .frame(width: 3, height: 36)
+        }
+        .foregroundStyle(Color.accentColor)
+        .frame(width: 20, height: 46)
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture(minimumDistance: 4)
+                .onChanged { drag in
+                    let start = dragStart ?? markerIndex
+                    if dragStart == nil { dragStart = start }
+                    let shift = Int((drag.translation.width / step).rounded())
+                    let target = min(max(start + shift, 0), count)
+                    if target != markerIndex { moveMarker(to: target) }
+                }
+                .onEnded { _ in dragStart = nil }
+        )
+        .accessibilityLabel("Rückrollmarke")
+        .accessibilityValue("nach Schritt \(markerIndex)")
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment: moveMarker(to: markerIndex + 1)
+            case .decrement: moveMarker(to: markerIndex - 1)
+            @unknown default: break
+            }
+        }
+    }
+
+    /// Marke setzen und den Stand bis dorthin zeigen (aus dem Zwischenspeicher des Nachbaus, nur Ansicht: eine schlichte
+    /// Vorschau wird beim Übernehmen verworfen). Neues entsteht weiter am Ende.
+    private func moveMarker(to index: Int) {
+        let target = min(max(index, 0), count)
+        guard target < count else {
+            resetMarker()
+            return
+        }
+        // Eine offene Vorschau eines Werkzeugs nicht überschreiben
+        if model.hasPreview, !showsRollback {
+            model.message = "Erst das laufende Werkzeug abschließen, dann zurückrollen."
+            return
+        }
+        let bodies: [SceneBody]
+        if target == 0 {
+            bodies = []
+        } else if let cached = model.featureRecorder.cache[model.features[target - 1].id] {
+            bodies = cached
+        } else {
+            model.message = "Dieser Stand ist noch nicht berechnet."
+            return
+        }
+        marker = target
+        showsRollback = true
+        model.showPreview(bodies, name: "Zurückgerollt", plain: true)
+    }
+
+    private func resetMarker() {
+        marker = nil
+        dragStart = nil
+        if showsRollback {
+            showsRollback = false
+            model.dropPreview()
+        }
+    }
+
+    // MARK: Schritte
 
     private func scrollToEnd(_ proxy: ScrollViewProxy) {
         guard let last = model.features.last?.id else { return }
         withAnimation(Theme.snappy) { proxy.scrollTo(last, anchor: .trailing) }
     }
 
+    /// Doppeltippen bzw. „Bearbeiten“: im Eigenschaften-Panel, sonst im kleinen Fenster
+    private func edit(_ feature: Feature) {
+        selected = feature.id
+        resetMarker()
+        if let workspace, workspace.editFeatureInPanel(feature) { return }
+        editing = feature.id
+    }
+
+    private func rename() {
+        defer { renaming = nil }
+        let name = nameDraft.trimmingCharacters(in: .whitespaces)
+        guard let id = renaming, !name.isEmpty, let index = model.features.firstIndex(where: { $0.id == id }) else { return }
+        model.features[index].name = name
+        model.saveFeatures()
+    }
+
     private func chip(_ feature: Feature, number: Int) -> some View {
         let isOpen = Binding(get: { editing == feature.id }, set: { if !$0 { editing = nil } })
-        return Button {
-            editing = feature.id
-        } label: {
-            VStack(spacing: 2) {
-                ZStack(alignment: .topTrailing) {
-                    Image(systemName: feature.systemImage)
-                        .font(.system(size: 16, weight: .medium))
-                        .frame(width: 30, height: 26)
-                    if feature.failed {
-                        Image(systemName: "exclamationmark.circle.fill")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(.red)
-                            .offset(x: 4, y: -2)
-                    } else if feature.usesFormulas {
-                        Text("ƒ")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(Color.accentColor)
-                            .offset(x: 4, y: -2)
-                    }
+        let isEditing = (editingFeature ?? workspace?.editingFeatureID) == feature.id
+        return VStack(spacing: 2) {
+            ZStack(alignment: .topTrailing) {
+                ToolIcon(feature.systemImage, size: 22)
+                    .font(.system(size: 16, weight: .medium))
+                    .frame(width: 30, height: 26)
+                    // Unterdrückt: farbiges Bild grau und blass (SF Symbols färbt chipColor)
+                    .saturation(feature.isSuppressed ? 0 : 1)
+                    .opacity(feature.isSuppressed && ToolIcon.isCustom(feature.systemImage) ? 0.5 : 1)
+                if feature.failed {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.red)
+                        .offset(x: 4, y: -2)
+                } else if feature.usesFormulas {
+                    Text("ƒ")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(Color.accentColor)
+                        .offset(x: 4, y: -2)
                 }
-                Text(feature.name)
-                    .font(.system(size: 10, weight: .medium))
-                    .lineLimit(1)
-                    .strikethrough(feature.isSuppressed)
             }
-            .frame(width: 66, height: 46)
-            .foregroundStyle(chipColor(feature))
-            .background {
-                RoundedRectangle(cornerRadius: Theme.Radius.label, style: .continuous)
-                    .fill(chipBackground(feature))
-            }
-            .contentShape(Rectangle())
+            Text(feature.name)
+                .font(.system(size: 10, weight: .medium))
+                .lineLimit(1)
+                .strikethrough(feature.isSuppressed)
         }
-        .buttonStyle(.pressable)
+        .frame(width: 66, height: 46)
+        .foregroundStyle(chipColor(feature))
+        .background {
+            RoundedRectangle(cornerRadius: Theme.Radius.label, style: .continuous)
+                .fill(chipBackground(feature))
+        }
+        .overlay {
+            if selected == feature.id || isEditing {
+                RoundedRectangle(cornerRadius: Theme.Radius.label, style: .continuous)
+                    .strokeBorder(Color.accentColor, lineWidth: 1.5)
+            }
+        }
+        .overlay(alignment: .top) {
+            // Kapsel „<Name> · bearbeiten“ über dem Schritt, der gerade im Panel bearbeitet wird
+            if isEditing {
+                Text("\(feature.name) · bearbeiten")
+                    .font(.system(size: 9, weight: .semibold))
+                    .lineLimit(1)
+                    .fixedSize()
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1)
+                    .background(Color.accentColor, in: Capsule())
+                    .offset(y: -13)
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) { edit(feature) }
+        .onTapGesture { selected = selected == feature.id ? nil : feature.id }
+        .accessibilityElement(children: .combine)
         .accessibilityLabel("Schritt \(number): \(feature.name)")
-        .hoverTip(feature.name, feature.problem ?? (feature.kind == .snapshot ? "Fester Stand (direkte Änderung)" : nil))
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction(named: "Bearbeiten") { edit(feature) }
+        .hoverTip(feature.name, feature.problem ?? (feature.kind == .snapshot ? "Fester Stand (direkte Änderung)"
+                                                    : "Doppeltippen: bearbeiten"))
         .popover(isPresented: isOpen) {
             FeatureEditor(model: model, feature: feature) { editing = nil }
         }
         .contextMenu {
+            Button("Bearbeiten", systemImage: "slider.horizontal.3") { edit(feature) }
             Button(feature.isSuppressed ? "Aktivieren" : "Unterdrücken",
                    systemImage: feature.isSuppressed ? "eye" : "eye.slash") {
+                resetMarker()
                 model.setFeatureSuppressed(!feature.isSuppressed, id: feature.id)
             }
-            Button("Aus Verlauf löschen", systemImage: "trash", role: .destructive) {
-                model.deleteFeature(feature.id)
+            Button("Umbenennen", systemImage: "character.cursor.ibeam") {
+                nameDraft = feature.name
+                renaming = feature.id
+            }
+            Button("Löschen", systemImage: "trash", role: .destructive) {
+                resetMarker()
+                deleting = feature
             }
         }
     }
@@ -122,7 +331,7 @@ struct TimelineBar: View {
     }
 
     private func chipBackground(_ feature: Feature) -> Color {
-        if editing == feature.id { return Theme.rowHighlight }
+        if editing == feature.id || selected == feature.id { return Theme.rowHighlight }
         if feature.failed { return Color.red.opacity(0.1) }
         return Color.clear
     }
@@ -140,7 +349,7 @@ struct FeatureEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
-                Image(systemName: feature.systemImage)
+                ToolIcon(feature.systemImage, size: 22)
                     .foregroundStyle(feature.failed ? Color.red : Color.accentColor)
                 Text(feature.name)
                     .font(.headline)

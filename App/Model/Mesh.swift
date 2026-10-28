@@ -6,7 +6,7 @@ import simd
 struct Vertex {
     var position: SIMD3<Float>
     var normal: SIMD3<Float>
-    var color: SIMD3<Float> = SIMD3(0.62, 0.66, 0.72)
+    var color: SIMD3<Float> = SceneBody.defaultColor
 }
 
 /// Eine Fläche eines Körpers in der Szene.
@@ -37,7 +37,7 @@ struct Mesh {
 
     init() {}
 
-    init(_ kernelMesh: PCKMesh, body: Int, color: SIMD3<Float> = SIMD3(0.62, 0.66, 0.72)) {
+    init(_ kernelMesh: PCKMesh, body: Int, color: SIMD3<Float> = SceneBody.defaultColor) {
         let floats: [Float] = kernelMesh.vertexData.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
         vertices = stride(from: 0, to: floats.count - 5, by: 6).map { i in
             Vertex(position: SIMD3(floats[i], floats[i + 1], floats[i + 2]),
@@ -81,11 +81,19 @@ struct Mesh {
     }
 
     /// Achsenparalleler Hüllquader (min, max).
+    /// Punkte mit NaN/∞ (fehlerhafte Importnetze) zählen nicht mit, sonst stimmen Einpassen und Nah-/Fernebene nicht.
     var bounds: (min: SIMD3<Float>, max: SIMD3<Float>)? {
-        guard let first = vertices.first?.position else { return nil }
-        return vertices.reduce((first, first)) { acc, v in
-            (simd_min(acc.0, v.position), simd_max(acc.1, v.position))
+        var result: (min: SIMD3<Float>, max: SIMD3<Float>)?
+        for vertex in vertices {
+            let p = vertex.position
+            guard p.x.isFinite, p.y.isFinite, p.z.isFinite else { continue }
+            if let current = result {
+                result = (min: simd_min(current.min, p), max: simd_max(current.max, p))
+            } else {
+                result = (min: p, max: p)
+            }
         }
+        return result
     }
 
     /// Indizes aller Dreiecke einer Fläche (für die Hervorhebung).

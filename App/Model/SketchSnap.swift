@@ -18,8 +18,21 @@ enum SnapKind: String, CaseIterable, Identifiable, Codable {
     case modelPoint = "3D-Leitpunkte"
     /// Körperkanten außerhalb der Skizzenebene, projiziert (Shapr3D „Entfernte Kanten“)
     case distantEdge = "Entfernte Kanten"
+    // Neue Fangarten nur hinten anhängen: storedSnapKinds schaltet unbekannte Arten beim ersten Start ein
+    /// Parallel bzw. rechtwinklig zu vorhandenen schrägen Linien (SolidCraft „//“, „⊥“)
+    case parallel = "Parallel/Rechtwinklig"
+    /// Verlängerung vorhandener Linien über ihre Enden hinaus (SolidCraft „Ext“)
+    case lineExtension = "Verlängerung"
+    /// Tangente vom vorigen Punkt an Kreise und Bögen (SolidCraft „T“)
+    case tangent = "Tangente"
 
     var id: Self { self }
+
+    /// Reihenfolge im Fang-Menü: erst Punkte, dann Leitlinien, Raster und Körper
+    static let menuOrder: [SnapKind] = [
+        .endpoint, .midpoint, .center, .intersection, .onCurve, .tangent,
+        .alignment, .angle, .parallel, .lineExtension, .grid, .modelPoint, .distantEdge,
+    ]
 
     var systemImage: String {
         switch self {
@@ -33,21 +46,27 @@ enum SnapKind: String, CaseIterable, Identifiable, Codable {
         case .grid: "grid"
         case .modelPoint: "cube"
         case .distantEdge: "cube.transparent"
+        case .parallel: "equal"
+        case .lineExtension: "arrow.right.to.line"
+        case .tangent: "circle.and.line.horizontal"
         }
     }
 
     var detail: String {
         switch self {
-        case .endpoint: "Enden, Ecken und Punkte"
-        case .midpoint: "Mitte von Linien und Bögen"
-        case .center: "Kreis-, Bogen- und Polygonmitten"
-        case .intersection: "Wo sich Kurven kreuzen"
-        case .onCurve: "Nächster Punkt auf einer Kurve"
-        case .alignment: "Hilfslinien zu vorhandenen Punkten"
-        case .angle: "Linien in 15°-Schritten"
-        case .grid: "Rasterpunkte"
-        case .modelPoint: "Ecken und Kantenmitten der Körper"
-        case .distantEdge: "Projizierte Körperkanten"
+        case .endpoint: "Enden, Ecken, Einzelpunkte und der Ursprung"
+        case .midpoint: "Mitte von Linien"
+        case .center: "Mitte von Kreisen, Bögen und Rechtecken; Linie durchs Zentrum"
+        case .intersection: "Wo sich zwei Kurven kreuzen"
+        case .onCurve: "Beliebiger Punkt auf einer Linie, einem Kreis oder Spline"
+        case .alignment: "Gestrichelt waagerecht/senkrecht zum vorigen und zu gemerkten Punkten"
+        case .angle: "Linie in 15°-Schritten, auch zum vorigen Linienstück"
+        case .grid: "Punkte und Längen rasten im Rastermaß ein"
+        case .modelPoint: "Ecken der Körper, auf die Skizze projiziert"
+        case .distantEdge: "Auf Körperkanten, auf die Skizze projiziert"
+        case .parallel: "Linie parallel bzw. rechtwinklig zu schrägen Linien"
+        case .lineExtension: "Gestrichelt über die Enden vorhandener Linien hinaus"
+        case .tangent: "Linie berührt einen Kreis oder Bogen"
         }
     }
 
@@ -64,6 +83,9 @@ enum SnapKind: String, CaseIterable, Identifiable, Codable {
         case .grid: "Raster"
         case .modelPoint: "3D-Punkt"
         case .distantEdge: "Körperkante"
+        case .parallel: "Parallel"
+        case .lineExtension: "Verlängerung"
+        case .tangent: "Tangente"
         }
     }
 }
@@ -379,14 +401,14 @@ func snapMarker(_ kind: SnapKind, at p: Point2, size s: Double) -> [[Point2]] {
         return [circle, [p + Point2(-s * 0.4, 0), p + Point2(s * 0.4, 0)], [p + Point2(0, -s * 0.4), p + Point2(0, s * 0.4)]]
     case .intersection:
         return [[p + Point2(-s, -s), p + Point2(s, s)], [p + Point2(-s, s), p + Point2(s, -s)]]
-    case .onCurve:
+    case .onCurve, .tangent:
         return [[p + Point2(0, -s), p + Point2(s, 0), p + Point2(0, s), p + Point2(-s, 0), p + Point2(0, -s)]]
     case .modelPoint:
         return [[p + Point2(0, -s), p + Point2(s, 0), p + Point2(0, s), p + Point2(-s, 0), p + Point2(0, -s)],
                 [p + Point2(-s * 0.3, 0), p + Point2(s * 0.3, 0)]]
     case .distantEdge:
         return [[p + Point2(-s, -s * 0.5), p + Point2(s, -s * 0.5)], [p + Point2(-s, s * 0.5), p + Point2(s, s * 0.5)]]
-    case .alignment, .angle:
+    case .alignment, .angle, .parallel, .lineExtension:
         let k = s * 0.6
         return [[p + Point2(-k, -k), p + Point2(k, k)], [p + Point2(-k, k), p + Point2(k, -k)]]
     case .grid:

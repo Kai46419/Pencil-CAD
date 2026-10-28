@@ -31,11 +31,7 @@ struct QuickToolsPalette: View {
                         item.action()
                         close()
                     } label: {
-                        Image(systemName: item.systemImage)
-                            .font(.system(size: 19, weight: .medium))
-                            .frame(width: 50, height: 50)
-                            .foregroundStyle(item.isActive ? Color.white : Color.primary)
-                            .floatingSurface(item.isActive ? Color.accentColor : Theme.surface, in: Circle())
+                        icon(item)
                     }
                     .buttonStyle(.pressable)
                     .accessibilityLabel(item.id)
@@ -54,6 +50,27 @@ struct QuickToolsPalette: View {
             }
         }
         .transition(.scale(scale: 0.6).combined(with: .opacity))
+    }
+
+    /// SF Symbol aktiv weiß auf Akzentfarbe; SolidCraft-Bild aktiv auf hellem Akzentgrund mit Ring.
+    @ViewBuilder private func icon(_ item: Item) -> some View {
+        if ToolIcon.isCustom(item.systemImage) {
+            ToolIcon(item.systemImage, size: 30)
+                .frame(width: 50, height: 50)
+                .background(item.isActive ? Color.accentColor.opacity(0.22) : Color.clear, in: Circle())
+                .floatingSurface(Theme.surface, in: Circle())
+                .overlay {
+                    if item.isActive {
+                        Circle().strokeBorder(Color.accentColor, lineWidth: 2)
+                    }
+                }
+        } else {
+            Image(systemName: item.systemImage)
+                .font(.system(size: 19, weight: .medium))
+                .frame(width: 50, height: 50)
+                .foregroundStyle(item.isActive ? Color.white : Color.primary)
+                .floatingSurface(item.isActive ? Color.accentColor : Theme.surface, in: Circle())
+        }
     }
 
     private func close() {
@@ -91,16 +108,28 @@ struct QuickToolsPalette: View {
                 },
             ]
         }
+        // Mit Auswahl (ohne offenes Panel): die Aktionen zur Auswahl wie im Menü „Auswahl“ (ModelRibbon)
+        let hasSelection = model.selection != nil || !model.selectedEdges.isEmpty || !model.selectedBodies.isEmpty
+            || !model.selectedRegions.isEmpty
+        if hasSelection, workspace.command == nil {
+            let actions = ModelRibbon.contextCommands(workspace).filter(\.isEnabled).prefix(7)
+            return actions.map { command in
+                Item(id: command.title, systemImage: command.icon, isActive: command.isActive, action: command.run)
+            } + [Item(id: "Rückgängig", systemImage: "arrow.uturn.backward") { model.undo() }]
+        }
         return [
-            Item(id: "Skizze", systemImage: "pencil.and.outline") { workspace.startSketch() },
-            Item(id: "Abrunden", systemImage: "app") { workspace.startEdgeOperation(.fillet) },
-            Item(id: "Fase", systemImage: "octagon") { workspace.startEdgeOperation(.chamfer) },
-            Item(id: "Verschieben", systemImage: "move.3d", isActive: workspace.tool == .move) {
-                workspace.activate(.move)
+            Item(id: "Skizze", systemImage: ToolGroup.sketch.systemImage) { workspace.startSketch() },
+            Item(id: "Abrunden", systemImage: "sc.fillet", isActive: workspace.command?.id == .fillet) {
+                workspace.startCommand(.fillet)
             },
-            Item(id: "Spiegeln", systemImage: "arrow.left.and.right.righttriangle.left.righttriangle.right",
-                 isActive: workspace.tool == .mirror) {
-                workspace.activate(.mirror)
+            Item(id: "Fase", systemImage: "sc.chamfer", isActive: workspace.command?.id == .chamfer) {
+                workspace.startCommand(.chamfer)
+            },
+            Item(id: "Verschieben", systemImage: "sc.move", isActive: workspace.command?.id == .move) {
+                workspace.startCommand(.move)
+            },
+            Item(id: "Spiegeln", systemImage: "sc.mirror", isActive: workspace.command?.id == .mirror) {
+                workspace.startCommand(.mirror)
             },
             Item(id: "Einpassen", systemImage: "arrow.up.left.and.arrow.down.right") { workspace.send(.fitAll) },
             Item(id: "Rückgängig", systemImage: "arrow.uturn.backward") { model.undo() },

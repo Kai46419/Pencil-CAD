@@ -1,0 +1,64 @@
+# PencilCAD-Blechmodul: C-ABI über die SolidCraft-Engine (siehe API.md).
+# Die Engine kommt als git-Abhängigkeit mit festem Commit, damit jeder Build (Linux-Tests,
+# Mac/iPad-Build über scripts/build-sheet-ios.sh) exakt denselben Quelltext übersetzt.
+[package]
+name = "pencil-sheet"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+description = "PencilCAD SheetKit: Blechmodul (SolidCraft-Engine) als statische Bibliothek mit C-ABI"
+publish = false
+
+# Eigener Workspace, damit ein übergeordnetes Cargo.toml nie hineinspielt.
+[workspace]
+
+[lib]
+name = "pencil_sheet"
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+# SolidCraft (MIT OR Apache-2.0), Commit 98b57a3 vom 27.10.2026. Beim Aktualisieren `rev` hier
+# UND in allen [patch]-Einträgen unten gleich setzen, danach `cargo update -p solidcraft-engine`.
+solidcraft-engine = { git = "https://github.com/tangency-labs/solidcraft", rev = "98b57a3588170ec1a1c7acc91b4bf8a60ea29865" }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+
+[dev-dependencies]
+serde_json = { version = "1", features = ["float_roundtrip"] }
+
+# SolidCraft übersetzt truck mit eigenen Korrekturen aus vendor/ (deren Workspace-[patch]).
+# Ein [patch] wirkt nur im obersten Workspace – als git-Abhängigkeit gilt er also NICHT
+# automatisch. Ohne diese Spiegelung bekämen wir das ungepatchte truck von crates.io und damit
+# andere Geometrie (Booleans, STEP) als SolidCraft selbst. Cargo findet die Pakete im
+# vendor/-Ordner desselben Repos über ihren Namen.
+[patch.crates-io]
+truck-geometry = { git = "https://github.com/tangency-labs/solidcraft", rev = "98b57a3588170ec1a1c7acc91b4bf8a60ea29865" }
+truck-shapeops = { git = "https://github.com/tangency-labs/solidcraft", rev = "98b57a3588170ec1a1c7acc91b4bf8a60ea29865" }
+truck-stepio = { git = "https://github.com/tangency-labs/solidcraft", rev = "98b57a3588170ec1a1c7acc91b4bf8a60ea29865" }
+truck-meshalgo = { git = "https://github.com/tangency-labs/solidcraft", rev = "98b57a3588170ec1a1c7acc91b4bf8a60ea29865" }
+matext4cgmath = { git = "https://github.com/tangency-labs/solidcraft", rev = "98b57a3588170ec1a1c7acc91b4bf8a60ea29865" }
+
+# Abhängigkeiten auch im Debug-Build optimieren: truck ist ohne Optimierung sehr langsam, und
+# debug-assertions lehnen in truck gültige Geometrie ab (siehe SolidCraft-Profil `ci`).
+[profile.dev]
+opt-level = 1
+debug-assertions = false
+
+[profile.dev.package."*"]
+opt-level = 2
+debug = false
+
+[profile.test]
+opt-level = 1
+debug-assertions = false
+
+# Release für das iPad: klein und schnell. panic bleibt "unwind", damit catch_unwind an der
+# C-Grenze Panics als {"ok":false,…} zurückgibt statt die App zu beenden.
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+debug = false
+strip = "debuginfo"
+panic = "unwind"
+incremental = false

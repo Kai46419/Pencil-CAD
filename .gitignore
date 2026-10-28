@@ -6,3 +6,4 @@ build/
 Vendor/
 signing.env
 App/BuildInfo.txt
+SheetKit/target/

@@ -10,8 +10,8 @@ enum PatternKind: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
-        case .linear: "square.grid.3x1.below.line.grid.1x2"
-        case .circular: "circle.grid.cross"
+        case .linear: "sc.pattern_rect"
+        case .circular: "sc.pattern_circ"
         }
     }
 }
@@ -195,6 +195,8 @@ enum HandleKind: Equatable {
     case radius
     /// Schnittansicht (Kai): Pfeil senkrecht zur Schnittebene, Wert = Versatz der Ebene (SectionHandle.swift)
     case section
+    /// Pfeil eines offenen Modellbefehls (ModelCommand); Schlüssel des Werts, z. B. "distance", "taper"
+    case command(String)
 }
 
 /// Ziehpfeil: Achse (Ursprung + Richtung), aktueller Wert in mm entlang der Achse.
@@ -264,6 +266,8 @@ final class Workspace: ObservableObject {
     let sculpt = MeshSculpt()
 
     @Published var tool: ModelTool = .select
+    /// Offener Modellbefehl nach SolidCraft (Eigenschaften-Panel rechts, FeaturePanel.swift); nil = kein Panel
+    @Published private(set) var command: ModelCommand?
     @Published var displayMode: DisplayMode = .shaded
     @Published var isOrthographic = false
     @Published private(set) var viewCommand = ViewCommand()
@@ -429,9 +433,10 @@ final class Workspace: ObservableObject {
     /// Gespeicherte Ansichten dieses Projekts
     @Published private(set) var savedViews: [SavedView] = []
 
-    init(project: Project) {
+    /// safeOpen: übrig gebliebene Hänger-Marke → sicherer Modus (HangGuard.swift)
+    init(project: Project, safeOpen: HangGuard.Marker? = nil) {
         self.project = project
-        model = ModelStore(folder: project.folder)
+        model = ModelStore(folder: project.folder, safeOpen: safeOpen)
         if let data = UserDefaults.standard.data(forKey: savedViewsKey),
            let views = try? JSONDecoder().decode([SavedView].self, from: data) {
             savedViews = views
@@ -530,6 +535,7 @@ final class Workspace: ObservableObject {
 
     /// Neue Skizze direkt auf einer Ebene (Konstruktionsebene, Fläche).
     func startSketch(on plane: SketchPlane) {
+        if command != nil { cancelCommand(keepSelection: true) }
         tool = .select
         // Jede Skizze beginnt mit dem Pfeil (Auswählen), nicht mit dem zuletzt benutzten Werkzeug
         sketch.tool = .select
@@ -563,6 +569,7 @@ final class Workspace: ObservableObject {
 
     /// Neue Skizze: auf der gewählten ebenen Fläche, sonst zuerst eine Standardebene antippen lassen.
     func startSketch() {
+        if command != nil { cancelCommand(keepSelection: true) }
         tool = .select
         sketch.tool = .select
         editingSketchIndex = nil
@@ -629,6 +636,7 @@ final class Workspace: ObservableObject {
     /// Gespeicherte Skizze wieder öffnen.
     func editSketch(_ index: Int) {
         guard model.sketches.indices.contains(index) else { return }
+        if command != nil { cancelCommand() }
         tool = .select
         model.commitPreview()
         model.resetSelection()
@@ -645,6 +653,8 @@ final class Workspace: ObservableObject {
     // MARK: Werkzeuge
 
     func activate(_ newTool: ModelTool) {
+        // Ein anderes Werkzeug schließt einen offenen Befehl; seine Auswahl geht an das neue Werkzeug
+        if command != nil { cancelCommand(keepSelection: true) }
         // Ein 3D-Werkzeug verlässt die Skizze – gespeichert wie mit dem grünen Haken, nie verworfen
         if sketch.isActive {
             finishSketch()
@@ -1036,7 +1046,7 @@ final class Workspace: ObservableObject {
 
     /// Bohrung setzen bzw. entfernen: Punkt rastet an Ecken, Kantenmitten und Kreismitten und liegt in der Fläche
     /// (eben oder gewölbt, SurfaceHoles.swift).
-    private func holeTapped(face: FaceRef?, point: SIMD3<Float>?) {
+    func holeTapped(face: FaceRef?, point: SIMD3<Float>?) {
         guard let face, let point,
               let found = model.holeSpot(on: face, near: SIMD3<Double>(point), tolerance: pickTolerance) else {
             if face != nil { model.message = "An dieser Stelle ist keine Bohrung möglich." }
@@ -1053,6 +1063,11 @@ final class Workspace: ObservableObject {
     }
 
     func updateHolePreview() {
+        // Bohrung im Eigenschaften-Panel (HoleCommand.swift): Bezüge und Werte rechnet der Befehl
+        if command != nil {
+            refreshCommandPreview()
+            return
+        }
         guard tool == .hole else { return }
         model.previewHoles(holePoints.map { (face: $0.face, point: $0.point) }, spec: holeSpec)
     }
@@ -1061,6 +1076,11 @@ final class Workspace: ObservableObject {
         guard !holePoints.isEmpty else { return }
         holePoints.removeLast()
         updateHolePreview()
+    }
+
+    /// Bohrstellen setzen (Bohrung im Eigenschaften-Panel, HoleCommand.swift).
+    func setHolePoints(_ points: [HolePoint]) {
+        holePoints = points
     }
 
     /// Druckprüfung im Hintergrund (Wandstärke per Strahlen kann bei großen Netzen dauern).
@@ -1103,6 +1123,17 @@ final class Workspace: ObservableObject {
             model.message = "Noch keine Extrusion – erst einmal am Pfeil ziehen, dann wiederholt Doppeltippen die Höhe."
             return
         }
+        // Mit Eigenschaften-Panel: Extrudieren mit der letzten Höhe öffnen (die Einzeltipps davor haben den
+        // Befehl schon gestartet bzw. den Bereich umgeschaltet)
+        if command == nil || command?.id == .extrude {
+            var tap = CommandTap(region: region)
+            if region == nil, let face, model.plane(of: face) != nil { tap.face = face }
+            guard !tap.isEmpty, ModelCommands.driver(.extrude) != nil else { return }
+            if command != nil { cancelCommand() }
+            start(.extrude, with: tap, distance: value)
+            model.message = "Letzte Höhe wiederholt: \(LengthUnit.current.format(value))"
+            return
+        }
         if let region {
             model.cancelPreview()
             model.resetSelection()
@@ -1130,11 +1161,18 @@ final class Workspace: ObservableObject {
 
     /// „Fertig“: aktuelles Werkzeug bzw. Vorschau übernehmen.
     func done() {
+        if command != nil, !sketch.isActive {
+            confirmCommand()
+            return
+        }
         if sketch.isActive {
             // Wie Fusion 360: „Fertig“ schließt nur die laufende Eingabe ab. Die Skizze bleibt offen,
             // bis der grüne Haken „Skizzieren beenden“ getippt wird.
             if sketch.isChoosingPlane {
                 chooseSketchPlane(.top)
+            } else if sketch.textDeformMode != nil {
+                // Text verformen bzw. am Pfad ausrichten: übernehmen und Modus beenden
+                sketch.finishTextDeform()
             } else {
                 sketch.finishCurrentInput()
             }
@@ -1158,11 +1196,18 @@ final class Workspace: ObservableObject {
 
     /// „Abbrechen“: Vorschau verwerfen, zurück zur Auswahl.
     func cancel() {
+        if command != nil, !sketch.isActive {
+            cancelCommand()
+            return
+        }
         if sketch.isActive {
             // Verwirft nur die laufende Eingabe; die Skizze bleibt offen (Ende nur über den grünen Haken).
             // Vor der Ebenenwahl gibt es noch nichts zu verlieren: dann zurück ins Modell.
             if sketch.isChoosingPlane {
                 endSketch()
+            } else if sketch.textDeformMode != nil {
+                // Text verformen bzw. am Pfad ausrichten: Stand vor dem Modus wiederherstellen
+                sketch.cancelTextDeform()
             } else {
                 sketch.cancelCurrentInput()
             }
@@ -1177,6 +1222,8 @@ final class Workspace: ObservableObject {
     /// Ob „Abbrechen/Fertig“ angezeigt werden.
     var showsDoneBar: Bool {
         if sketch.isActive { return true }
+        // Offener Befehl: OK/Abbrechen im Panel bzw. in der Ecke (CornerConfirm.swift)
+        if command != nil { return false }
         return tool != .select || model.hasPreview
     }
 
@@ -1197,6 +1244,15 @@ final class Workspace: ObservableObject {
     /// Tippen im Modellierbereich (nicht im Skizzenmodus).
     func tapped(face tappedFace: FaceRef?, edge: EdgeRef?, region: RegionRef? = nil, point: SIMD3<Float>? = nil) {
         model.message = nil
+        // Offener Befehl (SolidCraft): der Pick geht ins aktive Auswahlfeld. Befehle mit eigenen Antipp-Regeln
+        // (ModelCommands.legacyTapIDs: Messen, Konstruieren …) laufen über den bisherigen Weg, danach zeigt das Panel
+        // den neuen Stand.
+        let legacyCommand = command.map { ModelCommands.usesLegacyTaps($0) } ?? false
+        if command != nil, !legacyCommand {
+            commandTapped(face: tappedFace, edge: edge, region: region, point: point)
+            return
+        }
+        defer { if legacyCommand { refreshCommandPreview() } }
         // Während einer Vorschau zeigt das Netz die Vorschaukörper mit anderen Flächennummern: für Werkzeuge,
         // die Flächen der echten Körper sammeln, die passende echte Fläche unter dem Punkt suchen
         var face = tappedFace
@@ -1313,8 +1369,15 @@ final class Workspace: ObservableObject {
                 model.toggleBody(body)
             } else if let edge {
                 model.toggleEdge(edge)
+            } else if let region, ModelCommands.driver(.extrude) != nil {
+                // ★ Shapr3D: Bereich antippen zeigt sofort den Pfeil – und öffnet rechts das Extrudieren-Panel
+                start(.extrude, with: CommandTap(region: region, point: point.map { SIMD3<Double>($0) }), distance: 0)
             } else if let region {
                 model.toggleRegion(region)
+            } else if let face, model.selection == nil, model.plane(of: face) != nil,
+                      ModelCommands.driver(.extrude) != nil {
+                // Ebene Fläche antippen: Extrudieren (Press Pull) mit Panel, Pfeil wie gewohnt
+                start(.extrude, with: CommandTap(face: face, point: point.map { SIMD3<Double>($0) }), distance: 0)
             } else if let face {
                 // Weitere ebene Fläche antippen nimmt sie dazu (gemeinsam extrudieren), erneut antippen nimmt sie heraus
                 if model.selection != nil, model.faceHandle != nil, model.plane(of: face) != nil {
@@ -1365,6 +1428,18 @@ final class Workspace: ObservableObject {
 
     /// Vorschau des aktiven Werkzeugs mit den aktuellen Einstellungen neu berechnen.
     func updatePreview() {
+        // Alte Karten-Bausteine (z. B. Loft-Führungen) während eines offenen Befehls: der Befehl rechnet. Befehle,
+        // die ganz über das bisherige Werkzeug laufen (ModelCommands.legacyTapIDs), rechnen wie bisher.
+        if let command, !ModelCommands.usesLegacyTaps(command) {
+            refreshCommandPreview()
+            return
+        }
+        updateToolPreview()
+    }
+
+    /// Vorschau des bisherigen Werkzeugs (tool) rechnen – auch aus einem Befehlstreiber heraus (z. B. Skalieren),
+    /// ohne über refreshCommandPreview wieder im Treiber zu landen.
+    func updateToolPreview() {
         switch tool {
         case .pattern(.linear):
             guard let axis = model.resolve(patternAxis) else { return }
@@ -1846,6 +1921,11 @@ final class Workspace: ObservableObject {
     // MARK: Ziehpfeile
 
     var handles: [DragHandle] {
+        // Offener Befehl: Pfeile des Treibers (zweiter Pfeil, Verjüngung …), sonst die des Werkzeugs
+        if !sketch.isActive, let command, let driver = commandDriver {
+            let own = driver.handles(command, self)
+            if !own.isEmpty { return own }
+        }
         // Wie in Fusion 360: blauer Pfeil aus Schaft und Kegelspitze
         let blue = Self.handleBlue
         if sketch.isActive {
@@ -1855,6 +1935,8 @@ final class Workspace: ObservableObject {
                                    direction: SIMD3<Float>(simd_normalize(plane.world(direction: handle.direction))),
                                    value: sketch.offsetDistance, color: blue)]
             }
+            // Rechteckmuster: Abstandspfeile Richtung 1 und 2 (PatternSpacingHandles.swift)
+            if sketch.tool == .rectPattern { return sketchPatternHandles }
             return []
         }
         switch tool {
@@ -1939,7 +2021,13 @@ final class Workspace: ObservableObject {
     }
 
     func apply(_ kind: HandleKind, value: Double) {
+        if !sketch.isActive, let command, let driver = commandDriver, !driver.handles(command, self).isEmpty {
+            driver.apply(handle: kind, value: value, command, self)
+            return
+        }
         switch kind {
+        case .command(let key):
+            _ = applySketchPatternHandle(key, value: value)
         case .region:
             if value != model.regionValue { model.setRegionValue(value) }
         case .offset:
@@ -2066,6 +2154,8 @@ final class Workspace: ObservableObject {
         if sketch.isActive {
             return sketchHint
         }
+        // Offener Befehl: Hinweis des aktiven Felds steht im Panel
+        if command != nil { return nil }
         switch tool {
         case .select:
             if model.regionValue != 0 || model.faceValue != 0 {
@@ -2188,6 +2278,8 @@ final class Workspace: ObservableObject {
             return sketchOnBody ? "Ebene Fläche des Körpers antippen – darauf wird skizziert"
                 : "Skizzenebene antippen – oder eine ebene Fläche eines Körpers"
         }
+        // SolidCraft-Klickfolge: Hinweis je Werkzeug und Stufe (SketchClickTool.swift)
+        if sketch.clickKind != nil { return sketch.currentHint }
         switch sketch.tool {
         case .select:
             if !sketch.selection.isEmpty {
@@ -2271,5 +2363,205 @@ final class Workspace: ObservableObject {
     func saveThumbnail() {
         guard let image = snapshot?(CGSize(width: 480, height: 360)), let data = image.pngData() else { return }
         try? data.write(to: project.thumbnailURL)
+    }
+}
+
+// MARK: - Modellbefehle nach SolidCraft (ModelCommand.swift, FeaturePanel.swift)
+
+extension Workspace {
+    /// Treiber des offenen Befehls
+    var commandDriver: ModelCommandDriver.Type? {
+        command.flatMap { ModelCommands.driver($0.id) }
+    }
+
+    /// OK ist möglich (Pflichtfelder gefüllt, Vorschau fehlerfrei)
+    var canConfirmCommand: Bool {
+        guard let command, let driver = commandDriver else { return false }
+        return driver.canCommit(command, self)
+    }
+
+    /// Befehl starten (Leiste, Suche, Kontextmenü): beendet eine offene Skizze, bricht einen offenen Befehl ab,
+    /// übernimmt die Vorauswahl und rechnet die erste Vorschau.
+    func start(_ id: ModelCommandID) {
+        start(id, with: nil, distance: nil)
+    }
+
+    /// tap: Pick, mit dem der Befehl beginnt (★ Antippen eines Bereichs bzw. einer ebenen Fläche ohne Befehl);
+    /// distance: Anfangswert des Hauptwerts (0 = erst am Pfeil ziehen, wie Shapr3D).
+    func start(_ id: ModelCommandID, with tap: CommandTap?, distance: Double? = nil) {
+        guard let driver = ModelCommands.driver(id) else {
+            model.message = "Dieses Werkzeug hat noch kein Eigenschaften-Panel."
+            return
+        }
+        if sketch.isActive { finishSketch() }
+        if command != nil { cancelCommand(keepSelection: tap == nil) }
+        model.cancelPreview()
+        // Mit Pick beginnen: alte Auswahl gilt nicht; ohne Pick ist sie die Vorauswahl für make()
+        if tap != nil { model.resetSelection() }
+        toolExplanation = nil
+        let cmd = driver.make(self)
+        model.commitsOnSelect = false
+        if let tap {
+            // Mit Pick beginnen: Vorgaben aus make (z. B. Profil-Automatik der letzten Skizze) gelten nicht – sonst
+            // nähme das Antippen desselben Bereichs ihn gleich wieder heraus bzw. würde zur Höhe „bis dort“
+            for index in cmd.inputs.indices { cmd.inputs[index].items = [] }
+            if !driver.tapped(tap, cmd, self) { route(tap, into: cmd) }
+        }
+        if let distance, let key = driver.primaryValueKey(cmd) { cmd.setNumber(key, distance) }
+        cmd.advance()
+        command = cmd
+        refreshCommandPreview()
+    }
+
+    /// Bearbeiten aus dem Verlauf (Zeitleiste): öffnet dasselbe Panel mit den gespeicherten Werten.
+    /// false = kein Treiber kennt dieses Feature (dann bleibt der Zahlen-Editor der Zeitleiste).
+    @discardableResult
+    func edit(_ feature: Feature) -> Bool {
+        if sketch.isActive { finishSketch() }
+        if command != nil { cancelCommand() }
+        model.cancelPreview()
+        model.resetSelection()
+        for driver in ModelCommands.all {
+            guard let cmd = driver.load(feature, into: self) else { continue }
+            cmd.editing = feature.id
+            model.commitsOnSelect = false
+            command = cmd
+            refreshCommandPreview()
+            return true
+        }
+        return false
+    }
+
+    /// OK (Panel, Haken in der Ecke, Enter, „Fertig“). keepOpen = „Übernehmen“: gleich der nächste Befehl.
+    func confirmCommand(keepOpen: Bool = false) {
+        guard let cmd = command, let driver = commandDriver else { return }
+        if !cmd.previewEnabled {
+            cmd.previewEnabled = true
+            refreshCommandPreview()
+        }
+        guard driver.canCommit(cmd, self) else {
+            // Rundung, Fase bzw. Extrusion rechnet noch im Hintergrund (BlendJobs.swift, FaceExtrudeJobs.swift)
+            if model.isBlendComputing || model.isFaceComputing {
+                model.message = "Wird noch berechnet – gleich noch einmal bestätigen."
+                return
+            }
+            if cmd.error == nil {
+                if let missing = cmd.inputs.first(where: { !$0.isOptional && $0.items.isEmpty }) {
+                    cmd.error = "Erst „\(missing.title)“ wählen: \(missing.hint)"
+                } else {
+                    cmd.error = "Noch keine Vorschau – Wert eingeben oder am Pfeil ziehen."
+                }
+            }
+            return
+        }
+        driver.commit(cmd, self)
+        if keepOpen, cmd.editing == nil {
+            model.resetSelection()
+            let next = driver.make(self)
+            next.advance()
+            command = next
+            refreshCommandPreview()
+            return
+        }
+        closeCommand()
+    }
+
+    /// Abbrechen (Panel, ✗ in der Ecke, Esc): nichts ändert das Modell. keepSelection: Auswahl bleibt für das
+    /// nächste Werkzeug (activate, Neue Skizze).
+    func cancelCommand(keepSelection: Bool = false) {
+        guard let cmd = command else { return }
+        commandDriver?.cancel(cmd, self)
+        model.cancelPreview()
+        if !keepSelection { model.resetSelection() }
+        closeCommand()
+    }
+
+    private func closeCommand() {
+        command = nil
+        model.commitsOnSelect = true
+        // Treiber, die vorhandene Werkzeuge nutzen (Bohrung, Gewinde, Helix …), setzen tool; danach Auswahl
+        if tool != .select { tool = .select }
+    }
+
+    /// Vorschau des offenen Befehls neu rechnen (nach jedem Pick und jedem Wert).
+    func refreshCommandPreview() {
+        guard let cmd = command, let driver = commandDriver else { return }
+        guard cmd.previewEnabled else {
+            cmd.error = nil
+            return
+        }
+        let started = Date()
+        cmd.error = driver.preview(cmd, self)
+        cmd.previewSeconds = Date().timeIntervalSince(started)
+    }
+
+    /// Auswahlfeld antippen: wird aktiv, das nächste Antippen im Viewport füllt es.
+    func activateCommandInput(_ index: Int) {
+        guard let cmd = command, cmd.inputs.indices.contains(index) else { return }
+        cmd.activeInput = index
+    }
+
+    /// „×“ im Auswahlfeld: leeren und aktiv machen.
+    func clearCommandInput(_ index: Int) {
+        guard let cmd = command, cmd.inputs.indices.contains(index) else { return }
+        cmd.inputs[index].items = []
+        cmd.activeInput = index
+        refreshCommandPreview()
+    }
+
+    /// Antippen im Viewport bei offenem Befehl.
+    fileprivate func commandTapped(face tappedFace: FaceRef?, edge: EdgeRef?, region: RegionRef?, point: SIMD3<Float>?) {
+        guard let cmd = command, let driver = commandDriver else { return }
+        // Während der Vorschau zeigt das Netz andere Flächennummern: echte Fläche unter dem Punkt suchen
+        let face: FaceRef? = model.hasPreview ? tappedFace.flatMap { model.originalFace($0, near: point) } : tappedFace
+        let edgeRef: EdgeRef? = edge.flatMap { model.bodies.indices.contains($0.body) ? $0 : nil }
+        let tap = CommandTap(face: face, edge: edgeRef, region: region, point: point.map { SIMD3<Double>($0) })
+        if driver.tapped(tap, cmd, self) { return }
+        if tap.isEmpty {
+            // Ins Leere: ein Extrudieren ohne Ergebnis schließt wie „Auswahl aufheben“ (Shapr3D)
+            if cmd.id == .extrude, cmd.editing == nil, !model.hasPreview { cancelCommand() }
+            return
+        }
+        if route(tap, into: cmd) {
+            cmd.error = nil
+            refreshCommandPreview()
+        } else if cmd.inputs.indices.contains(cmd.activeInput) {
+            model.message = cmd.inputs[cmd.activeInput].hint
+        }
+    }
+
+    /// Pick ins aktive Feld bzw. ins nächste Feld, das ihn annimmt (Fokus springt dorthin).
+    @discardableResult
+    func route(_ tap: CommandTap, into cmd: ModelCommand) -> Bool {
+        let count = cmd.inputs.count
+        guard count > 0 else { return false }
+        let first = cmd.inputs.indices.contains(cmd.activeInput) ? cmd.activeInput : 0
+        for step in 0..<count {
+            let index = (first + step) % count
+            guard let candidate = pickCandidate(tap, accepts: cmd.inputs[index].accepts) else { continue }
+            cmd.activeInput = index
+            return cmd.pick(candidate.pick, kind: candidate.kind)
+        }
+        return false
+    }
+
+    /// Was das Antippen für ein Feld mit diesen Arten bedeutet (Bereich vor Fläche, Kante vor Körper).
+    func pickCandidate(_ tap: CommandTap, accepts: PickKinds) -> (pick: Pick, kind: PickKinds)? {
+        if accepts.contains(.regions), let region = tap.region { return (.region(region), .regions) }
+        if accepts.contains(.sketches), let region = tap.region { return (.sketch(region.sketch), .sketches) }
+        if accepts.contains(.edges), let edge = tap.edge { return (.edge(edge), .edges) }
+        if accepts.contains(.axes), let edge = tap.edge { return (.edge(edge), .axes) }
+        if let face = tap.face {
+            let planar = model.plane(of: face) != nil
+            if accepts.contains(.planarFaces), planar { return (.face(face), .planarFaces) }
+            if accepts.contains(.faces) { return (.face(face), .faces) }
+            if accepts.contains(.planes), planar { return (.plane(.face(face)), .planes) }
+            if accepts.contains(.axes), model.cylinder(of: face) != nil { return (.face(face), .axes) }
+        }
+        if accepts.contains(.bodies), let body = tap.face?.body ?? tap.edge?.body { return (.body(body), .bodies) }
+        if accepts.contains(.points), let point = tap.point {
+            return (.point(model.snappedModelPoint(point, tolerance: pickTolerance)), .points)
+        }
+        return nil
     }
 }

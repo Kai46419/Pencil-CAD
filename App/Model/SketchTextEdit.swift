@@ -8,11 +8,19 @@ import simd
 
 extension SketchText {
     /// Gleicher Text mit geänderten Einstellungen, an derselben Stelle (der Anker bleibt).
+    /// Die Verformung bleibt (deform: .some(nil) entfernt sie); geänderte Höhe skaliert ihre Maße mit.
     func with(string: String? = nil, height: Double? = nil, fontName: String? = nil,
-              alignment: TextAlignmentOption? = nil, rotation: Double? = nil) -> SketchText {
-        SketchText(string: string ?? self.string, anchor: anchor, height: height ?? self.height,
-                   fontName: fontName ?? self.fontName, alignment: alignment ?? self.alignment,
-                   rotation: rotation ?? self.rotation)
+              alignment: TextAlignmentOption? = nil, rotation: Double? = nil,
+              deform: SketchTextDeform?? = nil, transform: SketchTextTransform? = nil) -> SketchText {
+        // transform: .identity setzt die Griff-Lage zurück (nil = bleibt)
+        let newHeight: Double = height ?? self.height
+        var kept: SketchTextDeform? = deform ?? self.deform
+        if deform == nil, self.height > 0, abs(newHeight - self.height) > 1e-12 {
+            kept = kept?.scaled(by: newHeight / self.height, about: nil)
+        }
+        return SketchText(string: string ?? self.string, anchor: anchor, height: newHeight,
+                          fontName: fontName ?? self.fontName, alignment: alignment ?? self.alignment,
+                          rotation: rotation ?? self.rotation, deform: kept, transform: transform ?? self.transform)
     }
 
     /// Kurzname für Browser und Körper: ohne Zeilenumbrüche, lange Texte gekürzt.
@@ -25,9 +33,11 @@ extension SketchText {
     /// Drehung in Grad (für die Textkarte).
     var rotationDegrees: Double { rotation * 180 / .pi }
 
-    /// Punkt im System des Texts: Anker = Ursprung, Grundlinie = x-Achse.
+    /// Punkt im System des Texts: Anker = Ursprung, Grundlinie = x-Achse (vor Verschieben/Skalieren/Drehen
+    /// über die Griffe, siehe SketchTextTransform.swift).
     func local(_ p: Point2) -> Point2 {
-        let d = p - anchor
+        let unplaced: Point2 = transform?.invert(p, pivot: transformPivot) ?? p
+        let d = unplaced - anchor
         let c = cos(rotation), s = sin(rotation)
         let x: Double = c * d.x + s * d.y
         let y: Double = c * d.y - s * d.x
@@ -46,9 +56,12 @@ extension SketchText {
     /// Liegt p auf dem Text? Gezählt wird das (etwas vergrößerte) umgebende Rechteck, damit auch dünne Schrift
     /// und die Lücken zwischen den Buchstaben leicht zu treffen sind.
     func contains(_ p: Point2, tolerance: Double) -> Bool {
+        // Am Pfad über die gelegten Umrisse (das Rechteck deckt bei einem Bogen die ganze Fläche ab)
+        if deform?.path != nil { return pathOutlineContains(p, tolerance: tolerance) }
         guard let box = localBounds else { return false }
         let q = local(p)
-        let margin = tolerance * 0.5
+        // Toleranz in Skizzenmaß, das System des Texts ist um transform.scale kleiner bzw. größer
+        let margin = tolerance * 0.5 / max(transform?.scale ?? 1, 1e-6)
         let insideX = q.x >= box.min.x - margin && q.x <= box.max.x + margin
         let insideY = q.y >= box.min.y - margin && q.y <= box.max.y + margin
         return insideX && insideY

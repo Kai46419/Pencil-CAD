@@ -112,7 +112,9 @@ extension SketchEntity {
         case .point(let p): return .point(s(p))
         case .text(let t):
             return .text(SketchText(string: t.string, anchor: s(t.anchor), height: t.height * abs(factor),
-                                    fontName: t.fontName, alignment: t.alignment, rotation: t.rotation))
+                                    fontName: t.fontName, alignment: t.alignment, rotation: t.rotation,
+                                    deform: t.deform?.scaled(by: abs(factor), about: center),
+                                    transform: t.transform.map { $0.scaledOffset(by: factor) }))
         }
     }
 

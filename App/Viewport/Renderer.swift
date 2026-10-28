@@ -87,8 +87,27 @@ struct FillGroup {
     var onTop = false
 }
 
-/// Hintergrund wie bei Shapr3D: neutrales helles Grau (linear, ergibt etwa sRGB 237).
+/// Hintergrund wie bei Shapr3D: neutrales helles Grau (linear, ergibt etwa sRGB 237). Gilt mit „Helles Design“.
 let viewportBackground = MTLClearColor(red: 0.845, green: 0.845, blue: 0.845, alpha: 1)
+
+/// Hintergrund Anthrazit wie SolidCraft (#2E3440, oben = unten, kein Verlauf).
+let viewportBackgroundDark = MTLClearColor(red: Double(SketchTheme.Metal.background.x),
+                                           green: Double(SketchTheme.Metal.background.y),
+                                           blue: Double(SketchTheme.Metal.background.z), alpha: 1)
+
+/// Hintergrund nach dem gewählten Design (AppTheme).
+var currentViewportBackground: MTLClearColor {
+    AppTheme.isDark ? viewportBackgroundDark : viewportBackground
+}
+
+/// Muss zum `GridStyle`-Struct in Shaders.metal passen.
+private struct GridStyle {
+    var color: SIMD4<Float>
+    /// xyz = Mitte der Ansicht auf der Rasterebene (Welt)
+    var center: SIMD4<Float>
+    /// x = Abstand, ab dem das Raster dimmt, y = Abstand, ab dem es verschwunden ist
+    var range: SIMD4<Float>
+}
 
 final class Renderer: NSObject, MTKViewDelegate {
     /// Länge eines Ziehpfeils in Bildschirmpunkten.
@@ -99,9 +118,14 @@ final class Renderer: NSObject, MTKViewDelegate {
     var gridTransform: float4x4? = matrix_identity_float4x4
     /// Fangraster der Skizze in mm (0 = keins): das angezeigte Raster folgt ihm bzw. einem Vielfachen davon
     var gridBase: Float = 0
+    /// Raster „Automatisch“ (SolidCraft): Weite 1-2-5 nach der Sichthöhe statt nach gridBase (GridDisplay.swift)
+    var gridAuto = false
     /// Skizze: Raster minimal zur Kamera gezogen, damit es auf einer Körperfläche in der Skizzenebene sichtbar
     /// bleibt (sonst deckte die gleich tiefe Fläche das Raster zu)
     var gridOverFaces = false
+    /// Skizze mit sichtbaren Achsen: die Rasterlinien durch den Weltursprung weglassen, sonst lägen sie gleich tief
+    /// unter der Achse und der Tiefentest ließe die Achse stückweise verschwinden (wirkte gestrichelt, Kai)
+    var gridSkipsOriginLines = false
     var displayMode: DisplayMode = .shaded
     var handles: [HandleGraphic] = []
     var planes: [PlaneGraphic] = []
@@ -135,13 +159,24 @@ final class Renderer: NSObject, MTKViewDelegate {
     private let zebraPipeline: MTLRenderPipelineState?
     /// Glas und klare Kunststoffe: zweiter, durchsichtiger Durchgang über den Körpern (SurfaceFinish.swift)
     private let glassPipeline: MTLRenderPipelineState?
+    /// Ausgewählte ganze Körper leicht getönt statt deckend orange, damit die Oberfläche sichtbar bleibt
+    private let tintPipeline: MTLRenderPipelineState?
     private let behindDepthState: MTLDepthStencilState?
+    /// Raster mit weichem Rand (fragment_grid); ohne sie das bisherige Raster mit hartem Rand
+    private let gridPipeline: MTLRenderPipelineState?
+    private let gridOverlayPipeline: MTLRenderPipelineState?
+    /// Für das Neuzeichnen, wenn „Helles Design“ umgeschaltet wird
+    private weak var view: MTKView?
+    private var drawnDark = AppTheme.isDark
+    private var themeObserver: NSObjectProtocol?
 
     private var vertexBuffer: MTLBuffer?
     private var indexBuffer: MTLBuffer?
     private var indexCount = 0
     private var selectionBuffer: MTLBuffer?
     private var selectionCount = 0
+    /// Auswahl besteht aus ganzen Körpern (getönt zeichnen)
+    private var selectionTinted = false
     private var edgeBuffer: MTLBuffer?
     private var edgeCount = 0
     /// Körperkanten als zusammenhängende Linienzüge (für die breite Darstellung)
@@ -161,7 +196,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         view.colorPixelFormat = .bgra8Unorm_srgb
         view.depthStencilPixelFormat = .depth32Float
         view.sampleCount = 4
-        view.clearColor = viewportBackground
+        view.clearColor = currentViewportBackground
 
         func pipeline(vertex: String, fragment: String, blended: Bool = false) -> MTLRenderPipelineState? {
             let descriptor = MTLRenderPipelineDescriptor()
@@ -218,8 +253,22 @@ final class Renderer: NSObject, MTKViewDelegate {
         hiddenEdgePipeline = pipeline(vertex: "vertex_overlay", fragment: "fragment_dashed_clip", blended: true)
         zebraPipeline = pipeline(vertex: "vertex_main", fragment: "fragment_zebra")
         glassPipeline = pipeline(vertex: "vertex_main", fragment: "fragment_glass", blended: true)
+        tintPipeline = pipeline(vertex: "vertex_overlay", fragment: "fragment_flat_clip", blended: true)
         behindDepthState = depth(.greater, write: false)
+        gridPipeline = pipeline(vertex: "vertex_main", fragment: "fragment_grid", blended: true)
+        gridOverlayPipeline = pipeline(vertex: "vertex_overlay", fragment: "fragment_grid", blended: true)
+        self.view = view
         super.init()
+        // „Helles Design“ umgeschaltet: Hintergrund und Farben neu zeichnen
+        themeObserver = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification,
+                                                               object: nil, queue: .main) { [weak self] _ in
+            guard let self, self.drawnDark != AppTheme.isDark else { return }
+            self.view?.setNeedsDisplay()
+        }
+    }
+
+    deinit {
+        if let themeObserver { NotificationCenter.default.removeObserver(themeObserver) }
     }
 
     // MARK: Daten
@@ -244,6 +293,8 @@ final class Renderer: NSObject, MTKViewDelegate {
         edgePolylines = polylines
         selectionBuffer = nil
         selectionCount = 0
+        // Nah-/Fernebene an alle angezeigten Körper (inkl. Importkörper) anpassen
+        camera.sceneBounds = mesh.bounds
 
         // Nur beim Öffnen des Projekts einpassen. War es leer, wurde früher beim ersten Extrudieren
         // auf den neuen Körper gezoomt – das stört; die Ansicht bleibt jetzt, wie sie ist.
@@ -255,9 +306,10 @@ final class Renderer: NSObject, MTKViewDelegate {
         }
     }
 
-    func updateSelection(indices: [UInt32], edges: [SIMD3<Float>]) {
+    func updateSelection(indices: [UInt32], edges: [SIMD3<Float>], tinted: Bool = false) {
         selectionBuffer = makeBuffer(indices)
         selectionCount = indices.count
+        selectionTinted = tinted
         edgeHighlight = edges
     }
 
@@ -270,12 +322,13 @@ final class Renderer: NSObject, MTKViewDelegate {
 
     /// Raster um den sichtbaren Ausschnitt (lokal in der Rasterebene): Weite passend zum Zoom,
     /// jede fünfte Linie kräftiger. Liefert feine und kräftige Linien als Punktpaare.
-    private func gridLines(transform: float4x4, viewWidth: Float, viewHeight: Float) -> (minor: [Vertex], major: [Vertex]) {
+    private func gridLines(transform: float4x4, viewWidth: Float,
+                           viewHeight: Float) -> (minor: [Vertex], major: [Vertex], center: SIMD2<Float>, half: Float) {
         let origin = SIMD3<Float>(transform.columns.3.x, transform.columns.3.y, transform.columns.3.z)
         let u = SIMD3<Float>(transform.columns.0.x, transform.columns.0.y, transform.columns.0.z)
         let v = SIMD3<Float>(transform.columns.1.x, transform.columns.1.y, transform.columns.1.z)
         let perPoint = camera.worldUnitsPerPoint(viewHeight: viewHeight)
-        let (step, majorEvery) = displayGrid(perPoint: perPoint)
+        let (step, majorEvery) = displayGrid(perPoint: perPoint, viewHeight: viewHeight)
         // Mitte: Ziel der Kamera, auf die Ebene projiziert
         let d = camera.target - origin
         let center = SIMD2<Float>(simd_dot(d, u), simd_dot(d, v))
@@ -283,18 +336,42 @@ final class Renderer: NSObject, MTKViewDelegate {
         let half = min(reach, step * 160)
         let lo = ((center - half) / step).rounded(.down), hi = ((center + half) / step).rounded(.up)
         let up = SIMD3<Float>(0, 0, 1)
+        // Weltursprung in Rasterkoordinaten: Linien dort zeichnen die Achsen (gridSkipsOriginLines)
+        let originLocal = SIMD2<Float>(simd_dot(-origin, u), simd_dot(-origin, v))
+        let skipTolerance = step * 0.01
         var minor: [Vertex] = [], major: [Vertex] = []
         for i in stride(from: lo.x, through: hi.x, by: 1) {
+            if gridSkipsOriginLines, abs(i * step - originLocal.x) < skipTolerance { continue }
             let line = [Vertex(position: SIMD3(i * step, lo.y * step, 0), normal: up),
                         Vertex(position: SIMD3(i * step, hi.y * step, 0), normal: up)]
             if Int(i) % majorEvery == 0 { major += line } else { minor += line }
         }
         for j in stride(from: lo.y, through: hi.y, by: 1) {
+            if gridSkipsOriginLines, abs(j * step - originLocal.y) < skipTolerance { continue }
             let line = [Vertex(position: SIMD3(lo.x * step, j * step, 0), normal: up),
                         Vertex(position: SIMD3(hi.x * step, j * step, 0), normal: up)]
             if Int(j) % majorEvery == 0 { major += line } else { minor += line }
         }
-        return (minor, major)
+        return (minor, major, center, half)
+    }
+
+    /// Ausblenden des Rasters wie SolidCraft (GridFade): voll nahe der Mitte, ab 0,6 × Sichtweite dimmend,
+    /// bei 2,2 × verschwunden, immer vor dem eigenen Rand. Liefert Mitte (Welt) und Abstände.
+    private func gridFade(transform: float4x4, center: SIMD2<Float>, half: Float,
+                          viewHeight: Float) -> (center: SIMD3<Float>, start: Float, end: Float) {
+        let origin = SIMD3<Float>(transform.columns.3.x, transform.columns.3.y, transform.columns.3.z)
+        let u = SIMD3<Float>(transform.columns.0.x, transform.columns.0.y, transform.columns.0.z)
+        let v = SIMD3<Float>(transform.columns.1.x, transform.columns.1.y, transform.columns.1.z)
+        let world: SIMD3<Float> = origin + u * center.x + v * center.y
+        let normalRaw = simd_cross(u, v)
+        let normalLength = simd_length(normalRaw)
+        let normal: SIMD3<Float> = normalLength > 1e-9 ? normalRaw / normalLength : SIMD3<Float>(0, 0, 1)
+        let slant: Float = max(abs(simd_dot(camera.forward, normal)), 0.25)
+        let halfHeight: Float = camera.worldUnitsPerPoint(viewHeight: viewHeight) * viewHeight / 2
+        let reach: Float = halfHeight / slant
+        let end: Float = min(2.2 * reach, half)
+        let start: Float = 0.6 * min(reach, end)
+        return (world, start, end)
     }
 
     /// Breite Linien als Dreiecke in der Bildschirmebene, Ecken gerundet.
@@ -417,6 +494,8 @@ final class Renderer: NSObject, MTKViewDelegate {
 
     func draw(in view: MTKView) {
         willDraw?()
+        drawnDark = AppTheme.isDark
+        view.clearColor = currentViewportBackground
         guard let pass = view.currentRenderPassDescriptor,
               let drawable = view.currentDrawable,
               let commandBuffer = queue.makeCommandBuffer(),
@@ -451,7 +530,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         pass.colorAttachments[0].resolveTexture = resolve
         pass.colorAttachments[0].loadAction = .clear
         pass.colorAttachments[0].storeAction = .multisampleResolve
-        pass.colorAttachments[0].clearColor = viewportBackground
+        pass.colorAttachments[0].clearColor = currentViewportBackground
         pass.depthAttachment.texture = depthTexture
         pass.depthAttachment.loadAction = .clear
         pass.depthAttachment.storeAction = .dontCare
@@ -501,9 +580,16 @@ final class Renderer: NSObject, MTKViewDelegate {
             var color = SIMD4<Float>(r, g, b, a)
             encoder.setFragmentBytes(&color, length: MemoryLayout<SIMD4<Float>>.stride, index: 2)
         }
-        // Kanten wie bei Shapr3D als feine dunkle Linien mit fester Bildschirmbreite
-        func drawEdges(depth: MTLDepthStencilState) {
-            let group = LineGroup(polylines: edgePolylines, color: SIMD3(0.07, 0.075, 0.09), width: 1.1, onTop: false)
+        // Kanten wie bei Shapr3D als feine dunkle Linien mit fester Bildschirmbreite. Direkt auf dem Hintergrund
+        // (Drahtgitter, Röntgen) im dunklen Design hell, sonst wären sie auf Anthrazit unsichtbar.
+        let dark = AppTheme.isDark
+        // Auf Körpern wie bei SolidCraft fast schwarz (body_edge sRGB 16, 16, 18), damit die Kanten auf der grauen
+        // Standardfarbe (SceneBody.defaultColor) auch auf Schattenseiten klar lesbar bleiben
+        let edgeOnBody: SIMD3<Float> = SketchTheme.Metal.bodyEdge
+        let edgeOnBackground: SIMD3<Float> = dark ? SketchTheme.Metal.edgeOnBackground : edgeOnBody
+        func drawEdges(depth: MTLDepthStencilState, onBackground: Bool = false) {
+            let edgeColor: SIMD3<Float> = onBackground ? edgeOnBackground : edgeOnBody
+            let group = LineGroup(polylines: edgePolylines, color: edgeColor, width: 1.1, onTop: false)
             let triangles = lineTriangles(group, viewHeight: viewHeight)
             if let buffer = makeBuffer(triangles) {
                 encoder.setRenderPipelineState(edgePipeline)
@@ -516,7 +602,11 @@ final class Renderer: NSObject, MTKViewDelegate {
                 encoder.setDepthStencilState(depth)
                 encoder.setVertexBuffer(edgeBuffer, offset: 0, index: 0)
                 setUniforms(&uniforms)
-                setColor(0.12, 0.13, 0.16)
+                if onBackground && dark {
+                    setColor(edgeColor.x, edgeColor.y, edgeColor.z)
+                } else {
+                    setColor(0.12, 0.13, 0.16)
+                }
                 encoder.drawPrimitives(type: .line, vertexStart: 0, vertexCount: edgeCount)
             }
         }
@@ -526,14 +616,34 @@ final class Renderer: NSObject, MTKViewDelegate {
             let grid = gridLines(transform: gridTransform, viewWidth: viewHeight * aspect, viewHeight: viewHeight)
             var gridUniforms = uniforms
             gridUniforms.model = gridTransform
-            encoder.setRenderPipelineState(gridOverFaces ? fillPipeline : linePipeline)
             encoder.setDepthStencilState(depthState)
             setUniforms(&gridUniforms)
-            for (lines, shade) in [(grid.minor, Float(0.74)), (grid.major, Float(0.67))] {
-                guard let buffer = makeBuffer(lines) else { continue }
-                encoder.setVertexBuffer(buffer, offset: 0, index: 0)
-                setColor(shade, shade, shade)
-                encoder.drawPrimitives(type: .line, vertexStart: 0, vertexCount: lines.count)
+            // Farben: hell Grau 0,74/0,67 wie bisher, dunkel SolidCraft #3B414C/#494F5A
+            let minorColor: SIMD3<Float> = dark ? SketchTheme.Metal.grid : SIMD3<Float>(repeating: 0.74)
+            let majorColor: SIMD3<Float> = dark ? SketchTheme.Metal.gridMajor : SIMD3<Float>(repeating: 0.67)
+            let gridSets: [([Vertex], SIMD3<Float>)] = [(grid.minor, minorColor), (grid.major, majorColor)]
+            let fadePipeline: MTLRenderPipelineState? = gridOverFaces ? gridOverlayPipeline : gridPipeline
+            if let fadePipeline {
+                // Weicher Rand statt hartem Abbruch (SolidCraft GridFade)
+                let fade = gridFade(transform: gridTransform, center: grid.center, half: grid.half, viewHeight: viewHeight)
+                encoder.setRenderPipelineState(fadePipeline)
+                for (lines, color) in gridSets {
+                    guard let buffer = makeBuffer(lines) else { continue }
+                    var style = GridStyle(color: SIMD4<Float>(color, 1),
+                                          center: SIMD4<Float>(fade.center, 0),
+                                          range: SIMD4<Float>(fade.start, fade.end, 0, 0))
+                    encoder.setVertexBuffer(buffer, offset: 0, index: 0)
+                    encoder.setFragmentBytes(&style, length: MemoryLayout<GridStyle>.stride, index: 2)
+                    encoder.drawPrimitives(type: .line, vertexStart: 0, vertexCount: lines.count)
+                }
+            } else {
+                encoder.setRenderPipelineState(gridOverFaces ? fillPipeline : linePipeline)
+                for (lines, color) in gridSets {
+                    guard let buffer = makeBuffer(lines) else { continue }
+                    encoder.setVertexBuffer(buffer, offset: 0, index: 0)
+                    setColor(color.x, color.y, color.z)
+                    encoder.drawPrimitives(type: .line, vertexStart: 0, vertexCount: lines.count)
+                }
             }
         }
 
@@ -577,9 +687,9 @@ final class Renderer: NSObject, MTKViewDelegate {
                     drawEdges(depth: depthState)
                 }
             case .wireframe:
-                drawEdges(depth: alwaysDepthState)
+                drawEdges(depth: alwaysDepthState, onBackground: true)
             case .xray:
-                drawEdges(depth: alwaysDepthState)
+                drawEdges(depth: alwaysDepthState, onBackground: true)
                 encoder.setRenderPipelineState(xrayPipeline)
                 encoder.setDepthStencilState(readOnlyDepthState)
                 encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
@@ -601,11 +711,15 @@ final class Renderer: NSObject, MTKViewDelegate {
 
             // Ausgewählte Flächen bzw. Körper
             if let selectionBuffer, selectionCount > 0 {
-                encoder.setRenderPipelineState(overlayPipeline)
-                encoder.setDepthStencilState(displayMode.isSolid ? depthState : alwaysDepthState)
+                // Ganze Körper (deckend gezeichnet): halbdurchsichtig orange, die Oberfläche scheint durch;
+                // ohne Tiefe zu schreiben, sonst verdeckte die Tönung später gezeichnete Kanten
+                let tint: MTLRenderPipelineState? = selectionTinted && displayMode.isSolid ? tintPipeline : nil
+                encoder.setRenderPipelineState(tint ?? overlayPipeline)
+                encoder.setDepthStencilState(displayMode.isSolid ? (tint == nil ? depthState : readOnlyDepthState)
+                                                                 : alwaysDepthState)
                 encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
                 setUniforms(&uniforms)
-                setColor(0.98, 0.62, 0.18, 1)
+                setColor(0.98, 0.62, 0.18, tint == nil ? 1 : 0.32)
                 encoder.drawIndexedPrimitives(type: .triangle, indexCount: selectionCount, indexType: .uint32,
                                               indexBuffer: selectionBuffer, indexBufferOffset: 0)
             }

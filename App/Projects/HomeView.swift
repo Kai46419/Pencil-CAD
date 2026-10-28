@@ -6,6 +6,8 @@ struct HomeView: View {
     @EnvironmentObject private var projects: ProjectStore
     /// Öffnet ein Projekt; die URL ist eine STEP-Datei, die dabei importiert werden soll.
     let open: (Project, URL?) -> Void
+    /// Sicher öffnen (HangGuard.swift): Verlauf bis vor das hängende bzw. letzte Feature nachbauen
+    var openSafely: (Project) -> Void = { _ in }
 
     @State private var isImporting = false
     @State private var renaming: Project?
@@ -15,6 +17,8 @@ struct HomeView: View {
     @State private var isSelecting = false
     @State private var selected: Set<UUID> = []
     @State private var isBulkDeleteShown = false
+    /// Schalter „Helles Design“ (AppTheme); aus = Anthrazit nach SolidCraft
+    @AppStorage(AppTheme.lightKey) private var lightAppearance = false
 
     private let columns = [GridItem(.adaptive(minimum: 220, maximum: 280), spacing: 24)]
 
@@ -29,7 +33,7 @@ struct HomeView: View {
                         newProjectCard
                     }
                     ForEach(projects.projects) { project in
-                        ProjectCard(project: project, revision: projects.thumbnailRevision,
+                        ProjectCard(project: project, revision: projects.thumbnailRevision &+ projects.markerRevision,
                                     isSelected: isSelecting ? selected.contains(project.id) : nil)
                             .onTapGesture {
                                 if isSelecting {
@@ -46,6 +50,7 @@ struct HomeView: View {
             .padding(.vertical, 28)
         }
         .background(Theme.homeBackground.ignoresSafeArea())
+        .appTheme()
         .fileImporter(isPresented: $isImporting, allowedContentTypes: [.stepFile, .stpFile, .stl, .threeMF]) { result in
             guard case .success(let url) = result else { return }
             open(projects.create(name: url.deletingPathExtension().lastPathComponent), url)
@@ -149,6 +154,15 @@ struct HomeView: View {
 
     @ViewBuilder
     private var normalButtons: some View {
+        // Helles bzw. dunkles Design (Anthrazit nach SolidCraft) für die ganze App
+        Button {
+            lightAppearance.toggle()
+        } label: {
+            Label(lightAppearance ? "Dunkles Design" : "Helles Design",
+                  systemImage: lightAppearance ? "moon" : "sun.max")
+                .padding(.horizontal, 6)
+        }
+        .buttonStyle(.bordered)
         Button {
             selected = []
             isSelecting = true
@@ -206,6 +220,8 @@ struct HomeView: View {
     @ViewBuilder
     private func contextMenu(for project: Project) -> some View {
         Button("Öffnen", systemImage: "arrow.up.forward.app") { open(project, nil) }
+        // Hänger-Schutz: immer anbieten (auch ohne Marke, z. B. Projekte aus älteren Builds)
+        Button("Sicher öffnen (letztes Feature unterdrückt)", systemImage: "cross.case") { openSafely(project) }
         Button("Umbenennen", systemImage: "pencil") {
             newName = project.name
             renaming = project
@@ -226,6 +242,9 @@ private struct ProjectCard: View {
     /// Stift oder Zeiger schwebt über der Kachel
     @State private var isHovered = false
 
+    /// Grund hinter dem Vorschaubild: hell weiß, dunkel Viewport-Anthrazit #2E3440
+    private static let tileBackground = Color(SketchTheme.dynamic(light: .white, dark: SketchTheme.uiRGB(46, 52, 64)))
+
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous)
         VStack(alignment: .leading, spacing: 10) {
@@ -239,12 +258,24 @@ private struct ProjectCard: View {
                             .strokeBorder(Color.red, lineWidth: 3)
                     }
                 }
+                .overlay(alignment: .topLeading) {
+                    // Hänger-Marke (HangGuard.swift): der letzte Versuch hing – öffnet im sicheren Modus
+                    if HangGuard.hasMarker(in: project.folder) {
+                        Label("Hing beim letzten Mal – öffnet sicher", systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.orange, in: Capsule())
+                            .padding(8)
+                    }
+                }
                 .overlay(alignment: .topTrailing) {
                     if let isSelected {
                         Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                             .font(.system(size: 28, weight: .semibold))
                             .foregroundStyle(isSelected ? Color.red : Color.secondary)
-                            .background(Circle().fill(Color.white).padding(2))
+                            .background(Circle().fill(Theme.surface).padding(2))
                             .shadow(color: .black.opacity(0.2), radius: 2)
                             .padding(10)
                     }
@@ -267,13 +298,13 @@ private struct ProjectCard: View {
     @ViewBuilder
     private var thumbnail: some View {
         if let image = UIImage(contentsOfFile: project.thumbnailURL.path(percentEncoded: false)) {
-            Color.white.overlay {
+            Self.tileBackground.overlay {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
             }
         } else {
-            Color.white.overlay {
+            Self.tileBackground.overlay {
                 Image(systemName: "cube.transparent")
                     .font(.system(size: 44, weight: .ultraLight))
                     .foregroundStyle(.tertiary)

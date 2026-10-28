@@ -50,8 +50,19 @@ echo "Version: Build $PENCILCAD_BUILD (${build_info:-ohne Git})"
 rm -rf PencilCAD.xcodeproj
 
 if [ -d Vendor/OCCT.xcframework ]; then
-  echo "OpenCASCADE gefunden – Projekt mit Kernel."
-  xcodegen generate --spec project-occt.yml
+  # Blechmodul (SheetKit): nur einbinden, wenn das xcframework gebaut ist – nie automatisch bauen
+  if [ -d Vendor/PencilSheet.xcframework ]; then
+    echo "OpenCASCADE und Blechmodul gefunden – Projekt mit Kernel und Blech."
+    # Hinweis, wenn die Rust-Quellen neuer sind als das gebaute Modul
+    if [ -n "$(find SheetKit/src SheetKit/include SheetKit/Cargo.toml SheetKit/Cargo.lock -newer Vendor/PencilSheet.xcframework -print -quit 2>/dev/null)" ]; then
+      echo "Hinweis: SheetKit wurde seit dem letzten Bau geändert – ./scripts/build-sheet-ios.sh erneut ausführen."
+    fi
+    xcodegen generate --spec project-occt-sheet.yml
+  else
+    echo "OpenCASCADE gefunden – Projekt mit Kernel (ohne Blechmodul)."
+    echo "Blechmodul: ./scripts/build-sheet-ios.sh ausführen, danach dieses Skript erneut starten."
+    xcodegen generate --spec project-occt.yml
+  fi
 else
   echo "Kein Vendor/OCCT.xcframework – Projekt im Fallback-Modus (nur Skizze und Neuer Körper)."
   xcodegen generate --spec project.yml

@@ -17,7 +17,7 @@ enum SplineInput: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
-        case .points: "scribble.variable"
+        case .points: "sc.spline"
         case .freehand: "pencil.and.scribble"
         case .insert: "plus.circle"
         }

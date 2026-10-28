@@ -41,11 +41,11 @@ enum Primitive: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
-        case .box: "cube"
-        case .cylinder: "cylinder"
-        case .sphere: "circle.circle"
-        case .cone: "cone"
-        case .torus: "circle.dashed"
+        case .box: "sc.box"
+        case .cylinder: "sc.cylinder"
+        case .sphere: "sc.sphere"
+        case .cone: "sc.cone"
+        case .torus: "sc.torus"
         }
     }
 
@@ -70,9 +70,9 @@ enum BooleanKind: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
-        case .union: "square.on.square.squareshape.controlhandles"
+        case .union: "sc.combine"
         case .subtract: "square.on.square.dashed"
-        case .intersect: "square.on.square.intersection.dashed"
+        case .intersect: "sc.intersect"
         }
     }
 }
@@ -115,6 +115,8 @@ struct SceneBody {
     var finish: String? = nil
     /// Aus Text extrudiert: dessen Inhalt (Textkörper im Browser, SketchTextEdit.swift); nil = kein Text
     var textLabel: String? = nil
+    /// Blechkörper: Rezept und Regel (App/Sheet/SheetModel.swift); nil = kein Blech
+    var sheetMetal: SheetBodyInfo? = nil
 
     func with(_ shape: PCKShape) -> SceneBody {
         var body = self
@@ -122,9 +124,26 @@ struct SceneBody {
         return body
     }
 
+    /// Standardfarbe neuer Körper wie bei SolidCraft (Kai, Punkt 9): mittleres Grau sRGB (152, 156, 162) aus
+    /// dem dunklen Design von SolidCraft (assets/styles/ui/palettes.rs, Tokens::dark, t.body), linear für Metal.
+    /// Matt (Rauheit 1, ohne Spiegelung) über SceneBody.appearance, solange keine Oberfläche gewählt ist.
+    static let defaultColor: SIMD3<Float> = SketchTheme.Metal.body
+
+    /// Bisherige Standardfarbe (fast Weiß). Körper ohne Oberfläche und Werkstoff in dieser Farbe zeigen
+    /// stattdessen die neue Standardfarbe (SceneBody.appearance), selbst gewählte Farben bleiben.
+    static let legacyDefaultColor: SIMD3<Float> = [0.86, 0.87, 0.89]
+
+    /// Farbe noch die alte Standardfarbe (gespeicherte Werte mit Rundung)?
+    static func isLegacyDefault(_ color: SIMD3<Float>) -> Bool {
+        let d: SIMD3<Float> = simd_abs(color - legacyDefaultColor)
+        return d.max() < 0.003
+    }
+
+    /// Farben für getrennte Teile (Teilen, Einzelkörper, Import), damit die Stücke unterscheidbar sind;
+    /// das erste Stück in der Standardfarbe.
     static let palette: [SIMD3<Float>] = [
-        [0.86, 0.87, 0.89], [0.36, 0.55, 0.85], [0.85, 0.52, 0.30], [0.40, 0.70, 0.45],
-        [0.80, 0.38, 0.45], [0.62, 0.48, 0.80], [0.85, 0.75, 0.35], [0.30, 0.30, 0.33],
+        defaultColor, [0.36, 0.55, 0.85], [0.85, 0.52, 0.30], [0.40, 0.70, 0.45],
+        [0.80, 0.38, 0.45], [0.62, 0.48, 0.80], [0.85, 0.75, 0.35], [0.25, 0.60, 0.62],
     ]
 }
 
@@ -267,6 +286,16 @@ final class ModelStore: ObservableObject {
     @Published private(set) var selectionIndices: [UInt32] = []
     @Published private(set) var edgeHighlight: [SIMD3<Float>] = []
     @Published private(set) var selectionRevision = 0
+    /// Ganze Körper hervorgehoben (nicht einzelne Flächen): dann nur leicht getönt, damit die Oberfläche
+    /// (Chrom, Gold, Lack …) sichtbar bleibt (Renderer.updateSelection)
+    @Published private(set) var selectionTintsBodies = false
+    /// Vorschau „Oberfläche für alle Körper“ (Sichtbarkeit): Kurzname aus SurfaceFinish.all, nil = aus.
+    /// Nur Darstellung, wird nicht gespeichert; die Oberflächen der Körper bleiben unverändert.
+    @Published var previewFinishAll: String? = nil {
+        didSet {
+            if previewFinishAll != oldValue { remesh() }
+        }
+    }
 
     // Ziehpfeile
     @Published var edgeOperation: EdgeOperation = .fillet {
@@ -280,6 +309,14 @@ final class ModelStore: ObservableObject {
     @Published private(set) var edgeSecondValue: Double?
     /// Variable Rundung: Radius am Kantenende (edgeValue gilt am Anfang); nil = gleichbleibender Radius
     @Published private(set) var edgeEndValue: Double?
+    /// Eine Rundung bzw. Fase rechnet im Hintergrund (BlendJobs.swift); „Fertig“ wartet so lange
+    @Published var isBlendComputing = false
+    /// Hintergrund-Rundung: laufende/wartende Anfrage, gemerkte Ergebnisse (BlendJobs.swift)
+    let blendJobs = BlendJobs()
+    /// Flächen werden im Hintergrund extrudiert (FaceExtrudeJobs.swift); „OK“ wartet so lange
+    @Published var isFaceComputing = false
+    /// Hintergrund-Extrudieren ebener Flächen: laufende/wartende Anfrage, gemerkte Ergebnisse (FaceExtrudeJobs.swift)
+    let faceJobs = FaceExtrudeJobs()
     /// Kantenmitte und Richtung ins Material.
     @Published private(set) var edgeHandle: (origin: SIMD3<Double>, direction: SIMD3<Double>)?
     /// Flächenmitte und Normale der gewählten ebenen Fläche (Extrudieren per Pfeil).
@@ -359,12 +396,34 @@ final class ModelStore: ObservableObject {
             if regionValue != 0, regionThin { setRegionValue(regionValue) }
         }
     }
+    /// Dünn „Zwei Seiten“ (SolidCraft): Stärke der äußeren Wand; nil = eine Wand nach regionThinSide
+    @Published var regionThinThickness2: Double? {
+        didSet {
+            if regionValue != 0, regionThin { setRegionValue(regionValue) }
+        }
+    }
+    /// Start versetzt (SolidCraft „Start: Versatz“): Profil um diesen Wert entlang der Skizzennormale verschoben
+    @Published var regionStartOffset: Double = 0 {
+        didSet {
+            if regionValue != 0 { setRegionValue(regionValue) }
+        }
+    }
+    /// Symmetrisch als Gesamtabstand (SolidCraft, neue Extrusionen aus dem Eigenschaften-Panel): je Seite die
+    /// Hälfte des Werts. false = alter PencilCAD-Weg (Wert je Seite)
+    @Published var regionSymmetricTotal = false {
+        didSet {
+            if regionValue != 0, regionDirection == .symmetric { setRegionValue(regionValue) }
+        }
+    }
+    /// Offener Modellbefehl (Workspace.command): eine neue Auswahl übernimmt die Vorschau nicht still, sondern
+    /// verwirft sie (übernommen wird nur mit OK). Vom Workspace gesetzt.
+    var commitsOnSelect = true
 
     // Vorschau und Verlauf
     @Published private(set) var previewName: String?
     /// Skizze des Körpers, der gerade abgerundet bzw. gefast wird: ihre (eckige) Kontur passt nicht mehr zum
     /// Körper und wird während der Vorschau ausgeblendet, beim Übernehmen dauerhaft (Kai: „die Außenlinie muss weg“).
-    @Published private(set) var previewHiddenSketch: UUID?
+    @Published var previewHiddenSketch: UUID?
     @Published private(set) var history: [HistoryEntry] = []
     @Published private(set) var future: [HistoryEntry] = []
     private var previewBodies: [SceneBody]?
@@ -375,6 +434,8 @@ final class ModelStore: ObservableObject {
     /// Parametrischer Verlauf: Features in Reihenfolge, Zeitleiste unten (FeatureHistory.swift, TimelineBar.swift)
     @Published var features: [Feature] = []
     let featureRecorder = FeatureRecorder()
+    /// Blechmodul: Regeln, Sitzungen, Vorschau (App/Sheet/SheetModel.swift)
+    lazy var sheetDocument = SheetDocument(folder: folder)
 
     /// Projektordner (model.step + bodies.json); nil = nichts speichern.
     let folder: URL?
@@ -404,17 +465,25 @@ final class ModelStore: ObservableObject {
         return (sketch.plane.world(center), sketch.plane.normal * sketch.plane.extrusionSign(mode: regionMode))
     }
 
-    init(folder: URL?) {
+    /// safeOpen: übrig gebliebene Hänger-Marke (HangGuard.swift) – dann sicherer Modus: Verlauf ohne model.step
+    /// bis vor das hängende Feature nachbauen, dieses und alle folgenden unterdrücken.
+    init(folder: URL?, safeOpen: HangGuard.Marker? = nil) {
         self.folder = folder
-        load()
+        let plan = safeOpen.flatMap { self.safeOpenPlan(for: $0) }
+        load(skipModel: plan != nil)
         remesh()
+        if let plan {
+            openSafely(plan)
+            // Rückgängig darf nicht zum leeren Stand vor dem Nachbau zurück (würde model.step leeren)
+            history.removeAll()
+        }
     }
 
     // MARK: Auswahl
 
     /// Wählt eine Fläche (nil = nichts). Eine offene Vorschau wird vorher übernommen.
     func select(face: FaceRef?) {
-        commitPreview()
+        if commitsOnSelect { commitPreview() } else { dropPreview() }
         clearSelectionState()
         selection = face
         if let face, let plane = plane(of: face), let center = mesh.centroid(of: face) {
@@ -430,7 +499,7 @@ final class ModelStore: ObservableObject {
             if commitsPreview { select(face: face) } else { selectForTool(face) }
             return
         }
-        if commitsPreview { commitPreview() } else { dropPreview() }
+        if commitsPreview, commitsOnSelect { commitPreview() } else { dropPreview() }
         var faces = selectedFaces
         if let index = faces.firstIndex(of: face) {
             faces.remove(at: index)
@@ -463,7 +532,7 @@ final class ModelStore: ObservableObject {
     /// Kante antippen: zur Auswahl hinzufügen bzw. wieder entfernen.
     /// Kanten eines anderen Körpers beginnen eine neue Auswahl.
     func toggleEdge(_ edge: EdgeRef) {
-        commitPreview()
+        if commitsOnSelect { commitPreview() } else { dropPreview() }
         var edges = selectedEdges
         if edges.first?.body != edge.body {
             edges = []
@@ -501,7 +570,7 @@ final class ModelStore: ObservableObject {
 
     /// Mehrere Körper auf einmal wählen (Rahmenauswahl).
     func selectBodies(_ list: [Int]) {
-        commitPreview()
+        if commitsOnSelect { commitPreview() } else { dropPreview() }
         var chosen: [Int] = []
         for body in list where bodies.indices.contains(body) && !chosen.contains(body) {
             chosen.append(body)
@@ -512,7 +581,7 @@ final class ModelStore: ObservableObject {
     }
 
     func clearSelection() {
-        commitPreview()
+        if commitsOnSelect { commitPreview() } else { dropPreview() }
         clearSelectionState()
         refreshHighlight()
     }
@@ -556,7 +625,9 @@ final class ModelStore: ObservableObject {
         }
         let value = regionValue
         let keepPreview = previewName == Self.regionPreviewName && !selectedRegions.isEmpty && !chosen.isEmpty
-        if !keepPreview { commitPreview() }
+        if !keepPreview {
+            if commitsOnSelect { commitPreview() } else { dropPreview() }
+        }
         clearSelectionState()
         selectedRegions = chosen
         if sketches.indices.contains(ref.sketch), sketches[ref.sketch].plane.isOnFace, !keepPreview {
@@ -587,95 +658,41 @@ final class ModelStore: ObservableObject {
     // MARK: Ziehpfeile
 
     /// Fase mit zwei Abständen ein- (Wert) bzw. ausschalten (nil) und die Vorschau erneuern.
-    func setEdgeSecondValue(_ value: Double?) {
+    /// update false: nur setzen (gleich folgt setEdgeValue – nicht zweimal rechnen).
+    func setEdgeSecondValue(_ value: Double?, update: Bool = true) {
         edgeSecondValue = value.map { max(0.01, $0) }
-        if edgeValue > 0 { setEdgeValue(edgeValue) }
+        if update, edgeValue > 0 { setEdgeValue(edgeValue) }
     }
 
     /// Variable Rundung ein- (Endradius) bzw. ausschalten (nil) und die Vorschau erneuern.
-    func setEdgeEndValue(_ value: Double?) {
+    /// update false: nur setzen (gleich folgt setEdgeValue – nicht zweimal rechnen).
+    func setEdgeEndValue(_ value: Double?, update: Bool = true) {
         edgeEndValue = value.map { max(0.01, $0) }
-        if edgeValue > 0 { setEdgeValue(edgeValue) }
+        if update, edgeValue > 0 { setEdgeValue(edgeValue) }
     }
 
     /// Radius bzw. Fasenbreite der gewählten Kanten setzen und als Vorschau zeigen.
+    /// Der Kernel rechnet im Hintergrund (BlendJobs.swift): die App bleibt bedienbar, gemerkte Werte erscheinen
+    /// sofort, bis zum Ergebnis bleibt die vorige Vorschau stehen.
     func setEdgeValue(_ newValue: Double) {
         let value = max(0, newValue)
         edgeValue = value
+        // Neue Anfrage: ältere Ergebnisse aus dem Hintergrund gelten nicht mehr
+        beginBlendRequest()
         guard let body = selectedEdges.first?.body, bodies.indices.contains(body) else { return }
         guard value > 0 else {
             dropPreview()
             return
         }
         guard requireKernel() else { return }
-        let numbers = selectedEdges.map { NSNumber(value: $0.edge) }
-        let shape = bodies[body].shape
-        let operation = edgeOperation
-        // Fase mit zwei Abständen (Fusion 360 „Zwei Abstände“); nil = gleich breit
-        let second = operation == .chamfer ? edgeSecondValue : nil
-        func blend(_ amount: Double) -> PCKShape? {
-            if operation == .fillet { return shape.filleting(edges: numbers, radius: amount) }
-            if let second { return shape.chamfering(edges: numbers, distance: amount, distance2: second) }
-            return shape.chamfering(edges: numbers, distance: amount)
-        }
-        // Variable Rundung (Fusion 360): Anfangsradius value, Endradius edgeEndValue
-        if operation == .fillet, let end = edgeEndValue {
-            guard let result = shape.filleting(edges: numbers, radius: value, endRadius: end) else {
-                message = "Rundung \(value.formatted()) → \(end.formatted()) mm an dieser Kante nicht möglich."
-                dropPreview()
-                return
-            }
-            message = nil
-            var preview = bodies
-            preview[body] = preview[body].with(result)
-            previewHiddenSketch = bodies[body].sketchID
-            showPreview(preview, name: "Variabel abrunden")
-            noteBlend(.fillet, value: value, end: end)
-            return
-        }
-        if second != nil {
-            guard let result = blend(value) else {
-                message = "Fase \(value.formatted()) × \((second ?? 0).formatted()) mm an dieser Kante nicht möglich."
-                dropPreview()
-                return
-            }
-            message = nil
-            var preview = bodies
-            preview[body] = preview[body].with(result)
-            previewHiddenSketch = bodies[body].sketchID
-            showPreview(preview, name: operation.rawValue)
-            noteBlend(operation, value: value, second: second)
-            return
-        }
-        // Zu groß: nicht einfach nichts zeigen, sondern den größten möglichen Wert (einmal je Auswahl gesucht)
-        let key = EdgeLimitKey(edges: selectedEdges, operation: operation, shape: ObjectIdentifier(shape))
-        var amount = value
-        var result: PCKShape?
-        if let limit = edgeLimit, limit.key == key, value > limit.value {
-            amount = limit.value
-        } else {
-            result = blend(value)
-        }
-        if result == nil {
-            if edgeLimit?.key != key || value <= (edgeLimit?.value ?? 0) {
-                let found = shape.maximumBlend(edges: numbers, upTo: value, chamfer: operation == .chamfer)
-                edgeLimit = (key, (found * 100).rounded(.down) / 100)
-            }
-            amount = edgeLimit?.value ?? 0
-            result = amount > 0 ? blend(amount) : nil
-        }
-        guard let result else {
-            message = "\(operation.rawValue) an dieser Kante nicht möglich."
-            dropPreview()
-            return
-        }
-        message = amount < value - 1e-9
-            ? "\(operation.rawValue): größter möglicher Wert hier \(amount.formatted()) mm." : nil
-        var preview = bodies
-        preview[body] = preview[body].with(result)
-        previewHiddenSketch = bodies[body].sketchID
-        showPreview(preview, name: operation.rawValue)
-        noteBlend(operation, value: amount)
+        // Rundung vor Schnitt (BlendBeforeCuts.swift): Wurde die Kante erst durch einen späteren Schnitt (z. B.
+        // eine Text-Tasche) zerteilt, wird sie im Verlauf vor diesem Schnitt ganz verrundet und der Schnitt
+        // schneidet danach wieder hinein (gemerkt sofort, sonst entprellt nach kurzer Ruhe)
+        if previewBlendBeforeCuts(value: value) { return }
+        // Sonst direkt am Körper, mit allen Teilstücken derselben geraden Kante (keine Stückelung); grenzt die
+        // Kante an die vorige Rundung, beide zusammen
+        let blendEdges = completedEdgeChain(selectedEdges, body: body)
+        requestBlend(body: body, value: value, blendEdges: blendEdges)
     }
 
     /// Wie in Fusion 360: Während Kanten zum Abrunden bzw. Fasen gewählt sind, übernimmt das Antippen einer
@@ -697,38 +714,29 @@ final class ModelStore: ObservableObject {
         return true
     }
 
-    /// Größter möglicher Radius bzw. Fasenbreite für die aktuelle Kantenauswahl (Halbierungssuche, gemerkt)
-    private struct EdgeLimitKey: Equatable {
+    /// Größter möglicher Radius bzw. Fasenbreite für die aktuelle Kantenauswahl (Halbierungssuche, gemerkt;
+    /// gesetzt in BlendJobs.swift)
+    struct EdgeLimitKey: Equatable {
         var edges: [EdgeRef]
         var operation: EdgeOperation
         var shape: ObjectIdentifier
     }
-    private var edgeLimit: (key: EdgeLimitKey, value: Double)?
+    var edgeLimit: (key: EdgeLimitKey, value: Double)?
 
     /// Gewählte ebene Fläche um value mm herausziehen (> 0) oder hineindrücken (< 0).
     func setFaceValue(_ value: Double) {
         faceValue = value
         guard let face = selection, bodies.indices.contains(face.body) else { return }
         guard value != 0 else {
+            cancelFaceExtrudeJobs()
             dropPreview()
             return
         }
         guard requireKernel() else { return }
-        // Mehrere Flächen: je Körper alle zugleich, jede entlang ihrer eigenen Normale
-        var preview = bodies
+        // Mehrere Flächen: je Körper alle zugleich, jede entlang ihrer eigenen Normale. Gerechnet wird im Hintergrund
+        // an einer Kopie mit Zeitlimit (FaceExtrudeJobs.swift; vorher synchron hier – Absturz bei großen Importen)
         let faces = selectedFaces.filter { bodies.indices.contains($0.body) }
-        for body in Set(faces.map(\.body)) {
-            let numbers = faces.filter { $0.body == body }.map { NSNumber(value: $0.face) }
-            guard let result = bodies[body].shape.extruding(faces: numbers, distance: value) else {
-                message = faces.count > 1 ? "Diese Flächen lassen sich nicht zusammen extrudieren."
-                    : "Extrudieren der Fläche nicht möglich."
-                return
-            }
-            preview[body] = preview[body].with(result)
-        }
-        message = nil
-        showPreview(preview, name: faces.count > 1 ? "Flächen extrudieren" : "Extrudieren")
-        noteFaceExtrude(distance: value)
+        requestFaceExtrude(faces, distance: value)
     }
 
     private static let regionPreviewName = "Extrudieren"
@@ -780,7 +788,9 @@ final class ModelStore: ObservableObject {
                 behind = min(behind, t)
             }
         }
-        let value = ahead > 1e-6 ? ahead + 1 : behind < -1e-6 ? behind - 1 : 0
+        // Toleranz 1e-3: Hüllquader kommen als Float aus dem Netz; eine Skizze auf der Körperfläche läge sonst um
+        // Rundungsreste „vor“ dem Körper und bekäme 1 mm Aufsatz statt Loch
+        let value = ahead > 1e-3 ? ahead + 1 : behind < -1e-3 ? behind - 1 : 0
         guard value != 0 else {
             message = "Kein Körper in Richtung des Profils."
             return
@@ -807,9 +817,28 @@ final class ModelStore: ObservableObject {
             mode = .cut
             distance = -value
         }
+        // Symmetrisch als Gesamtabstand (SolidCraft): je Seite die Hälfte
+        if regionDirection == .symmetric, regionSymmetricTotal { distance /= 2 }
+        // Start versetzt: Profil entlang der Normale verschoben (Bereiche bleiben in Skizzenkoordinaten)
+        var plane = sketch.plane
+        if regionStartOffset != 0 {
+            plane.origin += plane.normal * regionStartOffset
+            plane.anchor += plane.normal * regionStartOffset
+        }
         guard mode == .newBody || requireKernel() else { return }
+        // Kai: Loch „bis hinten“ – endet das Abziehen an (oder knapp vor/hinter) der Rückseite, durchgehend schneiden,
+        // statt eine hauchdünne Haut bzw. eine koplanare Bodenfläche stehen zu lassen
+        var throughNote: String?
+        if mode == .cut, regionDirection == .oneSide,
+           let through = cutThroughDistance(regions, plane: plane, distance: distance) {
+            distance = through
+            throughNote = "Durchgehend: das Loch reicht bis zur Rückseite."
+        }
         if regionThin {
-            guard let solid = thinExtrudeRegions(regions, plane: sketch.plane, distance: distance, mode: mode) else {
+            let thinSolid: PCKShape? = regionThinThickness2.map {
+                thinBothSides(regions, plane: plane, distance: distance, mode: mode, outer: $0)
+            } ?? thinExtrudeRegions(regions, plane: plane, distance: distance, mode: mode)
+            guard let solid = thinSolid else {
                 message = "Dünne Wand mit \(regionThinThickness.formatted()) mm hier nicht möglich."
                 return
             }
@@ -820,7 +849,7 @@ final class ModelStore: ObservableObject {
             noteExtrude(mode: mode, distance: distance)
             return
         }
-        guard let solid = extrudeRegions(regions, plane: sketch.plane, distance: distance, mode: mode,
+        guard let solid = extrudeRegions(regions, plane: plane, distance: distance, mode: mode,
                                          direction: regionDirection, secondDistance: regionSecondValue,
                                          taper: regionTaper) else {
             message = regionTaper != 0 ? "Mit diesem Verjüngungswinkel nicht möglich – kleineren Winkel versuchen."
@@ -828,10 +857,118 @@ final class ModelStore: ObservableObject {
             return
         }
         guard var result = extrusionResult(solid, sourceBody: sketch.plane.sourceBody, mode: mode, sketch: sketch.id) else { return }
+        // Abziehen ohne Wirkung (Werkzeug zeigt aus dem Material heraus): melden statt stillschweigend nichts zu tun
+        if mode == .cut, !cutChangedBodies(result) {
+            dropPreview()
+            message = "Abziehen trifft keinen Körper – Abstand ins Material (negativ) ziehen oder Richtung umkehren."
+            return
+        }
         labelTextBodies(&result, regions: regions, sketch: sketch, mode: mode)
-        message = SketchRegionMerge.newBodyNote(regions, mode: mode)
+        message = throughNote ?? SketchRegionMerge.newBodyNote(regions, mode: mode)
+        // Kai: nach dem Loch lag die halbtransparente Bereichsfüllung der Flächenskizze noch über der Öffnung
+        // („ich sehe den Kreis noch“). Sind alle Bereiche der Flächenskizze abgezogen, blendet OK sie aus
+        // (rückgängig machbar); mit weiteren Bereichen bleibt sie zum Weiterarbeiten sichtbar.
+        let consumed = Set(selectedRegions.filter { $0.sketch == first.sketch }.map(\.region))
+        previewHiddenSketch = mode == .cut && sketch.plane.isOnFace && !sketch.regions.isEmpty
+            && consumed.count >= sketch.regions.count ? sketch.id : nil
         showPreview(result, name: Self.regionPreviewName)
         noteExtrude(mode: mode, distance: distance)
+    }
+
+    /// Hat das Abziehen mindestens einen Körper verändert (Volumen)?
+    private func cutChangedBodies(_ result: [SceneBody]) -> Bool {
+        guard PCKShape.kernelAvailable, result.count == bodies.count else { return true }
+        for index in bodies.indices {
+            let before = bodies[index].shape.volume
+            let after = result[index].shape.volume
+            if abs(before - after) > max(1e-6, abs(before) * 1e-9) { return true }
+        }
+        return false
+    }
+
+    /// Abziehen „bis hinten“: liegt die Rückseite des Materials höchstens eine Toleranz vor bzw. hinter dem
+    /// Werkzeugende, wird der Abstand über die Rückseite hinaus verlängert (OpenCASCADE lässt sonst bei koplanarem
+    /// bzw. knapp verfehltem Ende eine Haut stehen). distance wie in setRegionValue; nil = nichts ändern.
+    /// in: Körperstand (Nachbau im Verlauf), sonst die aktuellen Körper.
+    func cutThroughDistance(_ regions: [SketchRegion], plane: SketchPlane, distance: Double,
+                            in state: [SceneBody]? = nil) -> Double? {
+        guard PCKShape.kernelAvailable, distance != 0, distance.isFinite else { return nil }
+        let shapes: [PCKShape] = (state ?? bodies).filter { !$0.isHidden }.map(\.shape)
+        guard !shapes.isEmpty else { return nil }
+        let depth = abs(distance)
+        let main = plane.extrusionSign(mode: .cut) * distance
+        let axis: SIMD3<Double> = simd_normalize(plane.normal) * (main >= 0 ? 1.0 : -1.0)
+        // 2,5 % der Tiefe, mindestens 0,05 mm, höchstens 0,5 mm
+        let tolerance = min(0.5, max(0.05, depth * 0.025))
+        guard depth > tolerance else { return nil }
+        func inside(_ p: SIMD3<Double>) -> Bool { shapes.contains { $0.contains(point: p) } }
+        for region in regions {
+            for probe in Self.interiorProbes(region) {
+                let start: SIMD3<Double> = plane.world(probe)
+                let before: SIMD3<Double> = start + axis * (depth - tolerance)
+                let after: SIMD3<Double> = start + axis * (depth + tolerance)
+                // Kurz vor dem Ende noch Material, kurz dahinter keines: die Rückseite liegt am Werkzeugende
+                if inside(before), !inside(after) {
+                    let longer = depth + 2 * tolerance
+                    return distance >= 0 ? longer : -longer
+                }
+            }
+        }
+        return nil
+    }
+
+    /// Einige Punkte sicher im Inneren eines Bereichs (außerhalb seiner Löcher): Schwerpunkt und zur Mitte
+    /// gerückte Eckpunkte.
+    private static func interiorProbes(_ region: SketchRegion) -> [Point2] {
+        let polygon = region.polygon
+        guard polygon.count >= 3 else { return [] }
+        let center = polygon.reduce(Point2.zero, +) / Double(polygon.count)
+        var candidates: [Point2] = [center]
+        let step = max(1, polygon.count / 6)
+        for index in stride(from: 0, to: polygon.count, by: step) {
+            candidates.append(polygon[index] + (center - polygon[index]) * 0.1)
+        }
+        return candidates.filter { p in
+            polygonContains(polygon, p) && !region.holes.contains { polygonContains($0.polygon, p) }
+        }
+    }
+
+    /// Dünn „Zwei Seiten“ (SolidCraft): innen die Wandstärke, außen eine eigene Stärke – zwei Wände vereinigt.
+    private func thinBothSides(_ regions: [SketchRegion], plane: SketchPlane, distance: Double, mode: ExtrudeMode,
+                               outer: Double) -> PCKShape? {
+        guard !regions.isEmpty, distance != 0, regionThinThickness > 0, outer > 0, PCKShape.kernelAvailable else { return nil }
+        let sign = plane.extrusionSign(mode: mode)
+        let main = sign * distance
+        let from: Double
+        let length: Double
+        switch regionDirection {
+        case .oneSide:
+            from = mode == .cut ? -sign * 0.01 : 0
+            length = main - from
+        case .symmetric:
+            from = -main
+            length = 2 * main
+        case .twoSides:
+            let second = abs(regionSecondValue) * (main >= 0 ? -1 : 1)
+            from = second
+            length = main - second
+        }
+        guard length != 0 else { return nil }
+        let start: SIMD3<Double> = plane.origin + plane.normal * from
+        let vector: SIMD3<Double> = plane.normal * length
+        var shapes: [PCKShape] = []
+        for region in regions {
+            let wires = profileWires(region, plane: plane, offset: from)
+            guard let inner = PCKShape.thinPrism(profileWires: wires, planeOrigin: start, planeNormal: plane.normal,
+                                                 thickness: regionThinThickness, side: ThinSide.inside.kernelValue,
+                                                 direction: vector),
+                  let outerWall = PCKShape.thinPrism(profileWires: wires, planeOrigin: start, planeNormal: plane.normal,
+                                                     thickness: outer, side: ThinSide.outside.kernelValue,
+                                                     direction: vector),
+                  let wall = inner.fusing(outerWall) else { return nil }
+            shapes.append(wall)
+        }
+        return shapes.count == 1 ? shapes[0] : PCKShape.compound(shapes)
     }
 
     /// Gewählte Körper verschieben (Vorschau).
@@ -1032,6 +1169,8 @@ final class ModelStore: ObservableObject {
     }
 
     func cancelPreview() {
+        cancelBlendJobs()
+        cancelFaceExtrudeJobs()
         dropPreview()
         edgeValue = 0
         // Variable Rundung gilt nur für die eine Rundung, nicht für die nächste Auswahl bzw. das nächste Werkzeug
@@ -1273,7 +1412,7 @@ final class ModelStore: ObservableObject {
             let parts: [PCKShape] = joinTouching ? solid.separatedSolids() : solid.separatedParts()
             for part in parts {
                 result.append(SceneBody(shape: part, name: "Körper \(result.count + 1)",
-                                        color: SceneBody.palette[result.count % SceneBody.palette.count], sketchID: sketch))
+                                        color: SceneBody.defaultColor, sketchID: sketch))
             }
             return result
         case .union:
@@ -1436,7 +1575,7 @@ final class ModelStore: ObservableObject {
     func newBody(_ shape: PCKShape, name: String, sketch: UUID? = nil) -> SceneBody {
         let number = bodies.count + 1
         return SceneBody(shape: shape, name: "\(name) \(number)",
-                         color: SceneBody.palette[bodies.count % SceneBody.palette.count], sketchID: sketch)
+                         color: SceneBody.defaultColor, sketchID: sketch)
     }
 
     func requireKernel() -> Bool {
@@ -1448,6 +1587,7 @@ final class ModelStore: ObservableObject {
 
     func showPreview(_ preview: [SceneBody], name: String, plain: Bool = false) {
         featureRecorder.preview = nil
+        featureRecorder.orderedPreview = nil
         previewBodies = preview
         previewName = name
         plainPreview = plain
@@ -1457,6 +1597,7 @@ final class ModelStore: ObservableObject {
 
     func dropPreview() {
         featureRecorder.preview = nil
+        featureRecorder.orderedPreview = nil
         guard previewBodies != nil else { return }
         previewBodies = nil
         previewName = nil
@@ -1521,6 +1662,9 @@ final class ModelStore: ObservableObject {
     }
 
     private func clearSelectionState() {
+        // Rechnet noch eine Rundung bzw. Extrusion im Hintergrund: ihr Ergebnis gilt nicht mehr
+        cancelBlendJobs()
+        cancelFaceExtrudeJobs()
         selection = nil
         extraFaces = []
         selectedEdges = []
@@ -1546,14 +1690,18 @@ final class ModelStore: ObservableObject {
         } else {
             selectionIndices = selectedBodies.flatMap { mesh.triangleIndices(ofBody: $0) }
         }
+        selectionTintsBodies = !(previewBodies == nil && selection != nil)
         edgeHighlight = previewBodies == nil ? mesh.edgeSegments(of: selectedEdges) : []
         selectionRevision += 1
     }
 
     private func remesh() {
         var combined = Mesh()
+        // Vorschau „Oberfläche für alle Körper“ überdeckt die eigene Oberfläche nur in der Darstellung
+        let override: SIMD3<Float>? = previewFinishAll.flatMap { SurfaceFinish.named($0)?.appearance.encoded }
         for (index, body) in (previewBodies ?? bodies).enumerated() where !body.isHidden {
-            combined.append(Mesh(body.shape.triangulate(deflection: 0.05), body: index, color: body.renderColor))
+            combined.append(Mesh(body.shape.triangulate(deflection: 0.05), body: index,
+                                 color: override ?? body.renderColor))
         }
         mesh = combined
         revision += 1
@@ -1988,6 +2136,8 @@ final class ModelStore: ObservableObject {
         var finish: String?
         /// Inhalt des Texts bei Textkörpern (SketchTextEdit.swift); fehlt in älteren Projekten
         var textLabel: String?
+        /// Blechrezept (App/Sheet/SheetModel.swift); fehlt in älteren Projekten
+        var sheetMetal: SheetBodyInfo?
     }
 
     private var modelURL: URL? { folder?.appending(path: "model.step") }
@@ -1997,9 +2147,10 @@ final class ModelStore: ObservableObject {
     private var canvasesURL: URL? { folder?.appending(path: "canvases.json") }
     private var variablesURL: URL? { folder?.appending(path: "variables.json") }
 
-    private func load() {
+    /// skipModel: sicherer Modus (HangGuard.swift) – model.step und Verlauf nicht laden, openSafely baut nach.
+    private func load(skipModel: Bool = false) {
         // Verlauf erst nach den Körpern lesen (FeatureHistory.swift)
-        defer { loadFeatures() }
+        defer { if !skipModel { loadFeatures() } }
         if let url = variablesURL, let data = try? Data(contentsOf: url),
            let stored = try? JSONDecoder().decode([ProjectVariable].self, from: data) {
             variables = stored
@@ -2016,7 +2167,7 @@ final class ModelStore: ObservableObject {
            let stored = try? JSONDecoder().decode([CanvasImage].self, from: data) {
             canvases = stored
         }
-        guard PCKShape.stepAvailable, let modelURL,
+        guard !skipModel, PCKShape.stepAvailable, let modelURL,
               FileManager.default.fileExists(atPath: modelURL.path(percentEncoded: false)),
               let shapes = PCKShape.readSTEP(path: modelURL.path(percentEncoded: false)) else { return }
         let metas = metaURL.flatMap { try? Data(contentsOf: $0) }
@@ -2031,9 +2182,10 @@ final class ModelStore: ObservableObject {
                 body.threads = meta.threads
                 body.finish = meta.finish
                 body.textLabel = meta.textLabel
+                body.sheetMetal = meta.sheetMetal
                 return body
             }
-            return SceneBody(shape: shape, name: "Körper \(index + 1)", color: SceneBody.palette[index % SceneBody.palette.count])
+            return SceneBody(shape: shape, name: "Körper \(index + 1)", color: SceneBody.defaultColor)
         }
     }
 
@@ -2063,7 +2215,7 @@ final class ModelStore: ObservableObject {
             BodyMeta(name: $0.name, color: [$0.color.x, $0.color.y, $0.color.z], isHidden: $0.isHidden, sketchID: $0.sketchID,
                      folder: $0.folder, componentID: $0.componentID,
                      placement: $0.componentID == nil ? nil : $0.placementValues, material: $0.material,
-                     threads: $0.threads, finish: $0.finish, textLabel: $0.textLabel)
+                     threads: $0.threads, finish: $0.finish, textLabel: $0.textLabel, sheetMetal: $0.sheetMetal)
         }
         if let data = try? JSONEncoder().encode(metas) {
             try? data.write(to: metaURL)
@@ -2082,9 +2234,9 @@ enum ConstructionKind: String, CaseIterable, Identifiable, Codable {
 
     var systemImage: String {
         switch self {
-        case .plane: "square.dashed"
-        case .axis: "line.diagonal.arrow"
-        case .point: "smallcircle.filled.circle"
+        case .plane: "sc.plane"
+        case .axis: "sc.axis"
+        case .point: "sc.point"
         }
     }
 }

@@ -223,6 +223,13 @@ static float lampHighlight(float3 n, float3 h, float roughness, float3 tangent) 
     return highlight * strength;
 }
 
+/// Anteil „matt“ 0…1: ab Rauheit ~0,45 matt (weicher Übergang, damit Muster mit leicht schwankender Rauheit
+/// nicht flackern). Mit Klarlack nie matt – die Lackschicht glänzt. Muss zu SurfaceAppearance.matteAmount passen.
+static float matteAmount(Surface s) {
+    if (s.clearcoat > 0.5f) return 0.0f;
+    return smoothstep(0.43f, 0.49f, s.roughness);
+}
+
 /// Körper schattieren: matt ohne Muster wie bisher, sonst PBR-ähnlich mit Fresnel (Schlick, rauheitsabhängig),
 /// Spiegelung der Studio-Umgebung, Glanzlicht der Lampe und optionaler Klarlackschicht.
 static float3 shadeSurface(VertexOut in, constant Uniforms &uniforms, Surface s, float footprint) {
@@ -253,6 +260,19 @@ static float3 shadeSurface(VertexOut in, constant Uniforms &uniforms, Surface s,
     } else {
         float3 base = s.albedo * lambert * (float3(1.0f) - fresnel);
         color = base + env * fresnel * (1.0f - 0.5f * s.roughness) + float3(highlight * 0.6f);
+    }
+    // Matt (Kai: „bei mattem Werkstoff ohne Spiegelung“): keine Umgebungsspiegelung, Fresnel-Schlick-Roughness
+    // zusätzlich mit (1 − r)² gedämpft, nur ein breiter, schwacher Schimmer. Matte Metalle wirken über ihre
+    // Farbe diffus statt über die Spiegelung – sonst kippen sie je nach Blickwinkel nach schwarz oder weiß.
+    float matte = matteAmount(s);
+    if (matte > 0.0f) {
+        float gloss = 1.0f - s.roughness;
+        float3 dull = fresnel * (gloss * gloss);
+        float3 diffuseColor = s.albedo * (s.metallic > 0.5f ? 0.8f : 1.0f);
+        float3 sheenTint = mix(float3(1.0f), s.albedo, s.metallic);
+        float3 sheen = sheenTint * pow(saturate(dot(n, h)), 6.0f) * 0.03f * gloss;
+        float3 matteColor = diffuseColor * lambert * (float3(1.0f) - dull) + dull * lambert + sheen;
+        color = mix(color, matteColor, matte);
     }
     if (s.clearcoat > 0.5f) {
         // Klarlack: scharfe, farblose Spiegelung darüber
@@ -329,6 +349,28 @@ fragment float4 fragment_texture(VertexOut in [[stage_in]],
 fragment float4 fragment_flat(VertexOut in [[stage_in]],
                               constant float4 &color [[buffer(2)]]) {
     return color;
+}
+
+/// Raster: Farbe und Ausblenden zum Rand (SolidCraft GridFade). center.xyz = Mitte der Ansicht auf der
+/// Rasterebene (Welt), range.x = Abstand, ab dem das Raster dimmt, range.y = Abstand, ab dem es verschwunden ist.
+struct GridStyle {
+    float4 color;
+    float4 center;
+    float4 range;
+};
+
+/// Rasterlinien mit weichem Rand statt hartem Abbruch (linear zwischen range.x und range.y).
+fragment float4 fragment_grid(VertexOut in [[stage_in]],
+                              constant GridStyle &style [[buffer(2)]]) {
+    float d = distance(in.world, style.center.xyz);
+    float start = style.range.x;
+    float end = style.range.y;
+    float alpha = 1.0f;
+    if (end > start) {
+        alpha = saturate((end - d) / (end - start));
+    }
+    if (alpha < 0.004f) discard_fragment();
+    return float4(style.color.rgb, style.color.a * alpha);
 }
 
 /// Einfarbig in Vertexfarbe (breite Linien, Fangsymbole).

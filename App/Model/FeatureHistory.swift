@@ -31,23 +31,26 @@ enum FeatureKind: String, Codable, CaseIterable {
     case mirror
     case pattern
     case delete
+    /// Blechschritt (App/Sheet/SheetModelReplay.swift)
+    case sheetMetal
 
     var systemImage: String {
         switch self {
         case .snapshot: "cube.transparent"
-        case .extrude: "square.stack.3d.up"
-        case .revolve: "arrow.triangle.2.circlepath"
-        case .primitive: "cube"
-        case .fillet: "app"
-        case .chamfer: "octagon"
-        case .faceExtrude: "arrow.up.and.down.square"
-        case .shell: "shippingbox"
-        case .boolean: "square.on.square.dashed"
-        case .move: "move.3d"
+        case .extrude: "sc.extrude"
+        case .revolve: "sc.revolve"
+        case .primitive: "sc.box"
+        case .fillet: "sc.fillet"
+        case .chamfer: "sc.chamfer"
+        case .faceExtrude: "sc.presspull"
+        case .shell: "sc.shell"
+        case .boolean: "sc.combine"
+        case .move: "sc.move"
         case .rotate: "rotate.3d"
-        case .mirror: "arrow.left.and.right.righttriangle.left.righttriangle.right"
-        case .pattern: "square.grid.3x1.below.line.grid.1x2"
-        case .delete: "trash"
+        case .mirror: "sc.mirror"
+        case .pattern: "sc.pattern_rect"
+        case .delete: "sc.delete"
+        case .sheetMetal: "sc.flange"
         }
     }
 }
@@ -139,6 +142,8 @@ struct SnapshotBodyMeta: Codable, Hashable {
     var finish: String? = nil
     /// Inhalt des Texts bei Textkörpern (SketchTextEdit.swift); fehlt in älteren Ständen
     var textLabel: String? = nil
+    /// Blechrezept (App/Sheet/SheetModel.swift); fehlt in älteren Ständen
+    var sheetMetal: SheetBodyInfo? = nil
 }
 
 /// Fester Stand: full = alle Körper, sonst nur die geänderten (changed, in dieser Reihenfolge) und die neuen.
@@ -185,6 +190,24 @@ struct FeatureData: Codable {
     /// angrenzende Bereiche zusammengefasst und berührende Teile verschmolzen – beim Nachbau ebenso, damit die
     /// Körpernummern späterer Schritte stimmen.
     var separateParts: Bool?
+    // Eigenschaften-Panel nach SolidCraft (ExtrudeCommand.swift, RevolveCommand.swift, PrimitiveCommand.swift):
+    // was das Panel beim Bearbeiten braucht. Fehlt in älteren Ständen.
+    /// Ausmaß (ExtrudeExtent bzw. „Winkel“/„Bis Objekt“ beim Drehen) als Rohwert
+    var extent: String?
+    /// Start versetzt (mm entlang der Skizzennormale)
+    var startOffset: Double?
+    /// Bis Objekt bzw. Von Objekt: angetippter Punkt
+    var toObject: SIMD3<Double>?
+    var fromObject: SIMD3<Double>?
+    /// Symmetrisch als Gesamtabstand: Parameter „distance“ ist je Seite gespeichert (Nachbau), das Panel zeigt
+    /// das Doppelte. nil/false = alter Weg (Wert je Seite)
+    var symmetricTotal: Bool?
+    /// Operation von der Automatik gewählt (nicht von Hand)
+    var operationAuto: Bool?
+    /// Richtung umgekehrt (Panel-Schalter)
+    var flipped: Bool?
+    /// Blechschritt (App/Sheet/SheetModelReplay.swift); fehlt in älteren Ständen
+    var sheet: SheetFeatureData?
 }
 
 /// Ein Schritt im parametrischen Verlauf.
@@ -213,7 +236,7 @@ struct Feature: Codable, Identifiable {
         if kind == .boolean, let boolean = data.mode.flatMap(BooleanKind.init(rawValue:)) {
             return boolean.systemImage
         }
-        if kind == .pattern, data.mode == "kreis" { return "circle.grid.cross" }
+        if kind == .pattern, data.mode == "kreis" { return "sc.pattern_circ" }
         return kind.systemImage
     }
 
@@ -250,6 +273,13 @@ final class FeatureRecorder {
     var cache: [UUID: [SceneBody]] = [:]
     /// Körper der festen Stände (aus features/<id>.step nachgeladen)
     var snapshots: [UUID: [SceneBody]] = [:]
+    /// Vorschau einer Rundung bzw. Fase, die vor spätere Schnitte eingefügt wird (BlendBeforeCuts.swift); wird
+    /// mit commitPreview zur neuen Feature-Liste
+    var orderedPreview: OrderedBlendPreview?
+    /// Gemerkte Suche nach der ursprünglichen Kante (je Kantenauswahl und Körper, BlendBeforeCuts.swift)
+    var blendPlacement: BlendPlacement?
+    /// Gemerkte Suche nach einer angrenzenden vorigen Rundung (ineinanderlaufende Rundungen, BlendBeforeCuts.swift)
+    var blendMerge: BlendMergeMemo?
 }
 
 /// Inhalt von features.json.
@@ -298,7 +328,26 @@ extension ModelStore {
         feature.data.onFace = plane.isOnFace
         feature.data.target = unionTarget(plane.sourceBody)
         feature.data.separateParts = true
+        feature.data.symmetricTotal = regionDirection == .symmetric && regionSymmetricTotal ? true : nil
+        // Versetzter Start und Dünn „Zwei Seiten“ kennt der Nachbau nicht: fester Stand statt falschem Feature
+        if regionStartOffset != 0 || (regionThin && regionThinThickness2 != nil) {
+            featureRecorder.preview = nil
+            return
+        }
         featureRecorder.preview = PendingFeature(feature: feature, regions: selectedRegions)
+    }
+
+    /// Angaben des Eigenschaften-Panels an die offene Extrusion bzw. Drehung hängen (nach noteExtrude/noteRevolve).
+    func notePanelData(extent: String?, toObject: SIMD3<Double>?, fromObject: SIMD3<Double>?, operationAuto: Bool,
+                       flipped: Bool) {
+        guard var pending = featureRecorder.preview,
+              pending.feature.kind == .extrude || pending.feature.kind == .revolve else { return }
+        pending.feature.data.extent = extent
+        pending.feature.data.toObject = toObject
+        pending.feature.data.fromObject = fromObject
+        pending.feature.data.operationAuto = operationAuto
+        pending.feature.data.flipped = flipped ? true : nil
+        featureRecorder.preview = pending
     }
 
     /// Bereiche um eine Achse gedreht (Vorschau).
@@ -312,6 +361,8 @@ extension ModelStore {
         feature.data.axis = axis
         feature.data.target = unionTarget(sketches[first.sketch].plane.sourceBody)
         feature.data.separateParts = true
+        feature.data.direction = ExtrudeDirection.oneSide.rawValue
+        feature.data.extent = "angle"
         featureRecorder.preview = PendingFeature(feature: feature, regions: selectedRegions)
     }
 
@@ -330,12 +381,24 @@ extension ModelStore {
         }
         feature.data.primitive = primitive.rawValue
         feature.data.origin = base
+        feature.data.mode = ExtrudeMode.newBody.rawValue
         featureRecorder.preview = PendingFeature(feature: feature)
     }
 
     /// Kanten abgerundet bzw. gefast (Vorschau). value = tatsächlich verwendeter Wert.
-    func noteBlend(_ operation: EdgeOperation, value: Double, second: Double? = nil, end: Double? = nil) {
+    /// edges = tatsächlich verrundete Kanten (nil = die gewählten).
+    func noteBlend(_ operation: EdgeOperation, value: Double, second: Double? = nil, end: Double? = nil,
+                   edges: [EdgeRef]? = nil) {
         guard let body = selectedEdges.first?.body else { return }
+        var feature = Self.blendFeature(operation, value: value, second: second, end: end)
+        feature.data.target = body
+        let used = edges ?? selectedEdges
+        featureRecorder.preview = PendingFeature(feature: feature, edges: used.filter { $0.body == body })
+    }
+
+    /// Feature „Abrunden“ bzw. „Fase“ mit seinen Werten (ohne Kanten und Ziel).
+    static func blendFeature(_ operation: EdgeOperation, value: Double, second: Double? = nil,
+                             end: Double? = nil) -> Feature {
         var feature: Feature
         if operation == .fillet {
             feature = Feature(name: end == nil ? "Abrunden" : "Variabel abrunden", kind: .fillet)
@@ -346,8 +409,7 @@ extension ModelStore {
             feature.parameters.append(.length("distance", "Abstand", value))
             if let second { feature.parameters.append(.length("second", "Zweiter Abstand", second)) }
         }
-        feature.data.target = body
-        featureRecorder.preview = PendingFeature(feature: feature, edges: selectedEdges.filter { $0.body == body })
+        return feature
     }
 
     /// Ebene Flächen gezogen (Vorschau).
@@ -465,8 +527,16 @@ extension ModelStore {
 
     /// commitPreview: das Feature der Vorschau wird mit dem folgenden commit aufgezeichnet.
     func takePreviewFeature() {
-        featureRecorder.pending = featureRecorder.preview
-        featureRecorder.preview = nil
+        let recorder = featureRecorder
+        recorder.pending = recorder.preview
+        recorder.preview = nil
+        // Rundung vor Schnitt: die umgestellte Liste samt ihren Zwischenständen übernehmen
+        if let ordered = recorder.orderedPreview {
+            recorder.orderedPreview = nil
+            recorder.pending = nil
+            recorder.replacement = ordered.features
+            for (id, state) in ordered.states { recorder.cache[id] = state }
+        }
     }
 
     /// Skizze wird gelöscht: Features, die sie verwenden, behalten eine Kopie (Nachbau bleibt möglich).
@@ -632,6 +702,9 @@ extension ModelStore {
     func featuresRestored() {
         featureRecorder.cache = [:]
         featureRecorder.preview = nil
+        featureRecorder.orderedPreview = nil
+        featureRecorder.blendPlacement = nil
+        featureRecorder.blendMerge = nil
         if let last = features.last { featureRecorder.cache[last.id] = bodies }
     }
 }
@@ -701,29 +774,47 @@ extension ModelStore {
             message = "Nachbau nicht möglich: ein gespeicherter Zwischenstand fehlt."
             return
         }
-        var result = run.bodies
-        if result.count == bodies.count {
-            // Name, Farbe, Sichtbarkeit, Ordner … der Körper bleiben, nur die Geometrie ist neu
-            for index in result.indices {
-                var body = bodies[index]
-                body.shape = result[index].shape
-                body.sketchID = result[index].sketchID
-                body.componentID = result[index].componentID
-                body.placement = result[index].placement
-                // Text nach dem Extrudieren geändert: Textkörper neu benennen (SketchTextEdit.swift)
-                body = body.takingTextLabel(from: result[index])
-                result[index] = body
-            }
-        }
+        let result = carryingBodyDetails(run.bodies)
         featureRecorder.replacement = list
         commit(result, sketches: newSketches, name: name)
         if let note = run.note { message = note }
     }
 
+    /// Nach dem Nachbau: Name, Farbe, Sichtbarkeit, Ordner … der Körper bleiben, nur die Geometrie ist neu.
+    func carryingBodyDetails(_ rebuilt: [SceneBody]) -> [SceneBody] {
+        var result = rebuilt
+        guard result.count == bodies.count else {
+            // Andere Körperzahl: wenigstens Farbe und Oberfläche nach Reihenfolge übernehmen (früher lieferte die
+            // Palette nach Index dieselben Farben), damit bunte Körper nicht in der grauen Standardfarbe landen
+            for index in result.indices where bodies.indices.contains(index) {
+                result[index].color = bodies[index].color
+                result[index].finish = bodies[index].finish
+            }
+            // Blechkörper erkennt ihr Rezept wieder: Name, Ordner, Sichtbarkeit … bleiben (App/Sheet/SheetModelReplay.swift)
+            sheetCarryDetails(&result)
+            return result
+        }
+        for index in result.indices {
+            var body = bodies[index]
+            body.shape = result[index].shape
+            body.sketchID = result[index].sketchID
+            body.componentID = result[index].componentID
+            body.placement = result[index].placement
+            body.sheetMetal = result[index].sheetMetal
+            // Text nach dem Extrudieren geändert: Textkörper neu benennen (SketchTextEdit.swift)
+            body = body.takingTextLabel(from: result[index])
+            result[index] = body
+        }
+        return result
+    }
+
     /// Rechnet list ab start (bzw. ab dem nächsten bekannten Zwischenstand davor) und markiert Fehlschläge.
-    /// nil = ein nötiger fester Stand fehlt.
-    private func runFeatures(_ list: inout [Feature], from start: Int, sketches sketchList: [StoredSketch],
-                             values: [String: Double]) -> (bodies: [SceneBody], note: String?)? {
+    /// nil = ein nötiger fester Stand fehlt. until = nur bis vor dieses Feature rechnen (Stand davor).
+    /// collect: Zwischenstände dorthin statt in den Speicher (Vorschau einer umgestellten Liste, die noch
+    /// verworfen werden kann).
+    func runFeatures(_ list: inout [Feature], from start: Int, until end: Int? = nil,
+                     sketches sketchList: [StoredSketch], values: [String: Double],
+                     collect: ((UUID, [SceneBody]) -> Void)? = nil) -> (bodies: [SceneBody], note: String?)? {
         let recorder = featureRecorder
         var state: [SceneBody] = []
         var begin = 0
@@ -746,12 +837,15 @@ extension ModelStore {
         var failures: [String] = []
         var fixedStand: String?
         var index = begin
-        while index < list.count {
+        let stop = min(end ?? list.count, list.count)
+        while index < stop {
             if list[index].isSuppressed {
                 list[index].failed = false
                 list[index].problem = nil
             } else {
                 do {
+                    // Hänger-Marke (HangGuard.swift): bleibt sie nach einem Einfrieren liegen, öffnet das Projekt sicher
+                    HangGuard.willRun(list[index], in: folder)
                     state = try applyFeature(&list[index], to: state, sketches: sketchList, values: values)
                     list[index].failed = false
                     list[index].problem = nil
@@ -764,9 +858,14 @@ extension ModelStore {
                     failures.append(list[index].name)
                 }
             }
-            recorder.cache[list[index].id] = state
+            if let collect {
+                collect(list[index].id, state)
+            } else {
+                recorder.cache[list[index].id] = state
+            }
             index += 1
         }
+        HangGuard.didRun(in: folder)
         var note: String?
         if !failures.isEmpty {
             let names = failures.prefix(3).map { "„\($0)“" }.joined(separator: ", ")
@@ -797,6 +896,7 @@ extension ModelStore {
         case .mirror: return try Self.replayMirror(feature, state)
         case .pattern: return try Self.replayPattern(feature, state)
         case .delete: return Self.replayDelete(feature, state)
+        case .sheetMetal: return try replaySheetMetal(feature, state)
         }
     }
 
@@ -881,8 +981,14 @@ extension ModelStore {
         let regions = separate || feature.data.thin == true ? filled : SketchRegionMerge.merged(filled)
         let mode = ExtrudeMode(rawValue: feature.data.mode ?? "") ?? .newBody
         let direction = ExtrudeDirection(rawValue: feature.data.direction ?? "") ?? .oneSide
-        let distance = feature.value("distance") ?? 0
+        var distance = feature.value("distance") ?? 0
         guard distance != 0 else { throw FeatureError("Abstand 0.") }
+        // Wie in der Vorschau (setRegionValue): Abziehen bis an die Rückseite schneidet durchgehend, auch nach
+        // „Bearbeiten“ mit genau der Materialstärke (sonst bliebe dort eine Haut)
+        if mode == .cut, direction == .oneSide,
+           let through = cutThroughDistance(regions, plane: plane, distance: distance, in: state) {
+            distance = through
+        }
         let second = feature.value("second") ?? 0
         let solid: PCKShape?
         if feature.data.thin == true {
@@ -970,7 +1076,7 @@ extension ModelStore {
             var result = state
             let parts: [PCKShape] = separate ? solid.separatedParts() : solid.separatedSolids()
             for part in parts {
-                let color = SceneBody.palette[result.count % SceneBody.palette.count]
+                let color = SceneBody.defaultColor
                 result.append(SceneBody(shape: part, name: "Körper \(result.count + 1)", color: color, sketchID: sketch))
             }
             return result
@@ -978,7 +1084,7 @@ extension ModelStore {
             var chosen = state.indices.last
             if let target, state.indices.contains(target) { chosen = target }
             guard let index = chosen else {
-                let color = SceneBody.palette[state.count % SceneBody.palette.count]
+                let color = SceneBody.defaultColor
                 let body = SceneBody(shape: solid, name: "Körper \(state.count + 1)", color: color, sketchID: sketch)
                 return state + [body]
             }
@@ -1036,7 +1142,7 @@ extension ModelStore {
             shape = z < x ? PCKShape.torus(center: center, axis: [0, 0, 1], majorRadius: x / 2, minorRadius: z / 2) : nil
         }
         guard let shape else { throw FeatureError("Maße ungültig.") }
-        let color = SceneBody.palette[state.count % SceneBody.palette.count]
+        let color = SceneBody.defaultColor
         let body = SceneBody(shape: shape, name: "\(primitive.rawValue) \(state.count + 1)", color: color)
         return state + [body]
     }
@@ -1083,8 +1189,11 @@ extension ModelStore {
             guard state.indices.contains(body) else { throw FeatureError("Körper fehlt.") }
             let group = signatures.filter { $0.body == body }
             let numbers = try matchFaces(group, in: state[body].shape).map { NSNumber(value: $0) }
-            guard let shape = state[body].shape.extruding(faces: numbers, distance: distance) else {
-                throw FeatureError("Fläche ziehen nicht möglich.")
+            // An einer Kopie auf großem Stapel mit Zeitlimit (FaceExtrudeJobs.swift): rot statt Absturz bzw. Hänger
+            let outcome = FaceExtrudeKernel.extrudeGuarded(state[body].shape, faces: numbers, distance: distance)
+            guard let shape = outcome.shape else {
+                throw FeatureError(outcome.timedOut ? "Fläche ziehen zu aufwendig (Zeitlimit) – übersprungen."
+                                   : "Fläche ziehen nicht möglich.")
             }
             result[body] = result[body].with(shape)
         }
@@ -1309,12 +1418,13 @@ extension ModelStore {
         SnapshotBodyMeta(name: body.name, color: [body.color.x, body.color.y, body.color.z], isHidden: body.isHidden,
                          sketchID: body.sketchID, folder: body.folder, componentID: body.componentID,
                          placement: body.componentID == nil ? nil : body.placementValues, material: body.material,
-                         threads: body.threads, finish: body.finish, textLabel: body.textLabel)
+                         threads: body.threads, finish: body.finish, textLabel: body.textLabel,
+                         sheetMetal: body.sheetMetal)
     }
 
     private static func snapshotBody(_ shape: PCKShape, meta: SnapshotBodyMeta, number: Int) -> SceneBody {
         guard meta.color.count == 3 else {
-            let color = SceneBody.palette[number % SceneBody.palette.count]
+            let color = SceneBody.defaultColor
             return SceneBody(shape: shape, name: meta.name, color: color)
         }
         let color = SIMD3<Float>(meta.color[0], meta.color[1], meta.color[2])
@@ -1324,6 +1434,7 @@ extension ModelStore {
         body.threads = meta.threads
         body.finish = meta.finish
         body.textLabel = meta.textLabel
+        body.sheetMetal = meta.sheetMetal
         return body.restoringComponent(meta.componentID, placement: meta.placement)
     }
 
@@ -1337,7 +1448,7 @@ extension ModelStore {
     }
 
     /// Nächstgelegene Kante gleicher Ausrichtung (Richtung ins Material) je Signatur.
-    private static func matchEdges(_ signatures: [EdgeSignature], in shape: PCKShape) throws -> [Int] {
+    static func matchEdges(_ signatures: [EdgeSignature], in shape: PCKShape) throws -> [Int] {
         let mesh = Mesh(shape.triangulate(deflection: 0.05), body: 0)
         var numbers: [Int] = []
         for ref in mesh.edgeRefs where ref.edge > 0 && !numbers.contains(ref.edge) {
