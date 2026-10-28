@@ -530,21 +530,18 @@ struct FeatureEditRows: View {
     }
 }
 
-/// Textfeld für Zahl oder Formel (ohne sofortiges Ausrechnen).
+/// Feld für Zahl oder Formel (ohne sofortiges Ausrechnen), mit dem kleinen Ziffernblock.
 private struct FeatureTextRow: View {
     let title: String
     let unit: String
     @Binding var text: String
 
+    @State private var isEditing = false
+
     var body: some View {
         PaletteLabeled(title: title) {
             PaletteFieldBox(isLocked: false, hasError: false) {
-                TextField(title, text: $text)
-                    .keyboardType(.numbersAndPunctuation)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                    .multilineTextAlignment(.trailing)
-                    .monospacedDigit()
+                KeypadField(title: title, text: $text, isEditing: $isEditing, unitSymbol: unit, onCommit: {})
                 Text(unit)
                     .font(.caption)
                     .foregroundStyle(.secondary)

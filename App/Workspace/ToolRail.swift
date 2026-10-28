@@ -66,7 +66,7 @@ enum ToolGroup: String, CaseIterable, Identifiable {
         case .inspect: "Messen, Schnittansicht, Druckprüfung (Überhang, dünne Wände) und Isolieren."
         case .insert: "Normteile (Schrauben, Muttern, Lager), Vorlagen (Gehäuse, Stirnrad), STEP-, STL- und 3MF-Dateien, Bild als Vorlage (aus Fotos, Dateien oder direkt mit der Kamera), Körper eines anderen Projekts, eine Variable, Netze bearbeiten."
         case .visualize: "Anzeigemodus, orthografische Projektion, Körperfarbe, Zeichnung und Kontextvorschläge."
-        case .sheetMetal: "Blech wie SolidCraft: Flansche, Umkantung, Falten, Perforieren, In Blech umwandeln (offene Kanten wählbar), Entfalten, Flachmuster mit DXF und Biegetabelle, Blechregeln."
+        case .sheetMetal: "Blech wie SolidCraft: Blechteil aus Skizze, Lasche, Profil biegen, Pfadflansch, Umkantung, Falten, Perforieren, In Blech umwandeln (offene Kanten wählbar), Entfalten, Flachmuster mit DXF und Biegetabelle, Blechregeln."
         }
     }
 

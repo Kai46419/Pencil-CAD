@@ -124,6 +124,7 @@ private struct SheetFoldStateRows: View {
     var body: some View {
         VStack(alignment: .leading, spacing: PaletteStyle.spacing) {
             SheetUnavailableRow(model: model)
+            if unfold { SheetToolPreview(sketch: .unfold) }
             SheetInfoRow(title: "Körper", text: SheetFoldState.shownBody(cmd, model, unfold: unfold))
             PaletteSection("Optionen") {
                 CommandPreviewRow(cmd: cmd, workspace: workspace)
@@ -139,7 +140,8 @@ enum SheetFlatPatternDriver: MainCommandDriver {
     static let title = "Flachmuster erstellen"
     static let icon = "sc.flat"
     static var explanation: String? {
-        "Abwicklung des Blechkörpers mit Biegelinien (auf/ab) und Biegetabelle. Export als DXF (Laser) bzw. CSV."
+        "Abwicklung des Blechkörpers mit Biegelinien (auf/ab) und Biegetabelle. Export als DXF (mit Bemaßung oder nur "
+            + "Laserkontur), CSV oder Abwicklungszeichnung (PDF)."
     }
 
     @MainActor static func build(_ ws: Workspace) -> ModelCommand {
@@ -149,6 +151,7 @@ enum SheetFlatPatternDriver: MainCommandDriver {
         cmd.flags["singleLayer"] = false
         cmd.flags["etchText"] = false
         cmd.flags["exactCurves"] = true
+        cmd.flags["drawing"] = true
         ws.model.resetSelection()
         return cmd
     }
@@ -214,6 +217,7 @@ enum SheetFlatPatternDriver: MainCommandDriver {
         options.bendLines = cmd.isOn("bendLines", default: true)
         options.singleLayer = cmd.isOn("singleLayer", default: false)
         options.etchText = cmd.isOn("etchText", default: false)
+        options.withDrawing = cmd.isOn("drawing", default: true)
         return options
     }
 
@@ -266,11 +270,18 @@ private struct SheetFlatRows: View {
                                   body: SheetFlatPatternDriver.body(cmd, model))
             }
             .disabled(state.flat == nil)
+            PrimaryWideButton(title: "Abwicklungszeichnung (PDF)…", systemImage: "doc.richtext", isPrimary: false) {
+                FlatDrawingPresenter.present(workspace, body: SheetFlatPatternDriver.body(cmd, model))
+            }
+            .disabled(state.flat == nil)
             PrimaryWideButton(title: "Biegetabelle exportieren…", systemImage: "tablecells", isPrimary: false) {
                 SheetUI.exportBendTable(workspace, body: SheetFlatPatternDriver.body(cmd, model))
             }
             .disabled(state.flat == nil)
             CommandSection("DXF", command: SheetFlatPatternDriver.id, section: "dxf", expanded: false) {
+                // Aus: reine Laserdatei (SolidCraft-Layer OUTLINE, CUT, BEND_UP, BEND_DOWN …)
+                CommandFlagRow(title: "Bemaßung und Biegetabelle", icon: "ruler", cmd: cmd, key: "drawing", fallback: true,
+                               workspace: workspace)
                 CommandFlagRow(title: "Exakte Kurven", icon: "point.topleft.down.to.point.bottomright.curvepath", cmd: cmd,
                                key: "exactCurves", fallback: true, workspace: workspace)
                 CommandFlagRow(title: "Biegelinien", icon: "line.diagonal", cmd: cmd, key: "bendLines", fallback: true,

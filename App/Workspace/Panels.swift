@@ -27,33 +27,27 @@ struct NumberField: View {
     @Environment(\.variableValues) private var variables
     @State private var text = ""
     @State private var error: String?
-    @FocusState private var isFocused: Bool
+    /// Ziffernblock offen bzw. Textfeld aktiv (statt der großen Bildschirmtastatur)
+    @State private var isEditing = false
 
     var body: some View {
         HStack(spacing: 6) {
             Text(title)
                 .foregroundStyle(.secondary)
                 .fixedSize()
-            TextField(title, text: $text)
-                .focused($isFocused)
-                .keyboardType(.numbersAndPunctuation)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-                .multilineTextAlignment(.trailing)
-                .monospacedDigit()
+            KeypadField(title: title, text: $text, isEditing: $isEditing,
+                        unitSymbol: isLength ? LengthUnit.current.symbol : unit, minHeight: 28,
+                        step: stepped, onCommit: commit)
+                .padding(.horizontal, 6)
                 .frame(width: width)
-                .textFieldStyle(.roundedBorder)
+                .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 6))
                 .overlay {
                     RoundedRectangle(cornerRadius: 6)
-                        .stroke(Color.red, lineWidth: error == nil ? 0 : 1.5)
+                        .stroke(error == nil ? Color(.separator) : Color.red, lineWidth: error == nil ? 0.5 : 1.5)
                 }
                 .help(error ?? "")
-                .onSubmit(commit)
-                .onChange(of: isFocused) { _, focused in
-                    if !focused { commit() }
-                }
                 .onChange(of: value) { _, newValue in
-                    if !isFocused { text = shown(newValue) }
+                    if !isEditing { text = shown(newValue) }
                 }
                 .onAppear { text = shown(value) }
             if !unit.isEmpty {
@@ -69,6 +63,15 @@ struct NumberField: View {
 
     private func shown(_ value: Double) -> String {
         isLength ? LengthUnit.current.number(value) : Self.format(value)
+    }
+
+    /// Schritt um eine Einheit (Länge: eine Projekteinheit) vom eingegebenen Wert aus
+    private func stepped(_ direction: Int) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        let current: Double? = trimmed.isEmpty ? value
+            : (try? PaletteExpression.evaluate(trimmed, unit: unit, variables: variables))
+        guard let current else { return nil }
+        return shown(current + Double(direction) * (isLength ? LengthUnit.current.millimeters : 1))
     }
 
     private func commit() {
@@ -1746,8 +1749,10 @@ struct HistoryPanel: View {
 // MARK: Elemente
 
 /// Reiter „Ebenen“ links, aufgebaut wie der Browser in Fusion 360: Projekt, Dokumenteinstellungen,
-/// Ursprung, genau ein Ordner „Körper“ (alle Körper, Mehrfachauswahl und Kombinieren), genau ein Ordner
-/// „Skizzen“ (Skizze 1, 2 …), Konstruktion und Bilder – jeweils mit Auge.
+/// Ursprung, dann feste Ordner (Kai: „Skizze 1 im Skizzen-Ordner, Körper 1 im Körper-Ordner“):
+/// „Skizzen“, „Körper“ (Mehrfachauswahl und Kombinieren), „Blechteile“ (Körper mit Blechrezept),
+/// „Konstruktion“ (Ebenen, Achsen, Punkte) und „Importe“ (Bilder) – jeweils mit Symbol, Anzahl und Auge.
+/// Skizzen und Körper stehen immer da (leer: blass), die übrigen Ordner nur mit Inhalt.
 struct LayersPanel: View {
     @ObservedObject var workspace: Workspace
     @ObservedObject var model: ModelStore
@@ -1761,8 +1766,9 @@ struct LayersPanel: View {
         case sketch(Int)
     }
 
-    /// Zugeklappte Ordner (Dokumenteinstellungen anfangs zu, wie in Fusion 360)
-    @State private var closedFolders: Set<String> = ["settings"]
+    /// Zugeklappte Ordner, kommagetrennt und über Projekte hinweg gemerkt (Dokumenteinstellungen anfangs zu,
+    /// wie in Fusion 360)
+    @AppStorage("layers.closedFolders") private var closedFoldersText = "settings"
     @State private var renaming: Renaming?
     @State private var newName = ""
     /// Filter wie bei Shapr3D: Alle, Körper, Skizzen, Konstruktion
@@ -1806,34 +1812,38 @@ struct LayersPanel: View {
                         EmptyView()
                     }
                 }
-                if filter == .all || filter == .bodies {
-                    bodiesFolder
-                }
                 if filter == .all || filter == .sketches {
                     // Genau ein Ordner „Skizzen“: Skizze 1, 2 … direkt darin (Kai, keine Ebenen-Zwischenstufe)
-                    folder("sketches", title: "Skizzen", systemImage: "folder",
+                    folder("sketches", title: "Skizzen", systemImage: "folder", badge: "pencil", tint: .blue,
                            count: model.sketches.count, visible: model.sketches.isEmpty ? nil : model.showsSketches,
-                           toggle: { model.setSketchesHidden(model.showsSketches) }) {
-                        if model.sketches.isEmpty {
-                            infoRow("Noch keine Skizze", systemImage: "pencil.and.outline")
-                        }
+                           toggle: { model.setSketchesHidden(model.showsSketches) }, isEmpty: model.sketches.isEmpty) {
                         ForEach(model.sketches.indices, id: \.self) { index in
                             sketchEntry(index)
                         }
                     }
                 }
-                if filter == .all || filter == .construction, !model.constructions.isEmpty {
-                    folder("constructions", title: "Konstruktion", systemImage: "folder",
-                           count: model.constructions.count, visible: model.showsConstructions,
-                           toggle: { model.setConstructionsHidden(model.showsConstructions) }) {
+                if filter == .all || filter == .bodies {
+                    bodiesFolder
+                    sheetsFolder
+                }
+                if filter == .construction || (filter == .all && !model.constructions.isEmpty) {
+                    // Hilfsebenen, -achsen und -punkte; im Filter „Konstruktion“ auch leer (blass)
+                    folder("constructions", title: "Konstruktion", systemImage: "folder", badge: "ruler.fill",
+                           tint: .orange, count: model.constructions.count,
+                           visible: model.constructions.isEmpty ? nil : model.showsConstructions,
+                           toggle: { model.setConstructionsHidden(model.showsConstructions) },
+                           isEmpty: model.constructions.isEmpty) {
                         ForEach(model.constructions) { item in
                             constructionRow(item)
                         }
                     }
                 }
                 if filter == .all, !model.canvases.isEmpty {
-                    folder("canvases", title: "Bilder", systemImage: "folder", count: model.canvases.count,
-                           visible: model.showsCanvases, toggle: { model.setCanvasesHidden(model.showsCanvases) }) {
+                    // Importe: bisher nur Bilder (Canvas). Importierte Netze und STEP-Dateien sind im Modell
+                    // gewöhnliche Körper und stehen deshalb unter „Körper“.
+                    folder("canvases", title: "Importe", systemImage: "folder", badge: "photo", tint: .teal,
+                           count: model.canvases.count, visible: model.showsCanvases,
+                           toggle: { model.setCanvasesHidden(model.showsCanvases) }) {
                         ForEach(model.canvases) { canvas in
                             canvasRow(canvas)
                         }
@@ -1857,10 +1867,40 @@ struct LayersPanel: View {
 
     // MARK: Ordner
 
-    /// Ordnerzeile wie im Fusion-Browser: Pfeil zum Auf-/Zuklappen, Auge, Symbol, Name; Inhalt eingerückt.
-    private func folder<Content: View>(_ id: String, title: String, systemImage: String, count: Int? = nil,
+    /// Zugeklappte Ordner aus dem gemerkten Text.
+    private var closedFolders: Set<String> {
+        Set(closedFoldersText.split(separator: ",").map(String.init))
+    }
+
+    /// Ordner auf- bzw. zuklappen und den Zustand merken.
+    private func setFolder(_ id: String, open: Bool) {
+        var closed = closedFolders
+        if open { closed.remove(id) } else { closed.insert(id) }
+        closedFoldersText = closed.sorted().joined(separator: ",")
+    }
+
+    /// Ordnersymbol: gefüllter Ordner in der Farbe der Art, darin klein das Symbol der Elemente.
+    private func folderIcon(badge: String, tint: Color, dimmed: Bool) -> some View {
+        ZStack {
+            Image(systemName: "folder.fill")
+                .foregroundStyle(tint.opacity(dimmed ? 0.35 : 0.85))
+            Image(systemName: badge)
+                .font(.system(size: 7, weight: .bold))
+                .foregroundStyle(.white)
+                .offset(y: 1.5)
+        }
+        .frame(width: 20)
+    }
+
+    /// Ordnerzeile wie im Fusion-Browser: Pfeil zum Auf-/Zuklappen, Auge, Symbol, Name, Anzahl; Inhalt
+    /// eingerückt. `badge`/`tint` zeichnen ein farbiges Ordnersymbol; `isEmpty` zeigt den Ordner blass
+    /// und ohne Pfeil.
+    private func folder<Content: View>(_ id: String, title: String, systemImage: String, badge: String? = nil,
+                                       tint: Color = .secondary, count: Int? = nil,
                                        visible: Bool?, toggle: (() -> Void)? = nil, hasChildren: Bool = true,
+                                       isEmpty: Bool = false,
                                        @ViewBuilder content: () -> Content) -> some View {
+        let expandable = hasChildren && !isEmpty
         let isOpen = !closedFolders.contains(id)
         return VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 6) {
@@ -1869,17 +1909,26 @@ struct LayersPanel: View {
                     .foregroundStyle(.secondary)
                     .rotationEffect(.degrees(isOpen ? 90 : 0))
                     .frame(width: 16, height: 30)
-                    .opacity(hasChildren ? 1 : 0)
+                    .opacity(expandable ? 1 : 0)
                 if let visible, let toggle {
                     eye(visible, action: toggle)
                 }
-                Image(systemName: systemImage)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 20)
+                if let badge {
+                    folderIcon(badge: badge, tint: tint, dimmed: isEmpty)
+                } else {
+                    Image(systemName: systemImage)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 20)
+                }
                 Text(title)
                     .fontWeight(id == "root" ? .semibold : .regular)
                     .lineLimit(1)
-                    .foregroundStyle(visible == false ? Color.secondary : Color.primary)
+                    .foregroundStyle(visible == false || isEmpty ? Color.secondary : Color.primary)
+                if isEmpty {
+                    Text("leer")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
                 if let count, count > 0 {
                     Text("\(count)")
                         .font(.caption2.weight(.semibold))
@@ -1891,14 +1940,15 @@ struct LayersPanel: View {
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 2)
+            .opacity(isEmpty ? 0.7 : 1)
             .contentShape(Rectangle())
             .onTapGesture {
-                guard hasChildren else { return }
+                guard expandable else { return }
                 withAnimation(.easeOut(duration: 0.15)) {
-                    if isOpen { closedFolders.insert(id) } else { closedFolders.remove(id) }
+                    setFolder(id, open: !isOpen)
                 }
             }
-            if isOpen, hasChildren {
+            if isOpen, expandable {
                 VStack(alignment: .leading, spacing: 2) {
                     content()
                 }
@@ -1934,34 +1984,43 @@ struct LayersPanel: View {
         .hoverTip("Variablen", "Name = Wert, in jedem Zahlenfeld als Formel nutzbar.")
     }
 
-    private func infoRow(_ title: String, systemImage: String) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: systemImage)
-                .foregroundStyle(.secondary)
-                .frame(width: 20)
-            Text(title)
-                .foregroundStyle(.secondary)
-            Spacer(minLength: 0)
-        }
-        .padding(.leading, 24)
-        .frame(height: 30)
-    }
+    /// Körper ohne Blechrezept (Volumenkörper, Textkörper, Komponenten, Importe).
+    private var solidIndices: [Int] { model.bodies.indices.filter { model.bodies[$0].sheetMetal == nil } }
 
-    /// Genau ein Ordner „Körper“ mit allen Körpern (Kai: keine doppelten oder verschachtelten Ordner),
+    /// Blechkörper (SceneBody.sheetMetal gesetzt, App/Sheet/SheetModel.swift).
+    private var sheetIndices: [Int] { model.bodies.indices.filter { model.bodies[$0].sheetMetal != nil } }
+
+    /// Genau ein Ordner „Körper“ mit allen Volumenkörpern (Kai: keine doppelten oder verschachtelten Ordner),
     /// darüber „Auswählen“ und – ab zwei gewählten Körpern – Vereinigen, Subtrahieren, Schneiden.
     private var bodiesFolder: some View {
-        let all = Array(model.bodies.indices)
+        let all = solidIndices
         let anyVisible = all.contains { !model.bodies[$0].isHidden }
-        return folder("solids", title: "Körper", systemImage: "folder", count: all.count,
-                      visible: all.isEmpty ? nil : anyVisible,
-                      toggle: { model.setBodiesHidden(anyVisible, bodies: all) }) {
-            if all.isEmpty {
-                infoRow("Noch kein Körper", systemImage: "cube")
-            } else {
-                BrowserBooleanBar(workspace: workspace, model: model, picking: $picksBodies)
-            }
+        return folder("solids", title: "Körper", systemImage: "folder", badge: "cube.fill", tint: .indigo,
+                      count: all.count, visible: all.isEmpty ? nil : anyVisible,
+                      toggle: { model.setBodiesHidden(anyVisible, bodies: all) }, isEmpty: all.isEmpty) {
+            BrowserBooleanBar(workspace: workspace, model: model, picking: $picksBodies)
             ForEach(all, id: \.self) { index in
                 bodyRow(index)
+            }
+        }
+    }
+
+    /// Ordner „Blechteile“ (nur mit Inhalt): dieselben Zeilen wie unter „Körper“. Gibt es nur Blechteile,
+    /// steht die Auswählen-/Kombinieren-Leiste hier.
+    @ViewBuilder
+    private var sheetsFolder: some View {
+        let all = sheetIndices
+        if !all.isEmpty {
+            let anyVisible = all.contains { !model.bodies[$0].isHidden }
+            folder("sheets", title: "Blechteile", systemImage: "folder", badge: "rectangle.stack.fill",
+                   tint: .gray, count: all.count, visible: anyVisible,
+                   toggle: { model.setBodiesHidden(anyVisible, bodies: all) }) {
+                if solidIndices.isEmpty {
+                    BrowserBooleanBar(workspace: workspace, model: model, picking: $picksBodies)
+                }
+                ForEach(all, id: \.self) { index in
+                    bodyRow(index)
+                }
             }
         }
     }

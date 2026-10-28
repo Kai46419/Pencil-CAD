@@ -344,6 +344,8 @@ struct FeatureEditor: View {
     let close: () -> Void
 
     @State private var drafts: [String: String] = [:]
+    /// Feld, dessen Ziffernblock gerade offen ist
+    @State private var editingKey: String?
     @State private var problem: String?
 
     var body: some View {
@@ -376,15 +378,18 @@ struct FeatureEditor: View {
                     Text(parameter.title)
                         .foregroundStyle(.secondary)
                     Spacer(minLength: 8)
-                    TextField(parameter.title, text: draft(parameter.key))
-                        .keyboardType(.numbersAndPunctuation)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                        .multilineTextAlignment(.trailing)
-                        .monospacedDigit()
+                    // Kleiner Ziffernblock am Feld statt der großen Bildschirmtastatur. OK übernimmt bei nur einem
+                    // Wert sofort, sonst „Übernehmen“ (damit mehrere Werte nacheinander geändert werden können).
+                    KeypadField(title: parameter.title, text: draft(parameter.key), isEditing: editingFlag(parameter.key),
+                                unitSymbol: Self.unitLabel(parameter.unit), minHeight: 30,
+                                onCommit: { if feature.parameters.count == 1 { apply() } })
+                        .padding(.horizontal, 6)
                         .frame(width: 130)
-                        .textFieldStyle(.roundedBorder)
-                        .onSubmit(apply)
+                        .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 6))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(Color(.separator), lineWidth: 0.5)
+                        }
                     Text(Self.unitLabel(parameter.unit))
                         .foregroundStyle(.secondary)
                         .frame(width: 26, alignment: .leading)
@@ -427,6 +432,12 @@ struct FeatureEditor: View {
 
     private func draft(_ key: String) -> Binding<String> {
         Binding(get: { drafts[key] ?? "" }, set: { drafts[key] = $0 })
+    }
+
+    private func editingFlag(_ key: String) -> Binding<Bool> {
+        Binding(get: { editingKey == key }, set: { editing in
+            if editing { editingKey = key } else if editingKey == key { editingKey = nil }
+        })
     }
 
     private var initialTexts: [String: String] {

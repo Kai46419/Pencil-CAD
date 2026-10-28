@@ -145,7 +145,7 @@ enum ToolTips {
         "Tools": "Kanten abrunden/fasen, Schale, boolesche Verknüpfung, Drehen, Sweep, Loft, Körper teilen.",
         "Visualisieren": "Anzeigemodus, Farbe, Schnittansicht, Messen und Isolieren.",
         "Extrudieren": "Geschlossenen Skizzenbereich oder ebene Fläche antippen und am Pfeil ziehen bzw. Abstand eingeben.",
-        "Ebenen": "Browser wie in Fusion 360: Skizzen mit den Körpern daraus, Konstruktion und Bilder – ein- und ausblenden, wählen, bearbeiten.",
+        "Ebenen": "Browser wie in Fusion 360: Ordner für Skizzen, Körper, Blechteile, Konstruktion und Importe – ein- und ausblenden, wählen, bearbeiten.",
         // Skizzenwerkzeuge nach Fusion 360
         "Langloch": "Mitte zu Mitte: von einem Bogenmittelpunkt zum anderen ziehen, dann die Breite. Gesamt: von Ende zu Ende. Mittelpunkt: von der Mitte zu einem Bogenmittelpunkt.",
         "Mitte zu Mitte": "Langloch: Abstand der beiden Bogenmittelpunkte ziehen, dann die Breite.",
@@ -254,5 +254,12 @@ enum ToolTips {
         "Lassoauswahl": "Frei um Körper herumfahren: alles ganz Umschlossene wird gewählt. Lange drücken: zurück zum Rahmen.",
         "Abziehen": "Schneidet heraus: beim Extrudieren aus vorhandenen Körpern, in der Auswahl die übrigen Körper aus dem zuerst gewählten. Als Werkzeug: erst das Ziel, dann die Werkzeuge antippen – Vorschau zeigt das Ergebnis, Spiel macht die Aussparung etwas größer.",
         "Negativform": "Block mit Rand um einen Körper, der Körper wird mit Spiel herausgeschnitten – wahlweise in zwei Formhälften geteilt (Trennebene durch die Mitte). Der Körper bleibt erhalten.",
+        // Blech (Punkt 6)
+        "Blechteil aus Skizze": "Geschlossenen Bereich einer Skizze antippen: er wird ein flaches Blechteil mit der Dicke der Blechregel (Grundflansch).",
+        "Lasche": "Kante eines Blechteils antippen: dort wird eine Lasche angekantet – Länge am Pfeil oder als Zahl, Winkel im Panel (Kantenflansch). Ein Vollkörper lässt sich vorher in Blech umwandeln.",
+        "Profil biegen": "Offene Linien einer Skizze (z. B. Z- oder U-Profil) werden ein gebogenes Blechprofil: jede Linie eine Wand, jede Ecke eine Biegung (Konturflansch).",
+        // Blech (Punkt 9)
+        "Kanten": "Außenkante eines flachen Blechteils antippen und die Flankenlänge eingeben: an der gestrichelten Linie wird das vorhandene Blech hochgekantet (der Zuschnitt bleibt gleich). Außen- oder Innenmaß, Winkel und Richtung im Panel.",
+        "Kasten aus Maßen": "Assistent: fertige Länge × Breite (außen oder innen), Laschenhöhe für alle oder je Seite, Blechdicke und Biegeradius – ergibt einen gekanteten Kasten mit Eckfreischnitten. Danach auf Wunsch gleich die Abwicklung.",
     ]
 }

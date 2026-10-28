@@ -287,24 +287,16 @@ struct CommandValueRow: View {
     @Environment(\.variableValues) private var variables
     @State private var text = ""
     @State private var error: String?
-    @FocusState private var isFocused: Bool
+    /// Ziffernblock offen bzw. Textfeld aktiv (statt der großen Bildschirmtastatur)
+    @State private var isEditing = false
 
     var body: some View {
         PaletteLabeled(title: title) {
             PaletteFieldBox(isLocked: false, hasError: error != nil) {
-                TextField(title, text: $text)
-                    .focused($isFocused)
-                    .keyboardType(.numbersAndPunctuation)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                    .multilineTextAlignment(.trailing)
-                    .monospacedDigit()
-                    .onSubmit(commit)
-                    .onChange(of: isFocused) { _, focused in
-                        if !focused { commit() }
-                    }
+                KeypadField(title: title, text: $text, isEditing: $isEditing,
+                            unitSymbol: PaletteExpression.unitSymbol(unit), step: stepped, onCommit: commit)
                     .onChange(of: value) { _, newValue in
-                        if !isFocused { text = PaletteExpression.shown(newValue, unit: unit) }
+                        if !isEditing { text = PaletteExpression.shown(newValue, unit: unit) }
                     }
                     .onAppear {
                         text = PaletteExpression.shown(value, unit: unit)
@@ -326,8 +318,18 @@ struct CommandValueRow: View {
 
     private func takeFocusIfRequested(_ requested: String?) {
         guard requested == key else { return }
-        isFocused = true
+        isEditing = true
         command.focusKey = nil
+    }
+
+    /// Schritt um eine Einheit (Länge: eine Projekteinheit) vom eingegebenen Wert aus
+    private func stepped(_ direction: Int) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        let current: Double? = trimmed.isEmpty ? value
+            : (try? PaletteExpression.evaluate(trimmed, unit: unit, variables: variables))
+        guard let current else { return nil }
+        let size = unit == "mm" ? LengthUnit.current.millimeters : 1
+        return PaletteExpression.shown(current + Double(direction) * size, unit: unit)
     }
 
     private func commit() {

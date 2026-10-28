@@ -4,7 +4,7 @@ import SwiftUI
 // Kai: „Werkzeug angeklickt, und auf der rechten Seite kommen die Eigenschaften der Werkzeuge zu stehen.“
 // SolidCraft verteilt Palette (rechts) und Befehlsfenster (links); auf dem iPad liegt beides in einem Panel.
 // Aufbau: Kopf (Skizze, Freiheitsgrade, Balken) · Werkzeug bzw. Auswahl · Linientyp · Schalter · Mehr ·
-// fester Fuß („Skizze beenden“, „Ausrichten“, „Schnitt“). Die Mitte scrollt, Kopf und Fuß bleiben stehen.
+// fester Fuß („Ausrichten“, „Schnitt“). Die Mitte scrollt, Kopf und Fuß bleiben stehen.
 
 /// Das eine schlanke Fenster rechts im Skizzenmodus (Kai): oben Ansichtswürfel, Fang „U“ und die Ansichtsknöpfe
 /// der früheren Säule RightRail, darunter die Eigenschaften von Werkzeug bzw. Auswahl und der feste Fuß.
@@ -45,7 +45,7 @@ struct SketchPalette: View {
                 }
                 LineTypeSection(sketch: sketch, options: sketch.options)
                 PaletteRule()
-                PaletteToggles(sketch: sketch, options: sketch.options)
+                PaletteToggles(sketch: sketch)
                 PaletteRule()
                 PaletteMoreSection(sketch: sketch, options: sketch.options)
             }
@@ -330,22 +330,17 @@ private struct LineTypeSection: View {
 
 // MARK: Schalter
 
-/// Häufige Schalter als kompakte Zeilen, darunter der Konstruktionsmodus (SolidCraft `:453-465`). Eine Spalte:
-/// zu zweit nebeneinander brächen die Namen im schmalen Fenster um. Fang schaltet das „U“ oben.
+/// Häufige Schalter als kompakte Zeilen (SolidCraft `:453-465`). Eine Spalte: zu zweit nebeneinander brächen die
+/// Namen im schmalen Fenster um. Fang schaltet das „U“ oben. Konstruktion schaltet nur noch der Linientyp darüber
+/// (Kai: der eigene Schalter „Konstruktion (X)“ wirkte doppelt bzw. funktionslos).
 private struct PaletteToggles: View {
     @ObservedObject var sketch: SketchController
-    @ObservedObject var options: SketchToolOptions
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             CheckRow(title: "Bedingungen", isOn: $sketch.showsConstraintBadges)
             CheckRow(title: "Bemaßungen", isOn: $sketch.showsDimensions)
             CheckRow(title: "Punkte", isOn: $sketch.showsPoints)
-            CheckRow(title: "Konstruktion (X)", icon: "sc.construction",
-                     isOn: Binding(get: { sketch.constructionMode }, set: { on in
-                         sketch.constructionMode = on
-                         options.lineType = on ? .construction : .normal
-                     }))
         }
     }
 }
@@ -396,17 +391,14 @@ private struct PaletteMoreSection: View {
 
 // MARK: Fuß
 
-/// Fester Fuß: „Skizze beenden“, darunter „Ausrichten“ und „Schnitt“ nur als Symbol (SolidCraft `:477-495`).
+/// Fester Fuß: „Ausrichten“ und „Schnitt“ nur als Symbol (SolidCraft `:477-495`). Ohne „Skizze beenden“
+/// (Kai: zu leicht versehentlich angetippt) – beendet wird über den grünen Haken „Beenden“ links.
 private struct PaletteFooter: View {
     @ObservedObject var workspace: Workspace
     @ObservedObject var sketch: SketchController
 
     var body: some View {
         VStack(spacing: PaletteStyle.spacing) {
-            PrimaryWideButton(title: "Skizze beenden", systemImage: "checkmark") {
-                workspace.finishSketch()
-            }
-            .hoverTip("Skizze beenden", "Skizze speichern und zurück in den 3D-Modus.")
             HStack(spacing: PaletteStyle.spacing) {
                 PrimaryWideButton(title: "Ausrichten", systemImage: "cube.transparent", isPrimary: false, showsTitle: false) {
                     workspace.send(.alignToSketchPlane)

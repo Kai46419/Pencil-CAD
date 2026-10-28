@@ -28,7 +28,7 @@ enum SheetUIOverlay {
                     perPoint: Double) {
         guard let cmd = workspace.command, cmd.editing == nil else { return }
         switch cmd.id {
-        case .sheetFlange:
+        case .sheetFlange, .sheetBaseFlange, .sheetEdgeFlange, .sheetContourFlange:
             addEdges(SheetEdgePicks.list(cmd, SheetFlangeDriver.edgesKey), to: &groups)
             addSketchLines(cmd, model, to: &groups)
         case .sheetPathFlange:
@@ -37,6 +37,10 @@ enum SheetUIOverlay {
         case .sheetHem:
             addEdges(SheetEdgePicks.list(cmd, SheetHemDriver.edgesKey), to: &groups)
         case .sheetFold:
+            addSketchLines(cmd, model, to: &groups)
+        case .sheetKanten:
+            // Gewählte Kanten und gestrichelte Biegelinien (Punkt 9); Biegelinie aus Skizze wie bei Falten
+            groups += SheetKantenDriver.overlay(cmd, model, perPoint: perPoint)
             addSketchLines(cmd, model, to: &groups)
         case .sheetConvert:
             addConvert(cmd, model, to: &groups, fills: &fills, perPoint: perPoint)

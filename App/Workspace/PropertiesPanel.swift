@@ -295,12 +295,15 @@ struct PropertiesPanel: View {
             Text(label)
                 .foregroundStyle(.secondary)
             Spacer(minLength: 4)
-            TextField(label, value: value, format: .number.precision(.fractionLength(0...digits)))
-                .keyboardType(.decimalPad)
-                .multilineTextAlignment(.trailing)
-                .monospacedDigit()
-                .textFieldStyle(.roundedBorder)
+            // Kleiner Ziffernblock am Feld statt der Bildschirmtastatur
+            KeypadNumberField(title: label, value: value, digits: digits, unitSymbol: unit)
+                .padding(.horizontal, 6)
                 .frame(width: 64)
+                .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 6))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color(.separator), lineWidth: 0.5)
+                }
             Text(unit)
                 .foregroundStyle(.secondary)
                 .frame(width: 38, alignment: .leading)
@@ -352,6 +355,10 @@ struct PropertiesPanel: View {
         if let box = model.mesh.bounds(ofBody: body) {
             let size = SIMD3<Double>(box.max - box.min)
             rows.append(.init(label: "L × B × H", value: "\(unit.number(size.x)) × \(unit.number(size.y)) × \(unit.format(size.z))"))
+        }
+        // Blechteil: Dicke, Außenmaße gekantet, Zuschnitt aus dem Flachmuster (Punkt 9, SheetUIKanten.swift)
+        for row in model.sheetPropertyRows(body) {
+            rows.append(.init(label: row.label, value: row.value))
         }
         let volume = model.volume(ofBody: body)
         if volume > 0 {

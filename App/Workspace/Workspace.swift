@@ -1221,7 +1221,9 @@ final class Workspace: ObservableObject {
 
     /// Ob „Abbrechen/Fertig“ angezeigt werden.
     var showsDoneBar: Bool {
-        if sketch.isActive { return true }
+        // Skizze: erst zeigen, wenn in dieser Sitzung gezeichnet/geändert wurde (vorher nur Ablenkung).
+        // Bei der Ebenenwahl bleibt „Abbrechen“ der Weg zurück ins Modell.
+        if sketch.isActive { return sketch.isChoosingPlane || sketch.hasSessionChanges }
         // Offener Befehl: OK/Abbrechen im Panel bzw. in der Ecke (CornerConfirm.swift)
         if command != nil { return false }
         return tool != .select || model.hasPreview
