@@ -747,7 +747,8 @@ final class ViewportView: MTKView {
             groups.append(LineGroup(polylines: stored.lines.map(move),
                                     color: sketching ? Self.otherSketchInk : Self.storedSketchInk,
                                     width: 1.8, onTop: false))
-            if !stored.constructionLines.isEmpty {
+            // Konstruktionslinien (gestrichelte Hilfslinien) nur im Skizzenmodus; im Modell stören sie (Kai)
+            if sketch.isActive, !stored.constructionLines.isEmpty {
                 groups.append(LineGroup(polylines: stored.constructionLines.flatMap { dashed(move($0), dash: Float(4 * perPoint)) },
                                         color: Self.constructionGray, width: 1.2, onTop: false))
             }
