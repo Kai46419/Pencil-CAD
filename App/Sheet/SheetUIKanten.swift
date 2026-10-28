@@ -451,6 +451,11 @@ enum SheetKantenDriver: MainCommandDriver {
             model.dropPreview()
             return "Kanten: Kante eines Blechteils antippen."
         }
+        // Entfaltet: die Anzeige liegt flach, SolidCraft nicht (Kontrolle Punkt 11)
+        guard !SheetUnfoldedGuard.isUnfolded(body, model) else {
+            model.dropPreview()
+            return SheetUnfoldedGuard.message
+        }
         guard cmd.previewEnabled else {
             model.dropPreview()
             return nil
@@ -551,6 +556,7 @@ private struct SheetKantenRows: View {
             SheetUnavailableRow(model: model)
             SheetToolPreview(sketch: .kanten)
             SheetConvertQuestionRow(workspace: workspace, model: model, state: state)
+            SheetUnfoldedRow(workspace: workspace, model: model, target: unfoldedTarget)
             CommandSegmentRow(title: "Biegelinie", options: SheetKantenDriver.modes, selected: mode) { id in
                 cmd.choices["mode"] = id
                 CommandCache.refreshNow(cmd, workspace)
@@ -613,6 +619,14 @@ private struct SheetKantenRows: View {
         if let text = lineText {
             SheetInfoRow(title: "Biegelinie", text: text)
         }
+    }
+
+    /// Gemeinter Körper für den Hinweis „entfaltet“: gewählte Kante bzw. Körper der Biegelinie
+    private var unfoldedTarget: Int? {
+        if let body = SheetKantenDriver.list(cmd).first?.body { return body }
+        guard cmd.option("mode", default: "edge") == "line", let sketch = SheetLines.sketch(cmd, model) else { return nil }
+        if let source = model.sketches[sketch].plane.sourceBody, model.isSheetBody(source) { return source }
+        return SheetUI.targetSheetBody(model)
     }
 
     /// Lage der Biegelinie im flachen Blech (Abstand der Biegemitte zur Kante) und Biegezugabe

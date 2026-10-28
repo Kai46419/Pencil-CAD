@@ -279,6 +279,11 @@ enum SheetFlangeDriver: SheetEditableDriver {
                 return fixedKind(cmd.id) == .edge ? "Lasche: Kante eines Blechteils antippen."
                     : "Kantenflansch: Kanten eines Blechkörpers antippen."
             }
+            // Entfaltet: die Anzeige liegt flach, SolidCraft nicht (Kontrolle Punkt 11)
+            guard !SheetUnfoldedGuard.isUnfolded(body, model) else {
+                model.dropPreview()
+                return SheetUnfoldedGuard.message
+            }
             let height = cmd.number("height", default: 10)
             guard height > 0 else {
                 model.dropPreview()
@@ -491,6 +496,8 @@ private struct SheetFlangeRows: View {
                 SheetInfoRow(title: "Typ", text: kind.title)
             }
             SheetConvertQuestionRow(workspace: workspace, model: model, state: state)
+            SheetUnfoldedRow(workspace: workspace, model: model,
+                             target: SheetEdgePicks.list(cmd, SheetFlangeDriver.edgesKey).first?.body)
             switch kind {
             case .edge:
                 edgeRows
@@ -736,6 +743,11 @@ enum SheetPathFlangeDriver: SheetEditableDriver {
             model.dropPreview()
             return nil
         }
+        // Entfaltet: die Anzeige liegt flach, SolidCraft nicht (Kontrolle Punkt 11)
+        guard !SheetUnfoldedGuard.isUnfolded(pick.body, model) else {
+            model.dropPreview()
+            return SheetUnfoldedGuard.message
+        }
         guard let path = chain(cmd, model) else {
             model.dropPreview()
             return "Der Pfad muss eine zusammenhängende offene Linienkette sein."
@@ -781,6 +793,8 @@ private struct SheetPathFlangeRows: View {
             SheetUnavailableRow(model: model)
             SheetToolPreview(sketch: .pathFlange)
             SheetConvertQuestionRow(workspace: workspace, model: model, state: state)
+            SheetUnfoldedRow(workspace: workspace, model: model,
+                             target: SheetEdgePicks.list(cmd, SheetPathFlangeDriver.edgeKey).first?.body)
             SheetLinePicker(title: "Pfad", cmd: cmd, workspace: workspace, model: model, chains: true)
             SheetInfoRow(title: "Flansche", text: lengths)
             PaletteHint(text: "Durch die Linien der Skizze festgelegt.")
@@ -846,6 +860,11 @@ enum SheetHemDriver: SheetEditableDriver {
             model.dropPreview()
             return nil
         }
+        // Entfaltet: die Anzeige liegt flach, SolidCraft nicht (Kontrolle Punkt 11)
+        guard !SheetUnfoldedGuard.isUnfolded(body, model) else {
+            model.dropPreview()
+            return SheetUnfoldedGuard.message
+        }
         let length = cmd.number("length", default: 5)
         guard length > 0 else {
             model.dropPreview()
@@ -880,6 +899,8 @@ private struct SheetHemRows: View {
             SheetUnavailableRow(model: model)
             SheetToolPreview(sketch: .hem)
             SheetConvertQuestionRow(workspace: workspace, model: model, state: state)
+            SheetUnfoldedRow(workspace: workspace, model: model,
+                             target: SheetEdgePicks.list(cmd, SheetHemDriver.edgesKey).first?.body)
             SheetInfoRow(title: "Typ", text: "Flach")
             CommandValueRow(title: "Länge", key: "length", command: cmd, value: cmd.number("length", default: 5)) {
                 cmd.putNumber("length", max(0.01, $0))
@@ -976,6 +997,11 @@ enum SheetFoldDriver: SheetEditableDriver {
             model.dropPreview()
             return "Kein Blechkörper im Projekt."
         }
+        // Entfaltet: die Anzeige liegt flach, SolidCraft nicht (Kontrolle Punkt 11)
+        guard !SheetUnfoldedGuard.isUnfolded(body, model) else {
+            model.dropPreview()
+            return SheetUnfoldedGuard.message
+        }
         guard cmd.previewEnabled else {
             model.dropPreview()
             return nil
@@ -1009,6 +1035,8 @@ private struct SheetFoldRows: View {
         VStack(alignment: .leading, spacing: PaletteStyle.spacing) {
             SheetUnavailableRow(model: model)
             SheetToolPreview(sketch: .fold)
+            SheetUnfoldedRow(workspace: workspace, model: model,
+                             target: SheetLines.sketch(cmd, model).flatMap { SheetFoldDriver.body(cmd, model, sketch: $0) })
             SheetLinePicker(title: "Biegelinie", cmd: cmd, workspace: workspace, model: model, single: true)
             SheetMenuRow(title: "Position der Biegelinie", options: SheetFoldDriver.positions,
                          selected: cmd.option("position", default: "centerline")) { id in

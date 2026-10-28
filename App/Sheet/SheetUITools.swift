@@ -486,3 +486,46 @@ private struct SheetSketchPainter {
         }
     }
 }
+
+// MARK: - Entfaltetes Teil (Kontrolle Punkt 11)
+
+/// Ein entfalteter Blechkörper wird seit Punkt 11 nur in der Anzeige flach auf Z = 0 gelegt; die SolidCraft-Sitzung
+/// behält die alte Lage. Werkzeuge, die Weltpunkte aus der Anzeige an SolidCraft geben (Kantenpunkte: Lasche,
+/// Umkantung, Pfadflansch, Kanten; Linien auf dem Flachteil: Falten), zielten dann daneben. Sie rechnen deshalb nicht,
+/// sondern zeigen den Hinweis mit Knopf „Wieder falten“. Wieder falten, Perforieren und Exporte bleiben erlaubt.
+@MainActor
+enum SheetUnfoldedGuard {
+    static let message = "Das Teil ist entfaltet – erst „Wieder falten“, dann kanten."
+
+    static func isUnfolded(_ body: Int?, _ model: ModelStore) -> Bool {
+        guard let body else { return false }
+        return model.sheetInfo(body)?.isUnfolded ?? false
+    }
+
+    /// „Wieder falten“ für diesen Körper starten (schließt das offene Werkzeug)
+    static func refold(_ body: Int, _ ws: Workspace) {
+        guard ws.model.bodies.indices.contains(body) else { return }
+        ws.model.selectBodies([body])
+        SheetUI.start(.sheetRefold, ws)
+    }
+}
+
+/// Hinweis im Panel, solange der gemeinte Körper entfaltet ist, mit Knopf „Wieder falten“.
+struct SheetUnfoldedRow: View {
+    let workspace: Workspace
+    @ObservedObject var model: ModelStore
+    /// Gemeinter Blechkörper (nil = keiner gewählt)
+    let target: Int?
+
+    var body: some View {
+        if let target, SheetUnfoldedGuard.isUnfolded(target, model) {
+            VStack(alignment: .leading, spacing: PaletteStyle.spacing) {
+                SheetWarningRow(text: SheetUnfoldedGuard.message)
+                PrimaryWideButton(title: "Wieder falten", systemImage: "arrow.uturn.up", isPrimary: true) {
+                    SheetUnfoldedGuard.refold(target, workspace)
+                }
+                .accessibilityLabel("Teil wieder falten")
+            }
+        }
+    }
+}
