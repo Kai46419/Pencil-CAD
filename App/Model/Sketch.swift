@@ -682,6 +682,12 @@ final class SketchController: ObservableObject {
     var hasProfile: Bool { !regions.isEmpty }
     var isEmpty: Bool { entities.isEmpty && !isInProgress }
     var canUndo: Bool { !undoStack.isEmpty || isInProgress || offsetTarget != nil }
+    /// In dieser Skizzensitzung wurde etwas gezeichnet oder geändert bzw. eine Eingabe läuft (Kai: „Abbrechen“
+    /// und „Fertig“ unten nur dann zeigen). Jede Änderung legt vorher einen Stand auf den Rückgängig-Stapel
+    /// (`remember()`); der Stapel beginnt mit jeder Sitzung leer (`load`/`reset`). Alles zurückgenommen = nichts geändert.
+    var hasSessionChanges: Bool {
+        !undoStack.isEmpty || isInProgress || offsetTarget != nil || textDeformMode != nil
+    }
     var isInProgress: Bool {
         dragStart != nil || hasOpenChain || arcChord != nil || !splinePoints.isEmpty || rectangleBase != nil
             || stepBase != nil || !click.isEmpty || click.press != nil
