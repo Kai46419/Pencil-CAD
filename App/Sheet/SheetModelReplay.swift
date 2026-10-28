@@ -66,6 +66,8 @@ extension ModelStore {
         // Entfaltet: Mitte des gefalteten Teils vor dem letzten Entfalten (Ablage an derselben Stelle, Punkt 11)
         let lastUnfold = info.isUnfolded ? info.steps.lastIndex(where: { $0.command.command == "sheet.unfold" }) : nil
         var foldedCenter: SIMD2<Double>?
+        // Verschiebungen des entfalteten Teils (solid.move nach dem Entfalten) kommen auf die Ablage obendrauf
+        var movedAfterUnfold = SIMD3<Double>(0, 0, 0)
         for (index, step) in info.steps.enumerated() {
             let command = sheetResolved(step.command, aliases: aliases, info: info, directory: directory)
             if index == lastUnfold {
@@ -73,6 +75,10 @@ extension ModelStore {
                 if let box = (try? kernel.shape(of: folded))?.boundingBox?.map(\.doubleValue), box.count == 6 {
                     foldedCenter = SIMD2((box[0] + box[3]) / 2, (box[1] + box[4]) / 2)
                 }
+            }
+            if let lastUnfold, index > lastUnfold, step.command.command == "solid.move",
+               step.command.params["copy"]?.asBool != true, let moved = step.command.params["translate"]?.asPoint3 {
+                movedAfterUnfold += moved
             }
             let result: SheetJSON
             do {
@@ -92,7 +98,7 @@ extension ModelStore {
         }
         let name = aliases[info.kernelBody] ?? info.kernelBody
         var shape = try kernel.shape(of: name)
-        if info.isUnfolded { shape = sheetLaidFlat(shape, center: foldedCenter) }
+        if info.isUnfolded { shape = sheetLaidFlat(shape, center: foldedCenter, lift: movedAfterUnfold) }
         return SheetReplayResult(shape: shape, kernel: kernel, bodyName: name, warnings: warnings)
     }
 
@@ -101,7 +107,9 @@ extension ModelStore {
     /// Die größte ebene Fläche wird nach unten gedreht (Normale −Z, Z ist oben), die Unterseite liegt bei Z = 0 und
     /// die Mitte in X/Y auf center (Mitte des gefalteten Teils; nil = eigene Mitte bleibt). Nur die Anzeige wird
     /// gedreht/verschoben, die Sitzung behält ihre Lage (Flachmuster, DXF und Zurückfalten bleiben unverändert).
-    nonisolated static func sheetLaidFlat(_ shape: PCKShape, center: SIMD2<Double>?) -> PCKShape {
+    /// lift = Verschiebung durch den Nutzer nach dem Entfalten (sonst spränge das Teil beim nächsten Schritt zurück).
+    nonisolated static func sheetLaidFlat(_ shape: PCKShape, center: SIMD2<Double>?,
+                                          lift: SIMD3<Double> = SIMD3(0, 0, 0)) -> PCKShape {
         // Größte ebene Fläche; bei gleich großen Gegenflächen (Ober-/Unterseite) die, die schon am meisten nach unten zeigt
         var faces: [(area: Double, normal: SIMD3<Double>)] = []
         if shape.faceCount > 0 {
@@ -128,8 +136,8 @@ extension ModelStore {
             }
         }
         guard let box = result.boundingBox?.map(\.doubleValue), box.count == 6 else { return result }
-        let target = center ?? SIMD2((box[0] + box[3]) / 2, (box[1] + box[4]) / 2)
-        let offset = SIMD3(target.x - (box[0] + box[3]) / 2, target.y - (box[1] + box[4]) / 2, -box[2])
+        let target = (center ?? SIMD2((box[0] + box[3]) / 2, (box[1] + box[4]) / 2)) + SIMD2(lift.x, lift.y)
+        let offset = SIMD3(target.x - (box[0] + box[3]) / 2, target.y - (box[1] + box[4]) / 2, -box[2] + lift.z)
         guard simd_length(offset) > 1e-9 else { return result }
         return result.translated(by: offset) ?? result
     }
