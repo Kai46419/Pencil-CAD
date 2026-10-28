@@ -254,5 +254,9 @@ enum ToolTips {
         "Lassoauswahl": "Frei um Körper herumfahren: alles ganz Umschlossene wird gewählt. Lange drücken: zurück zum Rahmen.",
         "Abziehen": "Schneidet heraus: beim Extrudieren aus vorhandenen Körpern, in der Auswahl die übrigen Körper aus dem zuerst gewählten. Als Werkzeug: erst das Ziel, dann die Werkzeuge antippen – Vorschau zeigt das Ergebnis, Spiel macht die Aussparung etwas größer.",
         "Negativform": "Block mit Rand um einen Körper, der Körper wird mit Spiel herausgeschnitten – wahlweise in zwei Formhälften geteilt (Trennebene durch die Mitte). Der Körper bleibt erhalten.",
+        // Blech (Punkt 6)
+        "Blechteil aus Skizze": "Geschlossenen Bereich einer Skizze antippen: er wird ein flaches Blechteil mit der Dicke der Blechregel (Grundflansch).",
+        "Lasche": "Kante eines Blechteils antippen: dort wird eine Lasche angekantet – Länge am Pfeil oder als Zahl, Winkel im Panel (Kantenflansch). Ein Vollkörper lässt sich vorher in Blech umwandeln.",
+        "Profil biegen": "Offene Linien einer Skizze (z. B. Z- oder U-Profil) werden ein gebogenes Blechprofil: jede Linie eine Wand, jede Ecke eine Biegung (Konturflansch).",
     ]
 }

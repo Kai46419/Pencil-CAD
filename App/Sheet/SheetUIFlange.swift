@@ -4,7 +4,9 @@ import simd
 // Blech › ERSTELLEN nach SolidCraft (dialogs_sheet.rs `Sm::Flange`, `Sm::Path`, `Sm::Hem`, `Sm::Fold`,
 // `Sm::Perforate`; Beschriftungen aus assets/locales/de.json bzw. SheetKit/COMMANDS.md):
 // - Flansch: Grundflansch (Skizzenbereich), Kantenflansch (Kanten eines Blechkörpers) oder Konturflansch (offene
-//   Linien einer Skizze) – die Auswahl entscheidet den Typ, wie in SolidCraft.
+//   Linien einer Skizze) – die Auswahl entscheidet den Typ, wie in SolidCraft. Im Ribbon stehen dafür drei eigene
+//   Werkzeuge mit festem Typ (Punkt 6, Kai: „Flansch verstehe ich nicht“): „Blechteil aus Skizze“, „Lasche“ und
+//   „Profil biegen“ (SheetFlangeVariant, SheetUITools.swift); SheetFlangeDriver ist ihre gemeinsame Umsetzung.
 // - Pfadflansch, Umkantung, Falten, Perforieren.
 // Vorschau über die Modell-API (preview: true), OK übernimmt sie (LegacyFinish.commit → commitPreview).
 
@@ -87,19 +89,62 @@ enum SheetFlangeDriver: SheetEditableDriver {
                                SheetOption("rectangular", "Rechteckig"), SheetOption("tear", "Reißen")]
 
     @MainActor static func kind(_ cmd: ModelCommand) -> SheetFlangeKind {
+        // Eigene Werkzeuge (Blechteil aus Skizze, Lasche, Profil biegen): Typ fest
+        if let fixed = fixedKind(cmd.id) { return fixed }
         if cmd.items(inputID).contains(where: SheetPick.isEdge) { return .edge }
         if !SheetLines.selected(cmd).isEmpty { return .contour }
         return .base
     }
 
+    /// Fester Typ der eigenen Werkzeuge; nil = Typ folgt der Auswahl (Flansch wie SolidCraft)
+    nonisolated static func fixedKind(_ id: ModelCommandID) -> SheetFlangeKind? {
+        switch id {
+        case .sheetBaseFlange: return .base
+        case .sheetEdgeFlange: return .edge
+        case .sheetContourFlange: return .contour
+        default: return nil
+        }
+    }
+
+    /// Typ eines aufgezeichneten sheet.flange (wie SheetEdit.fields)
+    nonisolated static func kind(of command: SheetCommand) -> SheetFlangeKind {
+        let p = command.params
+        switch p["type"]?.asString ?? (p["edges"] != nil ? "edge" : p["curves"] != nil ? "contour" : "base") {
+        case "edge": return .edge
+        case "contour": return .contour
+        default: return .base
+        }
+    }
+
     @MainActor static func build(_ ws: Workspace) -> ModelCommand {
+        buildCommand(ws, id: id)
+    }
+
+    /// Befehl anlegen; commandID bestimmt den festen Typ (fixedKind) bzw. den freien Flansch.
+    @MainActor static func buildCommand(_ ws: Workspace, id commandID: ModelCommandID) -> ModelCommand {
         let pre = Preselection(ws.model)
         let model = ws.model
-        var items: [Pick] = pre.regions.map { Pick.region($0) }
-        let input = PickInput(id: inputID, title: "Profil / Kanten", accepts: [.regions, .edges], multiple: true,
+        let fixed = fixedKind(commandID)
+        var items: [Pick] = fixed == nil || fixed == .base ? pre.regions.map { Pick.region($0) } : []
+        let input: PickInput
+        switch fixed {
+        case .base:
+            input = PickInput(id: inputID, title: "Skizzenbereich", accepts: [.regions], multiple: true, items: [],
+                              hint: "Geschlossenen Bereich einer Skizze antippen – er wird ein flaches Blechteil mit "
+                                  + "der Dicke der Regel.")
+        case .edge:
+            input = PickInput(id: inputID, title: "Kante", accepts: [.edges], multiple: true, items: [],
+                              hint: "Kante eines Blechteils antippen – dort wird die Lasche angekantet.")
+        case .contour:
+            input = PickInput(id: inputID, title: "Skizze", accepts: [.regions], multiple: false, items: [],
+                              hint: "Offene Linien einer Skizze unten wählen (oder einen Bereich der Skizze antippen).",
+                              isOptional: true)
+        case nil:
+            input = PickInput(id: inputID, title: "Profil / Kanten", accepts: [.regions, .edges], multiple: true,
                               items: [], hint: "Bereich einer Skizze (Grundflansch) oder Kanten eines Blechkörpers "
                                   + "(Kantenflansch) antippen; offene Linien (Konturflansch) unten wählen.")
-        let cmd = ModelCommand(id, inputs: [input])
+        }
+        let cmd = ModelCommand(commandID, inputs: [input])
         cmd.putNumber("height", 10)
         cmd.putNumber("angle", 90)
         cmd.putNumber("distance", 20)
@@ -107,8 +152,16 @@ enum SheetFlangeDriver: SheetEditableDriver {
         cmd.choices["heightFrom"] = "outer"
         cmd.choices["relief"] = ""
         cmd.choices["rule"] = ""
+        if fixed == .contour {
+            // Profil biegen: Skizze des gewählten Bereichs, sonst die jüngste mit offenen Linien; deren Kette vorwählen
+            let sketch = pre.regions.first?.sketch
+                ?? model.sketches.indices.last(where: { !SheetLines.lines(model, sketch: $0).isEmpty })
+            if let sketch { chooseContourSketch(sketch, cmd, model) }
+            model.resetSelection()
+            return cmd
+        }
         // Vorauswahl: gewählte Kanten eines Blechkörpers werden Kantenflansch
-        let sheetEdges = pre.edges.filter { model.isSheetBody($0.body) }
+        let sheetEdges = fixed == .base ? [] : pre.edges.filter { model.isSheetBody($0.body) }
         if !sheetEdges.isEmpty {
             items = []
             var picks: [SheetEdgePick] = []
@@ -120,19 +173,75 @@ enum SheetFlangeDriver: SheetEditableDriver {
             SheetEdgePicks.store(picks, cmd, edgesKey, inputID: inputID)
         } else {
             cmd.setItems(inputID, items)
+            // Lasche mit gewähltem Vollkörper: gleich fragen, ob er Blech werden soll
+            if fixed == .edge, let solid = pre.anyBodies.first(where: { !model.isSheetBody($0) }) {
+                SheetConvertQuestion.ask(solid, cmd, model)
+            }
         }
         model.resetSelection()
         return cmd
     }
 
+    /// Profil biegen: Skizze für die Linien wählen und, wenn ihre Linien eine offene Kette bilden, diese vorwählen.
+    @MainActor static func chooseContourSketch(_ sketch: Int, _ cmd: ModelCommand, _ model: ModelStore) {
+        guard model.sketches.indices.contains(sketch) else { return }
+        cmd.choices["lineSketch"] = String(sketch)
+        let lines = SheetLines.lines(model, sketch: sketch)
+        guard let first = lines.first else {
+            SheetLines.setSelected([], cmd)
+            return
+        }
+        let chain = SheetLines.connectedChain(lines, from: first.entity)
+        let ordered = SheetLines.orderedChain(lines, selected: chain, plane: model.sketches[sketch].plane, start: nil)
+        SheetLines.setSelected(ordered == nil ? [] : chain, cmd)
+    }
+
     @MainActor static func tapped(_ tap: CommandTap, _ cmd: ModelCommand, _ ws: Workspace) -> Bool {
         guard cmd.editing == nil else { return false }
         let model = ws.model
+        switch fixedKind(cmd.id) {
+        case .contour:
+            // Bereich antippen wählt dessen Skizze für die Linien
+            if let region = tap.region {
+                chooseContourSketch(region.sketch, cmd, model)
+                ws.refreshCommandPreview()
+                ws.objectWillChange.send()
+                return true
+            }
+            if !tap.isEmpty { model.message = "Profil biegen: offene Linien einer Skizze im Panel wählen." }
+            return true
+        case .base:
+            guard tap.region == nil else { return false }
+            if !tap.isEmpty {
+                model.message = "Blechteil aus Skizze: geschlossenen Bereich einer Skizze antippen – an einem vorhandenen "
+                    + "Blechteil setzt „Lasche“ an."
+            }
+            return true
+        case .edge:
+            if let edge = tap.edge, !model.isSheetBody(edge.body) {
+                SheetConvertQuestion.ask(edge.body, cmd, model)
+                return true
+            }
+            if tap.edge == nil {
+                if let face = tap.face, !model.isSheetBody(face.body) {
+                    SheetConvertQuestion.ask(face.body, cmd, model)
+                } else if !tap.isEmpty {
+                    model.message = tap.region != nil
+                        ? "Lasche: Kante eines Blechteils antippen – ein neues Blechteil aus einer Skizze macht "
+                            + "„Blechteil aus Skizze“."
+                        : "Lasche: eine Kante des Blechteils antippen, nicht die Fläche."
+                }
+                return true
+            }
+        case nil:
+            break
+        }
         if let edge = tap.edge {
             guard model.isSheetBody(edge.body) else {
                 model.message = "Kantenflansch: Kante eines Blechkörpers antippen (erst Grundflansch oder „In Blech umwandeln“)."
                 return true
             }
+            SheetConvertQuestion.clear(cmd)
             // Kanten machen einen Kantenflansch: Bereiche und Linien gelten nicht mehr
             CommandPicks.setItems(cmd.items(inputID).filter(SheetPick.isEdge), cmd, inputID)
             SheetLines.setSelected([], cmd)
@@ -167,7 +276,8 @@ enum SheetFlangeDriver: SheetEditableDriver {
             }
             guard model.isSheetBody(body) else {
                 model.dropPreview()
-                return "Kantenflansch: Kanten eines Blechkörpers antippen."
+                return fixedKind(cmd.id) == .edge ? "Lasche: Kante eines Blechteils antippen."
+                    : "Kantenflansch: Kanten eines Blechkörpers antippen."
             }
             let height = cmd.number("height", default: 10)
             guard height > 0 else {
@@ -349,31 +459,47 @@ enum SheetFlangeDriver: SheetEditableDriver {
     }
 
     @MainActor static func panel(_ cmd: ModelCommand, _ ws: Workspace) -> AnyView {
-        AnyView(SheetFlangeRows(cmd: cmd, workspace: ws, model: ws.model, document: ws.model.sheetDocument))
+        AnyView(SheetFlangeRows(cmd: cmd, workspace: ws, model: ws.model, document: ws.model.sheetDocument,
+                                state: SheetCommandState.of(cmd)))
     }
 }
 
 /// Zeilen des Flanschs wie SolidCraft: Typ · (Kante) Höhe, Winkel, Biegeposition, Höhe ab, Weitere Biegungen,
 /// ERWEITERT (Biegeradius, Eckenentlastung, Pro Kante) · (Kontur) Abstand, Regel · (Grund) Regel · Optionen.
+/// Eigene Werkzeuge (fester Typ): Mini-Vorschaubild statt „Typ“, Frage „In Blech umwandeln?“ bei der Lasche.
 private struct SheetFlangeRows: View {
     @ObservedObject var cmd: ModelCommand
     let workspace: Workspace
     @ObservedObject var model: ModelStore
     @ObservedObject var document: SheetDocument
+    @ObservedObject var state: SheetCommandState
 
     private static let wayOptions = [CommandChoice(id: "same", title: "Gleiche Richtung"),
                                      CommandChoice(id: "other", title: "Entgegengesetzte Richtung")]
+    /// Lasche: häufige Winkel mit einem Tippen
+    private static let quickAngles = [CommandChoice(id: "45", title: "45°"), CommandChoice(id: "90", title: "90°"),
+                                      CommandChoice(id: "135", title: "135°")]
 
     var body: some View {
         let kind = SheetFlangeDriver.kind(cmd)
+        let fixed = SheetFlangeDriver.fixedKind(cmd.id)
         VStack(alignment: .leading, spacing: PaletteStyle.spacing) {
             SheetUnavailableRow(model: model)
-            SheetInfoRow(title: "Typ", text: kind.title)
+            if let fixed {
+                SheetToolPreview(sketch: SheetToolSketch(fixed))
+            } else {
+                SheetInfoRow(title: "Typ", text: kind.title)
+            }
+            SheetConvertQuestionRow(workspace: workspace, model: model, state: state)
             switch kind {
             case .edge:
                 edgeRows
             case .contour:
-                CommandValueRow(title: "Abstand", key: "distance", command: cmd, value: cmd.number("distance", default: 20)) {
+                if fixed == .contour {
+                    SheetLinePicker(title: "Skizze", cmd: cmd, workspace: workspace, model: model)
+                }
+                CommandValueRow(title: fixed == .contour ? "Breite" : "Abstand", key: "distance", command: cmd,
+                                value: cmd.number("distance", default: 20)) {
                     cmd.putNumber("distance", max(0.01, $0))
                     CommandCache.refreshNow(cmd, workspace)
                 }
@@ -381,12 +507,14 @@ private struct SheetFlangeRows: View {
             case .base:
                 SheetRuleMenuRow(cmd: cmd, document: document, workspace: workspace)
             }
-            PaletteSection("Konturflansch", detail: "Offene Linien einer Skizze", expanded: kind == .contour) {
-                SheetLinePicker(title: "Skizze", cmd: cmd, workspace: workspace, model: model) {
-                    // Linien machen einen Konturflansch: Bereiche und Kanten gelten nicht mehr
-                    if !SheetLines.selected(cmd).isEmpty {
-                        SheetEdgePicks.store([], cmd, SheetFlangeDriver.edgesKey, inputID: SheetFlangeDriver.inputID)
-                        CommandPicks.setItems([], cmd, SheetFlangeDriver.inputID)
+            if fixed == nil {
+                PaletteSection("Konturflansch", detail: "Offene Linien einer Skizze", expanded: kind == .contour) {
+                    SheetLinePicker(title: "Skizze", cmd: cmd, workspace: workspace, model: model) {
+                        // Linien machen einen Konturflansch: Bereiche und Kanten gelten nicht mehr
+                        if !SheetLines.selected(cmd).isEmpty {
+                            SheetEdgePicks.store([], cmd, SheetFlangeDriver.edgesKey, inputID: SheetFlangeDriver.inputID)
+                            CommandPicks.setItems([], cmd, SheetFlangeDriver.inputID)
+                        }
                     }
                 }
             }
@@ -402,13 +530,23 @@ private struct SheetFlangeRows: View {
     }
 
     @ViewBuilder private var edgeRows: some View {
-        CommandValueRow(title: "Höhe", key: "height", command: cmd, value: cmd.number("height", default: 10)) {
+        let isTab = SheetFlangeDriver.fixedKind(cmd.id) == .edge
+        CommandValueRow(title: isTab ? "Länge" : "Höhe", key: "height", command: cmd,
+                        value: cmd.number("height", default: 10)) {
             cmd.putNumber("height", max(0.01, $0))
             CommandCache.refreshNow(cmd, workspace)
         }
         CommandValueRow(title: "Winkel", key: "angle", command: cmd, unit: "°", value: cmd.number("angle", default: 90)) {
             cmd.putNumber("angle", $0)
             CommandCache.refreshNow(cmd, workspace)
+        }
+        if isTab {
+            let angle = cmd.number("angle", default: 90)
+            CommandSegmentRow(title: "Schnellwahl", options: Self.quickAngles,
+                              selected: Self.quickAngles.first(where: { abs((Double($0.id) ?? 0) - angle) < 1e-6 })?.id ?? "") { id in
+                cmd.putNumber("angle", Double(id) ?? 90)
+                CommandCache.refreshNow(cmd, workspace)
+            }
         }
         SheetMenuRow(title: "Biegeposition", options: SheetFlangeDriver.positions,
                      selected: cmd.option("position", default: "inside")) { id in
@@ -567,9 +705,11 @@ enum SheetPathFlangeDriver: SheetEditableDriver {
     @MainActor static func tapped(_ tap: CommandTap, _ cmd: ModelCommand, _ ws: Workspace) -> Bool {
         guard cmd.editing == nil, let edge = tap.edge else { return false }
         guard ws.model.isSheetBody(edge.body) else {
-            ws.model.message = "Pfadflansch: Kante eines Blechkörpers antippen."
+            // Vollkörper: fragen, ob er Blech werden soll (statt Fehlermeldung)
+            SheetConvertQuestion.ask(edge.body, cmd, ws.model)
             return true
         }
+        SheetConvertQuestion.clear(cmd)
         SheetEdgePicks.toggle(edge, cmd, ws, key: edgeKey, inputID: "edge", single: true)
         ws.refreshCommandPreview()
         ws.objectWillChange.send()
@@ -617,7 +757,7 @@ enum SheetPathFlangeDriver: SheetEditableDriver {
     }
 
     @MainActor static func panel(_ cmd: ModelCommand, _ ws: Workspace) -> AnyView {
-        AnyView(SheetPathFlangeRows(cmd: cmd, workspace: ws, model: ws.model))
+        AnyView(SheetPathFlangeRows(cmd: cmd, workspace: ws, model: ws.model, state: SheetCommandState.of(cmd)))
     }
 }
 
@@ -625,6 +765,7 @@ private struct SheetPathFlangeRows: View {
     @ObservedObject var cmd: ModelCommand
     let workspace: Workspace
     @ObservedObject var model: ModelStore
+    @ObservedObject var state: SheetCommandState
 
     private var lengths: String {
         guard let sketch = SheetLines.sketch(cmd, model) else { return "Pfad wählen" }
@@ -638,6 +779,8 @@ private struct SheetPathFlangeRows: View {
     var body: some View {
         VStack(alignment: .leading, spacing: PaletteStyle.spacing) {
             SheetUnavailableRow(model: model)
+            SheetToolPreview(sketch: .pathFlange)
+            SheetConvertQuestionRow(workspace: workspace, model: model, state: state)
             SheetLinePicker(title: "Pfad", cmd: cmd, workspace: workspace, model: model, chains: true)
             SheetInfoRow(title: "Flansche", text: lengths)
             PaletteHint(text: "Durch die Linien der Skizze festgelegt.")
@@ -681,9 +824,11 @@ enum SheetHemDriver: SheetEditableDriver {
     @MainActor static func tapped(_ tap: CommandTap, _ cmd: ModelCommand, _ ws: Workspace) -> Bool {
         guard cmd.editing == nil, let edge = tap.edge else { return false }
         guard ws.model.isSheetBody(edge.body) else {
-            ws.model.message = "Umkantung: Kante eines Blechkörpers antippen."
+            // Vollkörper: fragen, ob er Blech werden soll (statt Fehlermeldung)
+            SheetConvertQuestion.ask(edge.body, cmd, ws.model)
             return true
         }
+        SheetConvertQuestion.clear(cmd)
         SheetEdgePicks.toggle(edge, cmd, ws, key: edgesKey, inputID: "edges")
         ws.refreshCommandPreview()
         ws.objectWillChange.send()
@@ -720,7 +865,7 @@ enum SheetHemDriver: SheetEditableDriver {
     static func mainValueKey(_ cmd: ModelCommand) -> String? { "length" }
 
     @MainActor static func panel(_ cmd: ModelCommand, _ ws: Workspace) -> AnyView {
-        AnyView(SheetHemRows(cmd: cmd, workspace: ws, model: ws.model))
+        AnyView(SheetHemRows(cmd: cmd, workspace: ws, model: ws.model, state: SheetCommandState.of(cmd)))
     }
 }
 
@@ -728,10 +873,13 @@ private struct SheetHemRows: View {
     @ObservedObject var cmd: ModelCommand
     let workspace: Workspace
     @ObservedObject var model: ModelStore
+    @ObservedObject var state: SheetCommandState
 
     var body: some View {
         VStack(alignment: .leading, spacing: PaletteStyle.spacing) {
             SheetUnavailableRow(model: model)
+            SheetToolPreview(sketch: .hem)
+            SheetConvertQuestionRow(workspace: workspace, model: model, state: state)
             SheetInfoRow(title: "Typ", text: "Flach")
             CommandValueRow(title: "Länge", key: "length", command: cmd, value: cmd.number("length", default: 5)) {
                 cmd.putNumber("length", max(0.01, $0))
@@ -860,6 +1008,7 @@ private struct SheetFoldRows: View {
     var body: some View {
         VStack(alignment: .leading, spacing: PaletteStyle.spacing) {
             SheetUnavailableRow(model: model)
+            SheetToolPreview(sketch: .fold)
             SheetLinePicker(title: "Biegelinie", cmd: cmd, workspace: workspace, model: model, single: true)
             SheetMenuRow(title: "Position der Biegelinie", options: SheetFoldDriver.positions,
                          selected: cmd.option("position", default: "centerline")) { id in
@@ -916,8 +1065,11 @@ enum SheetPerforateDriver: SheetEditableDriver {
         let picked = CommandPicks.bodies(cmd, "body", model: model).first
         if let picked, !model.isSheetBody(picked) {
             model.dropPreview()
+            // Vollkörper: das Panel fragt, ob er Blech werden soll
+            SheetConvertQuestion.ask(picked, cmd, model)
             return "Das ist kein Blechkörper."
         }
+        SheetConvertQuestion.clear(cmd)
         guard let body = SheetUI.targetSheetBody(model, picked: picked) else {
             model.dropPreview()
             return "Kein Blechkörper im Projekt."
@@ -944,7 +1096,7 @@ enum SheetPerforateDriver: SheetEditableDriver {
     }
 
     @MainActor static func panel(_ cmd: ModelCommand, _ ws: Workspace) -> AnyView {
-        AnyView(SheetPerforateRows(cmd: cmd, workspace: ws, model: ws.model))
+        AnyView(SheetPerforateRows(cmd: cmd, workspace: ws, model: ws.model, state: SheetCommandState.of(cmd)))
     }
 }
 
@@ -952,10 +1104,13 @@ private struct SheetPerforateRows: View {
     @ObservedObject var cmd: ModelCommand
     let workspace: Workspace
     @ObservedObject var model: ModelStore
+    @ObservedObject var state: SheetCommandState
 
     var body: some View {
         VStack(alignment: .leading, spacing: PaletteStyle.spacing) {
             SheetUnavailableRow(model: model)
+            SheetToolPreview(sketch: .perforate)
+            SheetConvertQuestionRow(workspace: workspace, model: model, state: state)
             CommandNumberRow(title: "Durchmesser", cmd: cmd, key: "diameter", fallback: 3, workspace: workspace) {
                 max(0.01, $0)
             }

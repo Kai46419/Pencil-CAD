@@ -54,6 +54,8 @@ enum ModelCommandID: String, CaseIterable {
     // Blech (Punkt 16, App/Sheet/SheetUI*.swift)
     case sheetFlange, sheetPathFlange, sheetHem, sheetFold, sheetPerforate, sheetConvert
     case sheetUnfold, sheetRefold, sheetFlatPattern, sheetRules, sheetRuleList
+    // Blech-Werkzeuge mit festem Flanschtyp (Punkt 6): Blechteil aus Skizze, Lasche, Profil biegen
+    case sheetBaseFlange, sheetEdgeFlange, sheetContourFlange
 }
 
 /// Offener Modellbefehl nach SolidCraft-Vorbild: gehört dem Workspace (`workspace.command`), nil = kein Panel.

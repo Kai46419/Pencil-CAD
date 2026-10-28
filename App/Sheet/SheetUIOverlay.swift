@@ -28,7 +28,7 @@ enum SheetUIOverlay {
                     perPoint: Double) {
         guard let cmd = workspace.command, cmd.editing == nil else { return }
         switch cmd.id {
-        case .sheetFlange:
+        case .sheetFlange, .sheetBaseFlange, .sheetEdgeFlange, .sheetContourFlange:
             addEdges(SheetEdgePicks.list(cmd, SheetFlangeDriver.edgesKey), to: &groups)
             addSketchLines(cmd, model, to: &groups)
         case .sheetPathFlange:

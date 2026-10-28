@@ -8,6 +8,8 @@ import simd
 // Aufteilung:
 // - SheetUI.swift: Ribbon-Gruppe „Blech“, Befehlssuche, Register der Treiber, gemeinsame Bausteine
 //   (Kantenwahl über Kantenmitten, Skizzenlinien, Zahlenfelder mit „aus der Regel“, Teilen-Dialog)
+// - SheetUITools.swift: Werkzeugliste (Ribbon, Suche), Blechteil aus Skizze, Lasche, Profil biegen, Frage
+//   „In Blech umwandeln?“, Mini-Vorschaubilder
 // - SheetUIFlange.swift: Flansch (Grund-, Kanten-, Konturflansch), Pfadflansch, Umkantung, Falten, Perforieren
 // - SheetUIConvert.swift: In Blech umwandeln mit Wahl der offenen Kanten (Kais Wunsch)
 // - SheetUIFlat.swift: Entfalten, Wieder falten, Flachmuster erstellen, DXF- und Biegetabellen-Export
@@ -22,8 +24,11 @@ import simd
 extension ModelCommands {
     /// Treiber des Blechmoduls (aufgerufen aus registerAll())
     static func registerSheet() {
+        // Der freie „Flansch“ (SheetFlangeDriver, Typ folgt der Auswahl) steht nicht mehr im Ribbon: an seiner Stelle
+        // die drei Werkzeuge mit festem Typ (Punkt 6); sie öffnen auch die Flansche aus der Zeitleiste.
         let list: [ModelCommandDriver.Type] = [
-            SheetFlangeDriver.self, SheetPathFlangeDriver.self, SheetHemDriver.self, SheetFoldDriver.self,
+            SheetBaseFlangeDriver.self, SheetEdgeFlangeDriver.self, SheetContourFlangeDriver.self,
+            SheetPathFlangeDriver.self, SheetHemDriver.self, SheetFoldDriver.self,
             SheetPerforateDriver.self, SheetConvertDriver.self,
             SheetUnfoldDriver.self, SheetRefoldDriver.self, SheetFlatPatternDriver.self,
             SheetRulesDriver.self, SheetRuleListDriver.self,
@@ -56,27 +61,15 @@ enum SheetUI {
                                   icon: "sc.sketch", heading: "SKIZZE", isActive: ws.sketch.isActive) {
             ws.startSketch()
         })
-        func command(_ id: ModelCommandID, _ title: String, _ subtitle: String, _ icon: String, _ heading: String,
-                     featured: Bool = false) -> RibbonCommand {
-            RibbonCommand(id: id.rawValue, title: title, subtitle: subtitle, icon: icon, heading: heading,
-                          featured: featured, isActive: ws.command?.id == id, isEnabled: available) {
-                start(id, ws)
+        func command(_ entry: SheetToolEntry) -> RibbonCommand {
+            RibbonCommand(id: entry.id.rawValue, title: entry.title, subtitle: entry.subtitle, icon: entry.icon,
+                          heading: entry.heading, featured: entry.featured, isActive: ws.command?.id == entry.id,
+                          isEnabled: available) {
+                SheetTools.start(entry, ws)
             }
         }
-        list += [
-            command(.sheetFlange, "Flansch", "Grund-, Kanten- oder Konturflansch", "sc.flange", "ERSTELLEN",
-                    featured: true),
-            command(.sheetPathFlange, "Pfadflansch", "Flansche entlang einer Linienkette", "sc.path_flange", "ERSTELLEN"),
-            command(.sheetHem, "Umkantung", "Blechkante zurückbiegen", "sc.hem", "ERSTELLEN"),
-            command(.sheetFold, "Falten", "Entlang einer Skizzenlinie biegen", "sc.fold", "ERSTELLEN"),
-            command(.sheetPerforate, "Perforieren", "Lochfeld über das Blech", "sc.perforate", "ERSTELLEN"),
-            command(.sheetConvert, "In Blech umwandeln", "Platte, Volumen- oder Schalenkörper", "sc.convert_sheet",
-                    "ERSTELLEN", featured: true),
-            command(.sheetUnfold, "Entfalten", "Alle Biegungen flach", "sc.unfold", "ABWICKLUNG", featured: true),
-            command(.sheetRefold, "Wieder falten", "Entfalteten Körper zurückbiegen", "sc.refold", "ABWICKLUNG"),
-            command(.sheetFlatPattern, "Flachmuster erstellen", "Abwicklung, Biegelinien, Biegetabelle", "sc.flat",
-                    "ABWICKLUNG", featured: true),
-        ]
+        // Werkzeugliste (SheetUITools.swift); Regeln nach der Ausgabe
+        list += SheetTools.catalog.filter { $0.heading != "REGELN" }.map(command)
         list.append(RibbonCommand(id: "sheet.exportDXF", title: "DXF exportieren", subtitle: "Flachmuster als DXF",
                                   icon: "sc.dxf", heading: "AUSGABE", isEnabled: available) {
             exportDXF(ws)
@@ -85,10 +78,7 @@ enum SheetUI {
                                   icon: "sc.bendtable", heading: "AUSGABE", isEnabled: available) {
             exportBendTable(ws)
         })
-        list += [
-            command(.sheetRules, "Blechregeln", "Dicke, Biegeradius, K-Faktor, Freistiche", "sc.sheet_rules", "REGELN"),
-            command(.sheetRuleList, "Blechregeln auflisten", "Alle Regeln mit Werten", "sc.sheet_rules", "REGELN"),
-        ]
+        list += SheetTools.catalog.filter { $0.heading == "REGELN" }.map(command)
         return list
     }
 
@@ -104,28 +94,16 @@ enum SheetUI {
 
     /// Einträge der Befehlssuche (CommandSearch.swift)
     static func searchItems(_ ws: Workspace) -> [CommandItem] {
-        func item(_ id: ModelCommandID, _ title: String, _ subtitle: String, _ icon: String,
-                  _ keywords: String) -> CommandItem {
-            CommandItem(id: "sheet.\(id.rawValue)", title: title, subtitle: subtitle, systemImage: icon,
-                        keywords: "blech sheet metal " + keywords) { [weak ws] in
+        func item(_ entry: SheetToolEntry) -> CommandItem {
+            CommandItem(id: "sheet.\(entry.id.rawValue)", title: entry.title, subtitle: entry.search,
+                        systemImage: entry.icon, keywords: "blech sheet metal flansch flange " + entry.keywords) { [weak ws] in
                 guard let ws else { return }
-                start(id, ws)
+                SheetTools.start(entry, ws)
             }
         }
-        return [
-            item(.sheetFlange, "Flansch", "Blech: Grund-, Kanten- oder Konturflansch", "sc.flange",
-                 "flange grundflansch kantenflansch konturflansch base edge contour"),
-            item(.sheetPathFlange, "Pfadflansch", "Blech: Flansche entlang einer Linienkette", "sc.path_flange",
-                 "path flange pfad"),
-            item(.sheetHem, "Umkantung", "Blech: Kante zurückbiegen (Saum)", "sc.hem", "hem saum umschlag"),
-            item(.sheetFold, "Falten", "Blech: entlang einer Skizzenlinie biegen", "sc.fold", "fold abkanten biegen"),
-            item(.sheetPerforate, "Perforieren", "Blech: Lochfeld", "sc.perforate", "perforate lochung lochblech"),
-            item(.sheetConvert, "In Blech umwandeln", "Körper zu Blech, offene Kanten wählbar", "sc.convert_sheet",
-                 "convert umwandeln offene kanten abwickeln"),
-            item(.sheetUnfold, "Entfalten", "Blech: alle Biegungen flach", "sc.unfold", "unfold abwickeln flach"),
-            item(.sheetRefold, "Wieder falten", "Blech: zurückbiegen", "sc.refold", "refold zurückfalten"),
-            item(.sheetFlatPattern, "Flachmuster erstellen", "Abwicklung mit Biegelinien und Biegetabelle", "sc.flat",
-                 "flat pattern abwicklung zuschnitt laser"),
+        let tools = SheetTools.catalog.filter { $0.heading != "REGELN" }.map(item)
+        let rules = SheetTools.catalog.filter { $0.heading == "REGELN" }.map(item)
+        return tools + [
             CommandItem(id: "sheet.exportDXF", title: "Flachmuster als DXF exportieren", subtitle: "Blech: DXF für Laser",
                         systemImage: "sc.dxf", keywords: "blech sheet dxf export laser zuschnitt") { [weak ws] in
                 guard let ws else { return }
@@ -136,10 +114,7 @@ enum SheetUI {
                 guard let ws else { return }
                 exportBendTable(ws)
             },
-            item(.sheetRules, "Blechregeln", "Dicke, Biegeradius, K-Faktor, Freistiche", "sc.sheet_rules",
-                 "rules regel dicke k-faktor biegeradius"),
-            item(.sheetRuleList, "Blechregeln auflisten", "Alle Regeln mit Werten", "sc.sheet_rules", "rules liste"),
-        ]
+        ] + rules
     }
 
     /// Blechbefehl starten; ohne Blechmodul nur der Hinweis.
@@ -213,6 +188,8 @@ final class SheetCommandState: ObservableObject {
     var flatKey: String?
     /// Meldung nach einem Export
     @Published var status: String?
+    /// Angetippter Vollkörper, wo Blech erwartet wird: Frage „In Blech umwandeln?“ im Panel (SheetConvertQuestion)
+    @Published var convertBody: Int?
     /// Topologie für „In Blech umwandeln“ (Körper, Modellstand)
     var topologyKey: String?
     var topology: (faces: [SheetModelFace], edges: [SheetModelEdge]) = ([], [])

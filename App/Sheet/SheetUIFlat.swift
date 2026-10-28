@@ -124,6 +124,7 @@ private struct SheetFoldStateRows: View {
     var body: some View {
         VStack(alignment: .leading, spacing: PaletteStyle.spacing) {
             SheetUnavailableRow(model: model)
+            if unfold { SheetToolPreview(sketch: .unfold) }
             SheetInfoRow(title: "Körper", text: SheetFoldState.shownBody(cmd, model, unfold: unfold))
             PaletteSection("Optionen") {
                 CommandPreviewRow(cmd: cmd, workspace: workspace)
