@@ -314,7 +314,7 @@ enum SheetKantenDriver: MainCommandDriver {
 
     /// Biegelinien der gewählten Kanten (nur Kanten des ersten Körpers); Fehlertext bei zu kurzer Flanke.
     @MainActor static func folds(_ cmd: ModelCommand, _ model: ModelStore) -> (folds: [SheetKantFold], error: String?) {
-        let picks = reconcile(cmd)
+        let picks = list(cmd)
         guard let body = picks.first?.body else { return ([], nil) }
         let rule = Self.rule(of: body, model)
         let r = radius(cmd, rule)
@@ -434,6 +434,7 @@ enum SheetKantenDriver: MainCommandDriver {
             body = target
             steps = [step]
         } else {
+            _ = reconcile(cmd)
             let computed = folds(cmd, model)
             if let error = computed.error ?? cornerProblem(computed.folds) {
                 model.dropPreview()
@@ -494,7 +495,7 @@ enum SheetKantenDriver: MainCommandDriver {
     // MARK: Pfeil (Flankenlänge)
 
     @MainActor static func arrows(_ cmd: ModelCommand, _ ws: Workspace) -> [DragHandle] {
-        guard cmd.option("mode", default: "edge") == "edge", let pick = reconcile(cmd).first else { return [] }
+        guard cmd.option("mode", default: "edge") == "edge", let pick = list(cmd).first else { return [] }
         let side = legSide(pick.thickness, cmd)
         return [DragHandle(kind: .command("height"), axisOrigin: SIMD3<Float>(pick.mid), direction: SIMD3<Float>(side),
                            value: cmd.number("height", default: 40), color: Workspace.handleBlue)]
@@ -518,7 +519,7 @@ enum SheetKantenDriver: MainCommandDriver {
     @MainActor static func overlay(_ cmd: ModelCommand, _ model: ModelStore, perPoint: Double) -> [LineGroup] {
         guard cmd.option("mode", default: "edge") == "edge" else { return [] }
         var groups: [LineGroup] = []
-        let picked = reconcile(cmd).flatMap(\.lines).map { $0.map { SIMD3<Float>($0) } }.filter { $0.count >= 2 }
+        let picked = list(cmd).flatMap(\.lines).map { $0.map { SIMD3<Float>($0) } }.filter { $0.count >= 2 }
         if !picked.isEmpty {
             groups.append(LineGroup(polylines: picked, color: SheetUIOverlay.pickColor, width: 4, onTop: true))
         }
