@@ -63,8 +63,17 @@ extension ModelStore {
         let kernel = try SheetKernel()
         var aliases: [String: String] = [:]
         var warnings: [String] = []
+        // Entfaltet: Mitte des gefalteten Teils vor dem letzten Entfalten (Ablage an derselben Stelle, Punkt 11)
+        let lastUnfold = info.isUnfolded ? info.steps.lastIndex(where: { $0.command.command == "sheet.unfold" }) : nil
+        var foldedCenter: SIMD2<Double>?
         for (index, step) in info.steps.enumerated() {
             let command = sheetResolved(step.command, aliases: aliases, info: info, directory: directory)
+            if index == lastUnfold {
+                let folded = command.params["body"]?.asString ?? aliases[info.kernelBody] ?? info.kernelBody
+                if let box = (try? kernel.shape(of: folded))?.boundingBox?.map(\.doubleValue), box.count == 6 {
+                    foldedCenter = SIMD2((box[0] + box[3]) / 2, (box[1] + box[4]) / 2)
+                }
+            }
             let result: SheetJSON
             do {
                 result = try kernel.execute(command)
@@ -82,8 +91,47 @@ extension ModelStore {
             }
         }
         let name = aliases[info.kernelBody] ?? info.kernelBody
-        let shape = try kernel.shape(of: name)
+        var shape = try kernel.shape(of: name)
+        if info.isUnfolded { shape = sheetLaidFlat(shape, center: foldedCenter) }
         return SheetReplayResult(shape: shape, kernel: kernel, bodyName: name, warnings: warnings)
+    }
+
+    /// Entfalteter Körper flach auf die Grundebene (Punkt 11, „beim Entfalten schwebt es“): SolidCraft lässt die
+    /// feste Fläche beim Entfalten an ihrem Ort, das Flachteil schwebt dann in deren Höhe bzw. steht hochkant.
+    /// Die größte ebene Fläche wird nach unten gedreht (Normale −Z, Z ist oben), die Unterseite liegt bei Z = 0 und
+    /// die Mitte in X/Y auf center (Mitte des gefalteten Teils; nil = eigene Mitte bleibt). Nur die Anzeige wird
+    /// gedreht/verschoben, die Sitzung behält ihre Lage (Flachmuster, DXF und Zurückfalten bleiben unverändert).
+    nonisolated static func sheetLaidFlat(_ shape: PCKShape, center: SIMD2<Double>?) -> PCKShape {
+        // Größte ebene Fläche; bei gleich großen Gegenflächen (Ober-/Unterseite) die, die schon am meisten nach unten zeigt
+        var faces: [(area: Double, normal: SIMD3<Double>)] = []
+        if shape.faceCount > 0 {
+            for face in 1...shape.faceCount {
+                guard let plane = shape.plane(ofFace: face)?.map(\.doubleValue), plane.count == 6 else { continue }
+                let normal = SIMD3(plane[3], plane[4], plane[5])
+                guard simd_length(normal) > 1e-9 else { continue }
+                faces.append((shape.area(ofFace: face), simd_normalize(normal)))
+            }
+        }
+        var result = shape
+        if let largest = faces.max(by: { $0.area < $1.area }) {
+            let bottom = faces.filter { $0.area >= largest.area * 0.98 && abs(simd_dot($0.normal, largest.normal)) > 0.999 }
+                .min(by: { $0.normal.z < $1.normal.z })?.normal ?? largest.normal
+            let down = SIMD3<Double>(0, 0, -1)
+            let cosine = max(-1, min(1, simd_dot(bottom, down)))
+            if cosine < 1 - 1e-9, let box = result.boundingBox?.map(\.doubleValue), box.count == 6 {
+                let middle = SIMD3((box[0] + box[3]) / 2, (box[1] + box[4]) / 2, (box[2] + box[5]) / 2)
+                var axis = simd_cross(bottom, down)
+                if simd_length(axis) < 1e-9 { axis = SIMD3(1, 0, 0) }    // zeigt genau nach oben: um X wenden
+                if let turned = result.rotated(origin: middle, axis: simd_normalize(axis), angle: acos(cosine)) {
+                    result = turned
+                }
+            }
+        }
+        guard let box = result.boundingBox?.map(\.doubleValue), box.count == 6 else { return result }
+        let target = center ?? SIMD2((box[0] + box[3]) / 2, (box[1] + box[4]) / 2)
+        let offset = SIMD3(target.x - (box[0] + box[3]) / 2, target.y - (box[1] + box[4]) / 2, -box[2])
+        guard simd_length(offset) > 1e-9 else { return result }
+        return result.translated(by: offset) ?? result
     }
 
     /// Aliasse in body/bodies und die Quelldatei beim Import einsetzen.
