@@ -83,7 +83,7 @@ extension Workspace {
         case .extrude, .fillet, .chamfer, .pressPull, .deleteFace: return nil
         case .sheetFlange, .sheetPathFlange, .sheetHem, .sheetFold, .sheetPerforate, .sheetConvert, .sheetUnfold,
              .sheetRefold, .sheetFlatPattern, .sheetRules, .sheetRuleList, .sheetBaseFlange, .sheetEdgeFlange,
-             .sheetContourFlange, .sheetKanten: return nil
+             .sheetContourFlange, .sheetKanten, .sheetBox: return nil
         }
     }
 

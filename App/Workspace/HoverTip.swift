@@ -260,5 +260,6 @@ enum ToolTips {
         "Profil biegen": "Offene Linien einer Skizze (z. B. Z- oder U-Profil) werden ein gebogenes Blechprofil: jede Linie eine Wand, jede Ecke eine Biegung (Konturflansch).",
         // Blech (Punkt 9)
         "Kanten": "Außenkante eines flachen Blechteils antippen und die Flankenlänge eingeben: an der gestrichelten Linie wird das vorhandene Blech hochgekantet (der Zuschnitt bleibt gleich). Außen- oder Innenmaß, Winkel und Richtung im Panel.",
+        "Kasten aus Maßen": "Assistent: fertige Länge × Breite (außen oder innen), Laschenhöhe für alle oder je Seite, Blechdicke und Biegeradius – ergibt einen gekanteten Kasten mit Eckfreischnitten. Danach auf Wunsch gleich die Abwicklung.",
     ]
 }

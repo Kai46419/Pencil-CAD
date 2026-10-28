@@ -58,6 +58,8 @@ enum ModelCommandID: String, CaseIterable {
     case sheetBaseFlange, sheetEdgeFlange, sheetContourFlange
     // Kanten: vorhandenes Blech an einer Linie hochkanten (Punkt 9)
     case sheetKanten
+    // Kasten aus Maßen: Assistent für ein gekantetes Teil aus Boden und Laschen (Punkt 10)
+    case sheetBox
 }
 
 /// Offener Modellbefehl nach SolidCraft-Vorbild: gehört dem Workspace (`workspace.command`), nil = kein Panel.

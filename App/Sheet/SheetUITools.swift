@@ -59,6 +59,12 @@ enum SheetTools {
                        keywords: "kanten kantung abkanten hochkanten flanke biegen falten biegelinie fold",
                        capsule: "Außenkante eines Blechteils antippen und die Flankenlänge eingeben: an der gestrichelten "
                            + "Linie wird das Blech hochgekantet. Mehrere Kanten zugleich gehen auch."),
+        SheetToolEntry(id: .sheetBox, title: "Kasten aus Maßen", subtitle: "Boden und Laschen aus fertigen Maßen",
+                       icon: "shippingbox", heading: "ERSTELLEN", featured: true,
+                       search: "Blech: Kasten/Wanne aus Länge, Breite, Laschenhöhe, Dicke und Radius",
+                       keywords: "kasten wanne schale box tray assistent maße laschen boden abwicklung zuschnitt",
+                       capsule: "Fertige Maße eingeben – Länge, Breite, Laschenhöhe, Blechdicke und Biegeradius: daraus "
+                           + "wird ein gekanteter Kasten mit Eckfreischnitten."),
         SheetToolEntry(id: .sheetPathFlange, title: "Pfadflansch", subtitle: "Profil entlang einer Blechkante",
                        icon: "sc.path_flange", heading: "ERSTELLEN",
                        search: "Blech: Flansche entlang einer Linienkette an einer Kante", keywords: "path flange pfad"),
@@ -275,7 +281,7 @@ struct SheetConvertQuestionRow: View {
 
 /// Schematische Skizze des Ergebnisses je Werkzeug.
 enum SheetToolSketch {
-    case base, edge, contour, pathFlange, hem, fold, perforate, unfold, kanten
+    case base, edge, contour, pathFlange, hem, fold, perforate, unfold, kanten, box
 
     init(_ kind: SheetFlangeKind) {
         switch kind {
@@ -296,6 +302,7 @@ enum SheetToolSketch {
         case .perforate: "Blech mit Lochfeld"
         case .unfold: "Gebogenes Blech wird flach"
         case .kanten: "Flaches Blech, an der gestrichelten Linie hochgekantet"
+        case .box: "Kasten aus Boden und vier Laschen"
         }
     }
 }
@@ -468,6 +475,14 @@ private struct SheetSketchPainter {
             let right = CGPoint(x: 62, y: 60)
             box(right, 0, 8, 0, 34, 18, 3, .old)
             box(right, 0, 8, 3, 34, 3, 16, .new)
+        case .box:
+            // Kasten: Boden, vier Laschen (hinten und links zuerst, damit vorne und rechts darüber liegen)
+            let o = CGPoint(x: 18, y: 60)
+            box(o, 0, 29, 3, 64, 3, 20, .new)
+            box(o, 0, 0, 3, 3, 32, 20, .new)
+            box(o, 0, 0, 0, 64, 32, 3, .old)
+            box(o, 61, 0, 3, 3, 32, 20, .new)
+            box(o, 0, 0, 3, 64, 3, 20, .new)
         }
     }
 }
