@@ -27,33 +27,27 @@ struct NumberField: View {
     @Environment(\.variableValues) private var variables
     @State private var text = ""
     @State private var error: String?
-    @FocusState private var isFocused: Bool
+    /// Ziffernblock offen bzw. Textfeld aktiv (statt der großen Bildschirmtastatur)
+    @State private var isEditing = false
 
     var body: some View {
         HStack(spacing: 6) {
             Text(title)
                 .foregroundStyle(.secondary)
                 .fixedSize()
-            TextField(title, text: $text)
-                .focused($isFocused)
-                .keyboardType(.numbersAndPunctuation)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-                .multilineTextAlignment(.trailing)
-                .monospacedDigit()
+            KeypadField(title: title, text: $text, isEditing: $isEditing,
+                        unitSymbol: isLength ? LengthUnit.current.symbol : unit, minHeight: 28,
+                        step: stepped, onCommit: commit)
+                .padding(.horizontal, 6)
                 .frame(width: width)
-                .textFieldStyle(.roundedBorder)
+                .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 6))
                 .overlay {
                     RoundedRectangle(cornerRadius: 6)
-                        .stroke(Color.red, lineWidth: error == nil ? 0 : 1.5)
+                        .stroke(error == nil ? Color(.separator) : Color.red, lineWidth: error == nil ? 0.5 : 1.5)
                 }
                 .help(error ?? "")
-                .onSubmit(commit)
-                .onChange(of: isFocused) { _, focused in
-                    if !focused { commit() }
-                }
                 .onChange(of: value) { _, newValue in
-                    if !isFocused { text = shown(newValue) }
+                    if !isEditing { text = shown(newValue) }
                 }
                 .onAppear { text = shown(value) }
             if !unit.isEmpty {
@@ -69,6 +63,15 @@ struct NumberField: View {
 
     private func shown(_ value: Double) -> String {
         isLength ? LengthUnit.current.number(value) : Self.format(value)
+    }
+
+    /// Schritt um eine Einheit (Länge: eine Projekteinheit) vom eingegebenen Wert aus
+    private func stepped(_ direction: Int) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        let current: Double? = trimmed.isEmpty ? value
+            : (try? PaletteExpression.evaluate(trimmed, unit: unit, variables: variables))
+        guard let current else { return nil }
+        return shown(current + Double(direction) * (isLength ? LengthUnit.current.millimeters : 1))
     }
 
     private func commit() {

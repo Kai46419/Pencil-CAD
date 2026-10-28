@@ -307,6 +307,7 @@ enum PaletteExpression {
 }
 
 /// Zahlenzeile: Beschriftung, Ausdrucksfeld mit Einheit. Übernimmt beim Bestätigen (wie NumberField).
+/// Antippen öffnet den kleinen Ziffernblock am Feld (`KeypadField`), nicht die Bildschirmtastatur.
 struct PaletteNumberRow: View {
     let title: String
     let value: Double
@@ -317,17 +318,16 @@ struct PaletteNumberRow: View {
     @Environment(\.usesCompactKeypad) private var usesKeypad
     @State private var text = ""
     @State private var error: String?
+    /// Ziffernblock offen bzw. Textfeld aktiv
+    @State private var isEditing = false
     @FocusState private var isFocused: Bool
-    /// Ziffernblock offen (nur mit `usesCompactKeypad`)
-    @State private var showsPad = false
-    /// Nach „abc“: echtes Textfeld mit Bildschirmtastatur (Formeln, Variablen)
-    @State private var typesWithKeyboard = false
 
     var body: some View {
         PaletteLabeled(title: title) {
             PaletteFieldBox(isLocked: false, hasError: error != nil) {
-                if usesKeypad && !typesWithKeyboard {
-                    padField
+                if usesKeypad {
+                    KeypadField(title: title, text: $text, isEditing: $isEditing,
+                                unitSymbol: PaletteExpression.unitSymbol(unit), step: stepped, onCommit: commit)
                 } else {
                     textField
                 }
@@ -341,11 +341,12 @@ struct PaletteNumberRow: View {
         }
         .help(error ?? "")
         .onChange(of: value) { _, newValue in
-            if !isFocused && !showsPad { text = PaletteExpression.shown(newValue, unit: unit) }
+            if !isFocused && !isEditing { text = PaletteExpression.shown(newValue, unit: unit) }
         }
         .onAppear { text = PaletteExpression.shown(value, unit: unit) }
     }
 
+    /// Bildschirmtastatur (nur wo `usesCompactKeypad` ausdrücklich aus ist)
     private var textField: some View {
         TextField(title, text: $text)
             .focused($isFocused)
@@ -356,38 +357,8 @@ struct PaletteNumberRow: View {
             .monospacedDigit()
             .onSubmit(commit)
             .onChange(of: isFocused) { _, focused in
-                if !focused {
-                    commit()
-                    typesWithKeyboard = false
-                }
+                if !focused { commit() }
             }
-    }
-
-    /// Feld als Knopf: öffnet den Ziffernblock daneben, das Feld zeigt dabei die Eingabe mit
-    private var padField: some View {
-        Button {
-            showsPad = true
-        } label: {
-            Text(text.isEmpty ? " " : text)
-                .monospacedDigit()
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-                .frame(maxWidth: .infinity, minHeight: PaletteStyle.iconButton - 4, alignment: .trailing)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(title)
-        .accessibilityValue(text)
-        .popover(isPresented: $showsPad, arrowEdge: .trailing) {
-            CompactKeypad(title: title, text: $text, unitSymbol: PaletteExpression.unitSymbol(unit),
-                          step: stepped, onDone: { showsPad = false }, onKeyboard: switchToKeyboard)
-        }
-        .onChange(of: showsPad) { _, shown in
-            guard !shown && !typesWithKeyboard else { return }
-            // „12,“ (Komma ohne Nachkommastelle) gilt als „12“, sonst meldet der Formelleser ein Zeichen zu viel
-            if text.hasSuffix(",") || text.hasSuffix(".") { text.removeLast() }
-            commit()
-        }
     }
 
     /// Schritt um eine Einheit (Länge: eine Projekteinheit) vom aktuell eingegebenen Wert aus
@@ -398,13 +369,6 @@ struct PaletteNumberRow: View {
         guard let current else { return nil }
         let size = unit == "mm" ? LengthUnit.current.millimeters : 1
         return PaletteExpression.shown(current + Double(direction) * size, unit: unit)
-    }
-
-    private func switchToKeyboard() {
-        typesWithKeyboard = true
-        showsPad = false
-        // Erst nach dem Schließen des Popovers fokussieren, sonst bleibt die Tastatur zu
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { isFocused = true }
     }
 
     private func commit() {
@@ -439,7 +403,8 @@ struct PaletteLockRow: View {
     @Environment(\.variableValues) private var variables
     @State private var text = ""
     @State private var error: String?
-    @FocusState private var isFocused: Bool
+    /// Ziffernblock offen bzw. Textfeld aktiv
+    @State private var isEditing = false
 
     private var lockedText: String? { options.locked[key] }
 
@@ -455,19 +420,11 @@ struct PaletteLockRow: View {
 
     private var lockField: some View {
         PaletteFieldBox(isLocked: lockedText != nil, hasError: error != nil) {
-            TextField(live.map { PaletteExpression.shown($0, unit: unit) } ?? "–", text: $text)
-                .focused($isFocused)
-                .keyboardType(.numbersAndPunctuation)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-                .multilineTextAlignment(.trailing)
-                .monospacedDigit()
-                .onSubmit(commit)
-                .onChange(of: isFocused) { _, focused in
-                    if !focused { commit() }
-                }
+            KeypadField(title: title, text: $text, isEditing: $isEditing,
+                        placeholder: live.map { PaletteExpression.shown($0, unit: unit) } ?? "–",
+                        unitSymbol: PaletteExpression.unitSymbol(unit), step: stepped, onCommit: commit)
                 .onChange(of: lockedText) { _, newValue in
-                    if !isFocused { text = newValue ?? "" }
+                    if !isEditing { text = newValue ?? "" }
                 }
                 .onAppear { text = lockedText ?? "" }
             if !unit.isEmpty {
@@ -493,6 +450,16 @@ struct PaletteLockRow: View {
         .hoverTip(lockedText != nil ? "Wert lösen" : "Wert sperren",
                   lockedText != nil ? "Der Wert folgt wieder dem Stift."
                                     : "Hält den aktuellen Wert fest; er wird beim Setzen als Bemaßung angelegt.")
+    }
+
+    /// Schritt um eine Einheit vom eingegebenen bzw. live gezeichneten Wert aus
+    private func stepped(_ direction: Int) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        let current: Double? = trimmed.isEmpty ? live
+            : (try? PaletteExpression.evaluate(trimmed, unit: unit, variables: variables))
+        guard let current else { return nil }
+        let size = unit == "mm" ? LengthUnit.current.millimeters : 1
+        return PaletteExpression.shown(current + Double(direction) * size, unit: unit)
     }
 
     private func commit() {
