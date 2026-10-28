@@ -15,6 +15,7 @@ Körper als STEP) und übernimmt die Ergebnisse (Körper als STEP → OCCT, Flac
 | Swift-Brücke | `App/Sheet/SheetKernel.swift` | dünne Hülle um die C-Funktionen (nur im OCCT-Build mit `PENCIL_SHEETKIT`) |
 | Modell | `App/Sheet/SheetModel*.swift` | Blechrezepte je Körper, Wiedergabe, Speichern, Verlauf, Skizzen→SolidCraft |
 | Oberfläche | `App/Sheet/SheetUI*.swift`, `App/Sheet/FlatPatternView.swift` | Ribbon-Gruppe „Blech“, Panels, Kantenwahl, Flachmuster-Ansicht, offene Kanten |
+| Abwicklungszeichnung | `App/Sheet/FlatDrawing*.swift` | nur Swift: Fertigungs-DXF (R12, Layer KONTUR/BIEGUNG/BEMASSUNG/BIEGETABELLE, Kontur exakt aus `sheet.export_dxf`) und Blatt „Abwicklung“ (PDF) aus `sheet.flat_pattern` |
 | Projekt | `project-occt.yml` | xcframework + Flag `PENCIL_SHEETKIT`, nur wenn `Vendor/PencilSheet.xcframework` existiert |
 
 Bestehende Dateien nur mit minimalen Einhängepunkten ändern (ein Aufruf / ein `case`), weil parallel an

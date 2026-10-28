@@ -826,6 +826,11 @@ extension VectorFiles {
         var data: Data { Data((lines.joined(separator: "\r\n") + "\r\n").utf8) }
     }
 
+    /// Ein Skizzenelement als R12-Objekte auf einer Ebene (für andere DXF-Schreiber, z. B. die Abwicklungszeichnung).
+    static func appendDXF(_ entity: SketchEntity, layer: String, to out: inout DXFWriter) {
+        writeDXF(entity, layer: layer, to: &out)
+    }
+
     fileprivate static func writeDXF(_ entity: SketchEntity, layer: String, to out: inout DXFWriter) {
         switch entity {
         case .line(let a, let b):

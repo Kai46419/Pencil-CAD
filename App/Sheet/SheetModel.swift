@@ -234,6 +234,9 @@ struct SheetDXFOptions: Hashable {
     var singleLayer = false
     /// Text gravieren statt ausschneiden
     var etchText = false
+    /// Abwicklungszeichnung (Punkt 12): Layer KONTUR, BIEGUNG (gestrichelt), BEMASSUNG, BIEGETABELLE statt der reinen
+    /// Laserdatei von SolidCraft (FlatDrawing.swift). Nur in PencilCAD, geht nicht an sheet.export_dxf.
+    var withDrawing = true
 
     var params: SheetJSON {
         var p: SheetJSON = [

@@ -71,6 +71,8 @@ struct DrawingProjection {
 /// Linienart auf dem Blatt.
 enum DrawingPen {
     case visible, hidden, dimension, frame, thin
+    /// Biegelinie in der Abwicklung (gestrichelt, Abwicklungszeichnung)
+    case bend
 
     /// Strichstärke in mm (DIN ISO 128: breit 0,5, schmal 0,25)
     var width: Double {
@@ -78,6 +80,7 @@ enum DrawingPen {
         case .visible: 0.5
         case .frame: 0.7
         case .hidden, .dimension, .thin: 0.25
+        case .bend: 0.35
         }
     }
 
@@ -87,6 +90,7 @@ enum DrawingPen {
         case .hidden: "VERDECKT"
         case .dimension: "BEMASSUNG"
         case .frame, .thin: "RAHMEN"
+        case .bend: "BIEGUNG"
         }
     }
 }
@@ -485,7 +489,7 @@ enum TechnicalDrawing {
         let ink = UIColor.black.cgColor
         let hiddenInk = UIColor(white: 0.25, alpha: 1).cgColor
         // Linien gesammelt je Linienart (schneller, Strichmuster laufen über Linienzüge durch)
-        for pen in [DrawingPen.hidden, .thin, .dimension, .frame, .visible] {
+        for pen in [DrawingPen.hidden, .bend, .thin, .dimension, .frame, .visible] {
             let path = CGMutablePath()
             for case .polyline(let points, let linePen) in layout.elements where linePen == pen && points.count >= 2 {
                 path.addLines(between: points.map(map))
@@ -495,6 +499,7 @@ enum TechnicalDrawing {
             cg.setStrokeColor(pen == .hidden ? hiddenInk : ink)
             cg.setLineWidth(pen.width * k)
             if pen == .hidden { cg.setLineDash(phase: 0, lengths: [CGFloat(3 * k), CGFloat(1.5 * k)]) }
+            if pen == .bend { cg.setLineDash(phase: 0, lengths: [CGFloat(6 * k), CGFloat(2 * k)]) }
             cg.addPath(path)
             cg.strokePath()
             cg.restoreGState()
@@ -571,6 +576,7 @@ enum TechnicalDrawing {
         let layers: [(name: String, color: String, type: String)] = [
             ("0", "7", "CONTINUOUS"), ("SICHTBAR", "7", "CONTINUOUS"), ("VERDECKT", "8", "DASHED"),
             ("BEMASSUNG", "3", "CONTINUOUS"), ("RAHMEN", "7", "CONTINUOUS"), ("TEXT", "7", "CONTINUOUS"),
+            ("BIEGUNG", "1", "DASHED"),
         ]
         out.pair(0, "TABLE")
         out.pair(2, "LAYER")

@@ -70,9 +70,14 @@ enum SheetUI {
         }
         // Werkzeugliste (SheetUITools.swift); Regeln nach der Ausgabe
         list += SheetTools.catalog.filter { $0.heading != "REGELN" }.map(command)
-        list.append(RibbonCommand(id: "sheet.exportDXF", title: "DXF exportieren", subtitle: "Flachmuster als DXF",
+        list.append(RibbonCommand(id: "sheet.exportDXF", title: "DXF exportieren", subtitle: "Abwicklung mit Bemaßung",
                                   icon: "sc.dxf", heading: "AUSGABE", isEnabled: available) {
             exportDXF(ws)
+        })
+        list.append(RibbonCommand(id: "sheet.flatDrawing", title: "Abwicklungszeichnung",
+                                  subtitle: "Blatt mit Abwicklung, Biegetabelle, Ansichten (PDF)", icon: "doc.richtext",
+                                  heading: "AUSGABE", isEnabled: available) {
+            FlatDrawingPresenter.present(ws)
         })
         list.append(RibbonCommand(id: "sheet.exportBendTable", title: "Biegetabelle", subtitle: "Biegungstabelle als CSV",
                                   icon: "sc.bendtable", heading: "AUSGABE", isEnabled: available) {
@@ -108,6 +113,12 @@ enum SheetUI {
                         systemImage: "sc.dxf", keywords: "blech sheet dxf export laser zuschnitt") { [weak ws] in
                 guard let ws else { return }
                 exportDXF(ws)
+            },
+            CommandItem(id: "sheet.flatDrawing", title: "Abwicklungszeichnung", subtitle: "Blech: Blatt als PDF und DXF",
+                        systemImage: "doc.richtext",
+                        keywords: "blech sheet abwicklung zeichnung pdf bemaßung biegetabelle fertigung") { [weak ws] in
+                guard let ws else { return }
+                FlatDrawingPresenter.present(ws)
             },
             CommandItem(id: "sheet.exportBendTable", title: "Biegungstabelle exportieren", subtitle: "Blech: CSV",
                         systemImage: "sc.bendtable", keywords: "blech sheet biegetabelle bend table csv") { [weak ws] in
@@ -147,7 +158,9 @@ enum SheetUI {
             return
         }
         do {
-            let url = try model.exportFlatPatternDXF(of: body, options: options)
+            // Mit Bemaßung: Abwicklungszeichnung (FlatDrawing.swift), sonst die reine Laserdatei von SolidCraft
+            let url = try options.withDrawing ? model.exportFlatDrawingDXF(of: body, options: options)
+                : model.exportFlatPatternDXF(of: body, options: options)
             SheetShare.present([url])
         } catch {
             model.message = "DXF: \(error.localizedDescription)"
@@ -828,7 +841,7 @@ enum SheetShare {
         root.present(controller, animated: true)
     }
 
-    private static func topController() -> UIViewController? {
+    static func topController() -> UIViewController? {
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
         let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
         let window = scene?.windows.first { $0.isKeyWindow } ?? scene?.windows.first
