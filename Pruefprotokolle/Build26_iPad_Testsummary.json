@@ -1,0 +1,49 @@
+{
+  "devicesAndConfigurations" : [
+    {
+      "device" : {
+        "architecture" : "arm64",
+        "deviceId" : "00008132-001C65AC0160C01C",
+        "deviceName" : "iPad von Kai",
+        "modelName" : "iPad Air 11-inch (M4)",
+        "osBuildNumber" : "23F77",
+        "osVersion" : "26.5",
+        "platform" : "iOS"
+      },
+      "expectedFailures" : 0,
+      "failedTests" : 0,
+      "passedTests" : 75,
+      "skippedTests" : 0,
+      "testPlanConfiguration" : {
+        "configurationId" : "1",
+        "configurationName" : "Test Scheme Action"
+      }
+    }
+  ],
+  "environmentDescription" : "PencilCAD · Built with macOS 26.6.2",
+  "expectedFailures" : 0,
+  "failedTests" : 0,
+  "finishTime" : 1793677781.784,
+  "passedTests" : 75,
+  "result" : "Passed",
+  "runtimeWarnings" : [
+
+  ],
+  "skippedTests" : 0,
+  "startTime" : 1793677742.59,
+  "statistics" : [
+
+  ],
+  "testFailures" : [
+
+  ],
+  "title" : "Test - PencilCAD",
+  "topInsights" : [
+    {
+      "category" : "Longest Test Runs",
+      "impact" : "19% of duration",
+      "text" : "1 longest test run with outlier durations exceeding 0.19s (three standard deviations)"
+    }
+  ],
+  "totalTestCount" : 75
+}

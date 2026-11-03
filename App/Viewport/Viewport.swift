@@ -29,6 +29,7 @@ struct Viewport: UIViewRepresentable {
             renderer.willDraw = { [weak view] in view?.syncIfNeeded() }
         }
         view.workspace = workspace
+        workspace.quickToolsHoverFeedback = { [weak view] index in view?.quickToolFeedback(for: index) }
         workspace.snapshot = { [weak view] size in view?.snapshot(size: size) }
         workspace.currentCamera = { [weak view] in view?.renderer?.camera }
         workspace.cameraMotion.view = view
@@ -204,6 +205,7 @@ final class ViewportView: MTKView {
     private var needsSync = true
     /// Letzte Position des schwebenden Stifts (für Drücken/Doppeltippen ohne eigene Position)
     private var lastHoverLocation: CGPoint?
+    private var squeezePaletteActive = false
     /// Punkt merken durch ruhiges Schweben (1 s)
     private var hoverDwell: DispatchWorkItem?
     private var hoverDwellOrigin: CGPoint?
@@ -943,7 +945,7 @@ final class ViewportView: MTKView {
                 }
                 // Eingerastet auf gleichen bzw. gespiegelten Winkel einer vorhandenen Linie: grün
                 let previewColor: SIMD3<Float> = sketch.equalLengthPreview != nil ? Self.equalLengthYellow
-                    : (sketch.showsAngleMatch ? Self.angleMatchGreen : Self.sketchGraphite)
+                    : (sketch.showsAngleMatch || sketch.parallelPreview != nil ? Self.angleMatchGreen : Self.sketchGraphite)
                 groups.append(LineGroup(polylines: preview.map { $0.map(world) }, color: previewColor,
                                         width: Self.sketchLineWidth, dots: previewEnds.map(world),
                                         dotRadius: Self.sketchPointRadius))
@@ -1010,12 +1012,13 @@ final class ViewportView: MTKView {
                                         dots: (sketch.measuredPoints + span).map(world), dotRadius: 3))
             }
             // Gleicher Winkel wie eine vorhandene Linie: diese leuchtet grün
-            if !sketch.parallelLines.isEmpty {
-                groups.append(LineGroup(polylines: sketch.parallelLines.map { $0.map(world) },
+            let matchingParallelLines = sketch.parallelLines + (sketch.parallelPreview.map { [$0] } ?? [])
+            if !matchingParallelLines.isEmpty {
+                groups.append(LineGroup(polylines: matchingParallelLines.map { $0.map(world) },
                                         color: Self.angleMatchGreen, width: 4))
             }
             if let match = sketch.equalLengthPreview {
-                groups.append(LineGroup(polylines: [match.reference.map(world)],
+                groups.append(LineGroup(polylines: sketch.equalLengthReferenceLines.map { $0.map(world) },
                                         color: Self.equalLengthYellow, width: 3.5))
                 let dashes = dashed(match.connector, dash: 4 * perPoint)
                 groups.append(LineGroup(polylines: dashes.map { $0.map(world) },
@@ -3196,6 +3199,12 @@ final class ViewportView: MTKView {
     @objc private func handleHover(_ gesture: UIHoverGestureRecognizer) {
         guard let sketch else { return }
         let hovering = gesture.state == .began || gesture.state == .changed
+        if hovering, let workspace, workspace.quickToolsLocation != nil {
+            let point = gesture.location(in: self)
+            lastHoverLocation = point
+            updateQuickToolHover(at: point)
+            return
+        }
         sculptHover(at: hovering ? gesture.location(in: self) : nil)
         switch gesture.state {
         case .began, .changed:
@@ -3374,6 +3383,25 @@ final class ViewportView: MTKView {
         guard let workspace else { return }
         let point = location ?? CGPoint(x: bounds.midX, y: bounds.midY)
         workspace.quickToolsLocation = workspace.quickToolsLocation == nil ? point : nil
+        workspace.quickToolsHoverIndex = nil
+    }
+
+    private func updateQuickToolHover(at point: CGPoint?) {
+        guard let workspace, let sketch, let origin = workspace.quickToolsLocation else { return }
+        let palette = QuickToolsPalette(workspace: workspace, sketch: sketch, location: origin)
+        workspace.updateQuickToolsHover(point.flatMap { palette.hoverIndex(at: $0, in: bounds.size) })
+    }
+
+    fileprivate func quickToolFeedback(for index: Int) {
+        guard let workspace, let sketch, let origin = workspace.quickToolsLocation else { return }
+        let palette = QuickToolsPalette(workspace: workspace, sketch: sketch, location: origin)
+        if #available(iOS 17.5, *) {
+            canvasFeedback.alignmentOccurred(at: palette.iconCenter(index: index, in: bounds.size))
+            canvasFeedback.prepare()
+        } else {
+            selectionFeedback.selectionChanged()
+            selectionFeedback.prepare()
+        }
     }
 
     @objc private func handleOrbit(_ gesture: UIPanGestureRecognizer) {
@@ -3509,11 +3537,41 @@ extension ViewportView: UITextFieldDelegate {
 }
 
 extension ViewportView: UIPencilInteractionDelegate {
-    /// Apple Pencil Pro: Drücken öffnet das Werkzeugrad (sofern in den Einstellungen nicht abgeschaltet).
+    /// Apple Pencil Pro: Drücken öffnet sofort das Rad; Schweben wählt, Loslassen übernimmt.
     @available(iOS 17.5, *)
     func pencilInteraction(_ interaction: UIPencilInteraction, didReceiveSqueeze squeeze: UIPencilInteraction.Squeeze) {
-        guard squeeze.phase == .ended, UIPencilInteraction.preferredSqueezeAction != .ignore else { return }
-        pencilAction(at: squeeze.hoverPose?.location)
+        guard UIPencilInteraction.preferredSqueezeAction != .ignore else { return }
+        let location = squeeze.hoverPose?.location ?? lastHoverLocation
+        switch squeeze.phase {
+        case .began:
+            guard let sketch, sketch.isActive, !sketch.isChoosingPlane, sketchTouch == nil,
+                  heldFingers.isEmpty, CACurrentMediaTime() - strokeEndedAt > 0.8,
+                  let workspace else { return }
+            workspace.quickToolsLocation = location ?? CGPoint(x: bounds.midX, y: bounds.midY)
+            workspace.quickToolsHoverIndex = nil
+            squeezePaletteActive = true
+            canvasFeedback.prepare()
+        case .changed:
+            if squeezePaletteActive { updateQuickToolHover(at: location) }
+        case .ended:
+            if squeezePaletteActive {
+                updateQuickToolHover(at: location)
+                squeezePaletteActive = false
+                if let index = workspace?.quickToolsHoverIndex, let workspace, let sketch {
+                    QuickToolsPalette.performSelection(index, workspace: workspace, sketch: sketch)
+                }
+            } else {
+                // Druck während eines Strichs behält seine bisherige Fang-Umschaltung.
+                pencilAction(at: location)
+            }
+        case .cancelled:
+            if squeezePaletteActive {
+                workspace?.quickToolsLocation = nil
+                workspace?.quickToolsHoverIndex = nil
+                squeezePaletteActive = false
+            }
+        @unknown default: break
+        }
     }
 
     @available(iOS 17.5, *)

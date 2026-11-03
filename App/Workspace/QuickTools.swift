@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Werkzeugrad an der Stiftspitze: öffnet sich durch Drücken des Apple Pencil Pro bzw. Doppeltippen.
+/// Werkzeugrad an der Stiftspitze: Drücken und schwebend wählen (Pencil Pro), Doppeltippen/Antippen als Alternative.
 struct QuickToolsPalette: View {
     @ObservedObject var workspace: Workspace
     @ObservedObject var sketch: SketchController
@@ -31,10 +31,17 @@ struct QuickToolsPalette: View {
                         item.action()
                         close()
                     } label: {
-                        icon(item)
+                        icon(item, hovered: workspace.quickToolsHoverIndex == index)
                     }
                     .buttonStyle(.pressable)
                     .accessibilityLabel(item.id)
+                    .onContinuousHover { phase in
+                        switch phase {
+                        case .active: workspace.updateQuickToolsHover(index)
+                        case .ended:
+                            if workspace.quickToolsHoverIndex == index { workspace.updateQuickToolsHover(nil) }
+                        }
+                    }
                     .position(x: center.x + radius * cos(angle), y: center.y + radius * sin(angle))
                 }
                 Button(action: close) {
@@ -53,28 +60,63 @@ struct QuickToolsPalette: View {
     }
 
     /// SF Symbol aktiv weiß auf Akzentfarbe; SolidCraft-Bild aktiv auf hellem Akzentgrund mit Ring.
-    @ViewBuilder private func icon(_ item: Item) -> some View {
+    @ViewBuilder private func icon(_ item: Item, hovered: Bool) -> some View {
         if ToolIcon.isCustom(item.systemImage) {
             ToolIcon(item.systemImage, size: 30)
                 .frame(width: 50, height: 50)
-                .background(item.isActive ? Color.accentColor.opacity(0.22) : Color.clear, in: Circle())
+                .background(item.isActive || hovered ? Color.accentColor.opacity(0.22) : Color.clear, in: Circle())
                 .floatingSurface(Theme.surface, in: Circle())
                 .overlay {
-                    if item.isActive {
-                        Circle().strokeBorder(Color.accentColor, lineWidth: 2)
+                    if item.isActive || hovered {
+                        Circle().strokeBorder(Color.accentColor, lineWidth: hovered ? 3 : 2)
                     }
                 }
         } else {
             Image(systemName: item.systemImage)
                 .font(.system(size: 19, weight: .medium))
                 .frame(width: 50, height: 50)
-                .foregroundStyle(item.isActive ? Color.white : Color.primary)
-                .floatingSurface(item.isActive ? Color.accentColor : Theme.surface, in: Circle())
+                .foregroundStyle(item.isActive || hovered ? Color.white : Color.primary)
+                .floatingSurface(item.isActive || hovered ? Color.accentColor : Theme.surface, in: Circle())
         }
     }
 
     private func close() {
         workspace.quickToolsLocation = nil
+        workspace.quickToolsHoverIndex = nil
+    }
+
+    /// Dieselbe Geometrie wie die Schaltflächen; ein Treffer benötigt das Icon, nicht nur seinen Kreissektor.
+    func hoverIndex(at point: CGPoint, in size: CGSize) -> Int? {
+        let center = clamped(location, in: size)
+        var nearest: (index: Int, distance: CGFloat)?
+        for index in items.indices {
+            let icon = iconCenter(index: index, center: center)
+            let distance = hypot(point.x - icon.x, point.y - icon.y)
+            if distance <= 30, distance < (nearest?.distance ?? .infinity) {
+                nearest = (index, distance)
+            }
+        }
+        return nearest?.index
+    }
+
+    func iconCenter(index: Int, in size: CGSize) -> CGPoint {
+        iconCenter(index: index, center: clamped(location, in: size))
+    }
+
+    private func iconCenter(index: Int, center: CGPoint) -> CGPoint {
+        let angle = Double(index) / Double(items.count) * 2 * .pi - .pi / 2
+        return CGPoint(x: center.x + radius * cos(angle), y: center.y + radius * sin(angle))
+    }
+
+    /// Beim Loslassen des Drucks dieselbe Aktion wie beim Antippen ausführen.
+    @discardableResult static func performSelection(_ index: Int, workspace: Workspace, sketch: SketchController) -> Bool {
+        let palette = QuickToolsPalette(workspace: workspace, sketch: sketch,
+                                        location: workspace.quickToolsLocation ?? .zero)
+        guard palette.items.indices.contains(index) else { return false }
+        palette.items[index].action()
+        workspace.quickToolsLocation = nil
+        workspace.quickToolsHoverIndex = nil
+        return true
     }
 
     /// Rad vollständig im sichtbaren Bereich halten.

@@ -281,6 +281,15 @@ final class Workspace: ObservableObject {
     @Published private(set) var editingSketchIndex: Int?
     /// Werkzeugrad (Stift drücken bzw. doppeltippen) an dieser Stelle des Viewports.
     @Published var quickToolsLocation: CGPoint?
+    /// Werkzeug unter dem schwebenden Stift; nil bedeutet kein Treffer.
+    @Published var quickToolsHoverIndex: Int?
+    var quickToolsHoverFeedback: ((Int) -> Void)?
+
+    func updateQuickToolsHover(_ index: Int?) {
+        guard quickToolsLocation != nil, quickToolsHoverIndex != index else { return }
+        quickToolsHoverIndex = index
+        if let index { quickToolsHoverFeedback?(index) }
+    }
 
     // Werkzeugparameter
     @Published var insertSize: SIMD3<Double> = Primitive.box.defaultSize

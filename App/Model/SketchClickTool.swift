@@ -770,6 +770,7 @@ extension SketchController {
             // Zurück am Anfang: geschlossen
             click.points = []
             click.chainFirst = nil
+            tool = .select
             return
         }
         click.points = [SketchClickPoint(point: point.point, target: .point(SketchPointRef(entity: index, index: 1)))]
@@ -899,6 +900,36 @@ extension SketchController {
               case .equalLength(let ref)? = currentCandidate?.target,
               let curve = inference.curve(ref), case .line(let u, let v) = curve.shape else { return nil }
         return ([u, v], [(u + v) / 2, (a + b) / 2])
+    }
+
+    /// Alle Bezugsgeraden der aktuellen Gleichlängen-Gruppe, auch über mehrere Abhängigkeiten hinweg.
+    var equalLengthReferenceLines: [[Point2]] {
+        guard clickKind == .line, case .equalLength(let reference)? = currentCandidate?.target else { return [] }
+        var neighbors: [SketchCurveRef: [SketchCurveRef]] = [:]
+        for constraint in constraints where !constraint.isSuspended {
+            guard case .equalLength(let a, let b) = constraint.variant else { continue }
+            neighbors[a, default: []].append(b)
+            neighbors[b, default: []].append(a)
+        }
+        var connected: Set<SketchCurveRef> = [reference]
+        var pending = [reference]
+        while let current = pending.popLast() {
+            for neighbor in neighbors[current] ?? [] {
+                if connected.insert(neighbor).inserted { pending.append(neighbor) }
+            }
+        }
+        return connected.sorted { ($0.entity, $0.index) < ($1.entity, $1.index) }.compactMap { ref in
+            guard let curve = inference.curve(ref), case .line(let a, let b) = curve.shape else { return nil }
+            return [a, b]
+        }
+    }
+
+    /// Bezugslinie des aktiven Parallel-Fangs im Standard-Eingabestil.
+    var parallelPreview: [Point2]? {
+        guard clickKind == .line, !click.points.isEmpty, click.hover != nil,
+              case .parallel(let ref)? = currentCandidate?.target,
+              let curve = inference.curve(ref), case .line(let a, let b) = curve.shape else { return nil }
+        return [a, b]
     }
 
     /// Gezeigtes Gummiband der Linie ist genau waagerecht bzw. senkrecht: Mitte und Richtung für das „H“/„V“.

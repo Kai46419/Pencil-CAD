@@ -1923,11 +1923,13 @@ final class SketchController: ObservableObject {
         if simd_distance(start, end) <= 1e-6 {
             if let from = chainEnd, chainTapped {
                 guard simd_distance(from, end) > 1e-6 else { return }
+                let closed = chainStart.map { simd_distance($0, end) < 1e-6 } ?? false
                 add(.line(from, end), editable: true)
                 autoConstrainLine(entities.count - 1)
                 chainStart = nil
                 chainEnd = nil
                 chainTapped = false
+                if closed { tool = .select }
             } else {
                 chainStart = start
                 chainEnd = end
@@ -1951,6 +1953,7 @@ final class SketchController: ObservableObject {
         if let first = chainStart, simd_distance(first, end) < 1e-6 {
             chainStart = nil
             chainEnd = nil
+            tool = .select
         } else {
             chainEnd = end
         }

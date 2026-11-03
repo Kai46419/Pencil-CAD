@@ -3,6 +3,119 @@ import XCTest
 
 @MainActor
 final class SketchDimensionTests: XCTestCase {
+    func testSketchPencilWheelHoverAndReleaseSelectsToolOnce() {
+        let project = Project(id: UUID(), name: "Stiftrad-Test", modified: Date())
+        let workspace = Workspace(project: project)
+        let sketch = workspace.sketch
+        sketch.isActive = true
+        sketch.load(plane: .ground, entities: [])
+        sketch.tool = .select
+        workspace.quickToolsLocation = CGPoint(x: 150, y: 150)
+        let palette = QuickToolsPalette(workspace: workspace, sketch: sketch, location: workspace.quickToolsLocation!)
+        let size = CGSize(width: 300, height: 300)
+        let lineIcon = palette.iconCenter(index: 1, in: size)
+        XCTAssertEqual(palette.hoverIndex(at: lineIcon, in: size), 1)
+        let firstIcon = palette.iconCenter(index: 0, in: size)
+        let nearLine = CGPoint(x: lineIcon.x * 0.9 + firstIcon.x * 0.1,
+                               y: lineIcon.y * 0.9 + firstIcon.y * 0.1)
+        XCTAssertEqual(palette.hoverIndex(at: nearLine, in: size), 1)
+        XCTAssertNil(palette.hoverIndex(at: CGPoint(x: 150, y: 150), in: size))
+        var feedbackCount = 0
+        workspace.quickToolsHoverFeedback = { _ in feedbackCount += 1 }
+        workspace.updateQuickToolsHover(1)
+        workspace.updateQuickToolsHover(1)
+        XCTAssertEqual(feedbackCount, 1)
+        XCTAssertTrue(QuickToolsPalette.performSelection(1, workspace: workspace, sketch: sketch))
+        XCTAssertEqual(sketch.tool, .polyline)
+        XCTAssertNil(workspace.quickToolsLocation)
+        XCTAssertNil(workspace.quickToolsHoverIndex)
+    }
+
+    func testEqualLengthPreviewHighlightsTransitiveReferenceGroup() throws {
+        let first = SketchCurveRef(entity: 0, index: 0)
+        let second = SketchCurveRef(entity: 1, index: 0)
+        let third = SketchCurveRef(entity: 2, index: 0)
+        let sketch = SketchController()
+        sketch.load(plane: .ground, entities: [
+            .line([0, 0], [10, 0]), .line([20, 0], [30, 0]), .line([40, 0], [50, 0]),
+        ], constraints: [SketchConstraint(variant: .equalLength(first, second)),
+                         SketchConstraint(variant: .equalLength(second, third))])
+        sketch.options.inputStyle = .solidcraft
+        sketch.tool = .polyline
+        let originalSnapKinds = sketch.snapKinds
+        defer { sketch.snapKinds = originalSnapKinds }
+        sketch.snapKinds = [.equalLength]
+        sketch.click.points = [SketchClickPoint(point: [60, 0], target: nil)]
+        sketch.clickHover(at: [70, 0], tolerance: 1)
+        guard case .equalLength(let snapped)? = sketch.currentCandidate?.target, snapped == third else {
+            return XCTFail("Die nähere dritte Linie muss als Bezug gefangen werden")
+        }
+        XCTAssertNotNil(sketch.equalLengthPreview)
+        let references = sketch.equalLengthReferenceLines
+        XCTAssertEqual(references.count, 3)
+        XCTAssertTrue(references.contains { $0.count == 2 && $0[0].x == 0 && $0[1].x == 10 })
+        XCTAssertTrue(references.contains { $0.count == 2 && $0[0].x == 20 && $0[1].x == 30 })
+        XCTAssertTrue(references.contains { $0.count == 2 && $0[0].x == 40 && $0[1].x == 50 })
+    }
+
+    func testSolidCraftParallelPreviewMarksCurrentAndReferenceLine() throws {
+        let sketch = SketchController()
+        sketch.load(plane: .ground, entities: [.line([0, 0], [10, 5])])
+        sketch.options.inputStyle = .solidcraft
+        sketch.tool = .polyline
+        let originalSnapKinds = sketch.snapKinds
+        defer { sketch.snapKinds = originalSnapKinds }
+        sketch.snapKinds = [.parallel]
+        sketch.click.points = [SketchClickPoint(point: [20, 0], target: nil)]
+        sketch.clickHover(at: [32, 6], tolerance: 1)
+        guard case .parallel(_)? = sketch.currentCandidate?.target else {
+            return XCTFail("Der schräge Parallel-Fang muss aktiv sein")
+        }
+        let reference = try XCTUnwrap(sketch.parallelPreview)
+        XCTAssertEqual(reference[0].x, 0, accuracy: 1e-8)
+        XCTAssertEqual(reference[1].y, 5, accuracy: 1e-8)
+        XCTAssertTrue(sketch.previewPolylines.contains { line in
+            line.count == 2 && simd_distance(line[0], [20, 0]) < 1e-8
+        })
+    }
+
+    func testClosingSolidCraftContourReturnsToSelectionAndShowsEditableLength() {
+        let sketch = SketchController()
+        sketch.load(plane: .ground, entities: [
+            .line([0, 0], [10, 0]), .line([10, 0], [10, 10]), .line([10, 10], [0, 10]),
+        ])
+        sketch.options.inputStyle = .solidcraft
+        sketch.tool = .polyline
+        sketch.click.points = [SketchClickPoint(point: [0, 10], target: nil)]
+        sketch.click.chainFirst = [0, 0]
+        sketch.clickBegan(at: [0, 0], tolerance: 1)
+        sketch.clickEnded(at: [0, 0], tolerance: 1)
+        XCTAssertEqual(sketch.entities.count, 4)
+        XCTAssertEqual(sketch.tool, .select)
+        XCTAssertFalse(sketch.isInProgress)
+        sketch.select(at: [5, 0], tolerance: 0.5)
+        XCTAssertTrue(sketch.visibleDimensions.contains { $0.kind == .length && $0.isEditable })
+    }
+
+    func testClosingClassicContourReturnsToSelection() {
+        let sketch = SketchController()
+        sketch.load(plane: .ground, entities: [])
+        sketch.options.inputStyle = .classic
+        sketch.tool = .polyline
+        let originalSnapKinds = sketch.snapKinds
+        defer { sketch.snapKinds = originalSnapKinds }
+        sketch.snapKinds = [.endpoint]
+        let corners: [Point2] = [[0, 0], [20, 0], [20, 20], [0, 20], [0, 0]]
+        for index in 0..<4 {
+            sketch.began(at: corners[index], tolerance: 0.5)
+            sketch.moved(to: corners[index + 1], tolerance: 0.5)
+            sketch.ended(at: corners[index + 1], tolerance: 0.5)
+        }
+        XCTAssertEqual(sketch.entities.count, 4)
+        XCTAssertEqual(sketch.tool, .select)
+        XCTAssertFalse(sketch.isInProgress)
+    }
+
     func testClassicSnapUsesExactLineCircleIntersections() throws {
         let x = sqrt(91.0)
         let entities: [SketchEntity] = [
