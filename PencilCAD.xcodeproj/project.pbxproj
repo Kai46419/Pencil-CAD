@@ -59,6 +59,7 @@
 		42135FDA81BC117E46C79182 /* Project8_FilletInput.step in Resources */ = {isa = PBXBuildFile; fileRef = 645CF2F4CA52BFC121F9CF57 /* Project8_FilletInput.step */; };
 		4216871CC23ED8E88DC91A9F /* EdgeCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = 566DA93D5542B0AC3EE84F8E /* EdgeCommands.swift */; };
 		43C59774DB0A1B4686AD36EF /* BodyDelete.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2B487A42E179FAA1C21866B /* BodyDelete.swift */; };
+		43D076CE568F9239D41722BB /* Project21_AfterFirstFillet.step in Resources */ = {isa = PBXBuildFile; fileRef = E6BAA6A4BBB0F6680E103B0F /* Project21_AfterFirstFillet.step */; };
 		43D369A25D9CADC53FDCC206 /* ModelStartBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1EE5F16B04B548005F6C9F5 /* ModelStartBridge.swift */; };
 		47A9699D5F457674C93F405B /* Project8_Adjacent_project.json in Resources */ = {isa = PBXBuildFile; fileRef = 7DFCAC3192EE0EC389FF8077 /* Project8_Adjacent_project.json */; };
 		48EC02748F6EF4BBE0B1FFA4 /* PrintCheck.swift in Sources */ = {isa = PBXBuildFile; fileRef = E50FD8612FD9D7EEE52403B9 /* PrintCheck.swift */; };
@@ -122,6 +123,7 @@
 		98DFF4DD6EE16B8D34480BE6 /* ProjectSaveTransactionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24B7D99431CA0E37FC5B01C9 /* ProjectSaveTransactionTests.swift */; };
 		99624C6ED400EE75732C8DEA /* DrawingSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3952FE240238967F8F15445E /* DrawingSheet.swift */; };
 		9C6A4C5F9ACC0A009EC02448 /* SketchTextPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 048666BE4439ECD76B6F7FBE /* SketchTextPanel.swift */; };
+		A0514620A17C2F3FEEB209CF /* Project21_CurvedExtrusion.step in Resources */ = {isa = PBXBuildFile; fileRef = 565EE99C35CCFC401F4AB4E1 /* Project21_CurvedExtrusion.step */; };
 		A1C7E315D351A627C47C1978 /* SketchConstraints.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DF11130ED0F7A60837A785A /* SketchConstraints.swift */; };
 		A2DDE0C468A14EF3374DA856 /* LoftPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB673882764E34D157C352C0 /* LoftPanel.swift */; };
 		A4FCDB542521F940BDD2374A /* FeatureTimelinePersistenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90C4A03BFC90940867B8C6BA /* FeatureTimelinePersistenceTests.swift */; };
@@ -306,6 +308,7 @@
 		53B109A66221150892642ADC /* TransformGizmo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransformGizmo.swift; sourceTree = "<group>"; };
 		546C167AD0F28C798427D3EB /* RevolveCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RevolveCommand.swift; sourceTree = "<group>"; };
 		554D77241AD6283A5159CBDD /* PencilCAD.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PencilCAD.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		565EE99C35CCFC401F4AB4E1 /* Project21_CurvedExtrusion.step */ = {isa = PBXFileReference; path = Project21_CurvedExtrusion.step; sourceTree = "<group>"; };
 		566DA93D5542B0AC3EE84F8E /* EdgeCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EdgeCommands.swift; sourceTree = "<group>"; };
 		5826D425322224F7AC42CD4B /* RendererSurfaces.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RendererSurfaces.swift; sourceTree = "<group>"; };
 		58C79459B68B71DF1EA47132 /* SketchTextDeformPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchTextDeformPanel.swift; sourceTree = "<group>"; };
@@ -420,6 +423,7 @@
 		E44AC3375DD7FF9E9AADF156 /* SketchCommit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchCommit.swift; sourceTree = "<group>"; };
 		E50FD8612FD9D7EEE52403B9 /* PrintCheck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrintCheck.swift; sourceTree = "<group>"; };
 		E59B594E5D5ADBC752E2CBA5 /* CompactKeypad.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompactKeypad.swift; sourceTree = "<group>"; };
+		E6BAA6A4BBB0F6680E103B0F /* Project21_AfterFirstFillet.step */ = {isa = PBXFileReference; path = Project21_AfterFirstFillet.step; sourceTree = "<group>"; };
 		E702E874531FE33C9B4C8880 /* FlatDrawing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlatDrawing.swift; sourceTree = "<group>"; };
 		E74D4F278C819BE89AB27DF3 /* FlatPatternView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlatPatternView.swift; sourceTree = "<group>"; };
 		E80D34E826236B5FB8529CD2 /* SheetUIBox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SheetUIBox.swift; sourceTree = "<group>"; };
@@ -672,6 +676,8 @@
 				0EB4885BDBD2B3A613EF475A /* Project8_Adjacent_sketches.json */,
 				CD3D176F7E2A0A95ECFCAFA8 /* Project8_AdjacentFilletInput.step */,
 				645CF2F4CA52BFC121F9CF57 /* Project8_FilletInput.step */,
+				E6BAA6A4BBB0F6680E103B0F /* Project21_AfterFirstFillet.step */,
+				565EE99C35CCFC401F4AB4E1 /* Project21_CurvedExtrusion.step */,
 				66BA75143D18FAAD1F409E6D /* Project14 */,
 			);
 			path = Fixtures;
@@ -916,6 +922,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				43D076CE568F9239D41722BB /* Project21_AfterFirstFillet.step in Resources */,
+				A0514620A17C2F3FEEB209CF /* Project21_CurvedExtrusion.step in Resources */,
 				C4ABD586392F06FC7FF39735 /* Project6_FilletInput.step in Resources */,
 				E0173194A5E7986D93A055FE /* Project8_AdjacentFilletInput.step in Resources */,
 				25132F3DC701E397B3D55533 /* Project8_Adjacent_bodies.json in Resources */,
@@ -1177,7 +1185,7 @@
 				CLANG_WARN_DOCUMENTATION_COMMENTS = NO;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 31;
+				CURRENT_PROJECT_VERSION = 32;
 				DEVELOPMENT_TEAM = EYNJ86G4VD;
 				EX_ENABLE_EXTENSION_POINT_GENERATION = YES;
 				FRAMEWORK_SEARCH_PATHS = (
@@ -1297,7 +1305,7 @@
 			buildSettings = {
 				CLANG_CXX_LANGUAGE_STANDARD = "c++17";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 31;
+				CURRENT_PROJECT_VERSION = 32;
 				DEVELOPMENT_TEAM = EYNJ86G4VD;
 				EX_ENABLE_EXTENSION_POINT_GENERATION = YES;
 				FRAMEWORK_SEARCH_PATHS = (
@@ -1381,7 +1389,7 @@
 			buildSettings = {
 				CLANG_CXX_LANGUAGE_STANDARD = "c++17";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 31;
+				CURRENT_PROJECT_VERSION = 32;
 				DEVELOPMENT_TEAM = EYNJ86G4VD;
 				EX_ENABLE_EXTENSION_POINT_GENERATION = YES;
 				FRAMEWORK_SEARCH_PATHS = (
@@ -1413,7 +1421,7 @@
 				CLANG_WARN_DOCUMENTATION_COMMENTS = NO;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 31;
+				CURRENT_PROJECT_VERSION = 32;
 				DEVELOPMENT_TEAM = EYNJ86G4VD;
 				EX_ENABLE_EXTENSION_POINT_GENERATION = YES;
 				FRAMEWORK_SEARCH_PATHS = (

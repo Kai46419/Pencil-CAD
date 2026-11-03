@@ -334,6 +334,8 @@ final class ModelStore: ObservableObject {
     var completesEdgeChain = true
     /// Eine Rundung bzw. Fase rechnet im Hintergrund (BlendJobs.swift); „Fertig“ wartet so lange
     @Published var isBlendComputing = false
+    /// Nur eine ausdrücklich gestartete Suche nach dem größten gültigen Einzelkantenradius.
+    @Published var isBlendMaximumComputing = false
     /// Hintergrund-Rundung: laufende/wartende Anfrage, gemerkte Ergebnisse (BlendJobs.swift)
     let blendJobs = BlendJobs()
     /// Flächen werden im Hintergrund extrudiert (FaceExtrudeJobs.swift); „OK“ wartet so lange

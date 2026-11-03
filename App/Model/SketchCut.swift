@@ -248,13 +248,11 @@ extension SketchController {
         guard trimmed > 0 else {
             revertCut()
             notice = refused > 0
-                ? "Ellipsen und Splines mit Schnittpunkten lassen sich nicht beschneiden – nur ganz löschen."
+                ? "Dieses Kurvenstück lässt sich nicht beschneiden."
                 : "Keine Kurve überstrichen – quer über die Stücke wischen, die weg sollen."
             return true
         }
-        notice = refused > 0
-            ? "\(trimmed) beschnitten – Ellipsen und Splines mit Schnittpunkten bleiben (nur ganz löschbar)."
-            : nil
+        notice = refused > 0 ? "\(trimmed) beschnitten – ein Kurvenstück blieb unverändert." : nil
         finishCut()
         return true
     }
@@ -267,7 +265,7 @@ extension SketchController {
         case .text:
             return false
         case .ellipse, .spline:
-            // Erst prüfen, dann ändern (Ellipsen und Splines mit Schnittpunkten gehen nicht)
+            // Vor dem Ersetzen prüfen; ein fehlgeschlagener Schnitt darf das Original nicht ändern.
             let cutters = entities.indices.filter { $0 != index }.flatMap { entities[$0].trimPrimitives }
             guard let pieces = SketchTrim.trim(entities[index], at: p, cutters: cutters) else { return false }
             replaceForCut(index, with: pieces)

@@ -545,6 +545,16 @@ struct ParameterCard: View {
                     model.setEdgeValue($0)
                 }
                 if model.edgeOperation == .fillet {
+                    Button("Max.", systemImage: "arrow.up.to.line") {
+                        model.searchLargestFillet { model.setEdgeValue($0) }
+                    }
+                    .labelStyle(.titleAndIcon)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(model.selectedEdges.count != 1 || model.edgeEndValue != nil
+                              || model.edgePartialRange != nil || model.isBlendComputing
+                              || model.isBlendMaximumComputing)
+                    .hoverTip("Maximal gültiger Radius", "Prüft die gewählte Kante im isolierten Kernel und übernimmt den größten gültigen Radius. Der angegebene Wert bleibt unverändert, bis du Max. antippst.")
                     // Variable Rundung (Fusion 360): Radius wächst bzw. schrumpft entlang der Kante
                     Toggle("Variabel", isOn: Binding(get: { model.edgeEndValue != nil }, set: { on in
                         if on { model.setEdgePartialRange(nil, update: false) }

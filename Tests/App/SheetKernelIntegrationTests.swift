@@ -531,6 +531,46 @@ final class SheetKernelIntegrationTests: XCTestCase {
         }
     }
 
+    func testLargestValidRadiusForProject21SecondSide() throws {
+        let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "Project21_AfterFirstFillet", withExtension: "step"))
+        let shape = try XCTUnwrap(PCKShape.readSTEP(path: url.path)?.first)
+        let maximum = try XCTUnwrap(BlendMaximumSearch.find(shape: shape, edge: 22, ceiling: 27.5))
+        XCTAssertGreaterThan(maximum, 8.4)
+        XCTAssertLessThan(maximum, 8.5)
+        XCTAssertNotNil(IsolatedBlend.run(shape: shape, edges: [22], mode: 0, value: maximum))
+        XCTAssertNil(IsolatedBlend.run(shape: shape, edges: [22], mode: 0, value: 27.5))
+    }
+
+    func testLargestValidRadiusForProject21CurvedEdge() throws {
+        let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "Project21_CurvedExtrusion", withExtension: "step"))
+        let shape = try XCTUnwrap(PCKShape.readSTEP(path: url.path)?.first)
+        let maximum = try XCTUnwrap(BlendMaximumSearch.find(shape: shape, edge: 2, ceiling: 10))
+        XCTAssertGreaterThan(maximum, 3.6)
+        XCTAssertLessThan(maximum, 4.9)
+        XCTAssertNotNil(IsolatedBlend.run(shape: shape, edges: [2], mode: 0, value: maximum))
+        XCTAssertNil(IsolatedBlend.run(shape: shape, edges: [2], mode: 0, value: 10))
+    }
+
+    func testMaximumRadiusActionReturnsProject21ValueWithoutChangingRequestedRadius() async throws {
+        let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "Project21_AfterFirstFillet", withExtension: "step"))
+        let shape = try XCTUnwrap(PCKShape.readSTEP(path: url.path)?.first)
+        let project = Project(id: UUID(), name: "Maximalradius Regression", modified: Date())
+        defer { try? FileManager.default.removeItem(at: project.folder) }
+        let model = ModelStore(folder: project.folder)
+        model.commit([SceneBody(shape: shape, name: "Projekt 21", color: SceneBody.defaultColor)], name: "Import")
+        model.toggleEdge(EdgeRef(body: 0, edge: 22))
+        let done = expectation(description: "Maximalradius wird im Hintergrund gefunden")
+        var found: Double?
+        model.searchLargestFillet { value in
+            found = value
+            done.fulfill()
+        }
+        await fulfillment(of: [done], timeout: 30)
+        XCTAssertGreaterThan(try XCTUnwrap(found), 8.4)
+        XCTAssertEqual(model.edgeValue, 0, "Die Suche darf den angeforderten Wert nicht heimlich ändern")
+        XCTAssertFalse(model.isBlendMaximumComputing)
+    }
+
     func testFilletRejectsEntireSelectionWhenOneEdgeNumberIsStale() throws {
         let box = PCKShape.box(width: 20, depth: 20, height: 10)
         let edge = try XCTUnwrap(box.edgeNumbers(ofFace: 1).first)

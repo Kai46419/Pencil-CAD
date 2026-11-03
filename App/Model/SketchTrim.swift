@@ -190,7 +190,7 @@ enum SketchTrim {
     // MARK: Beschneiden
 
     /// Ersatz für entity, nachdem das Stück um p entfernt wurde ([] = ganz löschen).
-    /// nil, wenn sich das Element nicht beschneiden lässt (Ellipse, Spline mit Schnittpunkten, Text).
+    /// nil, wenn sich das Element nicht beschneiden lässt (z. B. Text).
     static func trim(_ entity: SketchEntity, at p: Point2, cutters: [TrimPrimitive]) -> [SketchEntity]? {
         let own = entity.trimPrimitives
         let hits = own.flatMap { primitive in cutters.flatMap { intersections(primitive, $0) } }
@@ -227,13 +227,107 @@ enum SketchTrim {
             guard span > 1e-6 else { return [] }
             func point(_ angle: Double) -> Point2 { c + r * Point2(cos(angle), sin(angle)) }
             return [.arc(start: point(after), mid: point(after + span / 2), end: point(before))]
+        case .ellipse(let center, let radii):
+            guard radii.x > 1e-9, radii.y > 1e-9 else { return [] }
+            var angles = unique(hits.map {
+                positiveAngle(atan2(($0.y - center.y) / radii.y, ($0.x - center.x) / radii.x))
+            })
+            guard angles.count >= 2 else { return [] }
+            angles.sort()
+            let tap = positiveAngle(atan2((p.y - center.y) / radii.y, (p.x - center.x) / radii.x))
+            let before = angles.last { $0 <= tap } ?? angles.last!
+            let after = angles.first { $0 > tap } ?? angles.first!
+            let span = positiveAngle(before - after)
+            guard span > 1e-6 else { return [] }
+            // Das Ellipsenstück wird als glatte Fit-Spline mit analytischen Tangenten gespeichert.
+            // SketchEntity kennt nur eine ganze Ellipse, keinen Ellipsenbogen.
+            let steps = max(2, Int(ceil(span / (.pi / 18))))
+            let increment = span / Double(steps)
+            let sampledAngles = (0...steps).map { after + Double($0) * increment }
+            let points = sampledAngles.map { angle in
+                center + Point2(radii.x * cos(angle), radii.y * sin(angle))
+            }
+            let tangents: [Point2?] = sampledAngles.map { angle in
+                Point2(-radii.x * sin(angle), radii.y * cos(angle)) * increment
+            }
+            return [.spline(points: points, kind: .fit, closed: false, tangents: tangents)]
+        case .spline(_, let kind, let closed, _):
+            return trimSpline(entity, at: p, hits: hits, kind: kind, closed: closed)
         case .point:
             return []
-        case .ellipse, .spline:
-            return hits.isEmpty ? [] : nil
         default:
             return nil
         }
+    }
+
+    /// Schnittpunkte entlang der angezeigten Kurve ordnen. Fit-Splines werden über die vorhandene
+    /// Teilfunktion getrennt; Kontrollpunkt-Splines werden aus ihrer Abtastung als glatte Fit-Spline übernommen,
+    /// weil das Skizzenmodell keine Teilkurve eines gleichmäßigen B-Splines darstellen kann.
+    private static func trimSpline(_ entity: SketchEntity, at p: Point2, hits: [Point2],
+                                   kind: SplineKind, closed: Bool) -> [SketchEntity]? {
+        guard !hits.isEmpty else { return [] }
+        guard let path = entity.drawing.first, path.count >= 2 else { return [] }
+        var lengths = [0.0]
+        for i in 0..<(path.count - 1) {
+            lengths.append(lengths[i] + simd_distance(path[i], path[i + 1]))
+        }
+        guard let total = lengths.last, total > 1e-9 else { return [] }
+        func position(_ point: Point2) -> (along: Double, onCurve: Point2) {
+            var best = (distance: Double.infinity, along: 0.0, onCurve: path[0])
+            for i in 0..<(path.count - 1) {
+                let a = path[i], ab = path[i + 1] - a
+                let squared = simd_length_squared(ab)
+                guard squared > 1e-18 else { continue }
+                let t = min(max(simd_dot(point - a, ab) / squared, 0), 1)
+                let projected = a + ab * t
+                let distance = simd_distance(point, projected)
+                if distance < best.distance {
+                    best = (distance, lengths[i] + t * (lengths[i + 1] - lengths[i]), projected)
+                }
+            }
+            return (best.along, best.onCurve)
+        }
+        let epsilon = max(1e-6, total * 1e-7)
+        var cuts = hits.map(position).filter { closed || ($0.along > epsilon && $0.along < total - epsilon) }
+        if closed {
+            cuts = cuts.map { $0.along >= total - epsilon ? (0, path[0]) : $0 }
+        }
+        cuts.sort { $0.along < $1.along }
+        var distinct: [(along: Double, onCurve: Point2)] = []
+        for cut in cuts where distinct.last.map({ cut.along - $0.along > epsilon }) ?? true {
+            distinct.append(cut)
+        }
+        guard !distinct.isEmpty else { return [] }
+        let tap = position(p).along
+        let source: SketchEntity
+        if kind == .fit {
+            source = entity
+        } else {
+            let points = closed ? Array(path.dropLast()) : path
+            source = .spline(points: points, kind: .fit, closed: closed)
+        }
+        if closed {
+            guard distinct.count >= 2 else { return [] }
+            let before = distinct.last { $0.along <= tap } ?? distinct.last!
+            let after = distinct.first { $0.along > tap } ?? distinct.first!
+            guard let opened = splitAtPoint(source, after.onCurve)?.first,
+                  let remainder = splitAtPoint(opened, before.onCurve)?.first else { return nil }
+            return [remainder]
+        }
+        let lower = distinct.last { $0.along <= tap }
+        let upper = distinct.first { $0.along > tap }
+        var left = source
+        var right: SketchEntity?
+        if let upper {
+            guard let halves = splitAtPoint(source, upper.onCurve), halves.count == 2 else { return nil }
+            left = halves[0]
+            right = halves[1]
+        }
+        if let lower {
+            guard let halves = splitAtPoint(left, lower.onCurve), halves.count == 2 else { return nil }
+            left = halves[0]
+        }
+        return (lower == nil ? [] : [left]) + (right.map { [$0] } ?? [])
     }
 
     /// Nächste Schnitte links und rechts von t (ohne die Enden 0 und 1).

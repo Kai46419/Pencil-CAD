@@ -799,3 +799,136 @@ final class SketchDimensionTests: XCTestCase {
         XCTAssertEqual(rebuilt[0].shape.volume, expected, accuracy: 1e-4)
     }
 }
+
+@MainActor
+final class SketchTrimRegressionTests: XCTestCase {
+    private let horizontal: TrimPrimitive = .segment([-20, 0], [20, 0])
+
+    func testEllipseTrimKeepsSmoothOppositeArcAndCanUndo() throws {
+        let ellipse = SketchEntity.ellipse(center: [0, 0], radii: [10, 5])
+        let pieces = try XCTUnwrap(SketchTrim.trim(ellipse, at: [0, 5], cutters: [horizontal]))
+        XCTAssertEqual(pieces.count, 1)
+        guard case .spline(_, .fit, false, _) = pieces[0] else {
+            return XCTFail("Der Rest der Ellipse muss eine offene, glatte Spline sein")
+        }
+        let samples = try XCTUnwrap(pieces[0].drawing.first)
+        XCTAssertEqual(samples.first?.x ?? .nan, -10, accuracy: 0.03)
+        XCTAssertEqual(samples.last?.x ?? .nan, 10, accuracy: 0.03)
+        XCTAssertLessThan(samples.map(\.y).max() ?? .infinity, 0.02)
+        XCTAssertLessThan(samples.map(\.y).min() ?? 0, -4.9)
+
+        let sketch = SketchController()
+        sketch.load(plane: .ground, entities: [ellipse, .line([-20, 0], [20, 0])])
+        sketch.trim(at: [0, 5], tolerance: 0.5)
+        XCTAssertEqual(sketch.entities.count, 2)
+        guard case .spline = sketch.entities.last else { return XCTFail("Ellipse wurde nicht beschnitten") }
+        sketch.undo()
+        guard case .ellipse = sketch.entities.first else { return XCTFail("Undo muss die Ellipse wiederherstellen") }
+    }
+
+    func testOpenFitSplineTrimRemovesOnlyIntervalBetweenTwoCuts() throws {
+        let spline = SketchEntity.spline(points: [[-10, 0], [0, 0], [10, 0]], kind: .fit, closed: false)
+        let cutters: [TrimPrimitive] = [.segment([-3, -5], [-3, 5]), .segment([3, -5], [3, 5])]
+        let pieces = try XCTUnwrap(SketchTrim.trim(spline, at: [0, 0], cutters: cutters))
+        XCTAssertEqual(pieces.count, 2)
+        for piece in pieces {
+            guard case .spline(_, .fit, false, _) = piece else { return XCTFail("Fit-Spline muss erhalten bleiben") }
+        }
+        let left = try XCTUnwrap(pieces[0].drawing.first)
+        let right = try XCTUnwrap(pieces[1].drawing.first)
+        XCTAssertEqual(left.last?.x ?? .nan, -3, accuracy: 0.03)
+        XCTAssertEqual(right.first?.x ?? .nan, 3, accuracy: 0.03)
+        XCTAssertTrue(left.allSatisfy { $0.x <= -2.99 })
+        XCTAssertTrue(right.allSatisfy { $0.x >= 2.99 })
+    }
+
+    func testClosedFitSplineTrimKeepsOtherSideOfIntersections() throws {
+        let spline = SketchEntity.spline(points: [[10, 0], [0, 10], [-10, 0], [0, -10]],
+                                         kind: .fit, closed: true)
+        let pieces = try XCTUnwrap(SketchTrim.trim(spline, at: [0, 10], cutters: [horizontal]))
+        XCTAssertEqual(pieces.count, 1)
+        guard case .spline(_, .fit, false, _) = pieces[0] else { return XCTFail("Geschlossene Spline muss geöffnet werden") }
+        let samples = try XCTUnwrap(pieces[0].drawing.first)
+        XCTAssertLessThan(samples.map(\.y).max() ?? .infinity, 0.05)
+        XCTAssertLessThan(samples.map(\.y).min() ?? 0, -9.5)
+    }
+
+    func testControlSplinesCanBeTrimmedOpenAndClosed() throws {
+        let open = SketchEntity.spline(points: [[-10, 0], [-5, 5], [5, 5], [10, 0]],
+                                       kind: .control, closed: false)
+        let vertical: [TrimPrimitive] = [.segment([-4, -5], [-4, 10]), .segment([4, -5], [4, 10])]
+        let fragments = try XCTUnwrap(SketchTrim.trim(open, at: [0, 4], cutters: vertical))
+        XCTAssertEqual(fragments.count, 2)
+        XCTAssertTrue(fragments.allSatisfy {
+            if case .spline(_, .fit, false, _) = $0 { return true }
+            return false
+        })
+        XCTAssertEqual(fragments[0].drawing.first?.last?.x ?? .nan, -4, accuracy: 0.05)
+        XCTAssertEqual(fragments[1].drawing.first?.first?.x ?? .nan, 4, accuracy: 0.05)
+        let original = try XCTUnwrap(open.drawing.first)
+        for sample in fragments.flatMap({ $0.drawing.first ?? [] }) {
+            XCTAssertLessThan(SplineFit.polylineDistance(sample, original), 0.05,
+                              "Der rekonstruierte Kontrollpunkt-Spline-Rest muss dem ursprünglichen Verlauf folgen")
+        }
+
+        let closed = SketchEntity.spline(points: [[10, 0], [0, 10], [-10, 0], [0, -10]],
+                                         kind: .control, closed: true)
+        let remainder = try XCTUnwrap(SketchTrim.trim(closed, at: [0, 7], cutters: [horizontal]))
+        XCTAssertEqual(remainder.count, 1)
+        guard case .spline(_, .fit, false, _) = remainder[0] else { return XCTFail("Periodischer Rest muss offen sein") }
+        let samples = try XCTUnwrap(remainder[0].drawing.first)
+        XCTAssertLessThan(samples.map(\.y).max() ?? .infinity, 0.1)
+        XCTAssertLessThan(samples.map(\.y).min() ?? 0, -6)
+    }
+
+    func testEllipseAndSplineWithoutCutsStillDeleteWholeEntity() {
+        let ellipse = SketchEntity.ellipse(center: [0, 0], radii: [10, 5])
+        let spline = SketchEntity.spline(points: [[-10, 0], [0, 5], [10, 0]], kind: .fit, closed: false)
+        XCTAssertEqual(SketchTrim.trim(ellipse, at: [0, 5], cutters: [])?.count, 0)
+        XCTAssertEqual(SketchTrim.trim(spline, at: [0, 5], cutters: [])?.count, 0)
+    }
+
+    func testOpenSplineWithOneCutKeepsSideOppositeTap() throws {
+        let spline = SketchEntity.spline(points: [[-10, 0], [0, 0], [10, 0]], kind: .fit, closed: false)
+        let cutter: TrimPrimitive = .segment([0, -5], [0, 5])
+        let right = try XCTUnwrap(SketchTrim.trim(spline, at: [5, 0], cutters: [cutter]))
+        XCTAssertEqual(right.count, 1)
+        XCTAssertEqual(right[0].drawing.first?.last?.x ?? .nan, 0, accuracy: 0.03)
+        XCTAssertEqual(right[0].drawing.first?.first?.x ?? .nan, -10, accuracy: 0.03)
+        let left = try XCTUnwrap(SketchTrim.trim(spline, at: [-5, 0], cutters: [cutter]))
+        XCTAssertEqual(left.count, 1)
+        XCTAssertEqual(left[0].drawing.first?.first?.x ?? .nan, 0, accuracy: 0.03)
+        XCTAssertEqual(left[0].drawing.first?.last?.x ?? .nan, 10, accuracy: 0.03)
+    }
+
+    func testCurvedFitSplineKeepsOriginalShapeOutsideRemovedInterval() throws {
+        let spline = SketchEntity.spline(points: [[-10, 0], [-5, 4], [0, 6], [5, 4], [10, 0]],
+                                         kind: .fit, closed: false)
+        let cutters: [TrimPrimitive] = [.segment([-3, -2], [-3, 8]), .segment([3, -2], [3, 8])]
+        let pieces = try XCTUnwrap(SketchTrim.trim(spline, at: [0, 6], cutters: cutters))
+        XCTAssertEqual(pieces.count, 2)
+        guard case .spline(let points, _, _, _) = spline else { return XCTFail("Spline fehlt") }
+        let poles = fitBezierPoles(points, closed: false)
+        let original = (0..<((poles.count - 1) / 3)).flatMap { span in
+            (0...128).map { k in SplineFit.bezier(poles, span: span, t: Double(k) / 128) }
+        }
+        // Die vorhandene Teilfunktion parametrisiert die Fit-Spline-Stücke neu; die Formabweichung
+        // muss bei dieser 20-mm-Testkurve unter 0,06 mm bleiben.
+        for sample in pieces.flatMap({ $0.drawing.first ?? [] }) {
+            XCTAssertLessThan(SplineFit.polylineDistance(sample, original), 0.06,
+                              "Getrimmte Fit-Spline darf sich außerhalb des Schnitts nicht verformen")
+        }
+    }
+
+    func testSwipeTrimAlsoCutsEllipseAndRestoresWithUndo() {
+        let sketch = SketchController()
+        sketch.load(plane: .ground, entities: [
+            .ellipse(center: [0, 0], radii: [10, 5]), .line([-20, 0], [20, 0]),
+        ])
+        XCTAssertTrue(sketch.trimSwiped([[0, 7], [0, 3]], tolerance: 1))
+        XCTAssertEqual(sketch.entities.count, 2)
+        guard case .spline = sketch.entities.last else { return XCTFail("Wischen muss den Ellipsenbogen entfernen") }
+        sketch.undo()
+        guard case .ellipse = sketch.entities.first else { return XCTFail("Ein Undo muss den ganzen Wisch zurücknehmen") }
+    }
+}

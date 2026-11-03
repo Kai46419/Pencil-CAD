@@ -351,6 +351,16 @@ private struct FilletRows: View {
             }
             CommandNumberRow(title: isVariable ? "Anfang" : "Radius", cmd: cmd, key: "radius", fallback: 2,
                             workspace: workspace) { max(0, $0) }
+            if !isVariable && !isPartial {
+                PrimaryWideButton(title: model.isBlendMaximumComputing ? "Radius wird geprüft …" : "Maximal gültigen Radius finden",
+                                  systemImage: "arrow.up.to.line", isPrimary: false) {
+                    model.searchLargestFillet { value in
+                        cmd.putNumber("radius", value)
+                        CommandCache.refreshNow(cmd, workspace)
+                    }
+                }
+                .disabled(model.selectedEdges.count != 1 || model.isBlendComputing || model.isBlendMaximumComputing)
+            }
             CommandSegmentRow(title: "Typ", options: [CommandChoice(id: "constant", title: "Konstant"),
                                                       CommandChoice(id: "variable", title: "Variabel"),
                                                       CommandChoice(id: "partial", title: "Teilweise")],

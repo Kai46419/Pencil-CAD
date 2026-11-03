@@ -3312,7 +3312,7 @@ final class SketchController: ObservableObject {
         let cutters = entities.indices.filter { $0 != target }.flatMap { entities[$0].trimPrimitives }
         guard let pieces = SketchTrim.trim(entities[target], at: p, cutters: cutters) else {
             if let snapshot = undoStack.popLast() { restore(snapshot) }
-            notice = "Ellipsen und Splines mit Schnittpunkten lassen sich nicht beschneiden – nur ganz löschen."
+            notice = "Dieses Kurvenstück lässt sich nicht beschneiden."
             return
         }
         replaceEntity(target, with: pieces)

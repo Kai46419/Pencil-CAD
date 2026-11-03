@@ -147,8 +147,76 @@ enum BlendKernel {
     }
 }
 
+/// Sucht auf ausdrücklichen Wunsch den größten geprüften Radius einer Einzelkante.
+/// Jeder Versuch läuft im isolierten Kernelprozess; ein Absturz oder Zeitlimit beendet die Suche.
+enum BlendMaximumSearch {
+    static func find(shape: PCKShape, edge: Int, ceiling: Double) -> Double? {
+        guard edge > 0, ceiling.isFinite, ceiling >= 0.01 else { return nil }
+        let selection = [NSNumber(value: edge)]
+        func works(_ radius: Double) -> Bool {
+            IsolatedBlend.run(shape: shape, edges: selection, mode: 0, value: radius) != nil
+        }
+        let seed = min(0.1, ceiling)
+        guard works(seed) else { return nil }
+        if ceiling <= seed { return seed }
+        let upperWorks = works(ceiling)
+        if IsolatedBlend.wasBlocked(shape: shape, edges: selection, mode: 0) { return nil }
+        if upperWorks { return ceiling }
+        var lower = seed
+        var upper = ceiling
+        let deadline = ProcessInfo.processInfo.systemUptime + 15
+        for _ in 0..<12 where upper - lower > 0.01 {
+            if ProcessInfo.processInfo.systemUptime >= deadline { break }
+            let middle = (lower + upper) / 2
+            if works(middle) { lower = middle } else { upper = middle }
+            if IsolatedBlend.wasBlocked(shape: shape, edges: selection, mode: 0) { return nil }
+        }
+        return lower
+    }
+}
+
 extension ModelStore {
     static let blendTooHeavyMessage = "Rundung zu aufwendig bzw. nicht möglich – Radius verkleinern."
+
+    /// Sucht auf Wunsch eine gültige Geometriegrenze. Kein weiterer OCCT-Aufruf beim normalen Ziehen.
+    @MainActor
+    func searchLargestFillet(_ apply: @escaping @MainActor (Double) -> Void) {
+        guard edgeOperation == .fillet, edgeEndValue == nil, edgePartialRange == nil,
+              selectedEdges.count == 1, let selected = selectedEdges.first,
+              bodies.indices.contains(selected.body), !isBlendComputing, !isBlendMaximumComputing else {
+            message = "Maximalradius: eine Kante und eine konstante Rundung wählen; laufende Vorschau abwarten."
+            return
+        }
+        let source = bodies[selected.body].shape
+        guard let copy = source.independentCopy(), copy !== source else {
+            message = "Körper für die Radiusprüfung nicht kopierbar."
+            return
+        }
+        let box = source.boundingBox?.map(\.doubleValue) ?? []
+        let diagonal = box.count == 6
+            ? simd_length(SIMD3<Double>(box[3] - box[0], box[4] - box[1], box[5] - box[2])) : 10
+        let ceiling = min(max(edgeValue, diagonal, 0.1), 10_000)
+        let generation = blendJobs.generation
+        isBlendMaximumComputing = true
+        message = "Größten gültigen Radius prüfen …"
+        let input = UncheckedBox((copy, selected.edge, ceiling))
+        KernelThread.start("PencilCAD.blend.maximum") { [weak self] in
+            let value = BlendMaximumSearch.find(shape: input.value.0, edge: input.value.1, ceiling: input.value.2)
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.isBlendMaximumComputing = false
+                guard self.blendJobs.generation == generation,
+                      self.selectedEdges == [selected], self.bodies.indices.contains(selected.body),
+                      self.bodies[selected.body].shape === source else { return }
+                guard let value else {
+                    self.message = "Kein gültiger Radius gefunden; Kante oder Geometrie prüfen."
+                    return
+                }
+                self.message = "Größter geprüfter Radius: \(value.formatted(.number.precision(.fractionLength(2)))) mm."
+                apply(value)
+            }
+        }
+    }
 
     /// setEdgeValue: neue Anfrage – noch laufende bzw. wartende Ergebnisse gelten nicht mehr.
     func beginBlendRequest() {
