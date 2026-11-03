@@ -294,6 +294,11 @@ extension ModelStore {
     /// Überlappt sich das Flachmuster (Kontur schneidet sich selbst, Teile liegen übereinander)?
     nonisolated static func sheetOverlapProblem(_ flat: FlatPattern) -> String? {
         guard !flat.outline.isEmpty else { return "Das Flachmuster ist leer." }
+        for loop in flat.outline {
+            guard loop.count >= 3, loop.allSatisfy({ $0.x.isFinite && $0.y.isFinite }) else {
+                return "Die Abwicklung enthält eine unvollständige Kontur."
+            }
+        }
         for loop in flat.outline where loop.count <= 4000 && polylineIntersectsItself(loop) {
             return "Die Abwicklung überlappt sich – andere Kanten öffnen."
         }
@@ -310,23 +315,34 @@ extension ModelStore {
         return nil
     }
 
-    /// Schneiden sich zwei nicht benachbarte Strecken des geschlossenen Linienzugs?
+    /// Schneiden oder überdecken sich zwei nicht benachbarte Strecken des geschlossenen Linienzugs?
     nonisolated private static func polylineIntersectsItself(_ points: [SIMD2<Double>]) -> Bool {
-        let n = points.count
-        guard n >= 4 else { return false }
+        var loop = points
+        if loop.count > 1, simd_distance(loop[0], loop[loop.count - 1]) < 1e-9 { loop.removeLast() }
+        let n = loop.count
+        guard n >= 3 else { return false }
         func cross(_ a: SIMD2<Double>, _ b: SIMD2<Double>) -> Double { a.x * b.y - a.y * b.x }
-        let size = points.reduce(0.0) { max($0, abs($1.x), abs($1.y)) }
+        let size = loop.reduce(0.0) { max($0, abs($1.x), abs($1.y)) }
         let eps = 1e-9 * max(1, size * size)
-        for i in 0..<(n - 2) {
-            let a1 = points[i], a2 = points[(i + 1) % n]
-            for j in (i + 2)..<n {
-                if i == 0 && j == n - 1 { continue }
-                let b1 = points[j], b2 = points[(j + 1) % n]
+        func onSegment(_ p: SIMD2<Double>, _ a: SIMD2<Double>, _ b: SIMD2<Double>) -> Bool {
+            abs(cross(b - a, p - a)) <= eps &&
+                p.x >= min(a.x, b.x) - eps && p.x <= max(a.x, b.x) + eps &&
+                p.y >= min(a.y, b.y) - eps && p.y <= max(a.y, b.y) + eps
+        }
+        for i in 0..<n {
+            let a1 = loop[i], a2 = loop[(i + 1) % n]
+            if simd_distance(a1, a2) < 1e-9 { continue }
+            for j in (i + 1)..<n {
+                if j == i + 1 || (i == 0 && j == n - 1) { continue }
+                let b1 = loop[j], b2 = loop[(j + 1) % n]
+                if simd_distance(b1, b2) < 1e-9 { continue }
                 let d1 = cross(a2 - a1, b1 - a1), d2 = cross(a2 - a1, b2 - a1)
                 let d3 = cross(b2 - b1, a1 - b1), d4 = cross(b2 - b1, a2 - b1)
                 if ((d1 > eps && d2 < -eps) || (d1 < -eps && d2 > eps)) && ((d3 > eps && d4 < -eps) || (d3 < -eps && d4 > eps)) {
                     return true
                 }
+                if onSegment(b1, a1, a2) || onSegment(b2, a1, a2) ||
+                    onSegment(a1, b1, b2) || onSegment(a2, b1, b2) { return true }
             }
         }
         return false

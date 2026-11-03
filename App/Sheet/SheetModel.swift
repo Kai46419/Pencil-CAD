@@ -633,6 +633,9 @@ extension ModelStore {
 
     /// Flachmuster als DXF in eine temporäre Datei (für den Teilen-Dialog).
     func exportFlatPatternDXF(of body: Int, options: SheetDXFOptions = SheetDXFOptions()) throws -> URL {
+        if let problem = Self.sheetOverlapProblem(try flatPattern(of: body)) {
+            throw SheetKernelError("DXF Export nicht möglich: \(problem)")
+        }
         let session = try sheetSession(body)
         let url = SheetKernel.temporaryURL("dxf", name: Self.sheetFileName(bodies[body].name))
         try? FileManager.default.removeItem(at: url)

@@ -1,1 +1,1 @@
-03.11.2026 · Blech: sichere Umwandlungsquellen im Verlauf und aufgeräumte Vorschauen (Build 35)
+03.11.2026 · Blech: geprüfte Abwicklung vor DXF Export (Build 36)
