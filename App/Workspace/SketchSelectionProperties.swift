@@ -28,6 +28,11 @@ struct SketchSelectionSection: View {
                     SketchTextTransformFields(sketch: sketch, index: index)
                 } else {
                     SelectionDimensionRows(sketch: sketch)
+                    if sketch.selectedEntities.count == 1, let index = sketch.selectedEntities.first,
+                       sketch.entities.indices.contains(index), case .arc = sketch.entities[index] {
+                        PrimaryWideButton(title: "Bogenseite wechseln", systemImage: "arrow.triangle.2.circlepath",
+                                          isPrimary: false, action: sketch.flipSelectedArcSide)
+                    }
                 }
                 SelectionConstraintButtons(sketch: sketch)
                 SelectionActions(sketch: sketch)

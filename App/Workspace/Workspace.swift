@@ -283,12 +283,10 @@ final class Workspace: ObservableObject {
     @Published var quickToolsLocation: CGPoint?
     /// Werkzeug unter dem schwebenden Stift; nil bedeutet kein Treffer.
     @Published var quickToolsHoverIndex: Int?
-    var quickToolsHoverFeedback: ((Int) -> Void)?
 
     func updateQuickToolsHover(_ index: Int?) {
         guard quickToolsLocation != nil, quickToolsHoverIndex != index else { return }
         quickToolsHoverIndex = index
-        if let index { quickToolsHoverFeedback?(index) }
     }
 
     // Werkzeugparameter

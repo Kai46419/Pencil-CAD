@@ -502,6 +502,21 @@ extension SketchController {
         notice = "Hilfsbogen angelegt – Griff im Scheitel zieht die Krümmung."
     }
 
+    /// Radius des gewählten Textbogens ändern; Endpunkte und Krümmungsseite bleiben erhalten.
+    func setTextPathArcRadius(at index: Int, radius: Double) {
+        guard radius.isFinite, let source = sketchText(at: index)?.deform?.path?.source,
+              entities.indices.contains(source), case .arc(let a, let oldMid, let b) = entities[source] else { return }
+        let chord = b - a
+        let length = simd_length(chord)
+        guard length > 1e-9, radius >= length / 2 else { return }
+        let normal = Point2(-chord.y, chord.x) / length
+        let midpoint = (a + b) / 2
+        let side = simd_dot(oldMid - midpoint, normal) < 0 ? -1.0 : 1.0
+        let sagitta = radius - sqrt(max(0, radius * radius - length * length / 4))
+        let middle = midpoint + normal * (side * sagitta)
+        setDraggedElement(.arc(start: a, mid: middle, end: b), at: source, begin: true, final: true)
+    }
+
     /// Pfad ändern (Optionen der Leiste), ein Schritt zum Rückgängigmachen.
     func updateTextPath(at index: Int, _ change: (inout SketchTextPath) -> Void) {
         guard let text = sketchText(at: index), var deform = text.deform, var path = deform.path else { return }

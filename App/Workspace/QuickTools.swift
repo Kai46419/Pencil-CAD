@@ -13,7 +13,7 @@ struct QuickToolsPalette: View {
         let action: () -> Void
     }
 
-    private let radius: CGFloat = 82
+    private let radius: CGFloat = 100
 
     var body: some View {
         GeometryReader { proxy in
@@ -31,7 +31,14 @@ struct QuickToolsPalette: View {
                         item.action()
                         close()
                     } label: {
-                        icon(item, hovered: workspace.quickToolsHoverIndex == index)
+                        VStack(spacing: 2) {
+                            icon(item, hovered: workspace.quickToolsHoverIndex == index)
+                            Text(item.id)
+                                .font(.system(size: 9, weight: .medium))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
+                                .frame(width: 58)
+                        }
                     }
                     .buttonStyle(.pressable)
                     .accessibilityLabel(item.id)
@@ -56,6 +63,8 @@ struct QuickToolsPalette: View {
                 .position(center)
             }
         }
+        // SwiftUI-Haptik hängt an der tatsächlich schwebend gewählten Rad-Ansicht.
+        .sensoryFeedback(.selection, trigger: workspace.quickToolsHoverIndex)
         .transition(.scale(scale: 0.6).combined(with: .opacity))
     }
 

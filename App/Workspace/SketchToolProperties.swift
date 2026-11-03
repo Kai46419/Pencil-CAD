@@ -264,6 +264,9 @@ private struct SketchToolFields: View {
                 lock("Radius")
                 lock("Bogenwinkel", unit: "°")
             }
+        } else if sketch.arcMode == .tangent {
+            CheckRow(title: "Andere Bogenseite", icon: "arrow.triangle.2.circlepath",
+                     isOn: $sketch.tangentArcOpposite)
         }
     }
 

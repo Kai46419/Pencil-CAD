@@ -568,6 +568,8 @@ final class SketchController: ObservableObject {
     /// Bogen ohne Finger (Werkzeugrad bzw. Knopf „Bogen“): der nächste Strich mit dem Linienwerkzeug wird ein
     /// tangentialer Bogen, danach geht es mit Linien weiter
     @Published var arcNext = false
+    /// Tangentialbogen: dieselbe Kreisbahn über die andere Seite zwischen den Endpunkten führen.
+    @Published var tangentArcOpposite = false
     /// Ein Finger liegt auf (auch einer, den der Viewport nicht als Bogen-Taste gezählt hat): Strich wird Bogen
     func latchArc() {
         guard dragStart != nil, tool == .polyline, !arcLatched else { return }
@@ -1318,7 +1320,8 @@ final class SketchController: ObservableObject {
 
     /// Bogen von start nach end, der in start in Richtung direction losläuft. nil, wenn end (fast) auf der
     /// Verlängerung liegt.
-    static func tangentArcShape(start: Point2, direction: Point2, end: Point2) -> SketchEntity? {
+    static func tangentArcShape(start: Point2, direction: Point2, end: Point2,
+                                opposite: Bool = false) -> SketchEntity? {
         let d = end - start
         let normal = Point2(-direction.y, direction.x)
         let side = simd_dot(d, normal)
@@ -1334,6 +1337,7 @@ final class SketchController: ObservableObject {
         } else {
             while sweep >= 0 { sweep -= 2 * .pi }
         }
+        if opposite { sweep += sweep > 0 ? -2 * .pi : 2 * .pi }
         let middle = a0 + sweep / 2
         let mid = center + Point2(cos(middle), sin(middle)) * abs(radius)
         guard circleThrough(start, mid, end) != nil else { return nil }

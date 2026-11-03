@@ -29,7 +29,7 @@ struct Viewport: UIViewRepresentable {
             renderer.willDraw = { [weak view] in view?.syncIfNeeded() }
         }
         view.workspace = workspace
-        workspace.quickToolsHoverFeedback = { [weak view] index in view?.quickToolFeedback(for: index) }
+        // Das Werkzeugrad liegt als SwiftUI-Overlay über dem Viewport und erzeugt seine Haptik selbst.
         workspace.snapshot = { [weak view] size in view?.snapshot(size: size) }
         workspace.currentCamera = { [weak view] in view?.renderer?.camera }
         workspace.cameraMotion.view = view
@@ -3390,18 +3390,6 @@ final class ViewportView: MTKView {
         guard let workspace, let sketch, let origin = workspace.quickToolsLocation else { return }
         let palette = QuickToolsPalette(workspace: workspace, sketch: sketch, location: origin)
         workspace.updateQuickToolsHover(point.flatMap { palette.hoverIndex(at: $0, in: bounds.size) })
-    }
-
-    fileprivate func quickToolFeedback(for index: Int) {
-        guard let workspace, let sketch, let origin = workspace.quickToolsLocation else { return }
-        let palette = QuickToolsPalette(workspace: workspace, sketch: sketch, location: origin)
-        if #available(iOS 17.5, *) {
-            canvasFeedback.alignmentOccurred(at: palette.iconCenter(index: index, in: bounds.size))
-            canvasFeedback.prepare()
-        } else {
-            selectionFeedback.selectionChanged()
-            selectionFeedback.prepare()
-        }
     }
 
     @objc private func handleOrbit(_ gesture: UIPanGestureRecognizer) {

@@ -237,6 +237,43 @@ extension SketchController {
         return (simd_normalize(at - from), SketchCurveRef(entity: ref.entity, index: 0))
     }
 
+    /// Der angezeigte Innenwinkel beginnt am gemeinsamen Eckpunkt in Richtung des vorigen Strichs.
+    private func lineAngle(to direction: Point2) -> Double {
+        guard simd_length(direction) > 1e-9 else { return 0 }
+        let absolute = atan2(direction.y, direction.x)
+        guard let previous = previousSegment()?.direction else { return positiveAngle(absolute) }
+        let back = atan2(-previous.y, -previous.x)
+        return abs(remainder(absolute - back, 2 * .pi))
+    }
+
+    /// Ein getippter Innenwinkel hat zwei Seiten; die Stiftlage wählt die nähere.
+    private func lineDirection(for angle: Double, toward pointer: Point2) -> Double {
+        guard let previous = previousSegment()?.direction else { return angle }
+        let back = atan2(-previous.y, -previous.x)
+        let plus = back + angle, minus = back - angle
+        let current = atan2(pointer.y, pointer.x)
+        return abs(remainder(plus - current, 2 * .pi)) <= abs(remainder(minus - current, 2 * .pi))
+            ? plus : minus
+    }
+
+    /// Ein genau paralleler, schräger Bezug bleibt erkennbar, auch wenn der 15°-Fang ihn zuerst als Winkel fand.
+    private func exactParallelReference(from a: Point2, to b: Point2) -> SketchCurveRef? {
+        let delta = b - a, length = simd_length(delta)
+        guard length > 1e-9 else { return nil }
+        let direction = delta / length
+        var best: (distance: Double, ref: SketchCurveRef)?
+        for curve in inference.curves {
+            guard case .line(let start, let end) = curve.shape else { continue }
+            let other = end - start, otherLength = simd_length(other)
+            guard otherLength > 1e-9, abs(other.x) > 1e-6, abs(other.y) > 1e-6 else { continue }
+            let unit = other / otherLength
+            guard abs(direction.x * unit.y - direction.y * unit.x) < 1e-7 else { continue }
+            let distance = simd_distance((a + b) / 2, (start + end) / 2)
+            if distance < (best?.distance ?? .infinity) { best = (distance, curve.ref) }
+        }
+        return best?.ref
+    }
+
     /// Punkt merken (zuletzt berührt bzw. gesetzt), ohne Doppelte, höchstens trackedLimit.
     private func rememberTracked(_ kind: SnapKind, _ p: Point2) {
         click.tracked.removeAll { simd_distance($0.point, p) < 1e-9 }
@@ -366,7 +403,8 @@ extension SketchController {
         switch (kind, n) {
         case (.line, _):
             let length = lockedValue("Länge") ?? simd_length(v)
-            let angle = lockedValue("Winkel") ?? SketchInference.snapAxis(atan2(v.y, v.x), limit: axisLimit)
+            let angle = lockedValue("Winkel").map { lineDirection(for: $0, toward: v) }
+                ?? SketchInference.snapAxis(atan2(v.y, v.x), limit: axisLimit)
             return a + Point2(cos(angle), sin(angle)) * length
         case (.rectangle, 1):
             let half = rectangleMode == .center ? 0.5 : 1.0
@@ -446,14 +484,29 @@ extension SketchController {
         let metrics = snapMetrics(tolerance)
         let lineTool = clickKind == .line
         let tracking = clickTracking(raw, metrics: metrics, fresh: false)
-        let snapped = solidCraftSnap(raw, tolerance: tolerance, prev: click.points.last?.point, lineTool: lineTool,
-                                     tracking: tracking)
+        var snapped = solidCraftSnap(raw, tolerance: tolerance, prev: click.points.last?.point, lineTool: lineTool,
+                                    tracking: tracking)
+        if clickKind == .arcCenter, click.points.count == 2, !hasLockedBox {
+            snapped = centerArcCandidate(snapped, raw: raw, tolerance: metrics.onCurve)
+        }
         updateTracking(snapped, raw: raw, metrics: metrics)
         // Mittelpunkt-Bogen: den Bogenwinkel mit dem Stiftpunkt mitzählen, bevor clickEffective den Punkt auf den
         // Kreis beim bisherigen Winkel legt – sonst zählte trackSweep den schon gelegten Punkt, der Winkel blieb 0
         // und nach Mitte und Start erschien nur die Radiuslinie, nie ein Bogen (Kai)
         trackSweep(snapped.point)
         var result = clickPlaced(snapped, metrics: metrics)
+        if clickKind == .line, let start = click.points.last?.point, snapEnabled,
+           snapKinds.contains(.parallel), !snapSuspended, !arcModifier {
+            let angleOnly: Bool
+            switch result.target {
+            case nil, .some(.grid), .some(.angle): angleOnly = true
+            default: angleOnly = false
+            }
+            if angleOnly, let reference = exactParallelReference(from: start, to: result.point) {
+                result = SnapCandidate(point: result.point, target: .parallel(reference),
+                                       guide: (start, result.point), label: "//")
+            }
+        }
         // 3-Punkt-Bogen bzw. -Kreis: ein Fang (z. B. waagerecht zum Ende B einer waagerechten Sehne), der den dritten
         // Punkt auf die Gerade A–B legt, ergäbe keinen Bogen – dann gilt der freie Stiftpunkt
         if click.points.count == 2, clickKind == .arcThreePoint || clickKind == .circleThreePoint, !hasLockedBox {
@@ -488,6 +541,29 @@ extension SketchController {
         click.pointer = result.point
         click.raw = raw
         return result
+    }
+
+    /// Der Endpunkt eines Mittelpunktbogens muss auf Radiuskreis UND Fangkurve liegen.
+    /// Ein nur auf die Fangkurve projizierter Punkt trägt sonst eine falsche Abhängigkeit.
+    private func centerArcCandidate(_ candidate: SnapCandidate, raw: Point2, tolerance: Double) -> SnapCandidate {
+        let center = click.points[0].point
+        let radius = simd_distance(center, click.points[1].point)
+        guard radius > 1e-9, let target = candidate.target else { return candidate }
+        if case .onCurve(let ref) = target, let curve = inference.curve(ref) {
+            let hits = curve.shape.primitives.flatMap {
+                SketchTrim.intersections(.circle(center: center, radius: radius), $0)
+            }
+            if let hit = hits.min(by: { simd_distance($0, raw) < simd_distance($1, raw) }),
+               simd_distance(hit, raw) <= tolerance {
+                return SnapCandidate(point: hit, target: target, guide: candidate.guide, label: candidate.label)
+            }
+            return .free(raw)
+        }
+        // Punkt-, Schnitt- und Mittelfang außerhalb des Radiuskreises ist ebenfalls kein Bogen-Endpunkt.
+        if candidate.hasArgument && abs(simd_distance(candidate.point, center) - radius) > 1e-6 {
+            return .free(raw)
+        }
+        return candidate
     }
 
     /// Mittelpunkt-Bogen: Bogenwinkel des Stifts mitzählen (PencilCAD, auch über 180° und im Uhrzeigersinn).
@@ -864,7 +940,8 @@ extension SketchController {
             if let arc = SketchShapes.arc(center: points[0], start: points[1], sweep: sweep) { shapes.append(arc) }
         case (.arcTangent, 1):
             if let h, let start = tangentStart(click.points[0]),
-               let arc = Self.tangentArcShape(start: points[0], direction: start.direction, end: h) {
+               let arc = Self.tangentArcShape(start: points[0], direction: start.direction, end: h,
+                                              opposite: tangentArcOpposite) {
                 shapes.append(arc)
             } else if let h {
                 lines.append([points[0], h])
@@ -1012,9 +1089,7 @@ extension SketchController {
             case "Länge":
                 value = clickKind == .slot && slotMode == .centerPoint ? 2 * simd_length(v) : simd_length(v)
             case "Winkel":
-                var degrees = atan2(v.y, v.x) * 180 / .pi
-                if degrees < 0 { degrees += 360 }
-                value = simd_length(v) > 1e-9 ? degrees : 0
+                value = lineAngle(to: v) * 180 / .pi
             case "Breite":
                 if clickKind == .slot {
                     value = 2 * SketchShapes.slotHalfWidth(first, a, through: h)

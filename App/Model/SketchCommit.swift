@@ -332,7 +332,8 @@ extension SketchController {
     private func commitTangentArc(_ placed: [SketchClickPoint]) {
         let start = placed[0].point, end = placed[1].point
         guard let tangent = outwardTangent(at: start, tolerance: 1e-6),
-              let arc = Self.tangentArcShape(start: start, direction: tangent.direction, end: end) else {
+              let arc = Self.tangentArcShape(start: start, direction: tangent.direction, end: end,
+                                              opposite: tangentArcOpposite) else {
             notice = "Kein Bogen: das Ende liegt auf der Verlängerung."
             return
         }

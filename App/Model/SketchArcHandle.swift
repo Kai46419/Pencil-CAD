@@ -23,6 +23,17 @@ struct SketchRadiusHandle {
 }
 
 extension SketchController {
+    /// Nach dem Zeichnen zwischen kurzem und langem Bogen auf demselben Kreis wechseln.
+    func flipSelectedArcSide() {
+        guard selectedEntities.count == 1, let index = selectedEntities.first,
+              entities.indices.contains(index), case .arc(let start, let through, let end) = entities[index],
+              let arc = ArcGeometry(start, through, end) else { return }
+        let alternate = arc.sweep + (arc.sweep > 0 ? -2 * .pi : 2 * .pi)
+        let angle = arc.startAngle + alternate / 2
+        let middle = arc.center + arc.radius * Point2(cos(angle), sin(angle))
+        setDraggedElement(.arc(start: start, mid: middle, end: end), at: index, begin: true, final: true)
+    }
+
     /// Laufendes Ziehen eines Radiusgriffs (gespeichert in radiusHandleDrag).
     struct RadiusHandleDrag {
         var entity: Int

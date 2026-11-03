@@ -3,6 +3,93 @@ import XCTest
 
 @MainActor
 final class SketchDimensionTests: XCTestCase {
+    func testTextArcRadiusUpdatesLinkedPathAndRejectsImpossibleRadius() throws {
+        let text = SketchText(string: "CAD", anchor: [0, 0], height: 2,
+                              fontName: "Helvetica", alignment: .left)
+        let sketch = SketchController()
+        sketch.isActive = true
+        sketch.load(plane: .ground, entities: [.text(text),
+                                              .arc(start: [0, 0], mid: [5, 2], end: [10, 0])])
+        let original = try XCTUnwrap(SketchTextPath.curve(of: sketch.entities[1]))
+        sketch.setTextPath(at: 0, points: original.points, closed: false, source: 1)
+        sketch.setTextPathArcRadius(at: 0, radius: 10)
+        guard case .arc(let a, let m, let b) = sketch.entities[1] else { return XCTFail("Bogen fehlt") }
+        XCTAssertEqual(try XCTUnwrap(ArcGeometry(a, m, b)).radius, 10, accuracy: 1e-5)
+        let updated = try XCTUnwrap(sketch.sketchText(at: 0)?.deform?.path)
+        XCTAssertEqual(updated.source, 1)
+        XCTAssertNotEqual(updated.points, original.points)
+        sketch.setTextPathArcRadius(at: 0, radius: 2)
+        guard case .arc(let a2, let m2, let b2) = sketch.entities[1] else { return XCTFail("Bogen fehlt") }
+        XCTAssertEqual(try XCTUnwrap(ArcGeometry(a2, m2, b2)).radius, 10, accuracy: 1e-5)
+    }
+
+    func testCenterArcSnapsOnlyAtActualRadiusCurveIntersection() throws {
+        let sketch = SketchController()
+        sketch.isActive = true
+        sketch.load(plane: .ground, entities: [.line([6, 6], [6, 11])])
+        sketch.options.inputStyle = .solidcraft
+        sketch.tool = .arc
+        sketch.arcMode = .center
+        sketch.snapKinds = [.onCurve]
+        sketch.click.points = [SketchClickPoint(point: [0, 0], target: nil),
+                               SketchClickPoint(point: [10, 0], target: nil)]
+        sketch.click.lastAngle = 0
+        sketch.clickHover(at: [6.1, 7.9], tolerance: 0.5)
+        let candidate = try XCTUnwrap(sketch.currentCandidate)
+        XCTAssertEqual(candidate.point.x, 6, accuracy: 1e-5)
+        XCTAssertEqual(candidate.point.y, 8, accuracy: 1e-5)
+        guard case .onCurve? = candidate.target else { return XCTFail("Kurve muss exakt gefangen sein") }
+        sketch.clickHover(at: [6, 7], tolerance: 0.5)
+        if case .onCurve? = sketch.currentCandidate?.target {
+            XCTFail("Punkt neben dem Kreis darf keinen Kurvenfang behalten")
+        }
+    }
+
+    func testTangentArcCanUseOtherSideAndFlipAfterCreation() throws {
+        let start = Point2(0, 0), end = Point2(10, 10), direction = Point2(1, 0)
+        guard case .arc(let a, let m, let b)? = SketchController.tangentArcShape(start: start,
+                   direction: direction, end: end),
+              case .arc(_, let otherMid, _)? = SketchController.tangentArcShape(start: start,
+                   direction: direction, end: end, opposite: true) else {
+            return XCTFail("Beide Bogenseiten müssen möglich sein")
+        }
+        let first = try XCTUnwrap(ArcGeometry(a, m, b))
+        let opposite = try XCTUnwrap(ArcGeometry(a, otherMid, b))
+        XCTAssertEqual(first.radius, opposite.radius, accuracy: 1e-7)
+        XCTAssertEqual(first.center.x, opposite.center.x, accuracy: 1e-7)
+        XCTAssertLessThan(first.sweep * opposite.sweep, 0)
+
+        let sketch = SketchController()
+        sketch.isActive = true
+        sketch.load(plane: .ground, entities: [.arc(start: a, mid: m, end: b)])
+        sketch.addToSelection([.curve(SketchCurveRef(entity: 0, index: 0))])
+        sketch.flipSelectedArcSide()
+        guard case .arc(_, let flipped, _) = sketch.entities[0] else { return XCTFail("Bogen fehlt") }
+        XCTAssertEqual(simd_distance(flipped, otherMid), 0, accuracy: 1e-7)
+        sketch.undo()
+        guard case .arc(_, let restored, _) = sketch.entities[0] else { return XCTFail("Undo fehlt") }
+        XCTAssertEqual(simd_distance(restored, m), 0, accuracy: 1e-7)
+    }
+
+    func testSolidCraftLineAngleUsesPreviousSlantedSegment() throws {
+        let sketch = SketchController()
+        sketch.isActive = true
+        sketch.load(plane: .ground, entities: [.line([0, 0], [10, 5])])
+        sketch.options.inputStyle = .solidcraft
+        sketch.tool = .polyline
+        sketch.snapEnabled = false
+        sketch.click.points = [SketchClickPoint(point: [10, 5],
+                                                target: .point(SketchPointRef(entity: 0, index: 1)))]
+        sketch.clickHover(at: [10, -5], tolerance: 0.5)
+        let angle = try XCTUnwrap(sketch.clickLiveValues.first { $0.key == "Winkel" }?.value)
+        XCTAssertEqual(angle, 63.4349488, accuracy: 0.01)
+        sketch.options.locked["Winkel"] = "90"
+        sketch.clickHover(at: [12, -5], tolerance: 0.5)
+        let end = try XCTUnwrap(sketch.currentCandidate?.point)
+        let back = Point2(-10, -5), next = end - Point2(10, 5)
+        XCTAssertEqual(simd_dot(back, next), 0, accuracy: 1e-6)
+    }
+
     func testSketchPencilWheelHoverAndReleaseSelectsToolOnce() {
         let project = Project(id: UUID(), name: "Stiftrad-Test", modified: Date())
         let workspace = Workspace(project: project)
@@ -20,11 +107,9 @@ final class SketchDimensionTests: XCTestCase {
                                y: lineIcon.y * 0.9 + firstIcon.y * 0.1)
         XCTAssertEqual(palette.hoverIndex(at: nearLine, in: size), 1)
         XCTAssertNil(palette.hoverIndex(at: CGPoint(x: 150, y: 150), in: size))
-        var feedbackCount = 0
-        workspace.quickToolsHoverFeedback = { _ in feedbackCount += 1 }
         workspace.updateQuickToolsHover(1)
         workspace.updateQuickToolsHover(1)
-        XCTAssertEqual(feedbackCount, 1)
+        XCTAssertEqual(workspace.quickToolsHoverIndex, 1)
         XCTAssertTrue(QuickToolsPalette.performSelection(1, workspace: workspace, sketch: sketch))
         XCTAssertEqual(sketch.tool, .polyline)
         XCTAssertNil(workspace.quickToolsLocation)

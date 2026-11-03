@@ -134,14 +134,13 @@ struct SketchTextPathSection: View {
                             .foregroundStyle(Color.accentColor)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    HStack(spacing: PaletteStyle.spacing) {
-                        PrimaryWideButton(title: "Pfad wählen", systemImage: "hand.tap", isPrimary: false,
-                                          isActive: sketch.textDeformMode == .pickPath, showsTitle: false) {
+                    VStack(spacing: PaletteStyle.spacing) {
+                        PrimaryWideButton(title: "Bogen oder Pfad wählen", systemImage: "hand.tap", isPrimary: false,
+                                          isActive: sketch.textDeformMode == .pickPath) {
                             sketch.textDeformMode = sketch.textDeformMode == .pickPath ? nil : .pickPath
                         }
                         .hoverTip("Pfad wählen", "Danach eine Linie, einen Bogen, Kreis, Spline, Linienzug oder eine projizierte Körperkante antippen.")
-                        PrimaryWideButton(title: "Bogen-Vorlage", systemImage: "rainbow", isPrimary: false,
-                                          showsTitle: false) {
+                        PrimaryWideButton(title: "Bogen-Vorlage anlegen", systemImage: "rainbow", isPrimary: false) {
                             // „Abbrechen“ nimmt auch den Hilfsbogen wieder weg
                             if sketch.textDeformMode == nil { sketch.beginTextDeformSession() }
                             sketch.addTextArcTemplate(at: index)
@@ -149,8 +148,7 @@ struct SketchTextPathSection: View {
                         }
                         .hoverTip("Bogen-Vorlage", "Legt einen Hilfsbogen über den Text und richtet ihn daran aus. Der Griff im Scheitel zieht die Krümmung.")
                         if path != nil {
-                            PrimaryWideButton(title: "Vom Pfad lösen", systemImage: "link.badge.plus", isPrimary: false,
-                                              showsTitle: false) {
+                            PrimaryWideButton(title: "Vom Pfad lösen", systemImage: "link.badge.plus", isPrimary: false) {
                                 sketch.updateTextDeform(at: index) { $0.path = nil }
                                 if sketch.textDeformMode == .path { sketch.textDeformMode = nil }
                             }
@@ -172,7 +170,22 @@ struct SketchTextPathSection: View {
         }
         .hoverTip("Startgriff", "Zeigt den Griff am Textanfang: ziehen verschiebt den Text entlang der Kurve.")
         CheckRow(title: "Kontur folgen", icon: "scribble.variable", isOn: binding(\.bends))
-        CheckRow(title: "Unterhalb", icon: "arrow.down.to.line", isOn: binding(\.below))
+        CommandSegmentRow(title: "Position zum Bogen",
+                          options: [CommandChoice(id: "on", title: "Auf"),
+                                    CommandChoice(id: "above", title: "Über"),
+                                    CommandChoice(id: "below", title: "Unter")],
+                          selected: path.below ? "below" : (path.distance > 0 ? "above" : "on")) { id in
+            sketch.updateTextPath(at: index) {
+                $0.below = id == "below"
+                $0.distance = id == "on" ? 0 : max($0.distance, 0.5)
+            }
+        }
+        if let source = path.source, sketch.entities.indices.contains(source),
+           case .arc(let a, let m, let b) = sketch.entities[source], let arc = ArcGeometry(a, m, b) {
+            PaletteNumberRow(title: "Bogenradius", value: arc.radius) { value in
+                sketch.setTextPathArcRadius(at: index, radius: value)
+            }
+        }
         CheckRow(title: "Umkehren", icon: "arrow.left.arrow.right", isOn: binding(\.reversed))
         // Beschriftung über der Wahl, Segmente umbrechend statt mit „…“ gekürzt (schmales Fenster)
         CommandSegmentRow(title: "Ausrichtung",

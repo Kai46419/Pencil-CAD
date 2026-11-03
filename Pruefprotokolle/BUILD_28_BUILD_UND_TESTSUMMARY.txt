@@ -1,0 +1,13 @@
+PencilCAD Build 28 – Xcode-Nachweis
+
+Simulator:
+xcodebuild test -project PencilCAD.xcodeproj -scheme PencilCAD -destination platform=iOS\ Simulator,id=8D0965B1-AAA5-4EDA-8929-2E220BA306CF -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO
+Executed 84 tests, with 0 failures (0 unexpected) in 3.506 (3.531) seconds
+Executed 84 tests, with 0 failures (0 unexpected) in 3.506 (3.534) seconds
+** TEST SUCCEEDED **
+
+iOS Release:
+xcodebuild build -project PencilCAD.xcodeproj -scheme PencilCAD -configuration Release -destination generic/platform=iOS CODE_SIGNING_ALLOWED=NO
+** BUILD SUCCEEDED **
+CFBundleVersion: 28
+iPad-Test: nicht durchgeführt (iPad abgezogen)
