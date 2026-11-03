@@ -1,1 +1,1 @@
-03.11.2026 · Skizzenraster: feste 1-mm-Wahl und Automatik (Build 39)
+03.11.2026 · Skizzenlinien: Längen folgen der U-Schrittweite (Build 40)

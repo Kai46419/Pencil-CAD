@@ -359,6 +359,19 @@ final class SketchController: ObservableObject {
         gridStep = step
         options.gridAuto = false
     }
+
+    /// Die U-Schrittweite gilt beim freien Linienziehen auch für die Länge ab dem Startpunkt.
+    /// Ein XY-Raster allein kann bei diagonalen Linien keine gerasterte Länge garantieren.
+    func steppedLineEnd(_ directionPoint: Point2, from start: Point2) -> Point2 {
+        guard snapEnabled, !snapSuspended, !options.gridAuto,
+              gridStep.isFinite, gridStep > 0 else { return directionPoint }
+        let delta = directionPoint - start
+        let length = simd_length(delta)
+        guard length.isFinite, length > 1e-9 else { return directionPoint }
+        let steps = (length / gridStep).rounded()
+        guard steps.isFinite else { return directionPoint }
+        return start + delta * (steps * gridStep / length)
+    }
     /// Fang insgesamt (Magnet in der rechten Leiste)
     @Published var snapEnabled = true
     /// Shapr3D „Auto-Constraining“: beim Zeichnen gefundene Richtungen (waagerecht, senkrecht, parallel,
@@ -4263,7 +4276,10 @@ final class SketchController: ObservableObject {
             return p
         }
         if let anchor, directionLock != nil, tool == .polyline || tool == .rectangle && rectangleMode == .threePoint,
-           let result = locked(p, anchor: anchor, tolerance: tolerance) {
+           var result = locked(p, anchor: anchor, tolerance: tolerance) {
+            if tool == .polyline, result.kind == .angle {
+                result.point = steppedLineEnd(result.point, from: anchor)
+            }
             parallelLines = []
             activeSnap = result
             return result.point
@@ -4303,6 +4319,16 @@ final class SketchController: ObservableObject {
             if abs(along) > tolerance, simd_distance(foot, p) <= tolerance {
                 parallelLines = []
                 result = SnapResult(point: foot, kind: .angle, guides: [(arcStart.start, foot)])
+            }
+        }
+        if tool == .polyline, !arcActive, let anchor {
+            switch result.kind {
+            case nil, .some(.grid):
+                result.point = steppedLineEnd(p, from: anchor)
+            case .some(.angle), .some(.parallel):
+                result.point = steppedLineEnd(result.point, from: anchor)
+            default:
+                break
             }
         }
         activeSnap = result.kind == nil ? nil : result

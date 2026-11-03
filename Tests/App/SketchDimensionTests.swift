@@ -352,6 +352,102 @@ final class SketchDimensionTests: XCTestCase {
         XCTAssertFalse(reopened.options.gridAuto)
     }
 
+    func testFixedGridQuantizesSlantedLinePreviewAndCommittedLength() throws {
+        let sketch = SketchController()
+        sketch.options.inputStyle = .solidcraft
+        sketch.tool = .polyline
+        sketch.autoConstrain = false
+        let previousKinds = sketch.snapKinds
+        defer { sketch.snapKinds = previousKinds }
+        sketch.snapKinds = [.grid]
+        sketch.chooseGridStep(1)
+        sketch.click.points = [SketchClickPoint(point: .zero, target: nil)]
+
+        let raw = Point2(1, 0.3) // Länge 1,044 mm, obwohl X und Y im Raster liegen können
+        sketch.clickHover(at: raw, tolerance: 0.05)
+        let preview = try XCTUnwrap(sketch.currentCandidate?.point)
+        XCTAssertEqual(simd_length(preview), 1, accuracy: 1e-8)
+        sketch.clickBegan(at: .zero, tolerance: 0.05)
+        sketch.clickMoved(to: raw, tolerance: 0.05)
+        sketch.clickEnded(at: raw, tolerance: 0.05)
+
+        guard case .line(let start, let end) = try XCTUnwrap(sketch.entities.last) else {
+            return XCTFail("Die gezogene Linie muss gespeichert werden")
+        }
+        XCTAssertEqual(simd_distance(start, end), 1, accuracy: 1e-8)
+        XCTAssertEqual(simd_distance(end, preview), 0, accuracy: 1e-8)
+    }
+
+    func testFixedGridSupportsFineStepsAndExistingPointPriority() throws {
+        let sketch = SketchController()
+        sketch.options.inputStyle = .solidcraft
+        sketch.tool = .polyline
+        let previousKinds = sketch.snapKinds
+        defer { sketch.snapKinds = previousKinds }
+        sketch.snapKinds = [.grid]
+        sketch.click.points = [SketchClickPoint(point: .zero, target: nil)]
+
+        sketch.chooseGridStep(0.1)
+        sketch.clickHover(at: [1, 0.4], tolerance: 0.05)
+        XCTAssertEqual(simd_length(try XCTUnwrap(sketch.currentCandidate?.point)), 1.1, accuracy: 1e-8)
+        sketch.chooseGridStep(0.01)
+        sketch.clickHover(at: [1, 0.4], tolerance: 0.05)
+        XCTAssertEqual(simd_length(try XCTUnwrap(sketch.currentCandidate?.point)), 1.08, accuracy: 1e-8)
+
+        sketch.chooseGridStep(0.5)
+        sketch.clickHover(at: [1.4, 0.4], tolerance: 0.05)
+        XCTAssertEqual(simd_length(try XCTUnwrap(sketch.currentCandidate?.point)), 1.5, accuracy: 1e-8)
+        sketch.chooseGridStep(0.2)
+        sketch.clickHover(at: [1.15, 0.3], tolerance: 0.05)
+        XCTAssertEqual(simd_length(try XCTUnwrap(sketch.currentCandidate?.point)), 1.2, accuracy: 1e-8)
+
+        let offsetStart = Point2(5.123, 8.456)
+        sketch.click.points = [SketchClickPoint(point: offsetStart, target: nil)]
+        sketch.chooseGridStep(1)
+        sketch.clickHover(at: offsetStart + Point2(1, 0.3), tolerance: 0.05)
+        XCTAssertEqual(simd_distance(offsetStart, try XCTUnwrap(sketch.currentCandidate?.point)), 1, accuracy: 1e-8)
+        sketch.snapEnabled = false
+        sketch.clickHover(at: offsetStart + Point2(1, 0.3), tolerance: 0.05)
+        XCTAssertEqual(simd_distance(offsetStart, try XCTUnwrap(sketch.currentCandidate?.point)), sqrt(1.09), accuracy: 1e-8)
+        sketch.snapEnabled = true
+
+        sketch.load(plane: .ground, entities: [.point([1, 0.3])])
+        sketch.snapKinds = [.grid, .endpoint]
+        sketch.chooseGridStep(1)
+        sketch.click.points = [SketchClickPoint(point: .zero, target: nil)]
+        sketch.clickHover(at: [1, 0.3], tolerance: 0.05)
+        XCTAssertEqual(try XCTUnwrap(sketch.currentCandidate?.point).x, 1, accuracy: 1e-8)
+        XCTAssertEqual(try XCTUnwrap(sketch.currentCandidate?.point).y, 0.3, accuracy: 1e-8)
+    }
+
+    func testFixedGridRespectsTypedLineLengthAndClassicDrawing() throws {
+        let sketch = SketchController()
+        sketch.options.inputStyle = .solidcraft
+        sketch.tool = .polyline
+        let previousKinds = sketch.snapKinds
+        defer { sketch.snapKinds = previousKinds }
+        sketch.snapKinds = [.grid]
+        sketch.chooseGridStep(1)
+        sketch.click.points = [SketchClickPoint(point: .zero, target: nil)]
+        sketch.options.locked["Länge"] = "1,0458"
+        sketch.clickHover(at: [1, 0.3], tolerance: 0.05)
+        XCTAssertEqual(simd_length(try XCTUnwrap(sketch.currentCandidate?.point)), 1.0458, accuracy: 1e-8)
+
+        sketch.options.locked = [:]
+        sketch.options.inputStyle = .classic
+        sketch.autoConstrain = false
+        sketch.began(at: .zero, tolerance: 0.05)
+        sketch.moved(to: [1, 0.3], tolerance: 0.05)
+        let preview = try XCTUnwrap(sketch.previewPolylines.first?.last)
+        XCTAssertEqual(simd_length(preview), 1, accuracy: 1e-8)
+        sketch.ended(at: [1, 0.3], tolerance: 0.05)
+        guard case .line(let start, let end) = try XCTUnwrap(sketch.entities.last) else {
+            return XCTFail("Die klassische Linie muss gespeichert werden")
+        }
+        XCTAssertEqual(simd_distance(start, end), 1, accuracy: 1e-8)
+        XCTAssertEqual(simd_distance(end, preview), 0, accuracy: 1e-8)
+    }
+
     func testAlignmentGuideReachesBothViewportEdges() throws {
         let vertical = try XCTUnwrap(SketchGuideGeometry.clipped(
             ([0, 0], [0, 50]), projected: (CGPoint(x: 100, y: 100), CGPoint(x: 100, y: 150)),

@@ -538,6 +538,18 @@ extension SketchController {
                                              tolerance: metrics.refine) {
             result = match
         }
+        if clickKind == .line, let anchor = click.points.last?.point,
+           lockedValue("Länge") == nil, !arcModifier {
+            switch result.target {
+            case nil, .some(.grid):
+                result.point = steppedLineEnd(raw, from: anchor)
+            case .some(.horizontal), .some(.vertical), .some(.angle),
+                 .some(.parallel), .some(.perpendicular):
+                result.point = steppedLineEnd(result.point, from: anchor)
+            default:
+                break
+            }
+        }
         click.pointer = result.point
         click.raw = raw
         return result
