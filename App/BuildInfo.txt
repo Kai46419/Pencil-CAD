@@ -1,1 +1,1 @@
-03.11.2026 · Blech: geprüfte Abwicklung vor DXF Export (Build 36)
+03.11.2026 · Zeichnung: manuelle Längenmaße in drei Messarten (Build 37)
