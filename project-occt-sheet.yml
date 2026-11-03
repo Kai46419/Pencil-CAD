@@ -1,0 +1,17 @@
+# Wie project-occt.yml, zusätzlich mit dem Blechmodul (Vendor/PencilSheet.xcframework, SolidCraft-Engine).
+# Wird von scripts/generate-project.sh automatisch gewählt, sobald OCCT und das Blechmodul existieren
+# (Blechmodul bauen: ./scripts/build-sheet-ios.sh). Listen aus den eingebundenen Dateien werden ergänzt.
+include:
+  - project-occt.yml
+
+targets:
+  PencilCAD:
+    dependencies:
+      - framework: Vendor/PencilSheet.xcframework
+        embed: false
+    settings:
+      base:
+        # Schaltet App/Sheet/SheetKernel.swift auf die echten C-Aufrufe um
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) PENCIL_SHEETKIT"
+        # Laut `--print native-static-libs`: CoreFoundation (Zeitzonen in truck-stepio), libiconv; Security für Zufallszahlen, libc++ zur Sicherheit
+        OTHER_LDFLAGS: "$(inherited) -framework CoreFoundation -framework Security -liconv -lc++"

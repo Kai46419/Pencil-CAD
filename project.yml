@@ -1,0 +1,98 @@
+name: PencilCAD
+options:
+  bundleIdPrefix: com.example
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+
+targets:
+  PencilCAD:
+    type: application
+    platform: iOS
+    sources:
+      - path: App
+        excludes:
+          - "**/*.backup"
+          - "**/*.backup-*"
+      - path: Shared
+    dependencies:
+      - target: PencilCADBlendWorker
+    settings:
+      base:
+        # Werden von scripts/generate-project.sh gesetzt (signing.env oder Zertifikat im Schlüsselbund)
+        PRODUCT_BUNDLE_IDENTIFIER: ${PENCILCAD_BUNDLE_ID}
+        DEVELOPMENT_TEAM: ${PENCILCAD_TEAM}
+        MARKETING_VERSION: "0.1.0"
+        # Build-Nummer = Anzahl der Commits (setzt scripts/generate-project.sh)
+        CURRENT_PROJECT_VERSION: "${PENCILCAD_BUILD}"
+        TARGETED_DEVICE_FAMILY: "2"
+        SWIFT_VERSION: "5.9"
+        "ARCHS[sdk=iphonesimulator*]": arm64
+        SWIFT_OBJC_BRIDGING_HEADER: App/Kernel/PencilCAD-Bridging-Header.h
+        CLANG_CXX_LANGUAGE_STANDARD: c++17
+        CLANG_WARN_DOCUMENTATION_COMMENTS: NO
+        EX_ENABLE_EXTENSION_POINT_GENERATION: YES
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: PencilCAD
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
+        INFOPLIST_KEY_UIRequiresFullScreen: NO
+        INFOPLIST_KEY_UIFileSharingEnabled: YES
+        INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace: YES
+        INFOPLIST_KEY_NSCameraUsageDescription: PencilCAD nutzt die Kamera, um ein Foto als Vorlage zum Nachzeichnen aufzunehmen.
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: >-
+          UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown
+          UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
+
+  PencilCADBlendWorker:
+    type: extensionkit-extension
+    platform: iOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: BlendWorker
+        excludes:
+          - Info.plist
+      - path: Shared
+      - path: App/Kernel/PCKShape.mm
+      - path: App/Kernel/PCKShape.h
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ${PENCILCAD_BUNDLE_ID}.BlendWorker
+        DEVELOPMENT_TEAM: ${PENCILCAD_TEAM}
+        SWIFT_VERSION: "5.9"
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "${PENCILCAD_BUILD}"
+        TARGETED_DEVICE_FAMILY: "2"
+        SWIFT_OBJC_BRIDGING_HEADER: App/Kernel/PencilCAD-Bridging-Header.h
+        CLANG_CXX_LANGUAGE_STANDARD: c++17
+        EX_ENABLE_EXTENSION_POINT_GENERATION: YES
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: BlendWorker/Info.plist
+        CODE_SIGN_STYLE: Automatic
+
+  PencilCADTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - Tests/App
+    dependencies:
+      - target: PencilCAD
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ${PENCILCAD_BUNDLE_ID}.tests
+        SWIFT_OBJC_BRIDGING_HEADER: App/Kernel/PencilCAD-Bridging-Header.h
+        DEVELOPMENT_TEAM: ${PENCILCAD_TEAM}
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: "5.9"
+        "ARCHS[sdk=iphonesimulator*]": arm64
+
+schemes:
+  PencilCAD:
+    build:
+      targets:
+        PencilCAD: all
+        PencilCADTests: [test]
+    test:
+      targets:
+        - PencilCADTests
