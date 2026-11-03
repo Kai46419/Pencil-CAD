@@ -307,10 +307,49 @@ final class SketchDimensionTests: XCTestCase {
         let project = Project(id: UUID(), name: "Rastertest", modified: Date())
         defer { try? FileManager.default.removeItem(at: project.folder) }
         let first = Workspace(project: project)
-        first.sketch.gridStep = 0.001
+        first.sketch.chooseGridStep(0.001)
         XCTAssertEqual(GridSettings.stored(in: project.folder), 0.001)
+        XCTAssertEqual(GridSettings.storedAutomatic(in: project.folder), false)
         let reopened = Workspace(project: project)
         XCTAssertEqual(reopened.sketch.gridStep, 0.001)
+        XCTAssertFalse(reopened.sketch.options.gridAuto)
+    }
+
+    func testExplicitOneMillimeterGridChangesActualSketchSnap() throws {
+        let project = Project(id: UUID(), name: "Fangrastertest", modified: Date())
+        defer { try? FileManager.default.removeItem(at: project.folder) }
+        let sketch = Workspace(project: project).sketch
+        sketch.options.inputStyle = .solidcraft
+        sketch.snapKinds = [.grid]
+        sketch.viewHalfHeight = 10
+
+        let raw = Point2(1.37, 2.26)
+        let automatic = sketch.solidCraftSnap(raw, tolerance: 0.5, prev: nil, lineTool: false)
+        sketch.chooseGridStep(1)
+        let fixed = sketch.solidCraftSnap(raw, tolerance: 0.5, prev: nil, lineTool: false)
+
+        XCTAssertTrue(sketch.snapEnabled)
+        XCTAssertFalse(sketch.options.gridAuto)
+        XCTAssertEqual(fixed.point.x, 1, accuracy: 1e-8)
+        XCTAssertEqual(fixed.point.y, 2, accuracy: 1e-8)
+        XCTAssertNotEqual(automatic.point.x, fixed.point.x)
+
+        let reopened = Workspace(project: project).sketch
+        XCTAssertEqual(reopened.gridStep, 1)
+        XCTAssertFalse(reopened.options.gridAuto)
+        reopened.options.gridAuto = true
+        XCTAssertTrue(Workspace(project: project).sketch.options.gridAuto)
+    }
+
+    func testLegacyGridSettingOpensAsFixedChoice() throws {
+        let project = Project(id: UUID(), name: "AltesRaster", modified: Date())
+        defer { try? FileManager.default.removeItem(at: project.folder) }
+        try FileManager.default.createDirectory(at: project.folder, withIntermediateDirectories: true)
+        try Data(#"{"stepMillimeters":0.5}"#.utf8).write(to: project.folder.appending(path: "grid.json"))
+
+        let reopened = Workspace(project: project).sketch
+        XCTAssertEqual(reopened.gridStep, 0.5)
+        XCTAssertFalse(reopened.options.gridAuto)
     }
 
     func testAlignmentGuideReachesBothViewportEdges() throws {

@@ -349,8 +349,15 @@ final class SketchController: ObservableObject {
     var gridStorageFolder: URL?
     @Published var gridStep: Double = 1 {
         didSet {
-            if gridStep != oldValue { GridSettings.store(gridStep, in: gridStorageFolder) }
+            if gridStep != oldValue { GridSettings.store(gridStep, automatic: options.gridAuto, in: gridStorageFolder) }
         }
+    }
+
+    /// Eine ausdrückliche Rasterwahl hat Vorrang vor dem zoomabhängigen 1-2-5-Raster.
+    func chooseGridStep(_ step: Double) {
+        guard step.isFinite, step > 0 else { return }
+        gridStep = step
+        options.gridAuto = false
     }
     /// Fang insgesamt (Magnet in der rechten Leiste)
     @Published var snapEnabled = true

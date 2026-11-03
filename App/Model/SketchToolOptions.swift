@@ -67,7 +67,11 @@ final class SketchToolOptions: ObservableObject {
     @Published var moveAngle: Double = 0
     @Published var moveCopy = false
     /// Raster 1-2-5 automatisch nach Zoom (SolidCraft), sonst feste Rasterweite
-    @Published var gridAuto = true
+    @Published var gridAuto = true {
+        didSet { if gridAuto != oldValue { onGridAutoChange?(gridAuto) } }
+    }
+    /// Der Workspace speichert den Modus zusammen mit der Rasterweite im Projekt.
+    var onGridAutoChange: ((Bool) -> Void)?
     /// Zuletzt gewählte Variante je Werkzeugfamilie
     @Published var familyChoice: [String: String] = [:]
     /// SolidCraft „Mitte“ (Taste M): der nächste Punkt fängt nur Linienmitten, mit größerem Radius; gilt für einen Punkt

@@ -1,1 +1,1 @@
-03.11.2026 · Abrundung: Fenster und Sehnenbreite (Build 38)
+03.11.2026 · Skizzenraster: feste 1-mm-Wahl und Automatik (Build 39)
