@@ -141,6 +141,7 @@
 		ACE8413D0711D943DE3A8683 /* BrowserBooleanBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE130E105D89C0521FC76BA3 /* BrowserBooleanBar.swift */; };
 		AD02D6C600198DEED3BBE9CA /* SketchSplineInterpolation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D9E8F1EAE03659DB4FB1EAB /* SketchSplineInterpolation.swift */; };
 		AF87D1EE227C4247B91BDD98 /* SketchTextTransformGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72F18E701E2F4774E53E116A /* SketchTextTransformGeometry.swift */; };
+		B0D608E920888FC5D00E6AC4 /* ModelingWorkflowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32858676E0D7E4AC9908D11D /* ModelingWorkflowTests.swift */; };
 		B197C3FDB6D3485ABD0F0247 /* SketchArrangement.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4DFEA6E1ED740F768BFA487 /* SketchArrangement.swift */; };
 		B451D957796D1CB8D7A63C4D /* ExtrusionSpan.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82D827BF2B5142943FC94463 /* ExtrusionSpan.swift */; };
 		B52864BD7AE5153241F62970 /* SheetModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D253ABEE39B95E131EF93C0 /* SheetModel.swift */; };
@@ -273,6 +274,7 @@
 		306373DC5C0231890B6DE470 /* SurfaceFinish.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SurfaceFinish.swift; sourceTree = "<group>"; };
 		3075F04C1E6B97EA9A19A3E7 /* Materials.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Materials.swift; sourceTree = "<group>"; };
 		31FB44E6B8FC2EC022DCE397 /* SheetUIConvert.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SheetUIConvert.swift; sourceTree = "<group>"; };
+		32858676E0D7E4AC9908D11D /* ModelingWorkflowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelingWorkflowTests.swift; sourceTree = "<group>"; };
 		3952FE240238967F8F15445E /* DrawingSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingSheet.swift; sourceTree = "<group>"; };
 		39BCA197BA49FC30150B2F57 /* FontPickerList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontPickerList.swift; sourceTree = "<group>"; };
 		39FE9702A7C6815F858F8AE6 /* Expressions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Expressions.swift; sourceTree = "<group>"; };
@@ -618,6 +620,7 @@
 			isa = PBXGroup;
 			children = (
 				90C4A03BFC90940867B8C6BA /* FeatureTimelinePersistenceTests.swift */,
+				32858676E0D7E4AC9908D11D /* ModelingWorkflowTests.swift */,
 				451778BCDA8978063D3F839F /* ProjectCycleTests.swift */,
 				24B7D99431CA0E37FC5B01C9 /* ProjectSaveTransactionTests.swift */,
 				1B8557EC1B02BFE8B9B94140 /* RemeshCacheTests.swift */,
@@ -1119,6 +1122,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A4FCDB542521F940BDD2374A /* FeatureTimelinePersistenceTests.swift in Sources */,
+				B0D608E920888FC5D00E6AC4 /* ModelingWorkflowTests.swift in Sources */,
 				5CF6C2A281086EEEAC29E71D /* ProjectCycleTests.swift in Sources */,
 				98DFF4DD6EE16B8D34480BE6 /* ProjectSaveTransactionTests.swift in Sources */,
 				E56FDA7307712FAD7FACAD3B /* RemeshCacheTests.swift in Sources */,
@@ -1173,7 +1177,7 @@
 				CLANG_WARN_DOCUMENTATION_COMMENTS = NO;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 28;
+				CURRENT_PROJECT_VERSION = 29;
 				DEVELOPMENT_TEAM = EYNJ86G4VD;
 				EX_ENABLE_EXTENSION_POINT_GENERATION = YES;
 				FRAMEWORK_SEARCH_PATHS = (
@@ -1293,7 +1297,7 @@
 			buildSettings = {
 				CLANG_CXX_LANGUAGE_STANDARD = "c++17";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 28;
+				CURRENT_PROJECT_VERSION = 29;
 				DEVELOPMENT_TEAM = EYNJ86G4VD;
 				EX_ENABLE_EXTENSION_POINT_GENERATION = YES;
 				FRAMEWORK_SEARCH_PATHS = (
@@ -1377,7 +1381,7 @@
 			buildSettings = {
 				CLANG_CXX_LANGUAGE_STANDARD = "c++17";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 28;
+				CURRENT_PROJECT_VERSION = 29;
 				DEVELOPMENT_TEAM = EYNJ86G4VD;
 				EX_ENABLE_EXTENSION_POINT_GENERATION = YES;
 				FRAMEWORK_SEARCH_PATHS = (
@@ -1409,7 +1413,7 @@
 				CLANG_WARN_DOCUMENTATION_COMMENTS = NO;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 28;
+				CURRENT_PROJECT_VERSION = 29;
 				DEVELOPMENT_TEAM = EYNJ86G4VD;
 				EX_ENABLE_EXTENSION_POINT_GENERATION = YES;
 				FRAMEWORK_SEARCH_PATHS = (

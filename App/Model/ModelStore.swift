@@ -849,7 +849,15 @@ final class ModelStore: ObservableObject {
     /// Gewählte Skizzenbereiche um value mm entlang der Skizzennormale extrudieren (Vorschau).
     func setRegionValue(_ value: Double) {
         regionValue = value
-        guard let first = selectedRegions.first, sketches.indices.contains(first.sketch) else { return }
+        guard value.isFinite else {
+            message = "Extrusionsabstand ungültig."
+            dropPreview()
+            return
+        }
+        guard let first = selectedRegions.first, sketches.indices.contains(first.sketch) else {
+            dropPreview()
+            return
+        }
         guard value != 0 else {
             dropPreview()
             refreshHighlight()
@@ -873,7 +881,10 @@ final class ModelStore: ObservableObject {
             plane.origin += plane.normal * regionStartOffset
             plane.anchor += plane.normal * regionStartOffset
         }
-        guard mode == .newBody || requireKernel() else { return }
+        guard mode == .newBody || requireKernel() else {
+            dropPreview()
+            return
+        }
         // Kai: Loch „bis hinten“ – endet das Abziehen an (oder knapp vor/hinter) der Rückseite, durchgehend schneiden,
         // statt eine hauchdünne Haut bzw. eine koplanare Bodenfläche stehen zu lassen
         var throughNote: String?
@@ -888,9 +899,13 @@ final class ModelStore: ObservableObject {
             } ?? thinExtrudeRegions(regions, plane: plane, distance: distance, mode: mode)
             guard let solid = thinSolid else {
                 message = "Dünne Wand mit \(regionThinThickness.formatted()) mm hier nicht möglich."
+                dropPreview()
                 return
             }
-            guard var result = extrusionResult(solid, sourceBody: sketch.plane.sourceBody, mode: mode, sketch: sketch.id) else { return }
+            guard var result = extrusionResult(solid, sourceBody: sketch.plane.sourceBody, mode: mode, sketch: sketch.id) else {
+                dropPreview()
+                return
+            }
             labelTextBodies(&result, regions: regions, sketch: sketch, mode: mode)
             message = nil
             showPreview(result, name: Self.regionPreviewName)
@@ -902,9 +917,13 @@ final class ModelStore: ObservableObject {
                                          taper: regionTaper) else {
             message = regionTaper != 0 ? "Mit diesem Verjüngungswinkel nicht möglich – kleineren Winkel versuchen."
                 : "Bereich lässt sich nicht extrudieren."
+            dropPreview()
             return
         }
-        guard var result = extrusionResult(solid, sourceBody: sketch.plane.sourceBody, mode: mode, sketch: sketch.id) else { return }
+        guard var result = extrusionResult(solid, sourceBody: sketch.plane.sourceBody, mode: mode, sketch: sketch.id) else {
+            dropPreview()
+            return
+        }
         // Abziehen ohne Wirkung (Werkzeug zeigt aus dem Material heraus): melden statt stillschweigend nichts zu tun
         if mode == .cut, !cutChangedBodies(result) {
             dropPreview()
@@ -2966,6 +2985,12 @@ extension ModelStore {
             dropPreview()
             return
         }
+        guard axis.x.isFinite, axis.y.isFinite, axis.z.isFinite, simd_length(axis) > 1e-9,
+              degrees.isFinite, axisOrigin.x.isFinite, axisOrigin.y.isFinite, axisOrigin.z.isFinite else {
+            message = "Drehachse oder Winkel ungültig."
+            dropPreview()
+            return
+        }
         var shapes: [PCKShape] = []
         for entry in chosen {
             guard let shape = PCKShape.revolve(profileWires: profileWires(entry.region, plane: entry.plane),
@@ -3002,6 +3027,8 @@ extension ModelStore {
                 break
             }
         }
+        // Ein zweiter, nicht verbundener Strang darf nicht stillschweigend fehlen.
+        guard segments.isEmpty else { return nil }
         let plane = sketch.plane
         let world = { (p: Point2) -> [NSNumber] in
             let w = plane.world(p)
@@ -3019,7 +3046,12 @@ extension ModelStore {
 
     func previewSweep(pathSketch: Int?, mode: ExtrudeMode) {
         let chosen = regions(selectedRegions)
-        guard requireKernel(), !chosen.isEmpty, let pathSketch, let path = sweepPath(fromSketch: pathSketch) else {
+        guard requireKernel(), !chosen.isEmpty else {
+            dropPreview()
+            return
+        }
+        guard let pathSketch, let path = sweepPath(fromSketch: pathSketch) else {
+            message = "Sweep-Pfad muss aus einer zusammenhängenden Kurve bestehen."
             dropPreview()
             return
         }
@@ -3043,7 +3075,7 @@ extension ModelStore {
             return
         }
         let sections = chosen.compactMap { profileWires($0.region, plane: $0.plane).first }
-        guard let shape = PCKShape.loft(sections: sections) else {
+        guard sections.count == chosen.count, let shape = PCKShape.loft(sections: sections) else {
             message = "Loft nicht möglich."
             dropPreview()
             return
