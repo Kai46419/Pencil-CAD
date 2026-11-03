@@ -8,3 +8,7 @@ targets:
     dependencies:
       - framework: Vendor/OCCT.xcframework
         embed: false
+  PencilCADBlendWorker:
+    dependencies:
+      - framework: Vendor/OCCT.xcframework
+        embed: false

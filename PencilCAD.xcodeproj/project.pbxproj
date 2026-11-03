@@ -1,0 +1,1497 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		01247A15164C1F05CE88C053 /* ModelStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 467896662E2B7CF17740918B /* ModelStore.swift */; };
+		03BBA18DD24AF86B31E08335 /* BlendWorkerProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3C05AC4F26BF33CAD1044B7 /* BlendWorkerProtocol.swift */; };
+		08AB7561D995C989724675B6 /* FlatDrawing.swift in Sources */ = {isa = PBXBuildFile; fileRef = E702E874531FE33C9B4C8880 /* FlatDrawing.swift */; };
+		090410F539946CDA24343E2A /* EqualLengthClick.wav in Resources */ = {isa = PBXBuildFile; fileRef = C4CEEA934C36384FC0212A33 /* EqualLengthClick.wav */; };
+		0988765B7B9C07D9921E9DA4 /* PCKShape.mm in Sources */ = {isa = PBXBuildFile; fileRef = 2E24776C4BCF09B1E55CC8DA /* PCKShape.mm */; };
+		0E77FFEA28BBF1D5F093FAB7 /* PrimitiveCommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB95D8F07B69BE64FE0AB6F3 /* PrimitiveCommand.swift */; };
+		0EFCC91CE158890437E7C5A8 /* MeshSculpt.swift in Sources */ = {isa = PBXBuildFile; fileRef = F306E22F4B53001537F3AEF1 /* MeshSculpt.swift */; };
+		13CA60F6D11BF4389C8D73E8 /* SketchPaletteBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 266E46BE0067A6B5496672DD /* SketchPaletteBridge.swift */; };
+		1505D3E93696496558E640AD /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FCD233E400FFE29EA7CD83F /* Theme.swift */; };
+		15798FC742C02624A8B0046A /* SketchTextDeform.swift in Sources */ = {isa = PBXBuildFile; fileRef = C66240B5A91D90A08388BE68 /* SketchTextDeform.swift */; };
+		15A141783DA327A6960F3179 /* SketchSplineTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4133F8CD5BEE6CBA8C189A9 /* SketchSplineTools.swift */; };
+		1613591C37764D13A4B92C04 /* SketchClickTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88219874901BEF57B9884DBF /* SketchClickTool.swift */; };
+		16EC7089B7BE7E4F8DEBD094 /* Project8_Adjacent_sketches.json in Resources */ = {isa = PBXBuildFile; fileRef = 0EB4885BDBD2B3A613EF475A /* Project8_Adjacent_sketches.json */; };
+		17AD529D5E7F9B2671E1D47B /* ExtrudeCommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D64C25177EE0DA34EC393E6 /* ExtrudeCommand.swift */; };
+		18017EBAEA49D2917D72C81E /* SketchCut.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B411D35971A3F6151F801E5 /* SketchCut.swift */; };
+		1A7ADC17E59438552AE4750C /* ShapeGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25AEB4A8087A2021D3A68D56 /* ShapeGenerator.swift */; };
+		1CA76600B484340CFAF97783 /* ModelRibbon.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88B545242683B0746D8754F9 /* ModelRibbon.swift */; };
+		1DF7DA25668920460927388F /* Materials.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3075F04C1E6B97EA9A19A3E7 /* Materials.swift */; };
+		1DFC0AF548134B090544E5B6 /* SurfaceFinish.swift in Sources */ = {isa = PBXBuildFile; fileRef = 306373DC5C0231890B6DE470 /* SurfaceFinish.swift */; };
+		21B3A4A5563B70EB90BB624C /* HangGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95A46FE40EA6A1C726512520 /* HangGuard.swift */; };
+		21F62AC8724075668548701A /* SketchSplineHandles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8794C4E57471ED771A1B7756 /* SketchSplineHandles.swift */; };
+		220E0EBB07CEA8489BC50B85 /* PCKShape.mm in Sources */ = {isa = PBXBuildFile; fileRef = 2E24776C4BCF09B1E55CC8DA /* PCKShape.mm */; };
+		23A7F3E5FEB8901566C5DAA7 /* SketchLocalSolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D791783A8DD3B64DF7B7EFB /* SketchLocalSolver.swift */; };
+		241C139F2F239E1F5EC530C4 /* BodyCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = 917F84F15434B58F1E7F74A7 /* BodyCommands.swift */; };
+		25132F3DC701E397B3D55533 /* Project8_Adjacent_bodies.json in Resources */ = {isa = PBXBuildFile; fileRef = 00EE94B30577067E735E1AE5 /* Project8_Adjacent_bodies.json */; };
+		25A721FB3CBF87870A47274C /* MoldTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AAD11A246B58A83DD5BA066 /* MoldTools.swift */; };
+		25FB4F12E3D40D71559C9C7D /* ModelCommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4A2CE567A55083A43A8364D /* ModelCommand.swift */; };
+		26F3FD959ACE41557E04237E /* GridDisplay.swift in Sources */ = {isa = PBXBuildFile; fileRef = E423E16D33BA1B6861C24C4F /* GridDisplay.swift */; };
+		2947AB3FF36500E2CE698438 /* MeshImport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C2D9F377963B998EAFE314C /* MeshImport.swift */; };
+		2B2F76340B31A6648A3E8835 /* ThirdPartyNotices.txt in Resources */ = {isa = PBXBuildFile; fileRef = C0ED6868B829F8635322136F /* ThirdPartyNotices.txt */; };
+		2F55FECB8468AC13A0FEFD3B /* SketchTextTransformPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E331EFF8A255B0DD8418E1 /* SketchTextTransformPanel.swift */; };
+		304F919697E47DB08AC8678A /* SheetUIOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E273C1EB9720DA264ABEE5D /* SheetUIOverlay.swift */; };
+		31B66C1F259A6213B79F689F /* SketchTrim.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48D4D9E557C53124770960DC /* SketchTrim.swift */; };
+		31CE420680964FB50A45AF7C /* SheetModelReplay.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63423BD041750FA0D37BFDE /* SheetModelReplay.swift */; };
+		31D2BEB76F8AF22FC166ED12 /* SheetUITools.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A22D759EDF3AC5E84007605 /* SheetUITools.swift */; };
+		320E1FA8EA958480948A86E9 /* SheetUIRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6413696F3976C368538CB303 /* SheetUIRules.swift */; };
+		332740EEBF5B1A685ED4D0A1 /* ConstructInspectCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC18561F1DDE0110533761F0 /* ConstructInspectCommands.swift */; };
+		3543A59AEDA51A2613A005CD /* SketchPalette.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAF13CBDB8973D4EA36CBB3A /* SketchPalette.swift */; };
+		37C236AA46308F6168D14EC8 /* SheetModelConvert.swift in Sources */ = {isa = PBXBuildFile; fileRef = 476D8BFFA0705CD1927B719E /* SheetModelConvert.swift */; };
+		3A112E47A85737C99DF38A73 /* HoleCommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = 662A797C2D58335927B7B2B2 /* HoleCommand.swift */; };
+		3CBAE3836964B270C84AE017 /* Sheets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 706C960F5F3B4D9B239CBCB6 /* Sheets.swift */; };
+		3DE8C349C64141036BA9AE55 /* PencilCADBlendWorker.appex in Embed ExtensionKit Extensions */ = {isa = PBXBuildFile; fileRef = 15E3622E9F69ECA0193AA2EA /* PencilCADBlendWorker.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		3ECCF2CD2921B8A7EF75B123 /* SheetKernel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BDAB48267E792C6FA4D64A2 /* SheetKernel.swift */; };
+		3F37B74722F4323E049D698B /* OrbitCamera.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49AE14FEE941665A12D9569D /* OrbitCamera.swift */; };
+		3FC448B851350206143FC667 /* SketchExtrusion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FC94D02783ED2A3CD6142BB /* SketchExtrusion.swift */; };
+		3FFF8E43ED84A0DC64123811 /* SketchToolOptions.swift in Sources */ = {isa = PBXBuildFile; fileRef = C01EBF028FE9DEFFA7CC5972 /* SketchToolOptions.swift */; };
+		40BBD81A34192FF640CE2748 /* SheetUI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87AAD4F13A52B03E618F868E /* SheetUI.swift */; };
+		40D6EE8DF6402B5C60B1E6FE /* SketchPlaneMatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25E4A37EB174949DEF2851B4 /* SketchPlaneMatch.swift */; };
+		41F9683EC6F9EAD08D9767AC /* Export.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDDF6DCD123052AE2FF0AA71 /* Export.swift */; };
+		42135FDA81BC117E46C79182 /* Project8_FilletInput.step in Resources */ = {isa = PBXBuildFile; fileRef = 645CF2F4CA52BFC121F9CF57 /* Project8_FilletInput.step */; };
+		4216871CC23ED8E88DC91A9F /* EdgeCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = 566DA93D5542B0AC3EE84F8E /* EdgeCommands.swift */; };
+		43C59774DB0A1B4686AD36EF /* BodyDelete.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2B487A42E179FAA1C21866B /* BodyDelete.swift */; };
+		43D076CE568F9239D41722BB /* Project21_AfterFirstFillet.step in Resources */ = {isa = PBXBuildFile; fileRef = E6BAA6A4BBB0F6680E103B0F /* Project21_AfterFirstFillet.step */; };
+		43D369A25D9CADC53FDCC206 /* ModelStartBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1EE5F16B04B548005F6C9F5 /* ModelStartBridge.swift */; };
+		47A9699D5F457674C93F405B /* Project8_Adjacent_project.json in Resources */ = {isa = PBXBuildFile; fileRef = 7DFCAC3192EE0EC389FF8077 /* Project8_Adjacent_project.json */; };
+		48EC02748F6EF4BBE0B1FFA4 /* PrintCheck.swift in Sources */ = {isa = PBXBuildFile; fileRef = E50FD8612FD9D7EEE52403B9 /* PrintCheck.swift */; };
+		4A96CFB097BC7CB66A95D2AC /* RendererStyles.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE4A8E424E209B402B69507A /* RendererStyles.swift */; };
+		4B0E403A2243901F8D6EFE49 /* StandardParts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E51FE1966D3CDB1E92B2E93 /* StandardParts.swift */; };
+		4BA334B8886B2A9B41FA2207 /* RegisterCreate.swift in Sources */ = {isa = PBXBuildFile; fileRef = C37E9D01CC370EB1536E0CE8 /* RegisterCreate.swift */; };
+		4BCE075EA2C82B908D3DF13B /* Viewport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D3E1C80B3C5E103AA4AB01F /* Viewport.swift */; };
+		4C83DF8C34648EA705994ECF /* SketchTextDeformHandles.swift in Sources */ = {isa = PBXBuildFile; fileRef = A762797F2E6F9E9D45A4D326 /* SketchTextDeformHandles.swift */; };
+		4D178BE631B6E9AB8EA5CFD1 /* CommandSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 919543B9E1FAAFD0A791FC58 /* CommandSearch.swift */; };
+		4F24DA0B6C4186671B0FA56C /* ToolExplainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A0AFC952A57684C37E23268 /* ToolExplainer.swift */; };
+		504B1BDFB749E92C598B691B /* Files.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80388C4E59A94A4B11FEC480 /* Files.swift */; };
+		50C1A0F903EE98255FF0F9A5 /* VectorFiles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BEC31F5EB0A4D65F8B3DA6B /* VectorFiles.swift */; };
+		50EA20085CF35AFAD2393C66 /* TransformGizmo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53B109A66221150892642ADC /* TransformGizmo.swift */; };
+		540F3927B31B7170EC5913B3 /* CornerConfirm.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF46D8E4B472B2239BC61C2E /* CornerConfirm.swift */; };
+		55F6B8C50AC03C4E60E1370E /* SketchTextEdit.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3ADF824E342E58ACFC37C15 /* SketchTextEdit.swift */; };
+		5B35832E3AFD2CDFC35C7463 /* OffsetFaces.swift in Sources */ = {isa = PBXBuildFile; fileRef = 412D6CD302E41490B5224440 /* OffsetFaces.swift */; };
+		5C45069DCDB93FF4F45C3C4D /* DrawingAngles.swift in Sources */ = {isa = PBXBuildFile; fileRef = E98522B56E888155DE2FC5AB /* DrawingAngles.swift */; };
+		5CF6C2A281086EEEAC29E71D /* ProjectCycleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 451778BCDA8978063D3F839F /* ProjectCycleTests.swift */; };
+		6008D46234E1C29B9CEDDA6C /* PatternSpacingHandles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51426C4ACAD0905555239703 /* PatternSpacingHandles.swift */; };
+		60FF2FC0541B909539875A1D /* SketchToolProperties.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDC041C40B998B7E708C44D1 /* SketchToolProperties.swift */; };
+		63287C2900A25DBE31291DBD /* CompactKeypad.swift in Sources */ = {isa = PBXBuildFile; fileRef = E59B594E5D5ADBC752E2CBA5 /* CompactKeypad.swift */; };
+		645C40C57D9DC250EA5724D5 /* BuildInfo.txt in Resources */ = {isa = PBXBuildFile; fileRef = 74D47D155D01A023D423E1C5 /* BuildInfo.txt */; };
+		659AF2C4BAC217B6D5598D3B /* OCCT.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = D9925690D7015A5464BD301C /* OCCT.xcframework */; };
+		68689EAC0B2F159904A7C558 /* OCCT.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = D9925690D7015A5464BD301C /* OCCT.xcframework */; };
+		68CD8E8C0A06830CEEAE0367 /* ToolRail.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AD884422FB11693A7DEB14D /* ToolRail.swift */; };
+		68D4D60CB26E5BC5CF4A4C7C /* LiveDimensionStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F759FF648AAEAFCD1DD95FB /* LiveDimensionStyle.swift */; };
+		69E89AECC624F28A598EEE9F /* SweepLoftCommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BC9E7B60FD02FB29BF34E47 /* SweepLoftCommand.swift */; };
+		6B9F4A23F533F7A7AF0CFF62 /* Threads.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBD8FA45B9124138AFCF8478 /* Threads.swift */; };
+		7021552B8DC77E70AD0137F1 /* ArrangeCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBF133DA9A0AA65F91CC51BD /* ArrangeCommands.swift */; };
+		70E45B654A77A28AC2301AB1 /* model.step in Resources */ = {isa = PBXBuildFile; fileRef = F6B4B09C238A70E2FA6F25E4 /* model.step */; };
+		71B14BB28376A1EDFD16E2B4 /* PickChip.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AE50509E702782782C90398 /* PickChip.swift */; };
+		7318F4133AB8E70EF6476810 /* CameraMotion.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1379D36519E23612AC74017 /* CameraMotion.swift */; };
+		76C5B4D6E26596EF23C4583A /* SketchInference.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E5A7F38C81B88D20FC9EDA1 /* SketchInference.swift */; };
+		77270E48AFE85B9B336998F9 /* FlatPatternView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E74D4F278C819BE89AB27DF3 /* FlatPatternView.swift */; };
+		78AF610785474FD05B65A9F0 /* ThreadPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1EDA09045BD5A77F75F0CF1 /* ThreadPanel.swift */; };
+		7E9FB998EA84908334C9398C /* CanvasTracing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4219358AAC1119E936B7CB60 /* CanvasTracing.swift */; };
+		7EDC9F7F30B5B8503CD86937 /* TechnicalDrawing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A7AD75DC7322EA43D5D9459 /* TechnicalDrawing.swift */; };
+		81E886363C78F6C19DBB21FF /* MeshFileReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFC438C8E10B0771ED37CB1F /* MeshFileReader.swift */; };
+		83339C4B4C8E140D9D76571B /* ExtrudeInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBF251338D0FFED8098264E5 /* ExtrudeInfo.swift */; };
+		8490AB390CF60114CE79EF00 /* SketchDimensionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE0CA231BA9DDD4C58CEECDB /* SketchDimensionTests.swift */; };
+		84F0766E13671C8E67E9F9D3 /* FaceExtrudeJobs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0ADAA402A9C5A363AF014192 /* FaceExtrudeJobs.swift */; };
+		861CC064C18F5EA36C335CCF /* BlendBeforeCuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = E241F0FB41B5B1207E06D1BD /* BlendBeforeCuts.swift */; };
+		86A447DA139B3AB3B3534594 /* SketchTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = D12936B60441EE6C4F82ECC4 /* SketchTheme.swift */; };
+		88033FCF0D61CBF9DCDCF8B9 /* SurfaceHoles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14CD19A42EE22B330770AE83 /* SurfaceHoles.swift */; };
+		888E3433AAA463DEDE7FE080 /* Workspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA68DFCA78686E254DA9B0E8 /* Workspace.swift */; };
+		88DF68ABE148E8072DA9ADFA /* ThreadModeling.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16028C3F909853FF79978251 /* ThreadModeling.swift */; };
+		8E1182DD2BDFCBCE94F127EC /* Mesh.swift in Sources */ = {isa = PBXBuildFile; fileRef = 642F4399911A58E42C134D07 /* Mesh.swift */; };
+		8FAA91E752E9ADD07D4451B6 /* SheetUIKanten.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8F918C5A7D6A3FCC66E09D2 /* SheetUIKanten.swift */; };
+		91334F5712FDD0CD387CCF5E /* FontPickerList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39BCA197BA49FC30150B2F57 /* FontPickerList.swift */; };
+		91A6DA2B0B7A027C92C1D7C3 /* ThreadNotes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B78748727D793272BA6E52E /* ThreadNotes.swift */; };
+		91B1C41FE239559B6B20501C /* RegisterModify.swift in Sources */ = {isa = PBXBuildFile; fileRef = A21A7EB8717B5E03E59ADEC1 /* RegisterModify.swift */; };
+		92B351A298C517604799F5A6 /* CameraCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69B7BF199879D01E484A54D5 /* CameraCapture.swift */; };
+		92E68799962E5379E844AB98 /* CommandManipulators.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EB9ECEDA402330D2C850DA8 /* CommandManipulators.swift */; };
+		94730B26FD34EBF98085514D /* SketchArcResize.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9711D721217B330D3977F9F /* SketchArcResize.swift */; };
+		94F3C6B233152CADC1FF9FD7 /* HoverTip.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A2D81C11BFD11A54D2E62F3 /* HoverTip.swift */; };
+		96D3C23C5BE22726147A13CC /* SketchDimBoxes.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3971700D5A6FB5D58D6CCF6 /* SketchDimBoxes.swift */; };
+		972417CB3601F879759B8170 /* Shaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = E34B8E236B666A88D23A9E01 /* Shaders.metal */; };
+		97FB6B1E2140C50E9A9DFE38 /* SurfaceQuickPalette.swift in Sources */ = {isa = PBXBuildFile; fileRef = A95C0CEAEC69ECFBAE461213 /* SurfaceQuickPalette.swift */; };
+		98522E01E05C50F9344EB826 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64B43B9550C1C018C9734FB2 /* HomeView.swift */; };
+		98734447733D2C21BBC4CC1E /* QuickTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFB3A8A59AEC3D345A23D037 /* QuickTools.swift */; };
+		98DFF4DD6EE16B8D34480BE6 /* ProjectSaveTransactionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24B7D99431CA0E37FC5B01C9 /* ProjectSaveTransactionTests.swift */; };
+		99624C6ED400EE75732C8DEA /* DrawingSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3952FE240238967F8F15445E /* DrawingSheet.swift */; };
+		9C6A4C5F9ACC0A009EC02448 /* SketchTextPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 048666BE4439ECD76B6F7FBE /* SketchTextPanel.swift */; };
+		A0514620A17C2F3FEEB209CF /* Project21_CurvedExtrusion.step in Resources */ = {isa = PBXBuildFile; fileRef = 565EE99C35CCFC401F4AB4E1 /* Project21_CurvedExtrusion.step */; };
+		A1C7E315D351A627C47C1978 /* SketchConstraints.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DF11130ED0F7A60837A785A /* SketchConstraints.swift */; };
+		A2DDE0C468A14EF3374DA856 /* LoftPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB673882764E34D157C352C0 /* LoftPanel.swift */; };
+		A4FCDB542521F940BDD2374A /* FeatureTimelinePersistenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90C4A03BFC90940867B8C6BA /* FeatureTimelinePersistenceTests.swift */; };
+		A54A6187AE21672400C97615 /* Expressions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39FE9702A7C6815F858F8AE6 /* Expressions.swift */; };
+		A5B3F7BE391228FFB247310D /* SketchArcHandle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62EB36D30998329520CB93FA /* SketchArcHandle.swift */; };
+		A5E31E3B38679BFCE3260992 /* FeaturePanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A7C3735F3062565E0A143A5 /* FeaturePanel.swift */; };
+		A76406044338D25B71510319 /* ShapeLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = E33514F7B576734A12FC8081 /* ShapeLibrary.swift */; };
+		A7B12265139174FF85E44FB0 /* SketchTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9327530748AC0B18426EBB56 /* SketchTools.swift */; };
+		A92B06C62104D580C290F917 /* SketchMeasure.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBA41E6E5958B3D2CDCEA333 /* SketchMeasure.swift */; };
+		A954E9FE0C315534B41AF2A1 /* bodies.json in Resources */ = {isa = PBXBuildFile; fileRef = 3F3325CFA40C2A1911D25ECA /* bodies.json */; };
+		A96A364CECA30D7DE90DFF42 /* ToolIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5571DFB2AB7FBA97385056A /* ToolIcon.swift */; };
+		A9C02BC0EF9E6CA078A2AFBC /* BlendJobs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E827FF738F6B42D72151A62 /* BlendJobs.swift */; };
+		A9E4B63C6BB566076E7661BE /* Renderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4663C65EFDEE977425E9B59F /* Renderer.swift */; };
+		AA4C06C5D091F15842C0098B /* SketchGestures.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00C70539590B7D08210FD553 /* SketchGestures.swift */; };
+		AC70A400E46C081D032F7529 /* SurfaceFinishUI.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6AAB4165EF015CEDE3470A7 /* SurfaceFinishUI.swift */; };
+		ACC2365EE3F4A847EB8D0462 /* ThreadNotesUI.swift in Sources */ = {isa = PBXBuildFile; fileRef = EED7B404EA0CA1D397FDCE2E /* ThreadNotesUI.swift */; };
+		ACE8413D0711D943DE3A8683 /* BrowserBooleanBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE130E105D89C0521FC76BA3 /* BrowserBooleanBar.swift */; };
+		AD02D6C600198DEED3BBE9CA /* SketchSplineInterpolation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D9E8F1EAE03659DB4FB1EAB /* SketchSplineInterpolation.swift */; };
+		AF87D1EE227C4247B91BDD98 /* SketchTextTransformGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72F18E701E2F4774E53E116A /* SketchTextTransformGeometry.swift */; };
+		B0D608E920888FC5D00E6AC4 /* ModelingWorkflowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32858676E0D7E4AC9908D11D /* ModelingWorkflowTests.swift */; };
+		B197C3FDB6D3485ABD0F0247 /* SketchArrangement.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4DFEA6E1ED740F768BFA487 /* SketchArrangement.swift */; };
+		B451D957796D1CB8D7A63C4D /* ExtrusionSpan.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82D827BF2B5142943FC94463 /* ExtrusionSpan.swift */; };
+		B52864BD7AE5153241F62970 /* SheetModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D253ABEE39B95E131EF93C0 /* SheetModel.swift */; };
+		B5528359E9E41E5F7B6459B9 /* PencilSheet.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 946AAEA8269A81BF9E00F6F8 /* PencilSheet.xcframework */; };
+		B5EF1FA7DB8F699C64778DD9 /* SheetUIFlat.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22DBE2DC4E9A087D1ED1A7F7 /* SheetUIFlat.swift */; };
+		B791A374C8E795E31B9C2353 /* Sketch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B949D1339D794A28D8351A3 /* Sketch.swift */; };
+		B92D222FEA95BC1400323026 /* SheetModelSketch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EEEE81F9A6257B2D06629CE /* SheetModelSketch.swift */; };
+		BA0A4BDEB4779B0CBC96F0BB /* SketchTextPathLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6452C51B2CF3B6691E94BF92 /* SketchTextPathLink.swift */; };
+		BB88B7A6487F11E2183D77F6 /* ModelMeasure.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFB5CD2485761D7DF0E08FEB /* ModelMeasure.swift */; };
+		BC67453E3483042B3890027B /* RegionSelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7585B36E3950E4AF58D385B3 /* RegionSelection.swift */; };
+		BC8C944ED5DB3AADD79DA49B /* ModelingExtras.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1809F3BEBA00544E40235103 /* ModelingExtras.swift */; };
+		BCBA74181C2986725B56FAE6 /* PartTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = 623096CDFE2A8744C5DA52B9 /* PartTools.swift */; };
+		BD0A8F844DAAAF62D4012786 /* PencilCADApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7643C5436773E6FBC1E1F04B /* PencilCADApp.swift */; };
+		BEE087841291F8DB4327312B /* RadiusHandle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 709A436A2F5B3877E006A4A6 /* RadiusHandle.swift */; };
+		C033A10BBEE9ABFD6757C80C /* SheetUIConvert.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31FB44E6B8FC2EC022DCE397 /* SheetUIConvert.swift */; };
+		C0ABA415E90D472D7CB305EA /* SheetUIEdit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 482396C3C40FADA78FE18BA4 /* SheetUIEdit.swift */; };
+		C2A5249F6E9298E2D24683C1 /* ShapeGeneratorPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA82AB7BE45391B830A3E608 /* ShapeGeneratorPanel.swift */; };
+		C402E27BE889D3139FDAA2DC /* LoftGuides.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C8C4C339D526C436A41D342 /* LoftGuides.swift */; };
+		C4ABD586392F06FC7FF39735 /* Project6_FilletInput.step in Resources */ = {isa = PBXBuildFile; fileRef = 03DAAFCE09819A57627D75C9 /* Project6_FilletInput.step */; };
+		C8B60D753AC02E9C50036697 /* SheetUIFlange.swift in Sources */ = {isa = PBXBuildFile; fileRef = D471E914D1F87C952158BA8C /* SheetUIFlange.swift */; };
+		CA1FF262EAFCF9BA7A3C74FC /* ProjectUnitsUI.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE3AA853AC5399C870FD60C5 /* ProjectUnitsUI.swift */; };
+		CA366BD6731CA4CA1994A91A /* SketchCommit.swift in Sources */ = {isa = PBXBuildFile; fileRef = E44AC3375DD7FF9E9AADF156 /* SketchCommit.swift */; };
+		CB280A004DE9B3896C081690 /* ProjectUnits.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66BE3304F07D56305ADE8029 /* ProjectUnits.swift */; };
+		CB6D09071D7064174F2584B3 /* SketchPaletteControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79816767175C7C59B81EBB78 /* SketchPaletteControls.swift */; };
+		CB9F94AB055930440C4F96B3 /* BlendWorkerExtension.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CFC6F3B794DC4BC640ABA97 /* BlendWorkerExtension.swift */; };
+		CC9CF189109562A2956C5608 /* TimelineBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8596E84292EC99D08D06929B /* TimelineBar.swift */; };
+		CE1BC0D7E1F333FBC4ED82E9 /* SketchAngleSnap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 011612B6C7DD5B3C95CAE62E /* SketchAngleSnap.swift */; };
+		CE3CE2FA7AB883D64AA4C3C4 /* SheetWorker.swift in Sources */ = {isa = PBXBuildFile; fileRef = B46D3A92F51FD623E7495FED /* SheetWorker.swift */; };
+		D4E5E0AE5AB6E5E3E7525EF3 /* USDZExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = E26076D41C035F0331F2BB49 /* USDZExport.swift */; };
+		D6F01043B52A3701526B1104 /* RightRail.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5C69F72A78FCE7EEDD77E17 /* RightRail.swift */; };
+		D784EB91843A21032F8C0BAB /* SectionHandle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 979172E9E7D641607AE319CB /* SectionHandle.swift */; };
+		D8691D3BBC8FC482B6335630 /* features.json in Resources */ = {isa = PBXBuildFile; fileRef = FB6FAE322EAF0FD7808735FC /* features.json */; };
+		DAE0B9725EBAEF6B931E1373 /* BodyContextMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CF648517FAF6BB4869A23B4 /* BodyContextMenu.swift */; };
+		DB8F3AF6366DFC5060DD9A95 /* WorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C41623E062AC17C604549DC6 /* WorkspaceView.swift */; };
+		DBE8DA909F3B307383BDDEA7 /* SketchGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC24E2C3D89196D46C225C04 /* SketchGeometry.swift */; };
+		DD946A836DDAC4B279BD645E /* MeshRepair.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C3BC9E2D0AD59D4273B5A13 /* MeshRepair.swift */; };
+		DE7F7E112FE73C17154A2C51 /* CommandSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = D411295A9EBBC9FD97204907 /* CommandSupport.swift */; };
+		E0173194A5E7986D93A055FE /* Project8_AdjacentFilletInput.step in Resources */ = {isa = PBXBuildFile; fileRef = CD3D176F7E2A0A95ECFCAFA8 /* Project8_AdjacentFilletInput.step */; };
+		E348899C1E76D3D92943AE22 /* PropertiesPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C71755B37EF1097B86A9CAAE /* PropertiesPanel.swift */; };
+		E38A7EE6DECC86DC1D01CFBA /* Project8_Adjacent_features.json in Resources */ = {isa = PBXBuildFile; fileRef = B912A1EF4C6FC4C5138238FA /* Project8_Adjacent_features.json */; };
+		E4E803A8B0645BD3CA82BD2F /* IsolatedBlend.swift in Sources */ = {isa = PBXBuildFile; fileRef = C723167BC0EC3C88473B40A1 /* IsolatedBlend.swift */; };
+		E53D0D327BB425EBAD31E2B1 /* Panels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B3D194896DF1DE408E17D19 /* Panels.swift */; };
+		E56FDA7307712FAD7FACAD3B /* RemeshCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B8557EC1B02BFE8B9B94140 /* RemeshCacheTests.swift */; };
+		E6896AB8583E30B845983BBC /* BlendWorkerProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3C05AC4F26BF33CAD1044B7 /* BlendWorkerProtocol.swift */; };
+		E99A13B26F2846279882CD63 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 4F177C6895F651C181AEB61D /* Assets.xcassets */; };
+		EACEFEA5D35093B1B81F2588 /* SketchSelectionProperties.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FF28DDAF036D25319C705B2 /* SketchSelectionProperties.swift */; };
+		EBDFF2A75D8808858CF99146 /* HelixThinCommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5867378689AA608F45F36BC /* HelixThinCommand.swift */; };
+		EC339003FD2A5B9ABF3CB435 /* SketchSnap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D21782A541AEB1A83C93939 /* SketchSnap.swift */; };
+		F00E2FC4692FD1F4B63B198A /* RevolveCommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = 546C167AD0F28C798427D3EB /* RevolveCommand.swift */; };
+		F05B099281F039ACA83F0495 /* SheetKernelIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA347EDD29179D7BB1C489F5 /* SheetKernelIntegrationTests.swift */; };
+		F084FA672CF6A0252EE91A7E /* SheetUIBox.swift in Sources */ = {isa = PBXBuildFile; fileRef = E80D34E826236B5FB8529CD2 /* SheetUIBox.swift */; };
+		F1540D666A84F88114EB0CF7 /* SketchRegionMerge.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9B1C94749DE49288AD1D36D /* SketchRegionMerge.swift */; };
+		F2C6644D578BF2F1AE59390F /* BooleanPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A21AD0D86A050EB6F15ECE3 /* BooleanPanel.swift */; };
+		F50A4C160620BDF387E7802B /* FlatDrawingSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25602EFFF5EDF9487B9B08C6 /* FlatDrawingSheet.swift */; };
+		F592DA4931264E2BAA31DDCE /* ProjectStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00774BB2B2A1AE97089F82F8 /* ProjectStore.swift */; };
+		F6167321E0C913BAEACE4E12 /* SketchTextDeformPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58C79459B68B71DF1EA47132 /* SketchTextDeformPanel.swift */; };
+		F66D1DBE39D68075D6ABAE87 /* SketchTextTransform.swift in Sources */ = {isa = PBXBuildFile; fileRef = 626D09AD53F64D7B7ADE6363 /* SketchTextTransform.swift */; };
+		F6CE455C8CD237D61131D730 /* FaceCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10ACF29AE0EBE94D33093DE9 /* FaceCommands.swift */; };
+		FBF08DAD46541CC09A383409 /* ModelComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8741FDF900EC11919310D141 /* ModelComponents.swift */; };
+		FD6C3B830AAE74EF2479BCA9 /* FeatureHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94B5F51197402594DA0B7FE2 /* FeatureHistory.swift */; };
+		FFDFB9749376C49A2B94315E /* RendererSurfaces.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5826D425322224F7AC42CD4B /* RendererSurfaces.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		9B658F51E9EA1A3775C7A533 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 38825FE339F66A6756AF78C5 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 72CFC031FEBB541FA54D9738;
+			remoteInfo = PencilCADBlendWorker;
+		};
+		EE131CBE040C8AD48F33F813 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 38825FE339F66A6756AF78C5 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 6E20179AEB152ADC14BC52D0;
+			remoteInfo = PencilCAD;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		AF4253D5814E6546F70F0510 /* Embed ExtensionKit Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(EXTENSIONS_FOLDER_PATH)";
+			dstSubfolderSpec = 16;
+			files = (
+				3DE8C349C64141036BA9AE55 /* PencilCADBlendWorker.appex in Embed ExtensionKit Extensions */,
+			);
+			name = "Embed ExtensionKit Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		00774BB2B2A1AE97089F82F8 /* ProjectStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectStore.swift; sourceTree = "<group>"; };
+		00C70539590B7D08210FD553 /* SketchGestures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchGestures.swift; sourceTree = "<group>"; };
+		00EE94B30577067E735E1AE5 /* Project8_Adjacent_bodies.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = Project8_Adjacent_bodies.json; sourceTree = "<group>"; };
+		011612B6C7DD5B3C95CAE62E /* SketchAngleSnap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchAngleSnap.swift; sourceTree = "<group>"; };
+		03DAAFCE09819A57627D75C9 /* Project6_FilletInput.step */ = {isa = PBXFileReference; path = Project6_FilletInput.step; sourceTree = "<group>"; };
+		048666BE4439ECD76B6F7FBE /* SketchTextPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchTextPanel.swift; sourceTree = "<group>"; };
+		0921EEAD34FE796E496B3ED7 /* PencilCADTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PencilCADTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		0ADAA402A9C5A363AF014192 /* FaceExtrudeJobs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FaceExtrudeJobs.swift; sourceTree = "<group>"; };
+		0D21782A541AEB1A83C93939 /* SketchSnap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchSnap.swift; sourceTree = "<group>"; };
+		0EB4885BDBD2B3A613EF475A /* Project8_Adjacent_sketches.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = Project8_Adjacent_sketches.json; sourceTree = "<group>"; };
+		10ACF29AE0EBE94D33093DE9 /* FaceCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FaceCommands.swift; sourceTree = "<group>"; };
+		1463D0F37EBB4506C73EBBD8 /* PCKShape.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = PCKShape.h; sourceTree = "<group>"; };
+		14CD19A42EE22B330770AE83 /* SurfaceHoles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SurfaceHoles.swift; sourceTree = "<group>"; };
+		15E3622E9F69ECA0193AA2EA /* PencilCADBlendWorker.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.extensionkit-extension"; includeInIndex = 0; path = PencilCADBlendWorker.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		16028C3F909853FF79978251 /* ThreadModeling.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadModeling.swift; sourceTree = "<group>"; };
+		1809F3BEBA00544E40235103 /* ModelingExtras.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelingExtras.swift; sourceTree = "<group>"; };
+		1B411D35971A3F6151F801E5 /* SketchCut.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchCut.swift; sourceTree = "<group>"; };
+		1B8557EC1B02BFE8B9B94140 /* RemeshCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemeshCacheTests.swift; sourceTree = "<group>"; };
+		1C2D9F377963B998EAFE314C /* MeshImport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshImport.swift; sourceTree = "<group>"; };
+		1CFC6F3B794DC4BC640ABA97 /* BlendWorkerExtension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlendWorkerExtension.swift; sourceTree = "<group>"; };
+		1D9E8F1EAE03659DB4FB1EAB /* SketchSplineInterpolation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchSplineInterpolation.swift; sourceTree = "<group>"; };
+		22DBE2DC4E9A087D1ED1A7F7 /* SheetUIFlat.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SheetUIFlat.swift; sourceTree = "<group>"; };
+		24B7D99431CA0E37FC5B01C9 /* ProjectSaveTransactionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectSaveTransactionTests.swift; sourceTree = "<group>"; };
+		25602EFFF5EDF9487B9B08C6 /* FlatDrawingSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlatDrawingSheet.swift; sourceTree = "<group>"; };
+		25AEB4A8087A2021D3A68D56 /* ShapeGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShapeGenerator.swift; sourceTree = "<group>"; };
+		25E4A37EB174949DEF2851B4 /* SketchPlaneMatch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchPlaneMatch.swift; sourceTree = "<group>"; };
+		266E46BE0067A6B5496672DD /* SketchPaletteBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchPaletteBridge.swift; sourceTree = "<group>"; };
+		2A21AD0D86A050EB6F15ECE3 /* BooleanPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BooleanPanel.swift; sourceTree = "<group>"; };
+		2AE50509E702782782C90398 /* PickChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PickChip.swift; sourceTree = "<group>"; };
+		2B949D1339D794A28D8351A3 /* Sketch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sketch.swift; sourceTree = "<group>"; };
+		2C3BC9E2D0AD59D4273B5A13 /* MeshRepair.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshRepair.swift; sourceTree = "<group>"; };
+		2D791783A8DD3B64DF7B7EFB /* SketchLocalSolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchLocalSolver.swift; sourceTree = "<group>"; };
+		2E24776C4BCF09B1E55CC8DA /* PCKShape.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = PCKShape.mm; sourceTree = "<group>"; };
+		2FB2B8B4D24D50DFF8E196E7 /* PencilCAD-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "PencilCAD-Bridging-Header.h"; sourceTree = "<group>"; };
+		306373DC5C0231890B6DE470 /* SurfaceFinish.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SurfaceFinish.swift; sourceTree = "<group>"; };
+		3075F04C1E6B97EA9A19A3E7 /* Materials.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Materials.swift; sourceTree = "<group>"; };
+		31FB44E6B8FC2EC022DCE397 /* SheetUIConvert.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SheetUIConvert.swift; sourceTree = "<group>"; };
+		32858676E0D7E4AC9908D11D /* ModelingWorkflowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelingWorkflowTests.swift; sourceTree = "<group>"; };
+		3952FE240238967F8F15445E /* DrawingSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingSheet.swift; sourceTree = "<group>"; };
+		39BCA197BA49FC30150B2F57 /* FontPickerList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontPickerList.swift; sourceTree = "<group>"; };
+		39FE9702A7C6815F858F8AE6 /* Expressions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Expressions.swift; sourceTree = "<group>"; };
+		3A7AD75DC7322EA43D5D9459 /* TechnicalDrawing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TechnicalDrawing.swift; sourceTree = "<group>"; };
+		3AD884422FB11693A7DEB14D /* ToolRail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolRail.swift; sourceTree = "<group>"; };
+		3DF11130ED0F7A60837A785A /* SketchConstraints.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchConstraints.swift; sourceTree = "<group>"; };
+		3E51FE1966D3CDB1E92B2E93 /* StandardParts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StandardParts.swift; sourceTree = "<group>"; };
+		3E5A7F38C81B88D20FC9EDA1 /* SketchInference.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchInference.swift; sourceTree = "<group>"; };
+		3EB9ECEDA402330D2C850DA8 /* CommandManipulators.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandManipulators.swift; sourceTree = "<group>"; };
+		3F3325CFA40C2A1911D25ECA /* bodies.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = bodies.json; sourceTree = "<group>"; };
+		3FC94D02783ED2A3CD6142BB /* SketchExtrusion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchExtrusion.swift; sourceTree = "<group>"; };
+		3FF28DDAF036D25319C705B2 /* SketchSelectionProperties.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchSelectionProperties.swift; sourceTree = "<group>"; };
+		412D6CD302E41490B5224440 /* OffsetFaces.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OffsetFaces.swift; sourceTree = "<group>"; };
+		4219358AAC1119E936B7CB60 /* CanvasTracing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasTracing.swift; sourceTree = "<group>"; };
+		451778BCDA8978063D3F839F /* ProjectCycleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectCycleTests.swift; sourceTree = "<group>"; };
+		4663C65EFDEE977425E9B59F /* Renderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Renderer.swift; sourceTree = "<group>"; };
+		467896662E2B7CF17740918B /* ModelStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelStore.swift; sourceTree = "<group>"; };
+		476D8BFFA0705CD1927B719E /* SheetModelConvert.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SheetModelConvert.swift; sourceTree = "<group>"; };
+		482396C3C40FADA78FE18BA4 /* SheetUIEdit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SheetUIEdit.swift; sourceTree = "<group>"; };
+		48D4D9E557C53124770960DC /* SketchTrim.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchTrim.swift; sourceTree = "<group>"; };
+		49AE14FEE941665A12D9569D /* OrbitCamera.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitCamera.swift; sourceTree = "<group>"; };
+		4A2D81C11BFD11A54D2E62F3 /* HoverTip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoverTip.swift; sourceTree = "<group>"; };
+		4B3D194896DF1DE408E17D19 /* Panels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels.swift; sourceTree = "<group>"; };
+		4D3E1C80B3C5E103AA4AB01F /* Viewport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Viewport.swift; sourceTree = "<group>"; };
+		4E273C1EB9720DA264ABEE5D /* SheetUIOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SheetUIOverlay.swift; sourceTree = "<group>"; };
+		4F177C6895F651C181AEB61D /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		4F759FF648AAEAFCD1DD95FB /* LiveDimensionStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveDimensionStyle.swift; sourceTree = "<group>"; };
+		51426C4ACAD0905555239703 /* PatternSpacingHandles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PatternSpacingHandles.swift; sourceTree = "<group>"; };
+		53B109A66221150892642ADC /* TransformGizmo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransformGizmo.swift; sourceTree = "<group>"; };
+		546C167AD0F28C798427D3EB /* RevolveCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RevolveCommand.swift; sourceTree = "<group>"; };
+		554D77241AD6283A5159CBDD /* PencilCAD.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PencilCAD.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		565EE99C35CCFC401F4AB4E1 /* Project21_CurvedExtrusion.step */ = {isa = PBXFileReference; path = Project21_CurvedExtrusion.step; sourceTree = "<group>"; };
+		566DA93D5542B0AC3EE84F8E /* EdgeCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EdgeCommands.swift; sourceTree = "<group>"; };
+		5826D425322224F7AC42CD4B /* RendererSurfaces.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RendererSurfaces.swift; sourceTree = "<group>"; };
+		58C79459B68B71DF1EA47132 /* SketchTextDeformPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchTextDeformPanel.swift; sourceTree = "<group>"; };
+		5A22D759EDF3AC5E84007605 /* SheetUITools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SheetUITools.swift; sourceTree = "<group>"; };
+		5B78748727D793272BA6E52E /* ThreadNotes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadNotes.swift; sourceTree = "<group>"; };
+		623096CDFE2A8744C5DA52B9 /* PartTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PartTools.swift; sourceTree = "<group>"; };
+		626D09AD53F64D7B7ADE6363 /* SketchTextTransform.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchTextTransform.swift; sourceTree = "<group>"; };
+		62EB36D30998329520CB93FA /* SketchArcHandle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchArcHandle.swift; sourceTree = "<group>"; };
+		6413696F3976C368538CB303 /* SheetUIRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SheetUIRules.swift; sourceTree = "<group>"; };
+		642F4399911A58E42C134D07 /* Mesh.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Mesh.swift; sourceTree = "<group>"; };
+		6452C51B2CF3B6691E94BF92 /* SketchTextPathLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchTextPathLink.swift; sourceTree = "<group>"; };
+		645CF2F4CA52BFC121F9CF57 /* Project8_FilletInput.step */ = {isa = PBXFileReference; path = Project8_FilletInput.step; sourceTree = "<group>"; };
+		64B43B9550C1C018C9734FB2 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
+		662A797C2D58335927B7B2B2 /* HoleCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoleCommand.swift; sourceTree = "<group>"; };
+		66BE3304F07D56305ADE8029 /* ProjectUnits.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectUnits.swift; sourceTree = "<group>"; };
+		69B7BF199879D01E484A54D5 /* CameraCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraCapture.swift; sourceTree = "<group>"; };
+		6A0AFC952A57684C37E23268 /* ToolExplainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolExplainer.swift; sourceTree = "<group>"; };
+		6A7C3735F3062565E0A143A5 /* FeaturePanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeaturePanel.swift; sourceTree = "<group>"; };
+		6BC9E7B60FD02FB29BF34E47 /* SweepLoftCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SweepLoftCommand.swift; sourceTree = "<group>"; };
+		6C8C4C339D526C436A41D342 /* LoftGuides.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoftGuides.swift; sourceTree = "<group>"; };
+		6D253ABEE39B95E131EF93C0 /* SheetModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SheetModel.swift; sourceTree = "<group>"; };
+		706C960F5F3B4D9B239CBCB6 /* Sheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sheets.swift; sourceTree = "<group>"; };
+		709A436A2F5B3877E006A4A6 /* RadiusHandle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadiusHandle.swift; sourceTree = "<group>"; };
+		72F18E701E2F4774E53E116A /* SketchTextTransformGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchTextTransformGeometry.swift; sourceTree = "<group>"; };
+		74D47D155D01A023D423E1C5 /* BuildInfo.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = BuildInfo.txt; sourceTree = "<group>"; };
+		7585B36E3950E4AF58D385B3 /* RegionSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegionSelection.swift; sourceTree = "<group>"; };
+		7643C5436773E6FBC1E1F04B /* PencilCADApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PencilCADApp.swift; sourceTree = "<group>"; };
+		79816767175C7C59B81EBB78 /* SketchPaletteControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchPaletteControls.swift; sourceTree = "<group>"; };
+		7DFCAC3192EE0EC389FF8077 /* Project8_Adjacent_project.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = Project8_Adjacent_project.json; sourceTree = "<group>"; };
+		7E827FF738F6B42D72151A62 /* BlendJobs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlendJobs.swift; sourceTree = "<group>"; };
+		7EEEE81F9A6257B2D06629CE /* SheetModelSketch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SheetModelSketch.swift; sourceTree = "<group>"; };
+		80388C4E59A94A4B11FEC480 /* Files.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Files.swift; sourceTree = "<group>"; };
+		82D827BF2B5142943FC94463 /* ExtrusionSpan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtrusionSpan.swift; sourceTree = "<group>"; };
+		8596E84292EC99D08D06929B /* TimelineBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineBar.swift; sourceTree = "<group>"; };
+		8741FDF900EC11919310D141 /* ModelComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelComponents.swift; sourceTree = "<group>"; };
+		8794C4E57471ED771A1B7756 /* SketchSplineHandles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchSplineHandles.swift; sourceTree = "<group>"; };
+		87AAD4F13A52B03E618F868E /* SheetUI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SheetUI.swift; sourceTree = "<group>"; };
+		88219874901BEF57B9884DBF /* SketchClickTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchClickTool.swift; sourceTree = "<group>"; };
+		88B545242683B0746D8754F9 /* ModelRibbon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelRibbon.swift; sourceTree = "<group>"; };
+		8AAD11A246B58A83DD5BA066 /* MoldTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoldTools.swift; sourceTree = "<group>"; };
+		8BEC31F5EB0A4D65F8B3DA6B /* VectorFiles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VectorFiles.swift; sourceTree = "<group>"; };
+		8CF648517FAF6BB4869A23B4 /* BodyContextMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BodyContextMenu.swift; sourceTree = "<group>"; };
+		8FCD233E400FFE29EA7CD83F /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		90C4A03BFC90940867B8C6BA /* FeatureTimelinePersistenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureTimelinePersistenceTests.swift; sourceTree = "<group>"; };
+		917F84F15434B58F1E7F74A7 /* BodyCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BodyCommands.swift; sourceTree = "<group>"; };
+		919543B9E1FAAFD0A791FC58 /* CommandSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandSearch.swift; sourceTree = "<group>"; };
+		9327530748AC0B18426EBB56 /* SketchTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchTools.swift; sourceTree = "<group>"; };
+		946AAEA8269A81BF9E00F6F8 /* PencilSheet.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = PencilSheet.xcframework; path = Vendor/PencilSheet.xcframework; sourceTree = "<group>"; };
+		94B5F51197402594DA0B7FE2 /* FeatureHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureHistory.swift; sourceTree = "<group>"; };
+		95A46FE40EA6A1C726512520 /* HangGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HangGuard.swift; sourceTree = "<group>"; };
+		979172E9E7D641607AE319CB /* SectionHandle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SectionHandle.swift; sourceTree = "<group>"; };
+		9BDAB48267E792C6FA4D64A2 /* SheetKernel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SheetKernel.swift; sourceTree = "<group>"; };
+		9D64C25177EE0DA34EC393E6 /* ExtrudeCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtrudeCommand.swift; sourceTree = "<group>"; };
+		A1379D36519E23612AC74017 /* CameraMotion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraMotion.swift; sourceTree = "<group>"; };
+		A21A7EB8717B5E03E59ADEC1 /* RegisterModify.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegisterModify.swift; sourceTree = "<group>"; };
+		A3ADF824E342E58ACFC37C15 /* SketchTextEdit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchTextEdit.swift; sourceTree = "<group>"; };
+		A4133F8CD5BEE6CBA8C189A9 /* SketchSplineTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchSplineTools.swift; sourceTree = "<group>"; };
+		A63423BD041750FA0D37BFDE /* SheetModelReplay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SheetModelReplay.swift; sourceTree = "<group>"; };
+		A6AAB4165EF015CEDE3470A7 /* SurfaceFinishUI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SurfaceFinishUI.swift; sourceTree = "<group>"; };
+		A762797F2E6F9E9D45A4D326 /* SketchTextDeformHandles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchTextDeformHandles.swift; sourceTree = "<group>"; };
+		A8F918C5A7D6A3FCC66E09D2 /* SheetUIKanten.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SheetUIKanten.swift; sourceTree = "<group>"; };
+		A95C0CEAEC69ECFBAE461213 /* SurfaceQuickPalette.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SurfaceQuickPalette.swift; sourceTree = "<group>"; };
+		B1EDA09045BD5A77F75F0CF1 /* ThreadPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadPanel.swift; sourceTree = "<group>"; };
+		B1EE5F16B04B548005F6C9F5 /* ModelStartBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelStartBridge.swift; sourceTree = "<group>"; };
+		B46D3A92F51FD623E7495FED /* SheetWorker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SheetWorker.swift; sourceTree = "<group>"; };
+		B4DFEA6E1ED740F768BFA487 /* SketchArrangement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchArrangement.swift; sourceTree = "<group>"; };
+		B5571DFB2AB7FBA97385056A /* ToolIcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolIcon.swift; sourceTree = "<group>"; };
+		B5C69F72A78FCE7EEDD77E17 /* RightRail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RightRail.swift; sourceTree = "<group>"; };
+		B7E331EFF8A255B0DD8418E1 /* SketchTextTransformPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchTextTransformPanel.swift; sourceTree = "<group>"; };
+		B912A1EF4C6FC4C5138238FA /* Project8_Adjacent_features.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = Project8_Adjacent_features.json; sourceTree = "<group>"; };
+		B9B1C94749DE49288AD1D36D /* SketchRegionMerge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchRegionMerge.swift; sourceTree = "<group>"; };
+		BAF13CBDB8973D4EA36CBB3A /* SketchPalette.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchPalette.swift; sourceTree = "<group>"; };
+		BB673882764E34D157C352C0 /* LoftPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoftPanel.swift; sourceTree = "<group>"; };
+		BC24E2C3D89196D46C225C04 /* SketchGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchGeometry.swift; sourceTree = "<group>"; };
+		BFC438C8E10B0771ED37CB1F /* MeshFileReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshFileReader.swift; sourceTree = "<group>"; };
+		C01EBF028FE9DEFFA7CC5972 /* SketchToolOptions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchToolOptions.swift; sourceTree = "<group>"; };
+		C0ED6868B829F8635322136F /* ThirdPartyNotices.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = ThirdPartyNotices.txt; sourceTree = "<group>"; };
+		C2B487A42E179FAA1C21866B /* BodyDelete.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BodyDelete.swift; sourceTree = "<group>"; };
+		C37E9D01CC370EB1536E0CE8 /* RegisterCreate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegisterCreate.swift; sourceTree = "<group>"; };
+		C41623E062AC17C604549DC6 /* WorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceView.swift; sourceTree = "<group>"; };
+		C4CEEA934C36384FC0212A33 /* EqualLengthClick.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = EqualLengthClick.wav; sourceTree = "<group>"; };
+		C66240B5A91D90A08388BE68 /* SketchTextDeform.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchTextDeform.swift; sourceTree = "<group>"; };
+		C71755B37EF1097B86A9CAAE /* PropertiesPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PropertiesPanel.swift; sourceTree = "<group>"; };
+		C723167BC0EC3C88473B40A1 /* IsolatedBlend.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IsolatedBlend.swift; sourceTree = "<group>"; };
+		CB95D8F07B69BE64FE0AB6F3 /* PrimitiveCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrimitiveCommand.swift; sourceTree = "<group>"; };
+		CBD8FA45B9124138AFCF8478 /* Threads.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Threads.swift; sourceTree = "<group>"; };
+		CBF133DA9A0AA65F91CC51BD /* ArrangeCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArrangeCommands.swift; sourceTree = "<group>"; };
+		CD3D176F7E2A0A95ECFCAFA8 /* Project8_AdjacentFilletInput.step */ = {isa = PBXFileReference; path = Project8_AdjacentFilletInput.step; sourceTree = "<group>"; };
+		CDDF6DCD123052AE2FF0AA71 /* Export.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Export.swift; sourceTree = "<group>"; };
+		CE4A8E424E209B402B69507A /* RendererStyles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RendererStyles.swift; sourceTree = "<group>"; };
+		CFB3A8A59AEC3D345A23D037 /* QuickTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickTools.swift; sourceTree = "<group>"; };
+		D12936B60441EE6C4F82ECC4 /* SketchTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchTheme.swift; sourceTree = "<group>"; };
+		D411295A9EBBC9FD97204907 /* CommandSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandSupport.swift; sourceTree = "<group>"; };
+		D471E914D1F87C952158BA8C /* SheetUIFlange.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SheetUIFlange.swift; sourceTree = "<group>"; };
+		D4A2CE567A55083A43A8364D /* ModelCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelCommand.swift; sourceTree = "<group>"; };
+		D5867378689AA608F45F36BC /* HelixThinCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelixThinCommand.swift; sourceTree = "<group>"; };
+		D9711D721217B330D3977F9F /* SketchArcResize.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchArcResize.swift; sourceTree = "<group>"; };
+		D9925690D7015A5464BD301C /* OCCT.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = OCCT.xcframework; path = Vendor/OCCT.xcframework; sourceTree = "<group>"; };
+		DA347EDD29179D7BB1C489F5 /* SheetKernelIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SheetKernelIntegrationTests.swift; sourceTree = "<group>"; };
+		DA68DFCA78686E254DA9B0E8 /* Workspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Workspace.swift; sourceTree = "<group>"; };
+		DBA41E6E5958B3D2CDCEA333 /* SketchMeasure.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchMeasure.swift; sourceTree = "<group>"; };
+		DC18561F1DDE0110533761F0 /* ConstructInspectCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConstructInspectCommands.swift; sourceTree = "<group>"; };
+		DDC041C40B998B7E708C44D1 /* SketchToolProperties.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchToolProperties.swift; sourceTree = "<group>"; };
+		DE130E105D89C0521FC76BA3 /* BrowserBooleanBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserBooleanBar.swift; sourceTree = "<group>"; };
+		E241F0FB41B5B1207E06D1BD /* BlendBeforeCuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlendBeforeCuts.swift; sourceTree = "<group>"; };
+		E26076D41C035F0331F2BB49 /* USDZExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = USDZExport.swift; sourceTree = "<group>"; };
+		E33514F7B576734A12FC8081 /* ShapeLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShapeLibrary.swift; sourceTree = "<group>"; };
+		E34B8E236B666A88D23A9E01 /* Shaders.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = Shaders.metal; sourceTree = "<group>"; };
+		E3971700D5A6FB5D58D6CCF6 /* SketchDimBoxes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchDimBoxes.swift; sourceTree = "<group>"; };
+		E3C05AC4F26BF33CAD1044B7 /* BlendWorkerProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlendWorkerProtocol.swift; sourceTree = "<group>"; };
+		E423E16D33BA1B6861C24C4F /* GridDisplay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GridDisplay.swift; sourceTree = "<group>"; };
+		E44AC3375DD7FF9E9AADF156 /* SketchCommit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchCommit.swift; sourceTree = "<group>"; };
+		E50FD8612FD9D7EEE52403B9 /* PrintCheck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrintCheck.swift; sourceTree = "<group>"; };
+		E59B594E5D5ADBC752E2CBA5 /* CompactKeypad.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompactKeypad.swift; sourceTree = "<group>"; };
+		E6BAA6A4BBB0F6680E103B0F /* Project21_AfterFirstFillet.step */ = {isa = PBXFileReference; path = Project21_AfterFirstFillet.step; sourceTree = "<group>"; };
+		E702E874531FE33C9B4C8880 /* FlatDrawing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlatDrawing.swift; sourceTree = "<group>"; };
+		E74D4F278C819BE89AB27DF3 /* FlatPatternView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlatPatternView.swift; sourceTree = "<group>"; };
+		E80D34E826236B5FB8529CD2 /* SheetUIBox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SheetUIBox.swift; sourceTree = "<group>"; };
+		E98522B56E888155DE2FC5AB /* DrawingAngles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingAngles.swift; sourceTree = "<group>"; };
+		EA82AB7BE45391B830A3E608 /* ShapeGeneratorPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShapeGeneratorPanel.swift; sourceTree = "<group>"; };
+		EBF251338D0FFED8098264E5 /* ExtrudeInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtrudeInfo.swift; sourceTree = "<group>"; };
+		EE0CA231BA9DDD4C58CEECDB /* SketchDimensionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchDimensionTests.swift; sourceTree = "<group>"; };
+		EE3AA853AC5399C870FD60C5 /* ProjectUnitsUI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectUnitsUI.swift; sourceTree = "<group>"; };
+		EED7B404EA0CA1D397FDCE2E /* ThreadNotesUI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadNotesUI.swift; sourceTree = "<group>"; };
+		F306E22F4B53001537F3AEF1 /* MeshSculpt.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshSculpt.swift; sourceTree = "<group>"; };
+		F6B4B09C238A70E2FA6F25E4 /* model.step */ = {isa = PBXFileReference; path = model.step; sourceTree = "<group>"; };
+		FB6FAE322EAF0FD7808735FC /* features.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = features.json; sourceTree = "<group>"; };
+		FF46D8E4B472B2239BC61C2E /* CornerConfirm.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CornerConfirm.swift; sourceTree = "<group>"; };
+		FFB5CD2485761D7DF0E08FEB /* ModelMeasure.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelMeasure.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		3B761F849B2227D99ABFD49A /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				659AF2C4BAC217B6D5598D3B /* OCCT.xcframework in Frameworks */,
+				B5528359E9E41E5F7B6459B9 /* PencilSheet.xcframework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		9F563C6E573055851C188599 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				68689EAC0B2F159904A7C558 /* OCCT.xcframework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		060F8E116D35C8EC0FFFEE72 = {
+			isa = PBXGroup;
+			children = (
+				1D1D0C1B812AF15F02E5B4A5 /* App */,
+				B03ECAE16B5E9B8B9216A3F2 /* BlendWorker */,
+				CE65F4483CC01F7F37CB3CE4 /* Shared */,
+				35BD2D176F065C2276AF3F67 /* Tests */,
+				CCDA0B9883EB494B9F4F963D /* Frameworks */,
+				1FDC556540BE64D7232AC804 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		1D1D0C1B812AF15F02E5B4A5 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				4F177C6895F651C181AEB61D /* Assets.xcassets */,
+				74D47D155D01A023D423E1C5 /* BuildInfo.txt */,
+				80388C4E59A94A4B11FEC480 /* Files.swift */,
+				7643C5436773E6FBC1E1F04B /* PencilCADApp.swift */,
+				E8266EAE8B18B1BA6A81632B /* Kernel */,
+				6D95A359279D7367DF547C30 /* Model */,
+				20E2B03495776A84208D4A5F /* Projects */,
+				EF4DD07E86B4E5BA0DFD9F3E /* Resources */,
+				F5E0B3AB2D668E6F70959477 /* Sheet */,
+				8EE731FC3D13CCD4DB8B068C /* Viewport */,
+				FD1564BA687C94CF53581A4B /* Workspace */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		1FDC556540BE64D7232AC804 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				554D77241AD6283A5159CBDD /* PencilCAD.app */,
+				15E3622E9F69ECA0193AA2EA /* PencilCADBlendWorker.appex */,
+				0921EEAD34FE796E496B3ED7 /* PencilCADTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		20E2B03495776A84208D4A5F /* Projects */ = {
+			isa = PBXGroup;
+			children = (
+				95A46FE40EA6A1C726512520 /* HangGuard.swift */,
+				64B43B9550C1C018C9734FB2 /* HomeView.swift */,
+				00774BB2B2A1AE97089F82F8 /* ProjectStore.swift */,
+			);
+			path = Projects;
+			sourceTree = "<group>";
+		};
+		35BD2D176F065C2276AF3F67 /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				981D0F2B54EE95CD808D9CDD /* App */,
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
+		66BA75143D18FAAD1F409E6D /* Project14 */ = {
+			isa = PBXGroup;
+			children = (
+				3F3325CFA40C2A1911D25ECA /* bodies.json */,
+				FB6FAE322EAF0FD7808735FC /* features.json */,
+				F6B4B09C238A70E2FA6F25E4 /* model.step */,
+			);
+			path = Project14;
+			sourceTree = "<group>";
+		};
+		6D95A359279D7367DF547C30 /* Model */ = {
+			isa = PBXGroup;
+			children = (
+				E241F0FB41B5B1207E06D1BD /* BlendBeforeCuts.swift */,
+				7E827FF738F6B42D72151A62 /* BlendJobs.swift */,
+				E98522B56E888155DE2FC5AB /* DrawingAngles.swift */,
+				CDDF6DCD123052AE2FF0AA71 /* Export.swift */,
+				39FE9702A7C6815F858F8AE6 /* Expressions.swift */,
+				82D827BF2B5142943FC94463 /* ExtrusionSpan.swift */,
+				0ADAA402A9C5A363AF014192 /* FaceExtrudeJobs.swift */,
+				94B5F51197402594DA0B7FE2 /* FeatureHistory.swift */,
+				C723167BC0EC3C88473B40A1 /* IsolatedBlend.swift */,
+				6C8C4C339D526C436A41D342 /* LoftGuides.swift */,
+				3075F04C1E6B97EA9A19A3E7 /* Materials.swift */,
+				642F4399911A58E42C134D07 /* Mesh.swift */,
+				BFC438C8E10B0771ED37CB1F /* MeshFileReader.swift */,
+				1C2D9F377963B998EAFE314C /* MeshImport.swift */,
+				2C3BC9E2D0AD59D4273B5A13 /* MeshRepair.swift */,
+				D4A2CE567A55083A43A8364D /* ModelCommand.swift */,
+				8741FDF900EC11919310D141 /* ModelComponents.swift */,
+				1809F3BEBA00544E40235103 /* ModelingExtras.swift */,
+				467896662E2B7CF17740918B /* ModelStore.swift */,
+				8AAD11A246B58A83DD5BA066 /* MoldTools.swift */,
+				412D6CD302E41490B5224440 /* OffsetFaces.swift */,
+				E50FD8612FD9D7EEE52403B9 /* PrintCheck.swift */,
+				66BE3304F07D56305ADE8029 /* ProjectUnits.swift */,
+				25AEB4A8087A2021D3A68D56 /* ShapeGenerator.swift */,
+				E33514F7B576734A12FC8081 /* ShapeLibrary.swift */,
+				2B949D1339D794A28D8351A3 /* Sketch.swift */,
+				011612B6C7DD5B3C95CAE62E /* SketchAngleSnap.swift */,
+				62EB36D30998329520CB93FA /* SketchArcHandle.swift */,
+				D9711D721217B330D3977F9F /* SketchArcResize.swift */,
+				B4DFEA6E1ED740F768BFA487 /* SketchArrangement.swift */,
+				88219874901BEF57B9884DBF /* SketchClickTool.swift */,
+				E44AC3375DD7FF9E9AADF156 /* SketchCommit.swift */,
+				3DF11130ED0F7A60837A785A /* SketchConstraints.swift */,
+				1B411D35971A3F6151F801E5 /* SketchCut.swift */,
+				3FC94D02783ED2A3CD6142BB /* SketchExtrusion.swift */,
+				BC24E2C3D89196D46C225C04 /* SketchGeometry.swift */,
+				00C70539590B7D08210FD553 /* SketchGestures.swift */,
+				3E5A7F38C81B88D20FC9EDA1 /* SketchInference.swift */,
+				2D791783A8DD3B64DF7B7EFB /* SketchLocalSolver.swift */,
+				DBA41E6E5958B3D2CDCEA333 /* SketchMeasure.swift */,
+				25E4A37EB174949DEF2851B4 /* SketchPlaneMatch.swift */,
+				B9B1C94749DE49288AD1D36D /* SketchRegionMerge.swift */,
+				0D21782A541AEB1A83C93939 /* SketchSnap.swift */,
+				8794C4E57471ED771A1B7756 /* SketchSplineHandles.swift */,
+				1D9E8F1EAE03659DB4FB1EAB /* SketchSplineInterpolation.swift */,
+				A4133F8CD5BEE6CBA8C189A9 /* SketchSplineTools.swift */,
+				C66240B5A91D90A08388BE68 /* SketchTextDeform.swift */,
+				A762797F2E6F9E9D45A4D326 /* SketchTextDeformHandles.swift */,
+				A3ADF824E342E58ACFC37C15 /* SketchTextEdit.swift */,
+				6452C51B2CF3B6691E94BF92 /* SketchTextPathLink.swift */,
+				626D09AD53F64D7B7ADE6363 /* SketchTextTransform.swift */,
+				72F18E701E2F4774E53E116A /* SketchTextTransformGeometry.swift */,
+				C01EBF028FE9DEFFA7CC5972 /* SketchToolOptions.swift */,
+				9327530748AC0B18426EBB56 /* SketchTools.swift */,
+				48D4D9E557C53124770960DC /* SketchTrim.swift */,
+				3E51FE1966D3CDB1E92B2E93 /* StandardParts.swift */,
+				306373DC5C0231890B6DE470 /* SurfaceFinish.swift */,
+				14CD19A42EE22B330770AE83 /* SurfaceHoles.swift */,
+				3A7AD75DC7322EA43D5D9459 /* TechnicalDrawing.swift */,
+				16028C3F909853FF79978251 /* ThreadModeling.swift */,
+				5B78748727D793272BA6E52E /* ThreadNotes.swift */,
+				CBD8FA45B9124138AFCF8478 /* Threads.swift */,
+				E26076D41C035F0331F2BB49 /* USDZExport.swift */,
+				8BEC31F5EB0A4D65F8B3DA6B /* VectorFiles.swift */,
+			);
+			path = Model;
+			sourceTree = "<group>";
+		};
+		8EE731FC3D13CCD4DB8B068C /* Viewport */ = {
+			isa = PBXGroup;
+			children = (
+				8CF648517FAF6BB4869A23B4 /* BodyContextMenu.swift */,
+				A1379D36519E23612AC74017 /* CameraMotion.swift */,
+				3EB9ECEDA402330D2C850DA8 /* CommandManipulators.swift */,
+				E423E16D33BA1B6861C24C4F /* GridDisplay.swift */,
+				4F759FF648AAEAFCD1DD95FB /* LiveDimensionStyle.swift */,
+				49AE14FEE941665A12D9569D /* OrbitCamera.swift */,
+				7585B36E3950E4AF58D385B3 /* RegionSelection.swift */,
+				4663C65EFDEE977425E9B59F /* Renderer.swift */,
+				CE4A8E424E209B402B69507A /* RendererStyles.swift */,
+				5826D425322224F7AC42CD4B /* RendererSurfaces.swift */,
+				E34B8E236B666A88D23A9E01 /* Shaders.metal */,
+				53B109A66221150892642ADC /* TransformGizmo.swift */,
+				4D3E1C80B3C5E103AA4AB01F /* Viewport.swift */,
+			);
+			path = Viewport;
+			sourceTree = "<group>";
+		};
+		981D0F2B54EE95CD808D9CDD /* App */ = {
+			isa = PBXGroup;
+			children = (
+				90C4A03BFC90940867B8C6BA /* FeatureTimelinePersistenceTests.swift */,
+				32858676E0D7E4AC9908D11D /* ModelingWorkflowTests.swift */,
+				451778BCDA8978063D3F839F /* ProjectCycleTests.swift */,
+				24B7D99431CA0E37FC5B01C9 /* ProjectSaveTransactionTests.swift */,
+				1B8557EC1B02BFE8B9B94140 /* RemeshCacheTests.swift */,
+				DA347EDD29179D7BB1C489F5 /* SheetKernelIntegrationTests.swift */,
+				EE0CA231BA9DDD4C58CEECDB /* SketchDimensionTests.swift */,
+				C66FD90D24ED9D6FE33965F0 /* Fixtures */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		B03ECAE16B5E9B8B9216A3F2 /* BlendWorker */ = {
+			isa = PBXGroup;
+			children = (
+				1CFC6F3B794DC4BC640ABA97 /* BlendWorkerExtension.swift */,
+			);
+			path = BlendWorker;
+			sourceTree = "<group>";
+		};
+		B6AC3BE846AB09828437C866 /* Commands */ = {
+			isa = PBXGroup;
+			children = (
+				CBF133DA9A0AA65F91CC51BD /* ArrangeCommands.swift */,
+				917F84F15434B58F1E7F74A7 /* BodyCommands.swift */,
+				D411295A9EBBC9FD97204907 /* CommandSupport.swift */,
+				DC18561F1DDE0110533761F0 /* ConstructInspectCommands.swift */,
+				566DA93D5542B0AC3EE84F8E /* EdgeCommands.swift */,
+				9D64C25177EE0DA34EC393E6 /* ExtrudeCommand.swift */,
+				EBF251338D0FFED8098264E5 /* ExtrudeInfo.swift */,
+				10ACF29AE0EBE94D33093DE9 /* FaceCommands.swift */,
+				D5867378689AA608F45F36BC /* HelixThinCommand.swift */,
+				662A797C2D58335927B7B2B2 /* HoleCommand.swift */,
+				B1EE5F16B04B548005F6C9F5 /* ModelStartBridge.swift */,
+				CB95D8F07B69BE64FE0AB6F3 /* PrimitiveCommand.swift */,
+				C37E9D01CC370EB1536E0CE8 /* RegisterCreate.swift */,
+				A21A7EB8717B5E03E59ADEC1 /* RegisterModify.swift */,
+				546C167AD0F28C798427D3EB /* RevolveCommand.swift */,
+				6BC9E7B60FD02FB29BF34E47 /* SweepLoftCommand.swift */,
+			);
+			path = Commands;
+			sourceTree = "<group>";
+		};
+		C66FD90D24ED9D6FE33965F0 /* Fixtures */ = {
+			isa = PBXGroup;
+			children = (
+				03DAAFCE09819A57627D75C9 /* Project6_FilletInput.step */,
+				00EE94B30577067E735E1AE5 /* Project8_Adjacent_bodies.json */,
+				B912A1EF4C6FC4C5138238FA /* Project8_Adjacent_features.json */,
+				7DFCAC3192EE0EC389FF8077 /* Project8_Adjacent_project.json */,
+				0EB4885BDBD2B3A613EF475A /* Project8_Adjacent_sketches.json */,
+				CD3D176F7E2A0A95ECFCAFA8 /* Project8_AdjacentFilletInput.step */,
+				645CF2F4CA52BFC121F9CF57 /* Project8_FilletInput.step */,
+				E6BAA6A4BBB0F6680E103B0F /* Project21_AfterFirstFillet.step */,
+				565EE99C35CCFC401F4AB4E1 /* Project21_CurvedExtrusion.step */,
+				66BA75143D18FAAD1F409E6D /* Project14 */,
+			);
+			path = Fixtures;
+			sourceTree = "<group>";
+		};
+		CCDA0B9883EB494B9F4F963D /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				D9925690D7015A5464BD301C /* OCCT.xcframework */,
+				946AAEA8269A81BF9E00F6F8 /* PencilSheet.xcframework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		CE65F4483CC01F7F37CB3CE4 /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				E3C05AC4F26BF33CAD1044B7 /* BlendWorkerProtocol.swift */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		E8266EAE8B18B1BA6A81632B /* Kernel */ = {
+			isa = PBXGroup;
+			children = (
+				1463D0F37EBB4506C73EBBD8 /* PCKShape.h */,
+				2E24776C4BCF09B1E55CC8DA /* PCKShape.mm */,
+				2FB2B8B4D24D50DFF8E196E7 /* PencilCAD-Bridging-Header.h */,
+			);
+			path = Kernel;
+			sourceTree = "<group>";
+		};
+		EF4DD07E86B4E5BA0DFD9F3E /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				C4CEEA934C36384FC0212A33 /* EqualLengthClick.wav */,
+				C0ED6868B829F8635322136F /* ThirdPartyNotices.txt */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		F5E0B3AB2D668E6F70959477 /* Sheet */ = {
+			isa = PBXGroup;
+			children = (
+				E702E874531FE33C9B4C8880 /* FlatDrawing.swift */,
+				25602EFFF5EDF9487B9B08C6 /* FlatDrawingSheet.swift */,
+				E74D4F278C819BE89AB27DF3 /* FlatPatternView.swift */,
+				9BDAB48267E792C6FA4D64A2 /* SheetKernel.swift */,
+				6D253ABEE39B95E131EF93C0 /* SheetModel.swift */,
+				476D8BFFA0705CD1927B719E /* SheetModelConvert.swift */,
+				A63423BD041750FA0D37BFDE /* SheetModelReplay.swift */,
+				7EEEE81F9A6257B2D06629CE /* SheetModelSketch.swift */,
+				87AAD4F13A52B03E618F868E /* SheetUI.swift */,
+				E80D34E826236B5FB8529CD2 /* SheetUIBox.swift */,
+				31FB44E6B8FC2EC022DCE397 /* SheetUIConvert.swift */,
+				482396C3C40FADA78FE18BA4 /* SheetUIEdit.swift */,
+				D471E914D1F87C952158BA8C /* SheetUIFlange.swift */,
+				22DBE2DC4E9A087D1ED1A7F7 /* SheetUIFlat.swift */,
+				A8F918C5A7D6A3FCC66E09D2 /* SheetUIKanten.swift */,
+				4E273C1EB9720DA264ABEE5D /* SheetUIOverlay.swift */,
+				6413696F3976C368538CB303 /* SheetUIRules.swift */,
+				5A22D759EDF3AC5E84007605 /* SheetUITools.swift */,
+				B46D3A92F51FD623E7495FED /* SheetWorker.swift */,
+			);
+			path = Sheet;
+			sourceTree = "<group>";
+		};
+		FD1564BA687C94CF53581A4B /* Workspace */ = {
+			isa = PBXGroup;
+			children = (
+				C2B487A42E179FAA1C21866B /* BodyDelete.swift */,
+				2A21AD0D86A050EB6F15ECE3 /* BooleanPanel.swift */,
+				DE130E105D89C0521FC76BA3 /* BrowserBooleanBar.swift */,
+				69B7BF199879D01E484A54D5 /* CameraCapture.swift */,
+				4219358AAC1119E936B7CB60 /* CanvasTracing.swift */,
+				919543B9E1FAAFD0A791FC58 /* CommandSearch.swift */,
+				E59B594E5D5ADBC752E2CBA5 /* CompactKeypad.swift */,
+				FF46D8E4B472B2239BC61C2E /* CornerConfirm.swift */,
+				3952FE240238967F8F15445E /* DrawingSheet.swift */,
+				6A7C3735F3062565E0A143A5 /* FeaturePanel.swift */,
+				39BCA197BA49FC30150B2F57 /* FontPickerList.swift */,
+				4A2D81C11BFD11A54D2E62F3 /* HoverTip.swift */,
+				BB673882764E34D157C352C0 /* LoftPanel.swift */,
+				F306E22F4B53001537F3AEF1 /* MeshSculpt.swift */,
+				FFB5CD2485761D7DF0E08FEB /* ModelMeasure.swift */,
+				88B545242683B0746D8754F9 /* ModelRibbon.swift */,
+				4B3D194896DF1DE408E17D19 /* Panels.swift */,
+				623096CDFE2A8744C5DA52B9 /* PartTools.swift */,
+				51426C4ACAD0905555239703 /* PatternSpacingHandles.swift */,
+				2AE50509E702782782C90398 /* PickChip.swift */,
+				EE3AA853AC5399C870FD60C5 /* ProjectUnitsUI.swift */,
+				C71755B37EF1097B86A9CAAE /* PropertiesPanel.swift */,
+				CFB3A8A59AEC3D345A23D037 /* QuickTools.swift */,
+				709A436A2F5B3877E006A4A6 /* RadiusHandle.swift */,
+				B5C69F72A78FCE7EEDD77E17 /* RightRail.swift */,
+				979172E9E7D641607AE319CB /* SectionHandle.swift */,
+				EA82AB7BE45391B830A3E608 /* ShapeGeneratorPanel.swift */,
+				706C960F5F3B4D9B239CBCB6 /* Sheets.swift */,
+				E3971700D5A6FB5D58D6CCF6 /* SketchDimBoxes.swift */,
+				BAF13CBDB8973D4EA36CBB3A /* SketchPalette.swift */,
+				266E46BE0067A6B5496672DD /* SketchPaletteBridge.swift */,
+				79816767175C7C59B81EBB78 /* SketchPaletteControls.swift */,
+				3FF28DDAF036D25319C705B2 /* SketchSelectionProperties.swift */,
+				58C79459B68B71DF1EA47132 /* SketchTextDeformPanel.swift */,
+				048666BE4439ECD76B6F7FBE /* SketchTextPanel.swift */,
+				B7E331EFF8A255B0DD8418E1 /* SketchTextTransformPanel.swift */,
+				D12936B60441EE6C4F82ECC4 /* SketchTheme.swift */,
+				DDC041C40B998B7E708C44D1 /* SketchToolProperties.swift */,
+				A6AAB4165EF015CEDE3470A7 /* SurfaceFinishUI.swift */,
+				A95C0CEAEC69ECFBAE461213 /* SurfaceQuickPalette.swift */,
+				8FCD233E400FFE29EA7CD83F /* Theme.swift */,
+				EED7B404EA0CA1D397FDCE2E /* ThreadNotesUI.swift */,
+				B1EDA09045BD5A77F75F0CF1 /* ThreadPanel.swift */,
+				8596E84292EC99D08D06929B /* TimelineBar.swift */,
+				6A0AFC952A57684C37E23268 /* ToolExplainer.swift */,
+				B5571DFB2AB7FBA97385056A /* ToolIcon.swift */,
+				3AD884422FB11693A7DEB14D /* ToolRail.swift */,
+				DA68DFCA78686E254DA9B0E8 /* Workspace.swift */,
+				C41623E062AC17C604549DC6 /* WorkspaceView.swift */,
+				B6AC3BE846AB09828437C866 /* Commands */,
+			);
+			path = Workspace;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		2416CB7202D108DC55140E63 /* PencilCADTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 68F5BBDD2A0B5BAFC547206F /* Build configuration list for PBXNativeTarget "PencilCADTests" */;
+			buildPhases = (
+				B9B8DFA022D8289E0CAA0295 /* Sources */,
+				D72A696957F4A912CF30EB47 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				131D5898A7F049350C280961 /* PBXTargetDependency */,
+			);
+			name = PencilCADTests;
+			packageProductDependencies = (
+			);
+			productName = PencilCADTests;
+			productReference = 0921EEAD34FE796E496B3ED7 /* PencilCADTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		6E20179AEB152ADC14BC52D0 /* PencilCAD */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 0603A904D5593ED47B300758 /* Build configuration list for PBXNativeTarget "PencilCAD" */;
+			buildPhases = (
+				7287F44D4EDC78E0D25281D8 /* Sources */,
+				21109C69ECC312B39D40BF4E /* Resources */,
+				3B761F849B2227D99ABFD49A /* Frameworks */,
+				AF4253D5814E6546F70F0510 /* Embed ExtensionKit Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				46FEABD436AE175A1B7B254A /* PBXTargetDependency */,
+			);
+			name = PencilCAD;
+			packageProductDependencies = (
+			);
+			productName = PencilCAD;
+			productReference = 554D77241AD6283A5159CBDD /* PencilCAD.app */;
+			productType = "com.apple.product-type.application";
+		};
+		72CFC031FEBB541FA54D9738 /* PencilCADBlendWorker */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 285CDBA8C04383600D16B417 /* Build configuration list for PBXNativeTarget "PencilCADBlendWorker" */;
+			buildPhases = (
+				1388038E7AB6D5846A0E98DD /* Sources */,
+				9F563C6E573055851C188599 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PencilCADBlendWorker;
+			packageProductDependencies = (
+			);
+			productName = PencilCADBlendWorker;
+			productReference = 15E3622E9F69ECA0193AA2EA /* PencilCADBlendWorker.appex */;
+			productType = "com.apple.product-type.extensionkit-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		38825FE339F66A6756AF78C5 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					2416CB7202D108DC55140E63 = {
+						DevelopmentTeam = EYNJ86G4VD;
+					};
+					6E20179AEB152ADC14BC52D0 = {
+						DevelopmentTeam = EYNJ86G4VD;
+						ProvisioningStyle = Automatic;
+					};
+					72CFC031FEBB541FA54D9738 = {
+						DevelopmentTeam = EYNJ86G4VD;
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = F19B02510AF23DA8F0677A72 /* Build configuration list for PBXProject "PencilCAD" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 060F8E116D35C8EC0FFFEE72;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 1FDC556540BE64D7232AC804 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				6E20179AEB152ADC14BC52D0 /* PencilCAD */,
+				72CFC031FEBB541FA54D9738 /* PencilCADBlendWorker */,
+				2416CB7202D108DC55140E63 /* PencilCADTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		21109C69ECC312B39D40BF4E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E99A13B26F2846279882CD63 /* Assets.xcassets in Resources */,
+				645C40C57D9DC250EA5724D5 /* BuildInfo.txt in Resources */,
+				090410F539946CDA24343E2A /* EqualLengthClick.wav in Resources */,
+				2B2F76340B31A6648A3E8835 /* ThirdPartyNotices.txt in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D72A696957F4A912CF30EB47 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				43D076CE568F9239D41722BB /* Project21_AfterFirstFillet.step in Resources */,
+				A0514620A17C2F3FEEB209CF /* Project21_CurvedExtrusion.step in Resources */,
+				C4ABD586392F06FC7FF39735 /* Project6_FilletInput.step in Resources */,
+				E0173194A5E7986D93A055FE /* Project8_AdjacentFilletInput.step in Resources */,
+				25132F3DC701E397B3D55533 /* Project8_Adjacent_bodies.json in Resources */,
+				E38A7EE6DECC86DC1D01CFBA /* Project8_Adjacent_features.json in Resources */,
+				47A9699D5F457674C93F405B /* Project8_Adjacent_project.json in Resources */,
+				16EC7089B7BE7E4F8DEBD094 /* Project8_Adjacent_sketches.json in Resources */,
+				42135FDA81BC117E46C79182 /* Project8_FilletInput.step in Resources */,
+				A954E9FE0C315534B41AF2A1 /* bodies.json in Resources */,
+				D8691D3BBC8FC482B6335630 /* features.json in Resources */,
+				70E45B654A77A28AC2301AB1 /* model.step in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		1388038E7AB6D5846A0E98DD /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CB9F94AB055930440C4F96B3 /* BlendWorkerExtension.swift in Sources */,
+				E6896AB8583E30B845983BBC /* BlendWorkerProtocol.swift in Sources */,
+				0988765B7B9C07D9921E9DA4 /* PCKShape.mm in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7287F44D4EDC78E0D25281D8 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7021552B8DC77E70AD0137F1 /* ArrangeCommands.swift in Sources */,
+				861CC064C18F5EA36C335CCF /* BlendBeforeCuts.swift in Sources */,
+				A9C02BC0EF9E6CA078A2AFBC /* BlendJobs.swift in Sources */,
+				03BBA18DD24AF86B31E08335 /* BlendWorkerProtocol.swift in Sources */,
+				241C139F2F239E1F5EC530C4 /* BodyCommands.swift in Sources */,
+				DAE0B9725EBAEF6B931E1373 /* BodyContextMenu.swift in Sources */,
+				43C59774DB0A1B4686AD36EF /* BodyDelete.swift in Sources */,
+				F2C6644D578BF2F1AE59390F /* BooleanPanel.swift in Sources */,
+				ACE8413D0711D943DE3A8683 /* BrowserBooleanBar.swift in Sources */,
+				92B351A298C517604799F5A6 /* CameraCapture.swift in Sources */,
+				7318F4133AB8E70EF6476810 /* CameraMotion.swift in Sources */,
+				7E9FB998EA84908334C9398C /* CanvasTracing.swift in Sources */,
+				92E68799962E5379E844AB98 /* CommandManipulators.swift in Sources */,
+				4D178BE631B6E9AB8EA5CFD1 /* CommandSearch.swift in Sources */,
+				DE7F7E112FE73C17154A2C51 /* CommandSupport.swift in Sources */,
+				63287C2900A25DBE31291DBD /* CompactKeypad.swift in Sources */,
+				332740EEBF5B1A685ED4D0A1 /* ConstructInspectCommands.swift in Sources */,
+				540F3927B31B7170EC5913B3 /* CornerConfirm.swift in Sources */,
+				5C45069DCDB93FF4F45C3C4D /* DrawingAngles.swift in Sources */,
+				99624C6ED400EE75732C8DEA /* DrawingSheet.swift in Sources */,
+				4216871CC23ED8E88DC91A9F /* EdgeCommands.swift in Sources */,
+				41F9683EC6F9EAD08D9767AC /* Export.swift in Sources */,
+				A54A6187AE21672400C97615 /* Expressions.swift in Sources */,
+				17AD529D5E7F9B2671E1D47B /* ExtrudeCommand.swift in Sources */,
+				83339C4B4C8E140D9D76571B /* ExtrudeInfo.swift in Sources */,
+				B451D957796D1CB8D7A63C4D /* ExtrusionSpan.swift in Sources */,
+				F6CE455C8CD237D61131D730 /* FaceCommands.swift in Sources */,
+				84F0766E13671C8E67E9F9D3 /* FaceExtrudeJobs.swift in Sources */,
+				FD6C3B830AAE74EF2479BCA9 /* FeatureHistory.swift in Sources */,
+				A5E31E3B38679BFCE3260992 /* FeaturePanel.swift in Sources */,
+				504B1BDFB749E92C598B691B /* Files.swift in Sources */,
+				08AB7561D995C989724675B6 /* FlatDrawing.swift in Sources */,
+				F50A4C160620BDF387E7802B /* FlatDrawingSheet.swift in Sources */,
+				77270E48AFE85B9B336998F9 /* FlatPatternView.swift in Sources */,
+				91334F5712FDD0CD387CCF5E /* FontPickerList.swift in Sources */,
+				26F3FD959ACE41557E04237E /* GridDisplay.swift in Sources */,
+				21B3A4A5563B70EB90BB624C /* HangGuard.swift in Sources */,
+				EBDFF2A75D8808858CF99146 /* HelixThinCommand.swift in Sources */,
+				3A112E47A85737C99DF38A73 /* HoleCommand.swift in Sources */,
+				98522E01E05C50F9344EB826 /* HomeView.swift in Sources */,
+				94F3C6B233152CADC1FF9FD7 /* HoverTip.swift in Sources */,
+				E4E803A8B0645BD3CA82BD2F /* IsolatedBlend.swift in Sources */,
+				68D4D60CB26E5BC5CF4A4C7C /* LiveDimensionStyle.swift in Sources */,
+				C402E27BE889D3139FDAA2DC /* LoftGuides.swift in Sources */,
+				A2DDE0C468A14EF3374DA856 /* LoftPanel.swift in Sources */,
+				1DF7DA25668920460927388F /* Materials.swift in Sources */,
+				8E1182DD2BDFCBCE94F127EC /* Mesh.swift in Sources */,
+				81E886363C78F6C19DBB21FF /* MeshFileReader.swift in Sources */,
+				2947AB3FF36500E2CE698438 /* MeshImport.swift in Sources */,
+				DD946A836DDAC4B279BD645E /* MeshRepair.swift in Sources */,
+				0EFCC91CE158890437E7C5A8 /* MeshSculpt.swift in Sources */,
+				25FB4F12E3D40D71559C9C7D /* ModelCommand.swift in Sources */,
+				FBF08DAD46541CC09A383409 /* ModelComponents.swift in Sources */,
+				BB88B7A6487F11E2183D77F6 /* ModelMeasure.swift in Sources */,
+				1CA76600B484340CFAF97783 /* ModelRibbon.swift in Sources */,
+				43D369A25D9CADC53FDCC206 /* ModelStartBridge.swift in Sources */,
+				01247A15164C1F05CE88C053 /* ModelStore.swift in Sources */,
+				BC8C944ED5DB3AADD79DA49B /* ModelingExtras.swift in Sources */,
+				25A721FB3CBF87870A47274C /* MoldTools.swift in Sources */,
+				5B35832E3AFD2CDFC35C7463 /* OffsetFaces.swift in Sources */,
+				3F37B74722F4323E049D698B /* OrbitCamera.swift in Sources */,
+				220E0EBB07CEA8489BC50B85 /* PCKShape.mm in Sources */,
+				E53D0D327BB425EBAD31E2B1 /* Panels.swift in Sources */,
+				BCBA74181C2986725B56FAE6 /* PartTools.swift in Sources */,
+				6008D46234E1C29B9CEDDA6C /* PatternSpacingHandles.swift in Sources */,
+				BD0A8F844DAAAF62D4012786 /* PencilCADApp.swift in Sources */,
+				71B14BB28376A1EDFD16E2B4 /* PickChip.swift in Sources */,
+				0E77FFEA28BBF1D5F093FAB7 /* PrimitiveCommand.swift in Sources */,
+				48EC02748F6EF4BBE0B1FFA4 /* PrintCheck.swift in Sources */,
+				F592DA4931264E2BAA31DDCE /* ProjectStore.swift in Sources */,
+				CB280A004DE9B3896C081690 /* ProjectUnits.swift in Sources */,
+				CA1FF262EAFCF9BA7A3C74FC /* ProjectUnitsUI.swift in Sources */,
+				E348899C1E76D3D92943AE22 /* PropertiesPanel.swift in Sources */,
+				98734447733D2C21BBC4CC1E /* QuickTools.swift in Sources */,
+				BEE087841291F8DB4327312B /* RadiusHandle.swift in Sources */,
+				BC67453E3483042B3890027B /* RegionSelection.swift in Sources */,
+				4BA334B8886B2A9B41FA2207 /* RegisterCreate.swift in Sources */,
+				91B1C41FE239559B6B20501C /* RegisterModify.swift in Sources */,
+				A9E4B63C6BB566076E7661BE /* Renderer.swift in Sources */,
+				4A96CFB097BC7CB66A95D2AC /* RendererStyles.swift in Sources */,
+				FFDFB9749376C49A2B94315E /* RendererSurfaces.swift in Sources */,
+				F00E2FC4692FD1F4B63B198A /* RevolveCommand.swift in Sources */,
+				D6F01043B52A3701526B1104 /* RightRail.swift in Sources */,
+				D784EB91843A21032F8C0BAB /* SectionHandle.swift in Sources */,
+				972417CB3601F879759B8170 /* Shaders.metal in Sources */,
+				1A7ADC17E59438552AE4750C /* ShapeGenerator.swift in Sources */,
+				C2A5249F6E9298E2D24683C1 /* ShapeGeneratorPanel.swift in Sources */,
+				A76406044338D25B71510319 /* ShapeLibrary.swift in Sources */,
+				3ECCF2CD2921B8A7EF75B123 /* SheetKernel.swift in Sources */,
+				B52864BD7AE5153241F62970 /* SheetModel.swift in Sources */,
+				37C236AA46308F6168D14EC8 /* SheetModelConvert.swift in Sources */,
+				31CE420680964FB50A45AF7C /* SheetModelReplay.swift in Sources */,
+				B92D222FEA95BC1400323026 /* SheetModelSketch.swift in Sources */,
+				40BBD81A34192FF640CE2748 /* SheetUI.swift in Sources */,
+				F084FA672CF6A0252EE91A7E /* SheetUIBox.swift in Sources */,
+				C033A10BBEE9ABFD6757C80C /* SheetUIConvert.swift in Sources */,
+				C0ABA415E90D472D7CB305EA /* SheetUIEdit.swift in Sources */,
+				C8B60D753AC02E9C50036697 /* SheetUIFlange.swift in Sources */,
+				B5EF1FA7DB8F699C64778DD9 /* SheetUIFlat.swift in Sources */,
+				8FAA91E752E9ADD07D4451B6 /* SheetUIKanten.swift in Sources */,
+				304F919697E47DB08AC8678A /* SheetUIOverlay.swift in Sources */,
+				320E1FA8EA958480948A86E9 /* SheetUIRules.swift in Sources */,
+				31D2BEB76F8AF22FC166ED12 /* SheetUITools.swift in Sources */,
+				CE3CE2FA7AB883D64AA4C3C4 /* SheetWorker.swift in Sources */,
+				3CBAE3836964B270C84AE017 /* Sheets.swift in Sources */,
+				B791A374C8E795E31B9C2353 /* Sketch.swift in Sources */,
+				CE1BC0D7E1F333FBC4ED82E9 /* SketchAngleSnap.swift in Sources */,
+				A5B3F7BE391228FFB247310D /* SketchArcHandle.swift in Sources */,
+				94730B26FD34EBF98085514D /* SketchArcResize.swift in Sources */,
+				B197C3FDB6D3485ABD0F0247 /* SketchArrangement.swift in Sources */,
+				1613591C37764D13A4B92C04 /* SketchClickTool.swift in Sources */,
+				CA366BD6731CA4CA1994A91A /* SketchCommit.swift in Sources */,
+				A1C7E315D351A627C47C1978 /* SketchConstraints.swift in Sources */,
+				18017EBAEA49D2917D72C81E /* SketchCut.swift in Sources */,
+				96D3C23C5BE22726147A13CC /* SketchDimBoxes.swift in Sources */,
+				3FC448B851350206143FC667 /* SketchExtrusion.swift in Sources */,
+				DBE8DA909F3B307383BDDEA7 /* SketchGeometry.swift in Sources */,
+				AA4C06C5D091F15842C0098B /* SketchGestures.swift in Sources */,
+				76C5B4D6E26596EF23C4583A /* SketchInference.swift in Sources */,
+				23A7F3E5FEB8901566C5DAA7 /* SketchLocalSolver.swift in Sources */,
+				A92B06C62104D580C290F917 /* SketchMeasure.swift in Sources */,
+				3543A59AEDA51A2613A005CD /* SketchPalette.swift in Sources */,
+				13CA60F6D11BF4389C8D73E8 /* SketchPaletteBridge.swift in Sources */,
+				CB6D09071D7064174F2584B3 /* SketchPaletteControls.swift in Sources */,
+				40D6EE8DF6402B5C60B1E6FE /* SketchPlaneMatch.swift in Sources */,
+				F1540D666A84F88114EB0CF7 /* SketchRegionMerge.swift in Sources */,
+				EACEFEA5D35093B1B81F2588 /* SketchSelectionProperties.swift in Sources */,
+				EC339003FD2A5B9ABF3CB435 /* SketchSnap.swift in Sources */,
+				21F62AC8724075668548701A /* SketchSplineHandles.swift in Sources */,
+				AD02D6C600198DEED3BBE9CA /* SketchSplineInterpolation.swift in Sources */,
+				15A141783DA327A6960F3179 /* SketchSplineTools.swift in Sources */,
+				15798FC742C02624A8B0046A /* SketchTextDeform.swift in Sources */,
+				4C83DF8C34648EA705994ECF /* SketchTextDeformHandles.swift in Sources */,
+				F6167321E0C913BAEACE4E12 /* SketchTextDeformPanel.swift in Sources */,
+				55F6B8C50AC03C4E60E1370E /* SketchTextEdit.swift in Sources */,
+				9C6A4C5F9ACC0A009EC02448 /* SketchTextPanel.swift in Sources */,
+				BA0A4BDEB4779B0CBC96F0BB /* SketchTextPathLink.swift in Sources */,
+				F66D1DBE39D68075D6ABAE87 /* SketchTextTransform.swift in Sources */,
+				AF87D1EE227C4247B91BDD98 /* SketchTextTransformGeometry.swift in Sources */,
+				2F55FECB8468AC13A0FEFD3B /* SketchTextTransformPanel.swift in Sources */,
+				86A447DA139B3AB3B3534594 /* SketchTheme.swift in Sources */,
+				3FFF8E43ED84A0DC64123811 /* SketchToolOptions.swift in Sources */,
+				60FF2FC0541B909539875A1D /* SketchToolProperties.swift in Sources */,
+				A7B12265139174FF85E44FB0 /* SketchTools.swift in Sources */,
+				31B66C1F259A6213B79F689F /* SketchTrim.swift in Sources */,
+				4B0E403A2243901F8D6EFE49 /* StandardParts.swift in Sources */,
+				1DFC0AF548134B090544E5B6 /* SurfaceFinish.swift in Sources */,
+				AC70A400E46C081D032F7529 /* SurfaceFinishUI.swift in Sources */,
+				88033FCF0D61CBF9DCDCF8B9 /* SurfaceHoles.swift in Sources */,
+				97FB6B1E2140C50E9A9DFE38 /* SurfaceQuickPalette.swift in Sources */,
+				69E89AECC624F28A598EEE9F /* SweepLoftCommand.swift in Sources */,
+				7EDC9F7F30B5B8503CD86937 /* TechnicalDrawing.swift in Sources */,
+				1505D3E93696496558E640AD /* Theme.swift in Sources */,
+				88DF68ABE148E8072DA9ADFA /* ThreadModeling.swift in Sources */,
+				91A6DA2B0B7A027C92C1D7C3 /* ThreadNotes.swift in Sources */,
+				ACC2365EE3F4A847EB8D0462 /* ThreadNotesUI.swift in Sources */,
+				78AF610785474FD05B65A9F0 /* ThreadPanel.swift in Sources */,
+				6B9F4A23F533F7A7AF0CFF62 /* Threads.swift in Sources */,
+				CC9CF189109562A2956C5608 /* TimelineBar.swift in Sources */,
+				4F24DA0B6C4186671B0FA56C /* ToolExplainer.swift in Sources */,
+				A96A364CECA30D7DE90DFF42 /* ToolIcon.swift in Sources */,
+				68CD8E8C0A06830CEEAE0367 /* ToolRail.swift in Sources */,
+				50EA20085CF35AFAD2393C66 /* TransformGizmo.swift in Sources */,
+				D4E5E0AE5AB6E5E3E7525EF3 /* USDZExport.swift in Sources */,
+				50C1A0F903EE98255FF0F9A5 /* VectorFiles.swift in Sources */,
+				4BCE075EA2C82B908D3DF13B /* Viewport.swift in Sources */,
+				888E3433AAA463DEDE7FE080 /* Workspace.swift in Sources */,
+				DB8F3AF6366DFC5060DD9A95 /* WorkspaceView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B9B8DFA022D8289E0CAA0295 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A4FCDB542521F940BDD2374A /* FeatureTimelinePersistenceTests.swift in Sources */,
+				B0D608E920888FC5D00E6AC4 /* ModelingWorkflowTests.swift in Sources */,
+				5CF6C2A281086EEEAC29E71D /* ProjectCycleTests.swift in Sources */,
+				98DFF4DD6EE16B8D34480BE6 /* ProjectSaveTransactionTests.swift in Sources */,
+				E56FDA7307712FAD7FACAD3B /* RemeshCacheTests.swift in Sources */,
+				F05B099281F039ACA83F0495 /* SheetKernelIntegrationTests.swift in Sources */,
+				8490AB390CF60114CE79EF00 /* SketchDimensionTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		131D5898A7F049350C280961 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 6E20179AEB152ADC14BC52D0 /* PencilCAD */;
+			targetProxy = EE131CBE040C8AD48F33F813 /* PBXContainerItemProxy */;
+		};
+		46FEABD436AE175A1B7B254A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 72CFC031FEBB541FA54D9738 /* PencilCADBlendWorker */;
+			targetProxy = 9B658F51E9EA1A3775C7A533 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		2751B4B6202855C0674D85AA /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				"ARCHS[sdk=iphonesimulator*]" = arm64;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				DEVELOPMENT_TEAM = EYNJ86G4VD;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = de.kai46419.pencilcad.tests;
+				SDKROOT = iphoneos;
+				SWIFT_OBJC_BRIDGING_HEADER = "App/Kernel/PencilCAD-Bridging-Header.h";
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/PencilCAD.app/PencilCAD";
+			};
+			name = Release;
+		};
+		334D06689BFF451C22558EDC /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				"ARCHS[sdk=iphonesimulator*]" = arm64;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CLANG_CXX_LANGUAGE_STANDARD = "c++17";
+				CLANG_WARN_DOCUMENTATION_COMMENTS = NO;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 33;
+				DEVELOPMENT_TEAM = EYNJ86G4VD;
+				EX_ENABLE_EXTENSION_POINT_GENERATION = YES;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"\"Vendor\"",
+				);
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = PencilCAD;
+				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "PencilCAD nutzt die Kamera, um ein Foto als Vorlage zum Nachzeichnen aufzunehmen.";
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UIFileSharingEnabled = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UIRequiresFullScreen = NO;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				OTHER_LDFLAGS = "$(inherited) -framework CoreFoundation -framework Security -liconv -lc++";
+				PRODUCT_BUNDLE_IDENTIFIER = de.kai46419.pencilcad;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) PENCIL_SHEETKIT";
+				SWIFT_OBJC_BRIDGING_HEADER = "App/Kernel/PencilCAD-Bridging-Header.h";
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = 2;
+			};
+			name = Release;
+		};
+		4317FF3C569B53A0C0EFADBA /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		58342B11540DBE37AC360E58 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				"ARCHS[sdk=iphonesimulator*]" = arm64;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				DEVELOPMENT_TEAM = EYNJ86G4VD;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = de.kai46419.pencilcad.tests;
+				SDKROOT = iphoneos;
+				SWIFT_OBJC_BRIDGING_HEADER = "App/Kernel/PencilCAD-Bridging-Header.h";
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/PencilCAD.app/PencilCAD";
+			};
+			name = Debug;
+		};
+		6B60B10C464E1AF5517F9A92 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_CXX_LANGUAGE_STANDARD = "c++17";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 33;
+				DEVELOPMENT_TEAM = EYNJ86G4VD;
+				EX_ENABLE_EXTENSION_POINT_GENERATION = YES;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"\"Vendor\"",
+				);
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = BlendWorker/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = de.kai46419.pencilcad.BlendWorker;
+				SDKROOT = iphoneos;
+				SWIFT_OBJC_BRIDGING_HEADER = "App/Kernel/PencilCAD-Bridging-Header.h";
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = 2;
+			};
+			name = Debug;
+		};
+		A726207D918A2A3F3AEA23D8 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		F406BD3FF1701FA52E888328 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_CXX_LANGUAGE_STANDARD = "c++17";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 33;
+				DEVELOPMENT_TEAM = EYNJ86G4VD;
+				EX_ENABLE_EXTENSION_POINT_GENERATION = YES;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"\"Vendor\"",
+				);
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = BlendWorker/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = de.kai46419.pencilcad.BlendWorker;
+				SDKROOT = iphoneos;
+				SWIFT_OBJC_BRIDGING_HEADER = "App/Kernel/PencilCAD-Bridging-Header.h";
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = 2;
+			};
+			name = Release;
+		};
+		F53A8208C0AFD9C414B967BF /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				"ARCHS[sdk=iphonesimulator*]" = arm64;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CLANG_CXX_LANGUAGE_STANDARD = "c++17";
+				CLANG_WARN_DOCUMENTATION_COMMENTS = NO;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 33;
+				DEVELOPMENT_TEAM = EYNJ86G4VD;
+				EX_ENABLE_EXTENSION_POINT_GENERATION = YES;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"\"Vendor\"",
+				);
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = PencilCAD;
+				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "PencilCAD nutzt die Kamera, um ein Foto als Vorlage zum Nachzeichnen aufzunehmen.";
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UIFileSharingEnabled = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UIRequiresFullScreen = NO;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				OTHER_LDFLAGS = "$(inherited) -framework CoreFoundation -framework Security -liconv -lc++";
+				PRODUCT_BUNDLE_IDENTIFIER = de.kai46419.pencilcad;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) PENCIL_SHEETKIT";
+				SWIFT_OBJC_BRIDGING_HEADER = "App/Kernel/PencilCAD-Bridging-Header.h";
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = 2;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		0603A904D5593ED47B300758 /* Build configuration list for PBXNativeTarget "PencilCAD" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F53A8208C0AFD9C414B967BF /* Debug */,
+				334D06689BFF451C22558EDC /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		285CDBA8C04383600D16B417 /* Build configuration list for PBXNativeTarget "PencilCADBlendWorker" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				6B60B10C464E1AF5517F9A92 /* Debug */,
+				F406BD3FF1701FA52E888328 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		68F5BBDD2A0B5BAFC547206F /* Build configuration list for PBXNativeTarget "PencilCADTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				58342B11540DBE37AC360E58 /* Debug */,
+				2751B4B6202855C0674D85AA /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		F19B02510AF23DA8F0677A72 /* Build configuration list for PBXProject "PencilCAD" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4317FF3C569B53A0C0EFADBA /* Debug */,
+				A726207D918A2A3F3AEA23D8 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 38825FE339F66A6756AF78C5 /* Project object */;
+}

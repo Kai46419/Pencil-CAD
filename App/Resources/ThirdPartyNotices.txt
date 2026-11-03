@@ -1,0 +1,49 @@
+SolidCraft-Icons
+Quelle: https://github.com/tangency-labs/solidcraft, assets/icons/ui/design/svg
+Commit: 514b0c84f9eb7655e3cdc986f0d44d4cd3416f4c
+PNG-Renderings der SolidCraft-Icons, Farben unverändert aus palette.toml.
+Erzeugt mit scripts/render-solidcraft-icons.py (App/Assets.xcassets/SolidCraft).
+
+------------------------------------------------------------------------
+
+MIT License
+
+Copyright (c) 2026 SolidCraft contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+========================================================================
+
+Blechmodul basiert auf SolidCraft-Engine
+Quelle: https://github.com/tangency-labs/solidcraft (Crate solidcraft-engine mit solidcraft-doc,
+-kernel, -sketch, -geom, -io, -render)
+Commit: 98b57a3588170ec1a1c7acc91b4bf8a60ea29865
+Lizenz: MIT OR Apache-2.0 (hier genutzt unter der MIT-Lizenz oben).
+Copyright (c) 2026 SolidCraft contributors.
+Eingebunden als statische Bibliothek (SheetKit, scripts/build-sheet-ios.sh); alle Blechbefehle
+laufen unverändert in SolidCraft.
+
+Der Geometriekern von SolidCraft baut auf den truck-Crates auf (truck-modeling, truck-shapeops,
+truck-meshalgo, truck-stepio, truck-topology, https://github.com/ricosjp/truck),
+Apache License 2.0, Copyright (c) RICOS Co. Ltd.; truck-shapeops, truck-geometry, truck-stepio,
+truck-meshalgo und matext4cgmath in der von SolidCraft geänderten Fassung (vendor/).
+Schrift für Skizzentext: Liberation Sans, SIL Open Font License 1.1.
+Weitere Rust-Abhängigkeiten (MIT, Apache-2.0, BSD, Zlib u. a.) mit vollständigen Lizenztexten:
+Licenses/SolidCraft-THIRD-PARTY-LICENSES.txt, Licenses/SolidCraft-NOTICE.txt,
+Licenses/SolidCraft-LICENSE-APACHE.txt im Quelltext von PencilCAD.

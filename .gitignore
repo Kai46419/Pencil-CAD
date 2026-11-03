@@ -1,6 +1,10 @@
 .DS_Store
+/PencilCAD.app/
 *.xcodeproj
 xcuserdata/
 DerivedData/
 build/
 Vendor/
+signing.env
+App/BuildInfo.txt
+SheetKit/target/
