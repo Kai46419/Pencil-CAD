@@ -16,6 +16,6 @@
 | Signierter iPad-Release-Build | Erfolgreich (`/tmp/PencilCAD_B29_device_build_final.log`), Buildnummer 29, `codesign --verify --deep --strict` bestanden |
 | iPad-Projektsicherung | 135 Dateien vor dem Installationsversuch gesichert |
 | XCTest auf echtem iPad | Nicht gelaufen: `xcodebuild test` führte das per WLAN gekoppelte iPad nicht als Ziel auf |
-| Installation auf echtem iPad | Nicht bestätigt: `devicectl` meldete beim Übertragen eine sofortige Trennung des Geräts |
+| Installation auf echtem iPad | Nicht bestätigt: `devicectl` meldete erst eine sofortige Trennung, beim zweiten Versuch einen nicht ladbaren Developer-Disk-Image-Dienst über WLAN |
 
 Die Tests prüfen einfache Referenzgeometrien und belegen keine fehlerfreie Bearbeitung beliebig komplexer Körper. Die 4/5-Wertung für 3D-Modellierung bleibt bis zu einem erfolgreichen Geräteablauf und einem Vergleich der Projektdaten vor und nach der Installation ausstehend.
