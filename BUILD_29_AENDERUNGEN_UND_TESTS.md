@@ -12,10 +12,10 @@
 | Prüfung | Ergebnis |
 | --- | --- |
 | Neue 3D-Regressionen | 7/7 bestanden: Extrusion, Drehung, Bohrung, Boolean, Schale, Sweep, Loft, Muster, Spiegeln, Undo und Wiederöffnen |
-| Vollständige iOS-Simulator-Suite | 91/91 Tests bestanden (`/tmp/PencilCAD_B29_full_final.log`) |
-| Gezielte 3D-Tests auf Kais iPad | 7/7 bestanden (`/tmp/PencilCAD_B29_ipad_tests_usb.log`) |
-| Vollständige Suite auf Kais iPad | 91/91 Tests bestanden (`/tmp/PencilCAD_B29_ipad_full.log`) |
-| Signierter iPad-Release-Build | Erfolgreich (`/tmp/PencilCAD_B29_device_build_final.log`), Buildnummer 29, `codesign --verify --deep --strict` bestanden |
+| Vollständige iOS-Simulator-Suite | 91/91 Tests bestanden (`Pruefprotokolle/Build29_Simulator_XCTest.log`) |
+| Gezielte 3D-Tests auf Kais iPad | 7/7 bestanden (`Pruefprotokolle/Build29_iPad_3D_XCTest.log`) |
+| Vollständige Suite auf Kais iPad | 91/91 Tests bestanden (`Pruefprotokolle/Build29_iPad_XCTest.log`) |
+| Signierter iPad-Release-Build | Erfolgreich (`Pruefprotokolle/Build29_iPad_Release_Build.log`), Buildnummer 29, `codesign --verify --deep --strict` bestanden |
 | Installation auf Kais iPad | Erfolgreich per USB; installierte Version 29, Release-App gestartet |
 | Projektdaten | 135 Dateien unmittelbar vor Installation gesichert; nach iPad-Tests, erneuter Release-Installation und App-Start 135/135 bytegleich, nichts entfernt oder hinzugefügt |
 
