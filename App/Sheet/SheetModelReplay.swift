@@ -47,6 +47,25 @@ struct SheetPlan {
     var warnings: [String] = []
 }
 
+/// Die Arbeitsdatei bleibt bei einem Zeitlimit im Hintergrundauftrag und wird erst
+/// nach dessen Ende entfernt. Die veröffentlichte Quelldatei hat einen anderen Namen.
+private final class SheetReplaySource {
+    let workingName: String
+    let finalName: String
+    let workingURL: URL
+    let finalURL: URL
+
+    init(directory: URL) {
+        let id = UUID().uuidString
+        workingName = ".working-\(id).step"
+        finalName = "replay-\(id).step"
+        workingURL = directory.appending(path: workingName)
+        finalURL = directory.appending(path: finalName)
+    }
+
+    deinit { try? FileManager.default.removeItem(at: workingURL) }
+}
+
 // MARK: - Wiedergabe
 
 extension SheetStep {
@@ -509,19 +528,34 @@ extension ModelStore {
             body.sketchID = data.sketchID
             result.append(body)
         case "convert":
-            guard let target = feature.data.target, result.indices.contains(target), let file = data.sourceFile else {
+            guard let target = feature.data.target, result.indices.contains(target), data.sourceFile != nil else {
                 throw FeatureError("Ausgangskörper fehlt.")
             }
-            // Ausgangskörper aus dem Stand davor (Änderungen davor wirken mit)
-            let url = directory.appending(path: file)
-            do {
-                try sheetWriteSTEP(result[target].shape, to: url, limit: SheetWorker.replayLimit)
-            } catch {
-                throw FeatureError("Ausgangskörper ließ sich nicht speichern: \(error.localizedDescription)")
+            // Nie die gespeicherte Quelle überschreiben: Verlaufsvorschau und fehlgeschlagene
+            // Folgeoperationen dürfen den aktuellen Projektstand nicht verändern.
+            let source = SheetReplaySource(directory: directory)
+            let original = result[target].shape
+            let copy = original.independentCopy().flatMap { $0 === original ? nil : $0 }
+            if copy == nil, !PCKShape.writeSTEP([original], path: source.workingURL.path(percentEncoded: false)) {
+                throw FeatureError("Ausgangskörper ließ sich nicht speichern.")
             }
             var info = SheetBodyInfo(steps: steps, kernelBody: data.kernelBody ?? "$sheet", rule: data.rule ?? "")
-            info.sourceFile = file
-            let shape = try Self.sheetReplayShape(info, directory: directory)
+            info.sourceFile = source.workingName
+            let staged = info
+            let shape: PCKShape
+            do {
+                shape = try SheetWorker.run(limit: SheetWorker.replayLimit) {
+                    // source bleibt bis zum Ende der Hintergrundarbeit im Besitz dieses Auftrags.
+                    if let copy, !PCKShape.writeSTEP([copy], path: source.workingURL.path(percentEncoded: false)) {
+                        throw SheetKernelError("Ausgangskörper ließ sich nicht speichern.")
+                    }
+                    return try Self.sheetReplay(staged, directory: directory).shape
+                }
+                try FileManager.default.moveItem(at: source.workingURL, to: source.finalURL)
+            } catch {
+                throw FeatureError(error.localizedDescription)
+            }
+            info.sourceFile = source.finalName
             info.resultBox = Self.sheetFingerprint(shape)
             result[target] = result[target].with(shape)
             result[target].sheetMetal = info

@@ -1680,6 +1680,7 @@ final class ModelStore: ObservableObject {
             sheetDocument.discardPreviewSource()
             sheetDocument.previewing = false
         }
+        defer { pruneSheetReplaySources() }
         guard previewBodies != nil else { return }
         previewBodies = nil
         previewName = nil
@@ -1741,6 +1742,50 @@ final class ModelStore: ObservableObject {
         clearSelectionState()
         refreshHighlight()
         save()
+        pruneSheetReplaySources()
+    }
+
+    /// Nur vom Nachbau erzeugte Blechquellen löschen, wenn weder aktueller Stand,
+    /// Vorschau, Undo/Redo noch ein zwischengespeicherter Verlauf sie verwenden.
+    private func pruneSheetReplaySources() {
+        guard let folder else { return }
+        let directory = folder.appending(path: "sheet", directoryHint: .isDirectory)
+        guard let files = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else {
+            return
+        }
+        let candidates = files.filter { $0.lastPathComponent.hasPrefix("replay-") && $0.pathExtension == "step" }
+        guard !candidates.isEmpty else { return }
+        var used = Set<String>()
+        func keep(_ bodies: [SceneBody]) {
+            for body in bodies {
+                if let file = body.sheetMetal?.sourceFile { used.insert(file) }
+            }
+        }
+        func keep(_ features: [Feature]) {
+            for feature in features {
+                if let file = feature.data.sheet?.sourceFile { used.insert(file) }
+                if let file = feature.data.sheet?.base?.sourceFile { used.insert(file) }
+            }
+        }
+        keep(bodies)
+        if let previewBodies { keep(previewBodies) }
+        keep(features)
+        for entry in history {
+            keep(entry.bodies)
+            keep(entry.features)
+        }
+        for entry in future {
+            keep(entry.bodies)
+            keep(entry.features)
+        }
+        for cached in featureRecorder.cache.values { keep(cached) }
+        for stored in featureRecorder.snapshots.values { keep(stored) }
+        if let preview = featureRecorder.preview { keep([preview.feature]) }
+        if let pending = featureRecorder.pending { keep([pending.feature]) }
+        if let replacement = featureRecorder.replacement { keep(replacement) }
+        for file in candidates where !used.contains(file.lastPathComponent) {
+            try? FileManager.default.removeItem(at: file)
+        }
     }
 
     private func clearSelectionState() {

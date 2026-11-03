@@ -1,1 +1,1 @@
-03.11.2026 · Verlauf: unabhängige Körper, sichere Fehlerfortsetzung und Snapshot-Erholung (Build 34)
+03.11.2026 · Blech: sichere Umwandlungsquellen im Verlauf und aufgeräumte Vorschauen (Build 35)
