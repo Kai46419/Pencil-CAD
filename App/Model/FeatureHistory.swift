@@ -926,9 +926,10 @@ extension ModelStore {
             k -= 1
         }
         var failures: [String] = []
-        // Sicherheitsmodus: Nach einem fehlgeschlagenen Schritt keine Folgeoperation
-        // auf einem veralteten Körperzustand ausführen. Ein Dependency-Graph kann dies
-        // später auf tatsächlich abhängige Schritte einschränken.
+        // Nur nachweislich körperzahlstabile Änderungen isolieren. Bei unbekannter Wirkung
+        // bleiben alle Folgeschritte gesperrt, bis ein vollständiger Stand sie ersetzt.
+        var failedBodies = Set<Int>()
+        var globalFailure = false
         var blockingFailure: String?
         var blockedCount = 0
         var fixedStand: String?
@@ -938,10 +939,19 @@ extension ModelStore {
             if list[index].isSuppressed {
                 list[index].failed = false
                 list[index].problem = nil
-            } else if let blockingFailure {
+            } else if let blockingFailure,
+                      !Self.canReplay(list[index], afterFailureIn: failedBodies,
+                                      globalFailure: globalFailure) {
                 list[index].failed = true
                 list[index].problem = "Nicht berechnet: vorausgehender Schritt „\(blockingFailure)“ fehlgeschlagen."
                 blockedCount += 1
+                // Auch ein übersprungener Schritt kann weitere Körper abhängig machen.
+                // Deren späterer Stand darf nicht als unabhängig gelten.
+                if let affected = Self.stableBodyReferences(of: list[index]) {
+                    failedBodies.formUnion(affected)
+                } else {
+                    globalFailure = true
+                }
             } else {
                 do {
                     // Hänger-Marke (HangGuard.swift): bleibt sie nach einem Einfrieren liegen, öffnet das Projekt sicher
@@ -949,6 +959,11 @@ extension ModelStore {
                     state = try applyFeature(&list[index], to: state, sketches: sketchList, values: values)
                     list[index].failed = false
                     list[index].problem = nil
+                    if list[index].kind == .snapshot, list[index].data.snapshot?.full == true {
+                        failedBodies.removeAll()
+                        globalFailure = false
+                        blockingFailure = nil
+                    }
                     if index > start, fixedStand == nil, list[index].kind == .snapshot {
                         fixedStand = list[index].name
                     }
@@ -956,7 +971,12 @@ extension ModelStore {
                     list[index].failed = true
                     list[index].problem = error.localizedDescription
                     failures.append(list[index].name)
-                    blockingFailure = list[index].name
+                    blockingFailure = blockingFailure ?? list[index].name
+                    if let affected = Self.stableBodyReferences(of: list[index]) {
+                        failedBodies.formUnion(affected)
+                    } else {
+                        globalFailure = true
+                    }
                 }
             }
             if let collect {
@@ -979,6 +999,40 @@ extension ModelStore {
                 + "nicht weitergeführt."
         }
         return (state, note)
+    }
+
+    /// Nicht-ankopierende Schritte mit festen Körperindizes. Ein fehlgeschlagener
+    /// solcher Schritt ändert weder den Zustand noch die Indizes der anderen Körper.
+    private static func stableBodyReferences(of feature: Feature) -> Set<Int>? {
+        switch feature.kind {
+        case .fillet, .chamfer:
+            guard let body = feature.data.target ?? feature.data.edges?.first?.body,
+                  body >= 0, let edges = feature.data.edges, !edges.isEmpty,
+                  edges.allSatisfy({ $0.body == body }) else { return nil }
+            return [body]
+        case .faceExtrude:
+            guard let faces = feature.data.faces, !faces.isEmpty,
+                  faces.allSatisfy({ $0.body >= 0 }) else { return nil }
+            return Set(faces.map(\.body))
+        case .shell:
+            guard let body = feature.data.target, body >= 0 else { return nil }
+            return [body]
+        case .move, .rotate, .mirror:
+            guard feature.data.copies != true, let bodies = feature.data.bodies,
+                  !bodies.isEmpty, bodies.allSatisfy({ $0 >= 0 }) else { return nil }
+            return Set(bodies)
+        default:
+            return nil
+        }
+    }
+
+    private static func canReplay(_ feature: Feature, afterFailureIn failedBodies: Set<Int>,
+                                  globalFailure: Bool) -> Bool {
+        if feature.kind == .snapshot, feature.data.snapshot?.full == true { return true }
+        guard !globalFailure else { return false }
+        if feature.kind == .primitive { return true }
+        guard let referenced = stableBodyReferences(of: feature) else { return false }
+        return referenced.isDisjoint(with: failedBodies)
     }
 
     /// Ein Feature auf die Körper anwenden (Formeln vorher neu ausrechnen).
