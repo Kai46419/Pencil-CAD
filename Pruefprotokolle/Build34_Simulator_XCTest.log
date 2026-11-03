@@ -1,0 +1,1659 @@
+Command line invocation:
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -project PencilCAD.xcodeproj -scheme PencilCAD -destination "platform=iOS Simulator,id=8D0965B1-AAA5-4EDA-8929-2E220BA306CF" -derivedDataPath /tmp/PencilCAD_B31_Derived test
+
+ComputePackagePrebuildTargetDependencyGraph
+
+Prepare packages
+
+CreateBuildRequest
+
+SendProjectDescription
+
+CreateBuildOperation
+
+ComputeTargetDependencyGraph
+note: Building targets in dependency order
+note: Target dependency graph (3 targets)
+    Target 'PencilCADTests' in project 'PencilCAD'
+        ➜ Explicit dependency on target 'PencilCAD' in project 'PencilCAD'
+    Target 'PencilCAD' in project 'PencilCAD'
+        ➜ Explicit dependency on target 'PencilCADBlendWorker' in project 'PencilCAD'
+    Target 'PencilCADBlendWorker' in project 'PencilCAD' (no dependencies)
+
+GatherProvisioningInputs
+
+CreateBuildDescription
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk -x objective-c++ -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk -x c -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc --version
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk -x c -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/usr/bin/actool --print-asset-tag-combinations --output-format xml1 /Users/kairosenfeld/Documents/ChatGPT/Pencil Cad/work/PencilCAD_Integration_Work_Build31/App/Assets.xcassets
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/usr/bin/actool --version --output-format xml1
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld -version_details
+
+Build description signature: 678ce6626d9b633b0275e06c14f2a7a7
+Build description path: /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/XCBuildData/678ce6626d9b633b0275e06c14f2a7a7.xcbuilddata
+ClangStatCache /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk /tmp/PencilCAD_B31_Derived/SDKStatCaches.noindex/iphonesimulator27.1-24A94232-e829b21a6f8c9b70876ba0858053c04435d3147121984ba087c28d913653d626.sdkstatcache
+    cd /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31/PencilCAD.xcodeproj
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk -o /tmp/PencilCAD_B31_Derived/SDKStatCaches.noindex/iphonesimulator27.1-24A94232-e829b21a6f8c9b70876ba0858053c04435d3147121984ba087c28d913653d626.sdkstatcache
+
+SwiftDriver PencilCAD normal arm64 com.apple.xcode.tools.swift.compiler (in target 'PencilCAD' from project 'PencilCAD')
+    cd /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31
+    builtin-SwiftDriver -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name PencilCAD -Onone @/tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/Objects-normal/arm64/PencilCAD.SwiftFileList -DDEBUG -DPENCIL_SHEETKIT -enable-bare-slash-regex -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk -target arm64-apple-ios17.0-simulator -g -module-cache-path /tmp/PencilCAD_B31_Derived/ModuleCache.noindex -Xfrontend -serialize-debugging-options -enable-testing -index-store-path /tmp/PencilCAD_B31_Derived/Index.noindex/DataStore -Xcc -D_LIBCPP_HARDENING_MODE\=_LIBCPP_HARDENING_MODE_DEBUG -swift-version 5 -I /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator -F /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator -F Vendor -c -j12 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /tmp/PencilCAD_B31_Derived/SDKStatCaches.noindex/iphonesimulator27.1-24A94232-e829b21a6f8c9b70876ba0858053c04435d3147121984ba087c28d913653d626.sdkstatcache -output-file-map /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/Objects-normal/arm64/PencilCAD-OutputFileMap.json -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /tmp/PencilCAD_B31_Derived/ModuleCache.noindex -sdk-module-cache-path /tmp/PencilCAD_B31_Derived/SDKExplicitPrecompiledModules -emit-dependencies -emit-module -emit-module-path /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/Objects-normal/arm64/PencilCAD.swiftmodule -serialize-diagnostics -dependency-scan-serialize-diagnostics-path /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/Objects-normal/arm64/PencilCAD-dependency-scan.dia -validate-clang-modules-once -clang-build-session-file /tmp/PencilCAD_B31_Derived/ModuleCache.noindex/Session.modulevalidation -Xcc -fmodules-prune-interval\=86400 -Xcc -fmodules-prune-after\=345600 -emit-const-values -const-gather-protocols-list /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/Objects-normal/arm64/PencilCAD_const_extract_protocols.json -Xcc -iquote -Xcc /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/PencilCAD-generated-files.hmap -Xcc -I/tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/PencilCAD-own-target-headers.hmap -Xcc -I/tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/PencilCAD-all-target-headers.hmap -Xcc -iquote -Xcc /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/PencilCAD-project-headers.hmap -Xcc -I/tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/include -Xcc -I/tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/DerivedSources-normal/arm64 -Xcc -I/tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/DerivedSources/arm64 -Xcc -I/tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/DerivedSources -Xcc -DDEBUG\=1 -emit-objc-header -emit-objc-header-path /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/Objects-normal/arm64/PencilCAD-Swift.h -import-objc-header /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31/App/Kernel/PencilCAD-Bridging-Header.h -working-directory /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31 -experimental-emit-module-separately -disable-cmo
+
+ProcessInfoPlistFile /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCADBlendWorker.appex/Info.plist /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31/BlendWorker/Info.plist (in target 'PencilCADBlendWorker' from project 'PencilCAD')
+    cd /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31
+    builtin-infoPlistUtility /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31/BlendWorker/Info.plist -producttype com.apple.product-type.extensionkit-extension -expandbuildsettings -format binary -platform iphonesimulator -additionalcontentfile /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADBlendWorker.build/PencilCADBlendWorker-appextension-generated-info.plist -o /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCADBlendWorker.appex/Info.plist
+
+Ld /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCADBlendWorker.appex/__preview.dylib normal (in target 'PencilCADBlendWorker' from project 'PencilCAD')
+    cd /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -Xlinker -reproducible -target arm64-apple-ios26.0-simulator -dynamiclib -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk -O0 -Xlinker -no_warn_duplicate_libraries -L/tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator -F/tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator -FVendor -install_name @rpath/PencilCADBlendWorker.debug.dylib -Xlinker -dead_strip -rdynamic -Xlinker -no_deduplicate -Xlinker -objc_abi_version -Xlinker 2 -Xlinker -dependency_info -Xlinker /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADBlendWorker.build/Objects-normal/arm64/PencilCADBlendWorker_dependency_info.dat -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __entitlements -Xlinker /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADBlendWorker.build/PencilCADBlendWorker.appex-Simulated.xcent -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __ents_der -Xlinker /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADBlendWorker.build/PencilCADBlendWorker.appex-Simulated.xcent.der -Xlinker -no_adhoc_codesign -o /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCADBlendWorker.appex/__preview.dylib
+
+Ld /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCADBlendWorker.appex/PencilCADBlendWorker.debug.dylib normal (in target 'PencilCADBlendWorker' from project 'PencilCAD')
+    cd /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang++ -Xlinker -reproducible -target arm64-apple-ios26.0-simulator -dynamiclib -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk -O0 -Xlinker -no_warn_duplicate_libraries -L/tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/EagerLinkingTBDs/Debug-iphonesimulator -L/tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator -F/tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/EagerLinkingTBDs/Debug-iphonesimulator -F/tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator -FVendor -filelist /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADBlendWorker.build/Objects-normal/arm64/PencilCADBlendWorker.LinkFileList -install_name @rpath/PencilCADBlendWorker.debug.dylib -Xlinker -rpath -Xlinker @executable_path/Frameworks -Xlinker -dead_strip -Xlinker -object_path_lto -Xlinker /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADBlendWorker.build/Objects-normal/arm64/PencilCADBlendWorker_lto.o -rdynamic -Xlinker -no_deduplicate -Xlinker -objc_abi_version -Xlinker 2 -Xlinker -dependency_info -Xlinker /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADBlendWorker.build/Objects-normal/arm64/PencilCADBlendWorker_dependency_info.dat -stdlib\=libc++ -fobjc-arc -fobjc-link-runtime -fapplication-extension -L/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/iphonesimulator -L/usr/lib/swift -Xlinker -add_ast_path -Xlinker /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADBlendWorker.build/Objects-normal/arm64/PencilCADBlendWorker.swiftmodule -Xlinker -alias -Xlinker _NSExtensionMain -Xlinker ___debug_main_executable_dylib_entry_point -lOCCT -Xlinker -no_adhoc_codesign -o /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCADBlendWorker.appex/PencilCADBlendWorker.debug.dylib
+
+ConstructStubExecutorLinkFileList /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADBlendWorker.build/PencilCADBlendWorker-ExecutorLinkFileList-normal-arm64.txt (in target 'PencilCADBlendWorker' from project 'PencilCAD')
+    cd /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31
+    construct-stub-executor-link-file-list /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCADBlendWorker.appex/PencilCADBlendWorker.debug.dylib /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib/libPreviewsJITStubExecutor_no_swift_entry_point.a /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib/libPreviewsJITStubExecutor.a --output /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADBlendWorker.build/PencilCADBlendWorker-ExecutorLinkFileList-normal-arm64.txt
+note: Using stub executor library with Swift entry point. (in target 'PencilCADBlendWorker' from project 'PencilCAD')
+
+Ld /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCADBlendWorker.appex/PencilCADBlendWorker normal (in target 'PencilCADBlendWorker' from project 'PencilCAD')
+    cd /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang++ -Xlinker -reproducible -target arm64-apple-ios26.0-simulator -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk -O0 -Xlinker -no_warn_duplicate_libraries -L/tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator -F/tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator -FVendor -Xlinker -rpath -Xlinker @executable_path -Xlinker -rpath -Xlinker @executable_path/Frameworks -rdynamic -Xlinker -no_deduplicate -Xlinker -objc_abi_version -Xlinker 2 -e ___debug_blank_executor_main -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __debug_dylib -Xlinker /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADBlendWorker.build/PencilCADBlendWorker-DebugDylibPath-normal-arm64.txt -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __debug_entry -Xlinker /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADBlendWorker.build/PencilCADBlendWorker-DebugEntryPoint-normal-arm64.txt -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __debug_instlnm -Xlinker /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADBlendWorker.build/PencilCADBlendWorker-DebugDylibInstallName-normal-arm64.txt -Xlinker -filelist -Xlinker /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADBlendWorker.build/PencilCADBlendWorker-ExecutorLinkFileList-normal-arm64.txt -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __entitlements -Xlinker /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADBlendWorker.build/PencilCADBlendWorker.appex-Simulated.xcent -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __ents_der -Xlinker /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADBlendWorker.build/PencilCADBlendWorker.appex-Simulated.xcent.der /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCADBlendWorker.appex/PencilCADBlendWorker.debug.dylib -Xlinker -no_adhoc_codesign -o /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCADBlendWorker.appex/PencilCADBlendWorker
+
+ExtractAppIntentsMetadata (in target 'PencilCADBlendWorker' from project 'PencilCAD')
+    cd /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/appintentsmetadataprocessor --toolchain-dir /var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-v27.1.266.1.M6CRI5/Metal.xctoolchain --module-name PencilCADBlendWorker --sdk-root /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk --xcode-version 27A9275 --platform-family iOS --deployment-target 26.0 --bundle-identifier de.kai46419.pencilcad.BlendWorker --output /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCADBlendWorker.appex --target-triple arm64-apple-ios26.0-simulator --binary-file /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCADBlendWorker.appex/PencilCADBlendWorker --dependency-file /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADBlendWorker.build/Objects-normal/arm64/PencilCADBlendWorker_dependency_info.dat --stringsdata-file /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADBlendWorker.build/Objects-normal/arm64/ExtractedAppShortcutsMetadata.stringsdata --source-file-list /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADBlendWorker.build/Objects-normal/arm64/PencilCADBlendWorker.SwiftFileList --metadata-file-list /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADBlendWorker.build/PencilCADBlendWorker.DependencyMetadataFileList --static-metadata-file-list /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADBlendWorker.build/PencilCADBlendWorker.DependencyStaticMetadataFileList --swift-const-vals-list /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADBlendWorker.build/Objects-normal/arm64/PencilCADBlendWorker.SwiftConstValuesFileList --compile-time-extraction --deployment-aware-processing --no-app-shortcuts-localization
+2026-11-03 20:23:58.519 appintentsmetadataprocessor[72078:31058413] Starting appintentsmetadataprocessor export
+2026-11-03 20:23:58.526 appintentsmetadataprocessor[72078:31058413] warning: Metadata extraction skipped, no AppIntents.framework dependency found
+
+CodeSign /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCADBlendWorker.appex/PencilCADBlendWorker.debug.dylib (in target 'PencilCADBlendWorker' from project 'PencilCAD')
+    cd /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31
+
+    Signing Identity:     "Sign to Run Locally"
+
+    /usr/bin/codesign --force --sign - --timestamp\=none --generate-entitlement-der /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCADBlendWorker.appex/PencilCADBlendWorker.debug.dylib
+
+CodeSign /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCADBlendWorker.appex/__preview.dylib (in target 'PencilCADBlendWorker' from project 'PencilCAD')
+    cd /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31
+
+    Signing Identity:     "Sign to Run Locally"
+
+    /usr/bin/codesign --force --sign - --timestamp\=none --generate-entitlement-der /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCADBlendWorker.appex/__preview.dylib
+
+CodeSign /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCADBlendWorker.appex (in target 'PencilCADBlendWorker' from project 'PencilCAD')
+    cd /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31
+
+    Signing Identity:     "Sign to Run Locally"
+
+    /usr/bin/codesign --force --sign - --timestamp\=none --generate-entitlement-der /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCADBlendWorker.appex
+
+SwiftGeneratePch normal arm64 Compiling\ bridging\ header (in target 'PencilCAD' from project 'PencilCAD')
+
+SwiftDriverJobDiscovery normal arm64 Compiling bridging header (in target 'PencilCAD' from project 'PencilCAD')
+
+SwiftCompile normal arm64 Compiling\ FeatureHistory.swift /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31/App/Model/FeatureHistory.swift (in target 'PencilCAD' from project 'PencilCAD')
+
+SwiftCompile normal arm64 /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31/App/Model/FeatureHistory.swift (in target 'PencilCAD' from project 'PencilCAD')
+    cd /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31
+    builtin-SwiftPerFileCompile FeatureHistory.swift
+
+SwiftEmitModule normal arm64 Emitting\ module\ for\ PencilCAD (in target 'PencilCAD' from project 'PencilCAD')
+
+SwiftCompile normal arm64 (in target 'PencilCAD' from project 'PencilCAD')
+    cd /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31
+
+
+/Users/kairosenfeld/Documents/ChatGPT/Pencil Cad/work/PencilCAD_Integration_Work_Build31/App/Workspace/ModelRibbon.swift:87:36: warning: main actor-isolated static property 'maxTiles' can not be referenced from a nonisolated context; this is an error in the Swift 6 language mode
+ 70 |     static let contextKey = "model.contextSuggestions"
+ 71 |     /// Höchstens so viele Kacheln je Gruppe
+ 72 |     static let maxTiles = 4
+    |                `- note: static property declared here
+ 73 |
+ 74 |     static func pins(_ raw: String) -> Set<String> {
+    :
+ 85 |     /// Kacheln einer Gruppe: hervorgehobene und angeheftete in Menü-Reihenfolge
+ 86 |     static func tiles(_ commands: [RibbonCommand], pins: Set<String>, usage: RibbonUsage = RibbonUsage(),
+ 87 |                       limit: Int = maxTiles) -> [RibbonCommand] {
+    |                                    `- warning: main actor-isolated static property 'maxTiles' can not be referenced from a nonisolated context; this is an error in the Swift 6 language mode
+ 88 |         let featured = commands.filter { $0.featured }
+ 89 |         let pinned = commands.filter { !$0.featured && pins.contains($0.id) }
+SwiftDriverJobDiscovery normal arm64 Compiling FeatureHistory.swift (in target 'PencilCAD' from project 'PencilCAD')
+
+SwiftDriverJobDiscovery normal arm64 Emitting module for PencilCAD (in target 'PencilCAD' from project 'PencilCAD')
+
+SwiftDriver\ Compilation\ Requirements PencilCAD normal arm64 com.apple.xcode.tools.swift.compiler (in target 'PencilCAD' from project 'PencilCAD')
+    cd /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31
+    builtin-Swift-Compilation-Requirements -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name PencilCAD -Onone @/tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/Objects-normal/arm64/PencilCAD.SwiftFileList -DDEBUG -DPENCIL_SHEETKIT -enable-bare-slash-regex -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk -target arm64-apple-ios17.0-simulator -g -module-cache-path /tmp/PencilCAD_B31_Derived/ModuleCache.noindex -Xfrontend -serialize-debugging-options -enable-testing -index-store-path /tmp/PencilCAD_B31_Derived/Index.noindex/DataStore -Xcc -D_LIBCPP_HARDENING_MODE\=_LIBCPP_HARDENING_MODE_DEBUG -swift-version 5 -I /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator -F /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator -F Vendor -c -j12 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /tmp/PencilCAD_B31_Derived/SDKStatCaches.noindex/iphonesimulator27.1-24A94232-e829b21a6f8c9b70876ba0858053c04435d3147121984ba087c28d913653d626.sdkstatcache -output-file-map /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/Objects-normal/arm64/PencilCAD-OutputFileMap.json -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /tmp/PencilCAD_B31_Derived/ModuleCache.noindex -sdk-module-cache-path /tmp/PencilCAD_B31_Derived/SDKExplicitPrecompiledModules -emit-dependencies -emit-module -emit-module-path /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/Objects-normal/arm64/PencilCAD.swiftmodule -serialize-diagnostics -dependency-scan-serialize-diagnostics-path /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/Objects-normal/arm64/PencilCAD-dependency-scan.dia -validate-clang-modules-once -clang-build-session-file /tmp/PencilCAD_B31_Derived/ModuleCache.noindex/Session.modulevalidation -Xcc -fmodules-prune-interval\=86400 -Xcc -fmodules-prune-after\=345600 -emit-const-values -const-gather-protocols-list /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/Objects-normal/arm64/PencilCAD_const_extract_protocols.json -Xcc -iquote -Xcc /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/PencilCAD-generated-files.hmap -Xcc -I/tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/PencilCAD-own-target-headers.hmap -Xcc -I/tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/PencilCAD-all-target-headers.hmap -Xcc -iquote -Xcc /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/PencilCAD-project-headers.hmap -Xcc -I/tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/include -Xcc -I/tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/DerivedSources-normal/arm64 -Xcc -I/tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/DerivedSources/arm64 -Xcc -I/tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/DerivedSources -Xcc -DDEBUG\=1 -emit-objc-header -emit-objc-header-path /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/Objects-normal/arm64/PencilCAD-Swift.h -import-objc-header /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31/App/Kernel/PencilCAD-Bridging-Header.h -working-directory /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31 -experimental-emit-module-separately -disable-cmo
+
+SwiftDriver\ Compilation PencilCAD normal arm64 com.apple.xcode.tools.swift.compiler (in target 'PencilCAD' from project 'PencilCAD')
+    cd /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31
+    builtin-Swift-Compilation -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name PencilCAD -Onone @/tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/Objects-normal/arm64/PencilCAD.SwiftFileList -DDEBUG -DPENCIL_SHEETKIT -enable-bare-slash-regex -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk -target arm64-apple-ios17.0-simulator -g -module-cache-path /tmp/PencilCAD_B31_Derived/ModuleCache.noindex -Xfrontend -serialize-debugging-options -enable-testing -index-store-path /tmp/PencilCAD_B31_Derived/Index.noindex/DataStore -Xcc -D_LIBCPP_HARDENING_MODE\=_LIBCPP_HARDENING_MODE_DEBUG -swift-version 5 -I /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator -F /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator -F Vendor -c -j12 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /tmp/PencilCAD_B31_Derived/SDKStatCaches.noindex/iphonesimulator27.1-24A94232-e829b21a6f8c9b70876ba0858053c04435d3147121984ba087c28d913653d626.sdkstatcache -output-file-map /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/Objects-normal/arm64/PencilCAD-OutputFileMap.json -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /tmp/PencilCAD_B31_Derived/ModuleCache.noindex -sdk-module-cache-path /tmp/PencilCAD_B31_Derived/SDKExplicitPrecompiledModules -emit-dependencies -emit-module -emit-module-path /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/Objects-normal/arm64/PencilCAD.swiftmodule -serialize-diagnostics -dependency-scan-serialize-diagnostics-path /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/Objects-normal/arm64/PencilCAD-dependency-scan.dia -validate-clang-modules-once -clang-build-session-file /tmp/PencilCAD_B31_Derived/ModuleCache.noindex/Session.modulevalidation -Xcc -fmodules-prune-interval\=86400 -Xcc -fmodules-prune-after\=345600 -emit-const-values -const-gather-protocols-list /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/Objects-normal/arm64/PencilCAD_const_extract_protocols.json -Xcc -iquote -Xcc /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/PencilCAD-generated-files.hmap -Xcc -I/tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/PencilCAD-own-target-headers.hmap -Xcc -I/tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/PencilCAD-all-target-headers.hmap -Xcc -iquote -Xcc /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/PencilCAD-project-headers.hmap -Xcc -I/tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/include -Xcc -I/tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/DerivedSources-normal/arm64 -Xcc -I/tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/DerivedSources/arm64 -Xcc -I/tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/DerivedSources -Xcc -DDEBUG\=1 -emit-objc-header -emit-objc-header-path /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/Objects-normal/arm64/PencilCAD-Swift.h -import-objc-header /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31/App/Kernel/PencilCAD-Bridging-Header.h -working-directory /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31 -experimental-emit-module-separately -disable-cmo
+
+Copy /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.swiftmodule/Project/arm64-apple-ios-simulator.swiftsourceinfo /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/Objects-normal/arm64/PencilCAD.swiftsourceinfo (in target 'PencilCAD' from project 'PencilCAD')
+    cd /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -resolve-src-symlinks -rename /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/Objects-normal/arm64/PencilCAD.swiftsourceinfo /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.swiftmodule/Project/arm64-apple-ios-simulator.swiftsourceinfo
+
+Copy /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.swiftmodule/arm64-apple-ios-simulator.abi.json /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/Objects-normal/arm64/PencilCAD.abi.json (in target 'PencilCAD' from project 'PencilCAD')
+    cd /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -resolve-src-symlinks -rename /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/Objects-normal/arm64/PencilCAD.abi.json /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.swiftmodule/arm64-apple-ios-simulator.abi.json
+
+Ld /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/__preview.dylib normal (in target 'PencilCAD' from project 'PencilCAD')
+    cd /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -Xlinker -reproducible -target arm64-apple-ios17.0-simulator -dynamiclib -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk -O0 -Xlinker -no_warn_duplicate_libraries -L/tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator -F/tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator -FVendor -install_name @rpath/PencilCAD.debug.dylib -Xlinker -dead_strip -rdynamic -Xlinker -no_deduplicate -Xlinker -objc_abi_version -Xlinker 2 -Xlinker -dependency_info -Xlinker /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/Objects-normal/arm64/PencilCAD_dependency_info.dat -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __entitlements -Xlinker /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/PencilCAD.app-Simulated.xcent -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __ents_der -Xlinker /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/PencilCAD.app-Simulated.xcent.der -Xlinker -no_adhoc_codesign -o /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/__preview.dylib
+
+Ld /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/PencilCAD.debug.dylib normal (in target 'PencilCAD' from project 'PencilCAD')
+    cd /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang++ -Xlinker -reproducible -target arm64-apple-ios17.0-simulator -dynamiclib -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk -O0 -Xlinker -no_warn_duplicate_libraries -L/tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/EagerLinkingTBDs/Debug-iphonesimulator -L/tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator -F/tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/EagerLinkingTBDs/Debug-iphonesimulator -F/tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator -FVendor -filelist /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/Objects-normal/arm64/PencilCAD.LinkFileList -install_name @rpath/PencilCAD.debug.dylib -Xlinker -rpath -Xlinker /usr/lib/swift -Xlinker -rpath -Xlinker @executable_path/Frameworks -Xlinker -dead_strip -Xlinker -object_path_lto -Xlinker /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/Objects-normal/arm64/PencilCAD_lto.o -rdynamic -Xlinker -no_deduplicate -Xlinker -objc_abi_version -Xlinker 2 -Xlinker -dependency_info -Xlinker /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/Objects-normal/arm64/PencilCAD_dependency_info.dat -stdlib\=libc++ -fobjc-arc -fobjc-link-runtime -L/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/iphonesimulator -L/usr/lib/swift -Xlinker -add_ast_path -Xlinker /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/Objects-normal/arm64/PencilCAD.swiftmodule -framework CoreFoundation -framework Security -liconv -lc++ -Xlinker -alias -Xlinker _main -Xlinker ___debug_main_executable_dylib_entry_point -lOCCT -lpencil_sheet -Xlinker -no_adhoc_codesign -o /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/PencilCAD.debug.dylib
+
+ConstructStubExecutorLinkFileList /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/PencilCAD-ExecutorLinkFileList-normal-arm64.txt (in target 'PencilCAD' from project 'PencilCAD')
+    cd /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31
+    construct-stub-executor-link-file-list /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/PencilCAD.debug.dylib /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib/libPreviewsJITStubExecutor_no_swift_entry_point.a /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib/libPreviewsJITStubExecutor.a --output /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/PencilCAD-ExecutorLinkFileList-normal-arm64.txt
+note: Using stub executor library with Swift entry point. (in target 'PencilCAD' from project 'PencilCAD')
+
+Ld /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/PencilCAD normal (in target 'PencilCAD' from project 'PencilCAD')
+    cd /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang++ -Xlinker -reproducible -target arm64-apple-ios17.0-simulator -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk -O0 -Xlinker -no_warn_duplicate_libraries -L/tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator -F/tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator -FVendor -Xlinker -rpath -Xlinker @executable_path -Xlinker -rpath -Xlinker @executable_path/Frameworks -rdynamic -Xlinker -no_deduplicate -Xlinker -objc_abi_version -Xlinker 2 -e ___debug_blank_executor_main -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __debug_dylib -Xlinker /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/PencilCAD-DebugDylibPath-normal-arm64.txt -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __debug_instlnm -Xlinker /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/PencilCAD-DebugDylibInstallName-normal-arm64.txt -Xlinker -filelist -Xlinker /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/PencilCAD-ExecutorLinkFileList-normal-arm64.txt -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __entitlements -Xlinker /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/PencilCAD.app-Simulated.xcent -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __ents_der -Xlinker /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/PencilCAD.app-Simulated.xcent.der /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/PencilCAD.debug.dylib -Xlinker -no_adhoc_codesign -o /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/PencilCAD
+
+Copy /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/Extensions/PencilCADBlendWorker.appex /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCADBlendWorker.appex (in target 'PencilCAD' from project 'PencilCAD')
+    cd /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -exclude Headers -exclude PrivateHeaders -exclude Modules -exclude \*.tbd -resolve-src-symlinks -remove-static-executable /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCADBlendWorker.appex /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/Extensions
+
+ProcessInfoPlistFile /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/Info.plist /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/empty-PencilCAD.plist (in target 'PencilCAD' from project 'PencilCAD')
+    cd /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31
+    builtin-infoPlistUtility /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/empty-PencilCAD.plist -producttype com.apple.product-type.application -genpkginfo /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/PkgInfo -expandbuildsettings -format binary -platform iphonesimulator -additionalcontentfile /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/assetcatalog_generated_info.plist -scanforprivacyfile /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/Extensions/PencilCADBlendWorker.appex -o /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/Info.plist
+
+CopySwiftLibs /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app (in target 'PencilCAD' from project 'PencilCAD')
+    cd /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31
+    builtin-swiftStdLibTool --copy --verbose --sign - --scan-executable /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/PencilCAD.debug.dylib --scan-folder /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/Frameworks --scan-folder /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/PlugIns --scan-folder /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/SystemExtensions --scan-folder /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/Extensions --platform iphonesimulator --toolchain /var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-v27.1.266.1.M6CRI5/Metal.xctoolchain --toolchain /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain --destination /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/Frameworks --strip-bitcode --strip-bitcode-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/bitcode_strip --emit-dependency-info /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/SwiftStdLibToolInputDependencies.dep --filter-for-swift-os
+
+ExtractAppIntentsMetadata (in target 'PencilCAD' from project 'PencilCAD')
+    cd /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/appintentsmetadataprocessor --toolchain-dir /var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-v27.1.266.1.M6CRI5/Metal.xctoolchain --module-name PencilCAD --sdk-root /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk --xcode-version 27A9275 --platform-family iOS --deployment-target 17.0 --bundle-identifier de.kai46419.pencilcad --output /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app --target-triple arm64-apple-ios17.0-simulator --binary-file /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/PencilCAD --dependency-file /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/Objects-normal/arm64/PencilCAD_dependency_info.dat --stringsdata-file /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/Objects-normal/arm64/ExtractedAppShortcutsMetadata.stringsdata --source-file-list /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/Objects-normal/arm64/PencilCAD.SwiftFileList --metadata-file-list /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/PencilCAD.DependencyMetadataFileList --static-metadata-file-list /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/PencilCAD.DependencyStaticMetadataFileList --swift-const-vals-list /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCAD.build/Objects-normal/arm64/PencilCAD.SwiftConstValuesFileList --compile-time-extraction --deployment-aware-processing --no-app-shortcuts-localization
+2026-11-03 20:24:04.688 appintentsmetadataprocessor[72101:31058634] Starting appintentsmetadataprocessor export
+2026-11-03 20:24:04.779 appintentsmetadataprocessor[72101:31058634] Extracted no relevant App Intents symbols, skipping writing output
+
+ProcessInfoPlistFile /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/PlugIns/PencilCADTests.xctest/Info.plist /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/empty-PencilCADTests.plist (in target 'PencilCADTests' from project 'PencilCAD')
+    cd /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31
+    builtin-infoPlistUtility /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/empty-PencilCADTests.plist -producttype com.apple.product-type.bundle.unit-test -expandbuildsettings -format binary -platform iphonesimulator -o /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/PlugIns/PencilCADTests.xctest/Info.plist
+
+SwiftDriver PencilCADTests normal arm64 com.apple.xcode.tools.swift.compiler (in target 'PencilCADTests' from project 'PencilCAD')
+    cd /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31
+    builtin-SwiftDriver -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name PencilCADTests -Onone @/tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/Objects-normal/arm64/PencilCADTests.SwiftFileList -DDEBUG -plugin-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing -enable-bare-slash-regex -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk -target arm64-apple-ios17.0-simulator -g -module-cache-path /tmp/PencilCAD_B31_Derived/ModuleCache.noindex -Xfrontend -serialize-debugging-options -enable-testing -index-store-path /tmp/PencilCAD_B31_Derived/Index.noindex/DataStore -Xcc -D_LIBCPP_HARDENING_MODE\=_LIBCPP_HARDENING_MODE_DEBUG -swift-version 5 -I /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator -Isystem /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib -F /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk/Developer/Library/Frameworks -c -j12 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /tmp/PencilCAD_B31_Derived/SDKStatCaches.noindex/iphonesimulator27.1-24A94232-e829b21a6f8c9b70876ba0858053c04435d3147121984ba087c28d913653d626.sdkstatcache -output-file-map /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/Objects-normal/arm64/PencilCADTests-OutputFileMap.json -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /tmp/PencilCAD_B31_Derived/ModuleCache.noindex -sdk-module-cache-path /tmp/PencilCAD_B31_Derived/SDKExplicitPrecompiledModules -emit-dependencies -emit-module -emit-module-path /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/Objects-normal/arm64/PencilCADTests.swiftmodule -serialize-diagnostics -dependency-scan-serialize-diagnostics-path /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/Objects-normal/arm64/PencilCADTests-dependency-scan.dia -validate-clang-modules-once -clang-build-session-file /tmp/PencilCAD_B31_Derived/ModuleCache.noindex/Session.modulevalidation -Xcc -fmodules-prune-interval\=86400 -Xcc -fmodules-prune-after\=345600 -emit-const-values -const-gather-protocols-list /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/Objects-normal/arm64/PencilCADTests_const_extract_protocols.json -Xcc -iquote -Xcc /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/PencilCADTests-generated-files.hmap -Xcc -I/tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/PencilCADTests-own-target-headers.hmap -Xcc -I/tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/PencilCADTests-all-target-headers.hmap -Xcc -iquote -Xcc /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/PencilCADTests-project-headers.hmap -Xcc -I/tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/include -Xcc -I/tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/DerivedSources-normal/arm64 -Xcc -I/tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/DerivedSources/arm64 -Xcc -I/tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/DerivedSources -Xcc -DDEBUG\=1 -emit-objc-header -emit-objc-header-path /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/Objects-normal/arm64/PencilCADTests-Swift.h -import-objc-header /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31/App/Kernel/PencilCAD-Bridging-Header.h -working-directory /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31 -experimental-emit-module-separately -disable-cmo
+
+SwiftGeneratePch normal arm64 Compiling\ bridging\ header (in target 'PencilCADTests' from project 'PencilCAD')
+
+SwiftDriverJobDiscovery normal arm64 Compiling bridging header (in target 'PencilCADTests' from project 'PencilCAD')
+
+SwiftCompile normal arm64 Compiling\ FeatureTimelinePersistenceTests.swift /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31/Tests/App/FeatureTimelinePersistenceTests.swift (in target 'PencilCADTests' from project 'PencilCAD')
+
+SwiftCompile normal arm64 /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31/Tests/App/FeatureTimelinePersistenceTests.swift (in target 'PencilCADTests' from project 'PencilCAD')
+    cd /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31
+    builtin-SwiftPerFileCompile FeatureTimelinePersistenceTests.swift
+
+SwiftEmitModule normal arm64 Emitting\ module\ for\ PencilCADTests (in target 'PencilCADTests' from project 'PencilCAD')
+
+SwiftCompile normal arm64 (in target 'PencilCADTests' from project 'PencilCAD')
+    cd /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31
+
+
+SwiftDriverJobDiscovery normal arm64 Emitting module for PencilCADTests (in target 'PencilCADTests' from project 'PencilCAD')
+
+SwiftDriver\ Compilation\ Requirements PencilCADTests normal arm64 com.apple.xcode.tools.swift.compiler (in target 'PencilCADTests' from project 'PencilCAD')
+    cd /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31
+    builtin-Swift-Compilation-Requirements -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name PencilCADTests -Onone @/tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/Objects-normal/arm64/PencilCADTests.SwiftFileList -DDEBUG -plugin-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing -enable-bare-slash-regex -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk -target arm64-apple-ios17.0-simulator -g -module-cache-path /tmp/PencilCAD_B31_Derived/ModuleCache.noindex -Xfrontend -serialize-debugging-options -enable-testing -index-store-path /tmp/PencilCAD_B31_Derived/Index.noindex/DataStore -Xcc -D_LIBCPP_HARDENING_MODE\=_LIBCPP_HARDENING_MODE_DEBUG -swift-version 5 -I /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator -Isystem /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib -F /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk/Developer/Library/Frameworks -c -j12 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /tmp/PencilCAD_B31_Derived/SDKStatCaches.noindex/iphonesimulator27.1-24A94232-e829b21a6f8c9b70876ba0858053c04435d3147121984ba087c28d913653d626.sdkstatcache -output-file-map /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/Objects-normal/arm64/PencilCADTests-OutputFileMap.json -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /tmp/PencilCAD_B31_Derived/ModuleCache.noindex -sdk-module-cache-path /tmp/PencilCAD_B31_Derived/SDKExplicitPrecompiledModules -emit-dependencies -emit-module -emit-module-path /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/Objects-normal/arm64/PencilCADTests.swiftmodule -serialize-diagnostics -dependency-scan-serialize-diagnostics-path /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/Objects-normal/arm64/PencilCADTests-dependency-scan.dia -validate-clang-modules-once -clang-build-session-file /tmp/PencilCAD_B31_Derived/ModuleCache.noindex/Session.modulevalidation -Xcc -fmodules-prune-interval\=86400 -Xcc -fmodules-prune-after\=345600 -emit-const-values -const-gather-protocols-list /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/Objects-normal/arm64/PencilCADTests_const_extract_protocols.json -Xcc -iquote -Xcc /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/PencilCADTests-generated-files.hmap -Xcc -I/tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/PencilCADTests-own-target-headers.hmap -Xcc -I/tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/PencilCADTests-all-target-headers.hmap -Xcc -iquote -Xcc /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/PencilCADTests-project-headers.hmap -Xcc -I/tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/include -Xcc -I/tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/DerivedSources-normal/arm64 -Xcc -I/tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/DerivedSources/arm64 -Xcc -I/tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/DerivedSources -Xcc -DDEBUG\=1 -emit-objc-header -emit-objc-header-path /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/Objects-normal/arm64/PencilCADTests-Swift.h -import-objc-header /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31/App/Kernel/PencilCAD-Bridging-Header.h -working-directory /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31 -experimental-emit-module-separately -disable-cmo
+
+SwiftMergeGeneratedHeaders /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/DerivedSources/PencilCADTests-Swift.h /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/Objects-normal/arm64/PencilCADTests-Swift.h (in target 'PencilCADTests' from project 'PencilCAD')
+    cd /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31
+    builtin-swiftHeaderTool -arch arm64 /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/Objects-normal/arm64/PencilCADTests-Swift.h -o /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/DerivedSources/PencilCADTests-Swift.h
+
+SwiftDriverJobDiscovery normal arm64 Compiling FeatureTimelinePersistenceTests.swift (in target 'PencilCADTests' from project 'PencilCAD')
+
+SwiftDriver\ Compilation PencilCADTests normal arm64 com.apple.xcode.tools.swift.compiler (in target 'PencilCADTests' from project 'PencilCAD')
+    cd /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31
+    builtin-Swift-Compilation -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name PencilCADTests -Onone @/tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/Objects-normal/arm64/PencilCADTests.SwiftFileList -DDEBUG -plugin-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing -enable-bare-slash-regex -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk -target arm64-apple-ios17.0-simulator -g -module-cache-path /tmp/PencilCAD_B31_Derived/ModuleCache.noindex -Xfrontend -serialize-debugging-options -enable-testing -index-store-path /tmp/PencilCAD_B31_Derived/Index.noindex/DataStore -Xcc -D_LIBCPP_HARDENING_MODE\=_LIBCPP_HARDENING_MODE_DEBUG -swift-version 5 -I /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator -Isystem /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib -F /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk/Developer/Library/Frameworks -c -j12 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /tmp/PencilCAD_B31_Derived/SDKStatCaches.noindex/iphonesimulator27.1-24A94232-e829b21a6f8c9b70876ba0858053c04435d3147121984ba087c28d913653d626.sdkstatcache -output-file-map /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/Objects-normal/arm64/PencilCADTests-OutputFileMap.json -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /tmp/PencilCAD_B31_Derived/ModuleCache.noindex -sdk-module-cache-path /tmp/PencilCAD_B31_Derived/SDKExplicitPrecompiledModules -emit-dependencies -emit-module -emit-module-path /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/Objects-normal/arm64/PencilCADTests.swiftmodule -serialize-diagnostics -dependency-scan-serialize-diagnostics-path /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/Objects-normal/arm64/PencilCADTests-dependency-scan.dia -validate-clang-modules-once -clang-build-session-file /tmp/PencilCAD_B31_Derived/ModuleCache.noindex/Session.modulevalidation -Xcc -fmodules-prune-interval\=86400 -Xcc -fmodules-prune-after\=345600 -emit-const-values -const-gather-protocols-list /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/Objects-normal/arm64/PencilCADTests_const_extract_protocols.json -Xcc -iquote -Xcc /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/PencilCADTests-generated-files.hmap -Xcc -I/tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/PencilCADTests-own-target-headers.hmap -Xcc -I/tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/PencilCADTests-all-target-headers.hmap -Xcc -iquote -Xcc /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/PencilCADTests-project-headers.hmap -Xcc -I/tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/include -Xcc -I/tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/DerivedSources-normal/arm64 -Xcc -I/tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/DerivedSources/arm64 -Xcc -I/tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/DerivedSources -Xcc -DDEBUG\=1 -emit-objc-header -emit-objc-header-path /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/Objects-normal/arm64/PencilCADTests-Swift.h -import-objc-header /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31/App/Kernel/PencilCAD-Bridging-Header.h -working-directory /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31 -experimental-emit-module-separately -disable-cmo
+
+Ld /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/PlugIns/PencilCADTests.xctest/PencilCADTests normal (in target 'PencilCADTests' from project 'PencilCAD')
+    cd /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -Xlinker -reproducible -target arm64-apple-ios17.0-simulator -bundle -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk -O0 -Xlinker -no_warn_duplicate_libraries -L/tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/EagerLinkingTBDs/Debug-iphonesimulator -L/tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator -L/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib -F/tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/EagerLinkingTBDs/Debug-iphonesimulator -F/tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator -iframework /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks -iframework /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk/Developer/Library/Frameworks -filelist /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/Objects-normal/arm64/PencilCADTests.LinkFileList -Xlinker -rpath -Xlinker /usr/lib/swift -Xlinker -rpath -Xlinker @loader_path/Frameworks -Xlinker -rpath -Xlinker @executable_path/Frameworks -Xlinker -dead_strip -bundle_loader /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/PencilCAD -Xlinker -object_path_lto -Xlinker /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/Objects-normal/arm64/PencilCADTests_lto.o -rdynamic -Xlinker -no_deduplicate -Xlinker -objc_abi_version -Xlinker 2 -Xlinker -dependency_info -Xlinker /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/Objects-normal/arm64/PencilCADTests_dependency_info.dat -fobjc-link-runtime -L/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/iphonesimulator -L/usr/lib/swift -Xlinker -add_ast_path -Xlinker /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/Objects-normal/arm64/PencilCADTests.swiftmodule -Xlinker -needed_framework -Xlinker XCTest -framework XCTest -Xlinker -needed-lXCTestSwiftSupport -lXCTestSwiftSupport /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/PencilCAD.debug.dylib -Xlinker -no_adhoc_codesign -o /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/PlugIns/PencilCADTests.xctest/PencilCADTests
+
+Copy /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCADTests.swiftmodule/Project/arm64-apple-ios-simulator.swiftsourceinfo /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/Objects-normal/arm64/PencilCADTests.swiftsourceinfo (in target 'PencilCADTests' from project 'PencilCAD')
+    cd /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -resolve-src-symlinks -rename /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/Objects-normal/arm64/PencilCADTests.swiftsourceinfo /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCADTests.swiftmodule/Project/arm64-apple-ios-simulator.swiftsourceinfo
+
+Copy /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCADTests.swiftmodule/arm64-apple-ios-simulator.swiftmodule /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/Objects-normal/arm64/PencilCADTests.swiftmodule (in target 'PencilCADTests' from project 'PencilCAD')
+    cd /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -resolve-src-symlinks -rename /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/Objects-normal/arm64/PencilCADTests.swiftmodule /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCADTests.swiftmodule/arm64-apple-ios-simulator.swiftmodule
+
+Copy /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCADTests.swiftmodule/arm64-apple-ios-simulator.abi.json /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/Objects-normal/arm64/PencilCADTests.abi.json (in target 'PencilCADTests' from project 'PencilCAD')
+    cd /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -resolve-src-symlinks -rename /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/Objects-normal/arm64/PencilCADTests.abi.json /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCADTests.swiftmodule/arm64-apple-ios-simulator.abi.json
+
+CopySwiftLibs /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/PlugIns/PencilCADTests.xctest (in target 'PencilCADTests' from project 'PencilCAD')
+    cd /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31
+    builtin-swiftStdLibTool --copy --verbose --sign - --scan-executable /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/PlugIns/PencilCADTests.xctest/PencilCADTests --scan-folder /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/PlugIns/PencilCADTests.xctest/Frameworks --scan-folder /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/PlugIns/PencilCADTests.xctest/PlugIns --scan-folder /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/PlugIns/PencilCADTests.xctest/SystemExtensions --scan-folder /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/PlugIns/PencilCADTests.xctest/Extensions --platform iphonesimulator --toolchain /var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-v27.1.266.1.M6CRI5/Metal.xctoolchain --toolchain /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain --destination /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/PlugIns/PencilCADTests.xctest/Frameworks --strip-bitcode --scan-executable /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib/libXCTestSwiftSupport.dylib --strip-bitcode-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/bitcode_strip --emit-dependency-info /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/SwiftStdLibToolInputDependencies.dep --filter-for-swift-os
+
+ExtractAppIntentsMetadata (in target 'PencilCADTests' from project 'PencilCAD')
+    cd /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/appintentsmetadataprocessor --toolchain-dir /var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-v27.1.266.1.M6CRI5/Metal.xctoolchain --module-name PencilCADTests --sdk-root /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk --xcode-version 27A9275 --platform-family iOS --deployment-target 17.0 --bundle-identifier de.kai46419.pencilcad.tests --output /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/PlugIns/PencilCADTests.xctest --target-triple arm64-apple-ios17.0-simulator --binary-file /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/PlugIns/PencilCADTests.xctest/PencilCADTests --dependency-file /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/Objects-normal/arm64/PencilCADTests_dependency_info.dat --stringsdata-file /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/Objects-normal/arm64/ExtractedAppShortcutsMetadata.stringsdata --source-file-list /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/Objects-normal/arm64/PencilCADTests.SwiftFileList --metadata-file-list /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/PencilCADTests.DependencyMetadataFileList --static-metadata-file-list /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/PencilCADTests.DependencyStaticMetadataFileList --swift-const-vals-list /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/PencilCAD.build/Debug-iphonesimulator/PencilCADTests.build/Objects-normal/arm64/PencilCADTests.SwiftConstValuesFileList --compile-time-extraction --deployment-aware-processing --no-app-shortcuts-localization
+2026-11-03 20:24:05.974 appintentsmetadataprocessor[72110:31058690] Starting appintentsmetadataprocessor export
+2026-11-03 20:24:06.021 appintentsmetadataprocessor[72110:31058690] Extracted no relevant App Intents symbols, skipping writing output
+
+CodeSign /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/PlugIns/PencilCADTests.xctest (in target 'PencilCADTests' from project 'PencilCAD')
+    cd /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31
+
+    Signing Identity:     "Sign to Run Locally"
+
+    /usr/bin/codesign --force --sign - --timestamp\=none --generate-entitlement-der /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/PlugIns/PencilCADTests.xctest
+
+CodeSign /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/PencilCAD.debug.dylib (in target 'PencilCAD' from project 'PencilCAD')
+    cd /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31
+
+    Signing Identity:     "Sign to Run Locally"
+
+    /usr/bin/codesign --force --sign - --timestamp\=none --generate-entitlement-der /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/PencilCAD.debug.dylib
+
+CodeSign /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/__preview.dylib (in target 'PencilCAD' from project 'PencilCAD')
+    cd /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31
+
+    Signing Identity:     "Sign to Run Locally"
+
+    /usr/bin/codesign --force --sign - --timestamp\=none --generate-entitlement-der /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/__preview.dylib
+
+CodeSign /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app (in target 'PencilCAD' from project 'PencilCAD')
+    cd /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31
+
+    Signing Identity:     "Sign to Run Locally"
+
+    /usr/bin/codesign --force --sign - --timestamp\=none --generate-entitlement-der /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app
+
+Validate /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app (in target 'PencilCAD' from project 'PencilCAD')
+    cd /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31
+    builtin-validationUtility /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app -shallow-bundle -infoplist-subpath Info.plist
+
+ValidateEmbeddedBinary /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/Extensions/PencilCADBlendWorker.appex (in target 'PencilCAD' from project 'PencilCAD')
+    cd /Users/kairosenfeld/Documents/ChatGPT/Pencil\ Cad/work/PencilCAD_Integration_Work_Build31
+    /Applications/Xcode.app/Contents/Developer/usr/bin/embeddedBinaryValidationUtility /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/Extensions/PencilCADBlendWorker.appex -signing-cert - -info-plist-path /tmp/PencilCAD_B31_Derived/Build/Products/Debug-iphonesimulator/PencilCAD.app/Info.plist
+
+PruneExplicitPrecompiledModules /tmp/PencilCAD_B31_Derived/SDKExplicitPrecompiledModules
+
+PruneExplicitPrecompiledModules /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/ExplicitPrecompiledModules
+
+PruneExplicitPrecompiledModules /tmp/PencilCAD_B31_Derived/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules
+
+2026-11-03 20:24:07.519 xcodebuild[72025:31058136] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-11-03 20:24:16.211326+0100 PencilCAD[72178:31059108] [XPCErrors] non-launching port is incompatible with service identifier "com.apple.PointerUI.pointeruid.default-service"
+objc[72178]: Class UIAccessibilityLoaderWebShared is implemented in both /private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.qQW0GQ/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/AccessibilityBundles/WebKit.axbundle/WebKit (0x1081b8398) and /private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.qQW0GQ/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/AccessibilityBundles/WebCore.axbundle/WebCore (0x108354310). This may cause spurious casting failures and mysterious crashes. One of the duplicates must be removed or renamed.
+Test Suite 'All tests' started at 2026-11-03 20:24:18.570.
+Test Suite 'PencilCADTests.xctest' started at 2026-11-03 20:24:18.572.
+Test Suite 'FeatureTimelinePersistenceTests' started at 2026-11-03 20:24:18.572.
+Test Case '-[PencilCADTests.FeatureTimelinePersistenceTests testFailedFilletDoesNotBlockMoveOnAnotherBody]' started.
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/46EBFFC8-151C-45A1-BC9A-1CF2E7F564A4/.model-ECD47D00-E8B9-482D-94E9-9AAAE4409154.step(350 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/46EBFFC8-151C-45A1-BC9A-1CF2E7F564A4/.model-395AD873-48AB-466C-A28D-E70523D02727.step(694 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/46EBFFC8-151C-45A1-BC9A-1CF2E7F564A4/.model-7D75BF06-7F5F-440C-9035-653A65AA65FC.step(694 ents)  Write  Done
+[0m
+Test Case '-[PencilCADTests.FeatureTimelinePersistenceTests testFailedFilletDoesNotBlockMoveOnAnotherBody]' passed (0.089 seconds).
+Test Case '-[PencilCADTests.FeatureTimelinePersistenceTests testFullSnapshotResumesAfterEarlierFailure]' started.
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/1FED95C5-10DA-4209-BB01-0DBFF7C100FE/.model-401CBCF6-B02E-421C-B751-D6E6062B0FF0.step(350 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/1FED95C5-10DA-4209-BB01-0DBFF7C100FE/.model-019D04BE-97F1-4819-B660-B536F8A51A30.step(694 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/1FED95C5-10DA-4209-BB01-0DBFF7C100FE/.model-97B53EB5-73AF-45DA-9672-C8561F716142.step(350 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/1FED95C5-10DA-4209-BB01-0DBFF7C100FE/features/642ED57C-2FEF-4072-AB25-D00EBD9D61E7.step(350 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/1FED95C5-10DA-4209-BB01-0DBFF7C100FE/.model-4C62338A-E005-4AE3-B3AE-C56876C0536D.step(694 ents)  Write  Done
+[0m
+Test Case '-[PencilCADTests.FeatureTimelinePersistenceTests testFullSnapshotResumesAfterEarlierFailure]' passed (0.045 seconds).
+Test Case '-[PencilCADTests.FeatureTimelinePersistenceTests testIndependentBodyReplaysAfterLocalFailureAndRecovers]' started.
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/9BD2313F-1D84-435A-B3CE-F56FE0525F85/.model-CB27947E-02FD-48D2-B84F-85074C91E948.step(350 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/9BD2313F-1D84-435A-B3CE-F56FE0525F85/.model-E50543DB-7BE2-472A-B5DC-4182B75B0FA7.step(694 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/9BD2313F-1D84-435A-B3CE-F56FE0525F85/.model-771BBE3B-233A-4210-93E1-D62A40F041B8.step(694 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/9BD2313F-1D84-435A-B3CE-F56FE0525F85/.model-DE503777-29D5-4C0B-85AB-8155020D17B2.step(694 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/9BD2313F-1D84-435A-B3CE-F56FE0525F85/.model-B578848F-111C-499B-9E25-25B65F46B9B0.step(694 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/9BD2313F-1D84-435A-B3CE-F56FE0525F85/.model-22EFDA94-68FC-4C2D-9E6A-982432E5BAE5.step(694 ents)  Write  Done
+[0m
+Test Case '-[PencilCADTests.FeatureTimelinePersistenceTests testIndependentBodyReplaysAfterLocalFailureAndRecovers]' passed (0.052 seconds).
+Test Case '-[PencilCADTests.FeatureTimelinePersistenceTests testLegacyScrewNameKeepsUnknownPropertiesExplicit]' started.
+Test Case '-[PencilCADTests.FeatureTimelinePersistenceTests testLegacyScrewNameKeepsUnknownPropertiesExplicit]' passed (0.030 seconds).
+Test Case '-[PencilCADTests.FeatureTimelinePersistenceTests testProject14ScrewTapOverridesFilletAndCanMove]' started.
+Test Case '-[PencilCADTests.FeatureTimelinePersistenceTests testProject14ScrewTapOverridesFilletAndCanMove]' passed (0.082 seconds).
+Test Case '-[PencilCADTests.FeatureTimelinePersistenceTests testReopenRestoresSelectableFeatureStages]' started.
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/6EB94698-E052-450B-BB4D-2BF1FFC975AD/.model-D5A753CF-E0A0-4A73-993D-C6901067DDD2.step(350 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/6EB94698-E052-450B-BB4D-2BF1FFC975AD/.model-8EFC39B7-CC4B-4952-AC77-1DE50D98750F.step(350 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/6EB94698-E052-450B-BB4D-2BF1FFC975AD/features/5C1AC449-D76A-4939-BD7A-A891906770F3.step(350 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/6EB94698-E052-450B-BB4D-2BF1FFC975AD/.model-1B145A3C-9E7D-41E0-BF04-74EB6B23BBEC.step(694 ents)  Write  Done
+[0m
+Test Case '-[PencilCADTests.FeatureTimelinePersistenceTests testReopenRestoresSelectableFeatureStages]' passed (0.032 seconds).
+Test Case '-[PencilCADTests.FeatureTimelinePersistenceTests testScrewCanBePlacedAgainAfterMoveOnSideFace]' started.
+Test Case '-[PencilCADTests.FeatureTimelinePersistenceTests testScrewCanBePlacedAgainAfterMoveOnSideFace]' passed (0.026 seconds).
+Test Case '-[PencilCADTests.FeatureTimelinePersistenceTests testScrewIsSelectedAsOneBodyByEdgeAndBox]' started.
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/3F15BC25-2A0D-468D-9CA3-34CCFD8C93E2/.model-9B52076B-21C3-4AC6-8181-8A5097BA17E2.step(350 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 0                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/3F15BC25-2A0D-468D-9CA3-34CCFD8C93E2/.model-35934777-0DD4-4C48-AFBC-1D66A7ADE122.step(1072 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 0                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/3F15BC25-2A0D-468D-9CA3-34CCFD8C93E2/features/1055D760-2496-44F2-8FF3-67A275823AF5.step(728 ents)  Write  Done
+[0m
+Test Case '-[PencilCADTests.FeatureTimelinePersistenceTests testScrewIsSelectedAsOneBodyByEdgeAndBox]' passed (0.033 seconds).
+Test Case '-[PencilCADTests.FeatureTimelinePersistenceTests testScrewPlacementAndPropertiesSurviveReopen]' started.
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/28FF1C77-92C4-4060-B2D8-8ECED0B23201/.model-924C34DB-926E-45CA-9182-3A6396F7B655.step(350 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 0                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/28FF1C77-92C4-4060-B2D8-8ECED0B23201/.model-5C16A41E-C5BC-4846-8815-7F27F1FD3D93.step(1072 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 0                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/28FF1C77-92C4-4060-B2D8-8ECED0B23201/features/59A549E8-28BF-4DCE-82DF-C9EFC2B08657.step(728 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 0                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/28FF1C77-92C4-4060-B2D8-8ECED0B23201/.model-79A53656-D1FF-4042-88AE-E47845B2EC68.step(1085 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 0                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/28FF1C77-92C4-4060-B2D8-8ECED0B23201/features/68CDE330-A76A-44D1-AD18-4DB93C863FD0.step(741 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 0                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/28FF1C77-92C4-4060-B2D8-8ECED0B23201/.model-F02D66BE-F2C0-428C-AE2F-6533B2DBA6D2.step(1085 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 0                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/28FF1C77-92C4-4060-B2D8-8ECED0B23201/features/AAC88124-47BA-4743-9BD0-421FCAC6B7EF.step(741 ents)  Write  Done
+[0m
+Test Case '-[PencilCADTests.FeatureTimelinePersistenceTests testScrewPlacementAndPropertiesSurviveReopen]' passed (0.076 seconds).
+Test Case '-[PencilCADTests.FeatureTimelinePersistenceTests testSkippedMultiBodyStepBlocksLaterOtherwiseIndependentMove]' started.
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/9A63BDBB-7195-45D3-9320-A0C9AF108F39/.model-655BA1B6-C4B3-43DC-9460-7A3E48076038.step(350 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/9A63BDBB-7195-45D3-9320-A0C9AF108F39/.model-92D883B3-4C6B-47A1-821E-1DC490728DCF.step(694 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/9A63BDBB-7195-45D3-9320-A0C9AF108F39/.model-25C48E53-A62B-4D8B-8360-965EC277F7F1.step(694 ents)  Write  Done
+[0m
+Test Case '-[PencilCADTests.FeatureTimelinePersistenceTests testSkippedMultiBodyStepBlocksLaterOtherwiseIndependentMove]' passed (0.019 seconds).
+Test Suite 'FeatureTimelinePersistenceTests' passed at 2026-11-03 20:24:19.061.
+	 Executed 10 tests, with 0 failures (0 unexpected) in 0.484 (0.489) seconds
+Test Suite 'ModelingWorkflowTests' started at 2026-11-03 20:24:19.064.
+Test Case '-[PencilCADTests.ModelingWorkflowTests testBooleanPreviewCommitUndoAndReopen]' started.
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/FB5E6F5E-4AB7-4B15-ABDA-7DA9C4E0D85E/.model-2E0BB19C-EC91-4500-BA6B-E5270DBB6782.step(350 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/FB5E6F5E-4AB7-4B15-ABDA-7DA9C4E0D85E/.model-381F3D87-DD7B-4AAB-90D1-4B0357A7181E.step(694 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 0                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/FB5E6F5E-4AB7-4B15-ABDA-7DA9C4E0D85E/.model-65E78E52-31FB-4959-8857-2B994A07D65D.step(350 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/FB5E6F5E-4AB7-4B15-ABDA-7DA9C4E0D85E/.model-0A9AAD7C-550D-4A2B-BB41-A91029C0E2E2.step(694 ents)  Write  Done
+[0m
+Test Case '-[PencilCADTests.ModelingWorkflowTests testBooleanPreviewCommitUndoAndReopen]' passed (0.036 seconds).
+Test Case '-[PencilCADTests.ModelingWorkflowTests testHoleAndOpenShellProduceClosedBodies]' started.
+Test Case '-[PencilCADTests.ModelingWorkflowTests testHoleAndOpenShellProduceClosedBodies]' passed (0.022 seconds).
+Test Case '-[PencilCADTests.ModelingWorkflowTests testInvalidExtrusionClearsOldPreviewBeforeCommit]' started.
+Test Case '-[PencilCADTests.ModelingWorkflowTests testInvalidExtrusionClearsOldPreviewBeforeCommit]' passed (0.007 seconds).
+Test Case '-[PencilCADTests.ModelingWorkflowTests testPatternAndMirrorKeepOriginalsAndUndo]' started.
+Test Case '-[PencilCADTests.ModelingWorkflowTests testPatternAndMirrorKeepOriginalsAndUndo]' passed (0.003 seconds).
+Test Case '-[PencilCADTests.ModelingWorkflowTests testRevolveRejectsZeroAxisAndBuildsValidRing]' started.
+Test Case '-[PencilCADTests.ModelingWorkflowTests testRevolveRejectsZeroAxisAndBuildsValidRing]' passed (0.006 seconds).
+Test Case '-[PencilCADTests.ModelingWorkflowTests testSweepAndLoftKernelsCreateValidSolids]' started.
+Test Case '-[PencilCADTests.ModelingWorkflowTests testSweepAndLoftKernelsCreateValidSolids]' passed (0.004 seconds).
+Test Case '-[PencilCADTests.ModelingWorkflowTests testSweepPathRequiresOneConnectedChain]' started.
+Test Case '-[PencilCADTests.ModelingWorkflowTests testSweepPathRequiresOneConnectedChain]' passed (0.001 seconds).
+Test Suite 'ModelingWorkflowTests' passed at 2026-11-03 20:24:19.145.
+	 Executed 7 tests, with 0 failures (0 unexpected) in 0.079 (0.081) seconds
+Test Suite 'ProjectCycleTests' started at 2026-11-03 20:24:19.145.
+Test Case '-[PencilCADTests.ProjectCycleTests testSketchExtrudeFilletReopenTimelineAndSTEPRoundtrip]' started.
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/B4B0BCDF-5C59-4535-8FF4-02D5306214C3/.model-A195E0E5-C7CE-4B7C-A9EF-97A5F1F94F65.step(350 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 0                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/B4B0BCDF-5C59-4535-8FF4-02D5306214C3/.model-54EE4558-F852-445B-8549-CD5F8518DC7B.step(438 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/B4B0BCDF-5C59-4535-8FF4-02D5306214C3/features/preblend-081407CD-8F1F-491A-B2A2-7A82ECB460CA.step(350 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/tmp/Export-427C88B7-9C93-4205-8DE0-5BF66E7BB17A.step(438 ents)  Write  Done
+[0m
+Test Case '-[PencilCADTests.ProjectCycleTests testSketchExtrudeFilletReopenTimelineAndSTEPRoundtrip]' passed (0.609 seconds).
+Test Suite 'ProjectCycleTests' passed at 2026-11-03 20:24:19.755.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.609 (0.610) seconds
+Test Suite 'ProjectSaveTransactionTests' started at 2026-11-03 20:24:19.755.
+Test Case '-[PencilCADTests.ProjectSaveTransactionTests testCommittedMarkerKeepsNewFilesOnReopen]' started.
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/02A44E13-5FC2-463C-9816-257E1ED8B53B/.model-C26C643C-02E6-4BA5-AFE3-185356225D21.step(350 ents)  Write  Done
+[0m
+Test Case '-[PencilCADTests.ProjectSaveTransactionTests testCommittedMarkerKeepsNewFilesOnReopen]' passed (0.035 seconds).
+Test Case '-[PencilCADTests.ProjectSaveTransactionTests testInterruptedModelWriteRestoresPreviousSnapshotOnReopen]' started.
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/57A51EBF-F6F6-4FAF-8758-1765E37C954E/.model-984F2A66-2110-4DD0-8CF6-D8B2D148DE46.step(350 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/57A51EBF-F6F6-4FAF-8758-1765E37C954E/.model-317F2C9D-8D2E-4BB0-A3E4-038524CCBAD8.step(694 ents)  Write  Done
+[0m
+Test Case '-[PencilCADTests.ProjectSaveTransactionTests testInterruptedModelWriteRestoresPreviousSnapshotOnReopen]' passed (0.044 seconds).
+Test Case '-[PencilCADTests.ProjectSaveTransactionTests testProjectDuplicatePublishesCompleteReopenableCopy]' started.
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/D488D0FE-F312-43B8-A19B-1F281E77C874/.model-7EEAA145-97DB-4914-BB49-DB1FDB86563A.step(350 ents)  Write  Done
+[0m
+Test Case '-[PencilCADTests.ProjectSaveTransactionTests testProjectDuplicatePublishesCompleteReopenableCopy]' passed (0.045 seconds).
+Test Suite 'ProjectSaveTransactionTests' passed at 2026-11-03 20:24:19.881.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.125 (0.126) seconds
+Test Suite 'RemeshCacheTests' started at 2026-11-03 20:24:19.881.
+Test Case '-[PencilCADTests.RemeshCacheTests testPreviewOfSecondBodyKeepsFirstBodyMeshUnchanged]' started.
+Test Case '-[PencilCADTests.RemeshCacheTests testPreviewOfSecondBodyKeepsFirstBodyMeshUnchanged]' passed (0.003 seconds).
+Test Case '-[PencilCADTests.RemeshCacheTests testReorderAndAppearanceChangesDoNotReuseWrongBodyMesh]' started.
+Test Case '-[PencilCADTests.RemeshCacheTests testReorderAndAppearanceChangesDoNotReuseWrongBodyMesh]' passed (0.004 seconds).
+Test Suite 'RemeshCacheTests' passed at 2026-11-03 20:24:19.889.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.007 (0.008) seconds
+Test Suite 'SheetKernelIntegrationTests' started at 2026-11-03 20:24:19.889.
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testAdjacentFilletCanReplayAnInterveningIndependentFeature]' started.
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/43300226-A44B-47D5-8D81-D1ACFBFA5134/.model-BEC8F0C6-94FF-457B-917E-AB84A1C7B051.step(1957 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 0                      ******
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/43300226-A44B-47D5-8D81-D1ACFBFA5134/.model-CD575B90-E727-4306-A968-E53B09962914.step(1920 ents)  Write  Done
+[0m
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testAdjacentFilletCanReplayAnInterveningIndependentFeature]' passed (0.660 seconds).
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testAsymmetricChamferRejectsCylinderSeamInsteadOfSilentlyChamferingOnlyTop]' started.
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testAsymmetricChamferRejectsCylinderSeamInsteadOfSilentlyChamferingOnlyTop]' passed (0.002 seconds).
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testBaseFlangeUsesEmbeddedEngine]' started.
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testBaseFlangeUsesEmbeddedEngine]' passed (0.037 seconds).
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testBlendWorkerDoesNotPreviewSubsetOfStaleSelection]' started.
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testBlendWorkerDoesNotPreviewSubsetOfStaleSelection]' passed (0.011 seconds).
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testBRepTransferPreservesEdgeNumbersAfterFillet]' started.
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testBRepTransferPreservesEdgeNumbersAfterFillet]' passed (0.005 seconds).
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testChamferRejectsCylinderSeamInsteadOfSilentlyChamferingOnlyTop]' started.
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testChamferRejectsCylinderSeamInsteadOfSilentlyChamferingOnlyTop]' passed (0.020 seconds).
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testChamferRejectsEntireSelectionWhenOneEdgeNumberIsStale]' started.
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testChamferRejectsEntireSelectionWhenOneEdgeNumberIsStale]' passed (0.003 seconds).
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testChamferSelectionModesKeepOneEdgeOrExplicitContour]' started.
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/5CA3A3C4-6FC9-406F-9D04-1A7D8D5FBB36/.model-9CD457F7-FF48-45C0-8B97-EA164B1B8440.step(350 ents)  Write  Done
+[0m
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testChamferSelectionModesKeepOneEdgeOrExplicitContour]' passed (0.017 seconds).
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testChangingSheetRuleRebuildsMatchingBodyAndSurvivesReopen]' started.
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/D8A2C2B0-CB3B-4E42-902C-9FD5C78B16FA/.model-D522E7C4-40F0-483D-B2AA-48525E905EAE.step(3150 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/D8A2C2B0-CB3B-4E42-902C-9FD5C78B16FA/.model-572E9A56-E588-4279-9D03-E9B991D6E8C4.step(3150 ents)  Write  Done
+[0m
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testChangingSheetRuleRebuildsMatchingBodyAndSurvivesReopen]' passed (0.176 seconds).
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testFailedMergeStillFallsBackWhenWorkerReturnsNormally]' started.
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testFailedMergeStillFallsBackWhenWorkerReturnsNormally]' passed (0.015 seconds).
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testFilletContourIncludesCornersBeyondRightAngle]' started.
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testFilletContourIncludesCornersBeyondRightAngle]' passed (0.014 seconds).
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testFilletRejectsCylinderSeamInsteadOfSilentlyRoundingOnlyTop]' started.
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testFilletRejectsCylinderSeamInsteadOfSilentlyRoundingOnlyTop]' passed (0.055 seconds).
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testFilletRejectsEntireSelectionWhenOneEdgeNumberIsStale]' started.
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testFilletRejectsEntireSelectionWhenOneEdgeNumberIsStale]' passed (0.003 seconds).
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testFilletRunsInSeparateProcess]' started.
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testFilletRunsInSeparateProcess]' passed (0.010 seconds).
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testFilletTapSelectsOneEdgeByDefaultAndContourOnRequest]' started.
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/6F3A59DC-F8A7-492F-8E13-8F711012EC07/.model-B98C4E81-6620-4659-A7C4-E59BF493B525.step(350 ents)  Write  Done
+[0m
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testFilletTapSelectsOneEdgeByDefaultAndContourOnRequest]' passed (0.015 seconds).
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testFilletWorkerCrashDoesNotTerminateApp]' started.
+2026-11-03 20:24:20.944091+0100 PencilCAD[72178:31059321] PencilCAD BlendWorker unterbrochen: Modus 99, 1 Kanten, Wert 2.0000 mm
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testFilletWorkerCrashDoesNotTerminateApp]' passed (0.285 seconds).
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testImpossibleBlendDoesNotClampOrRetryAnotherRadius]' started.
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testImpossibleBlendDoesNotClampOrRetryAnotherRadius]' passed (0.037 seconds).
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testKantenSelectsOuterEdgeAndKeepsFlatBlankSize]' started.
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/20DF982B-B242-4711-850D-4D22A467E879/.model-F99B7A19-59DA-4145-83E4-161766251836.step(350 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/20DF982B-B242-4711-850D-4D22A467E879/.model-60AF35DC-51A2-43BE-BE07-A017FAAE35F4.step(774 ents)  Write  Done
+[0m
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testKantenSelectsOuterEdgeAndKeepsFlatBlankSize]' passed (0.056 seconds).
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testLargestValidRadiusForProject21CurvedEdge]' started.
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testLargestValidRadiusForProject21CurvedEdge]' passed (2.559 seconds).
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testLargestValidRadiusForProject21SecondSide]' started.
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testLargestValidRadiusForProject21SecondSide]' passed (0.383 seconds).
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testMaximumRadiusActionReturnsProject21ValueWithoutChangingRequestedRadius]' started.
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/83ED735A-9DA0-404F-B98C-5F7840B5A6A4/.model-DDA71BA5-E3B3-4527-9182-88F578F71104.step(1085 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/83ED735A-9DA0-404F-B98C-5F7840B5A6A4/features/AF6F7AAA-8AF8-492E-9564-A4C53A164EA5.step(1085 ents)  Write  Done
+[0m
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testMaximumRadiusActionReturnsProject21ValueWithoutChangingRequestedRadius]' passed (0.283 seconds).
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testNonfiniteBlendValuesAreRejectedBeforeKernelWork]' started.
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testNonfiniteBlendValuesAreRejectedBeforeKernelWork]' passed (0.001 seconds).
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testPerEdgeRadiiRejectCylinderSeamInsteadOfSilentlyRoundingOnlyTop]' started.
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testPerEdgeRadiiRejectCylinderSeamInsteadOfSilentlyRoundingOnlyTop]' passed (0.000 seconds).
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testProject6BRepTransferPreservesComplexEdgeNumbers]' started.
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testProject6BRepTransferPreservesComplexEdgeNumbers]' passed (0.010 seconds).
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testProject6InterruptedMergeDoesNotStartFallbackFillet]' started.
+2026-11-03 20:24:24.566683+0100 PencilCAD[72178:31059613] PencilCAD BlendWorker unterbrochen: Modus 98, 1 Kanten, Wert 2.0000 mm
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testProject6InterruptedMergeDoesNotStartFallbackFillet]' passed (0.016 seconds).
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testProject8AdjacentFilletAcceptsFineRadiusAndReplays]' started.
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testProject8AdjacentFilletAcceptsFineRadiusAndReplays]' passed (0.736 seconds).
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testProject8AdjacentFilletReopensWithoutFirstHistoryReplay]' started.
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/EE8C60F5-E43C-4F92-A2B3-C63F785294D1/.model-CFC83FCA-C384-4D2E-BABA-1ADE03825D00.step(1613 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 0                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/EE8C60F5-E43C-4F92-A2B3-C63F785294D1/features/preblend-B8F39FB0-1699-4FF3-A030-A0E701702943.step(1136 ents)  Write  Done
+[0m
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testProject8AdjacentFilletReopensWithoutFirstHistoryReplay]' passed (0.108 seconds).
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testProject8MixedEdgeSelectionDoesNotReturnSingleEdgeFillet]' started.
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testProject8MixedEdgeSelectionDoesNotReturnSingleEdgeFillet]' passed (0.036 seconds).
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testProject8SevenMillimeterFaceFilletRejectsInvalidPreview]' started.
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testProject8SevenMillimeterFaceFilletRejectsInvalidPreview]' passed (0.091 seconds).
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testProjectBackupReopensModelAfterOriginalWasDeleted]' started.
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/05900B7C-D66F-4105-B6BC-BF891B290AEB/.model-17341109-B696-45EB-98EA-749F9E594C8A.step(350 ents)  Write  Done
+[0m
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testProjectBackupReopensModelAfterOriginalWasDeleted]' passed (0.053 seconds).
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testProjectBackupRestoresSeparateCopyAfterOriginalChanges]' started.
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testProjectBackupRestoresSeparateCopyAfterOriginalChanges]' passed (0.040 seconds).
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testRepeatedSnappedFilletAndChamferValuesDoNotRestartBlendJobs]' started.
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/199594F6-CD62-49F8-AEDB-673BDB36EA1B/.model-64A7599E-F849-4E2A-BF6B-16E3411B239F.step(350 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/EE7CEA5F-6B63-4C44-BBFD-071952F1D598/.model-68D504C4-DEDC-49D0-96D9-3AE20E3BCD70.step(350 ents)  Write  Done
+[0m
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testRepeatedSnappedFilletAndChamferValuesDoNotRestartBlendJobs]' passed (0.013 seconds).
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testSheetBoxDimensionsFlatPatternAndReopen]' started.
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/623D9E3A-A139-4E6F-A823-FBBAF60040D8/.model-25D3B9F7-3DAD-48BB-B269-70FD2430B17B.step(3150 ents)  Write  Done
+[0m
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testSheetBoxDimensionsFlatPatternAndReopen]' passed (0.144 seconds).
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testSheetContourFlangeAndRuleValues]' started.
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testSheetContourFlangeAndRuleValues]' passed (0.005 seconds).
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testSheetConversionPreviewDoesNotLeaveSourceFiles]' started.
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/B1C728CE-2F2F-4297-B57F-1F94A3930A42/.model-23C2E5AA-34AD-4707-B1D0-D9C489D0C764.step(350 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/tmp/pencil-sheet-probe-776EC9C9-4131-48F9-8C88-20ACC775B10C.step(350 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/B1C728CE-2F2F-4297-B57F-1F94A3930A42/sheet/CC54F953-D6A8-4EC8-94CB-2CE45B872DFE.step(350 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/B1C728CE-2F2F-4297-B57F-1F94A3930A42/sheet/7595D383-F0B4-4A81-9BD1-F845C4C6B9CE.step(350 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/B1C728CE-2F2F-4297-B57F-1F94A3930A42/sheet/C08BE801-4C19-484D-9601-8A50E51464DD.step(350 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/B1C728CE-2F2F-4297-B57F-1F94A3930A42/.model-846BB7A3-4A1E-433D-A3DA-344299026A34.step(350 ents)  Write  Done
+[0m
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testSheetConversionPreviewDoesNotLeaveSourceFiles]' passed (0.066 seconds).
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testSheetFlangeUnfoldRefoldAndExports]' started.
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testSheetFlangeUnfoldRefoldAndExports]' passed (0.007 seconds).
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testSheetHemFoldAndPerforate]' started.
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testSheetHemFoldAndPerforate]' passed (0.008 seconds).
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testSheetPathFlangeFromTransverseSketch]' started.
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testSheetPathFlangeFromTransverseSketch]' passed (0.005 seconds).
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testSheetStepEditDeleteAndReopen]' started.
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/7C767BA5-7175-4011-9684-64906E95280E/.model-A15618BF-3DF7-47DB-ADD5-F23E5CFBBAAC.step(350 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/7C767BA5-7175-4011-9684-64906E95280E/.model-BF2B8716-3BAC-45D9-927D-4FE3A1ED8754.step(774 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/7C767BA5-7175-4011-9684-64906E95280E/.model-D92C13DD-B614-4F33-8514-2658AA83D5E0.step(774 ents)  Write  Done
+[0m
+[32;1m
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+[0m
+[32;1m******        Transferring Shape, ShapeType = 2                      ******
+[0m
+[32;1m** WorkSession : Sending all data
+[0m
+[32;1m Step File Name : /Users/kairosenfeld/Library/Developer/CoreSimulator/Devices/8D0965B1-AAA5-4EDA-8929-2E220BA306CF/data/Containers/Data/Application/29E52065-5F8E-4917-802D-AA15FF7CFDC3/Documents/Projects/7C767BA5-7175-4011-9684-64906E95280E/.model-6ED5B54A-5062-47AD-9F19-61C12F4BA3B4.step(350 ents)  Write  Done
+[0m
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testSheetStepEditDeleteAndReopen]' passed (0.069 seconds).
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testSinglePlanarFilletVolumeBoundRejectsExcessMaterialLoss]' started.
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testSinglePlanarFilletVolumeBoundRejectsExcessMaterialLoss]' passed (0.007 seconds).
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testTangentEdgeChainFollowsSemicircularArcs]' started.
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testTangentEdgeChainFollowsSemicircularArcs]' passed (0.001 seconds).
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testTangentEdgeChainStopsAtRightAngle]' started.
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testTangentEdgeChainStopsAtRightAngle]' passed (0.001 seconds).
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testThreeBoxCornerEdgesBlendTogetherAsValidSolid]' started.
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testThreeBoxCornerEdgesBlendTogetherAsValidSolid]' passed (0.009 seconds).
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testVariableFilletRejectsCylinderSeamInsteadOfSilentlyRoundingOnlyTop]' started.
+Test Case '-[PencilCADTests.SheetKernelIntegrationTests testVariableFilletRejectsCylinderSeamInsteadOfSilentlyRoundingOnlyTop]' passed (0.001 seconds).
+Test Suite 'SheetKernelIntegrationTests' passed at 2026-11-03 20:24:25.974.
+	 Executed 44 tests, with 0 failures (0 unexpected) in 6.073 (6.085) seconds
+Test Suite 'SketchDimensionTests' started at 2026-11-03 20:24:25.974.
+Test Case '-[PencilCADTests.SketchDimensionTests testAdjacentSecondFilletRejectsPartialSelectionAfterLargeFirstFillet]' started.
+Test Case '-[PencilCADTests.SketchDimensionTests testAdjacentSecondFilletRejectsPartialSelectionAfterLargeFirstFillet]' passed (0.016 seconds).
+Test Case '-[PencilCADTests.SketchDimensionTests testAlignmentGuideReachesBothViewportEdges]' started.
+Test Case '-[PencilCADTests.SketchDimensionTests testAlignmentGuideReachesBothViewportEdges]' passed (0.001 seconds).
+Test Case '-[PencilCADTests.SketchDimensionTests testAlignmentPointRemainsAvailableBeyondOld300PointLimit]' started.
+Test Case '-[PencilCADTests.SketchDimensionTests testAlignmentPointRemainsAvailableBeyondOld300PointLimit]' passed (0.002 seconds).
+Test Case '-[PencilCADTests.SketchDimensionTests testAllSolidCraftToolIconsExistInAppAssets]' started.
+Test Case '-[PencilCADTests.SketchDimensionTests testAllSolidCraftToolIconsExistInAppAssets]' passed (0.034 seconds).
+Test Case '-[PencilCADTests.SketchDimensionTests testCenterArcSnapsOnlyAtActualRadiusCurveIntersection]' started.
+Test Case '-[PencilCADTests.SketchDimensionTests testCenterArcSnapsOnlyAtActualRadiusCurveIntersection]' passed (0.005 seconds).
+Test Case '-[PencilCADTests.SketchDimensionTests testCircleCenterSnapsAtIntersectionOfTwoAutomaticMidlines]' started.
+Test Case '-[PencilCADTests.SketchDimensionTests testCircleCenterSnapsAtIntersectionOfTwoAutomaticMidlines]' passed (0.002 seconds).
+Test Case '-[PencilCADTests.SketchDimensionTests testCircleCenterSnapsWhereMidlineCrossesConstructionSegment]' started.
+Test Case '-[PencilCADTests.SketchDimensionTests testCircleCenterSnapsWhereMidlineCrossesConstructionSegment]' passed (0.001 seconds).
+Test Case '-[PencilCADTests.SketchDimensionTests testClassicCircleAlsoSnapsAtAutomaticMidlineCrossing]' started.
+Test Case '-[PencilCADTests.SketchDimensionTests testClassicCircleAlsoSnapsAtAutomaticMidlineCrossing]' passed (0.002 seconds).
+Test Case '-[PencilCADTests.SketchDimensionTests testClassicHoverStillCreatesTwoPointMidline]' started.
+Test Case '-[PencilCADTests.SketchDimensionTests testClassicHoverStillCreatesTwoPointMidline]' passed (0.001 seconds).
+Test Case '-[PencilCADTests.SketchDimensionTests testClassicOnCurveFollowsExactCircleAndArcWithFineGrid]' started.
+Test Case '-[PencilCADTests.SketchDimensionTests testClassicOnCurveFollowsExactCircleAndArcWithFineGrid]' passed (0.001 seconds).
+Test Case '-[PencilCADTests.SketchDimensionTests testClassicSnapUsesExactCircleCircleAndArcIntersections]' started.
+Test Case '-[PencilCADTests.SketchDimensionTests testClassicSnapUsesExactCircleCircleAndArcIntersections]' passed (0.001 seconds).
+Test Case '-[PencilCADTests.SketchDimensionTests testClassicSnapUsesExactLineCircleIntersections]' started.
+Test Case '-[PencilCADTests.SketchDimensionTests testClassicSnapUsesExactLineCircleIntersections]' passed (0.001 seconds).
+Test Case '-[PencilCADTests.SketchDimensionTests testClosingClassicContourReturnsToSelection]' started.
+Test Case '-[PencilCADTests.SketchDimensionTests testClosingClassicContourReturnsToSelection]' passed (0.003 seconds).
+Test Case '-[PencilCADTests.SketchDimensionTests testClosingSolidCraftContourReturnsToSelectionAndShowsEditableLength]' started.
+Test Case '-[PencilCADTests.SketchDimensionTests testClosingSolidCraftContourReturnsToSelectionAndShowsEditableLength]' passed (0.006 seconds).
+Test Case '-[PencilCADTests.SketchDimensionTests testConflictingDimensionDoesNotChangeGeometryOrHistory]' started.
+Test Case '-[PencilCADTests.SketchDimensionTests testConflictingDimensionDoesNotChangeGeometryOrHistory]' passed (0.002 seconds).
+Test Case '-[PencilCADTests.SketchDimensionTests testConstructionCrossingWinsWhenCloserThanNearbyEndpoint]' started.
+Test Case '-[PencilCADTests.SketchDimensionTests testConstructionCrossingWinsWhenCloserThanNearbyEndpoint]' passed (0.000 seconds).
+Test Case '-[PencilCADTests.SketchDimensionTests testDimensionUndoRestoresGeometryAndConstraints]' started.
+Test Case '-[PencilCADTests.SketchDimensionTests testDimensionUndoRestoresGeometryAndConstraints]' passed (0.001 seconds).
+Test Case '-[PencilCADTests.SketchDimensionTests testEqualLengthClickHasOneIdentityDuringDragAndBundledSound]' started.
+Test Case '-[PencilCADTests.SketchDimensionTests testEqualLengthClickHasOneIdentityDuringDragAndBundledSound]' passed (0.001 seconds).
+Test Case '-[PencilCADTests.SketchDimensionTests testEqualLengthPreviewHighlightsTransitiveReferenceGroup]' started.
+Test Case '-[PencilCADTests.SketchDimensionTests testEqualLengthPreviewHighlightsTransitiveReferenceGroup]' passed (0.006 seconds).
+Test Case '-[PencilCADTests.SketchDimensionTests testEqualLengthSnapPreservesVerticalDirectionAndCommitsConstraint]' started.
+Test Case '-[PencilCADTests.SketchDimensionTests testEqualLengthSnapPreservesVerticalDirectionAndCommitsConstraint]' passed (0.003 seconds).
+Test Case '-[PencilCADTests.SketchDimensionTests testEqualLengthSnapRespectsTolerancePointSnapAndTypedLength]' started.
+Test Case '-[PencilCADTests.SketchDimensionTests testEqualLengthSnapRespectsTolerancePointSnapAndTypedLength]' passed (0.002 seconds).
+Test Case '-[PencilCADTests.SketchDimensionTests testEqualLengthSnapWithSlantedDirectionWithoutAutomaticConstraint]' started.
+Test Case '-[PencilCADTests.SketchDimensionTests testEqualLengthSnapWithSlantedDirectionWithoutAutomaticConstraint]' passed (0.002 seconds).
+Test Case '-[PencilCADTests.SketchDimensionTests testInvalidExtrusionParametersProduceNoShape]' started.
+Test Case '-[PencilCADTests.SketchDimensionTests testInvalidExtrusionParametersProduceNoShape]' passed (0.001 seconds).
+Test Case '-[PencilCADTests.SketchDimensionTests testOnlyRememberingARealPointFiresDwellFeedback]' started.
+Test Case '-[PencilCADTests.SketchDimensionTests testOnlyRememberingARealPointFiresDwellFeedback]' passed (0.001 seconds).
+Test Case '-[PencilCADTests.SketchDimensionTests testPartialFilletKeepsOneClosedBodyAndLimitsMaterialRemoval]' started.
+Test Case '-[PencilCADTests.SketchDimensionTests testPartialFilletKeepsOneClosedBodyAndLimitsMaterialRemoval]' passed (0.070 seconds).
+Test Case '-[PencilCADTests.SketchDimensionTests testPartialFilletRebuildsFromRecordedFeature]' started.
+Test Case '-[PencilCADTests.SketchDimensionTests testPartialFilletRebuildsFromRecordedFeature]' passed (0.086 seconds).
+Test Case '-[PencilCADTests.SketchDimensionTests testPassingOverSnapPointsDoesNotPlaySound]' started.
+Test Case '-[PencilCADTests.SketchDimensionTests testPassingOverSnapPointsDoesNotPlaySound]' passed (0.001 seconds).
+Test Case '-[PencilCADTests.SketchDimensionTests testPencilHoverAndPointMemoryUseConstructionCrossing]' started.
+Test Case '-[PencilCADTests.SketchDimensionTests testPencilHoverAndPointMemoryUseConstructionCrossing]' passed (0.001 seconds).
+Test Case '-[PencilCADTests.SketchDimensionTests testProjectGridStepSurvivesReopen]' started.
+Test Case '-[PencilCADTests.SketchDimensionTests testProjectGridStepSurvivesReopen]' passed (0.004 seconds).
+Test Case '-[PencilCADTests.SketchDimensionTests testRectangleExtrusionCreatesExpectedVolumeWithKernel]' started.
+Test Case '-[PencilCADTests.SketchDimensionTests testRectangleExtrusionCreatesExpectedVolumeWithKernel]' passed (0.001 seconds).
+Test Case '-[PencilCADTests.SketchDimensionTests testRejectedDimensionAtCapacityPreservesUndoDepth]' started.
+Test Case '-[PencilCADTests.SketchDimensionTests testRejectedDimensionAtCapacityPreservesUndoDepth]' passed (0.027 seconds).
+Test Case '-[PencilCADTests.SketchDimensionTests testRememberedMidpointSnapsAsCircleCenterAfterToolChange]' started.
+Test Case '-[PencilCADTests.SketchDimensionTests testRememberedMidpointSnapsAsCircleCenterAfterToolChange]' passed (0.002 seconds).
+Test Case '-[PencilCADTests.SketchDimensionTests testRememberedPointBisectorSpansViewportWhilePairStaysFinite]' started.
+Test Case '-[PencilCADTests.SketchDimensionTests testRememberedPointBisectorSpansViewportWhilePairStaysFinite]' passed (0.000 seconds).
+Test Case '-[PencilCADTests.SketchDimensionTests testSingleBoxEdgeCanRoundPastAdjacentFace]' started.
+Test Case '-[PencilCADTests.SketchDimensionTests testSingleBoxEdgeCanRoundPastAdjacentFace]' passed (0.046 seconds).
+Test Case '-[PencilCADTests.SketchDimensionTests testSketchPencilWheelHoverAndReleaseSelectsToolOnce]' started.
+Test Case '-[PencilCADTests.SketchDimensionTests testSketchPencilWheelHoverAndReleaseSelectsToolOnce]' passed (0.003 seconds).
+Test Case '-[PencilCADTests.SketchDimensionTests testSolidCraftHoverKeepsSnapTracesAndCreatesTwoPointMidline]' started.
+Test Case '-[PencilCADTests.SketchDimensionTests testSolidCraftHoverKeepsSnapTracesAndCreatesTwoPointMidline]' passed (0.001 seconds).
+Test Case '-[PencilCADTests.SketchDimensionTests testSolidCraftLineAngleUsesPreviousSlantedSegment]' started.
+Test Case '-[PencilCADTests.SketchDimensionTests testSolidCraftLineAngleUsesPreviousSlantedSegment]' passed (0.001 seconds).
+Test Case '-[PencilCADTests.SketchDimensionTests testSolidCraftParallelPreviewMarksCurrentAndReferenceLine]' started.
+Test Case '-[PencilCADTests.SketchDimensionTests testSolidCraftParallelPreviewMarksCurrentAndReferenceLine]' passed (0.001 seconds).
+Test Case '-[PencilCADTests.SketchDimensionTests testTangentArcCanUseOtherSideAndFlipAfterCreation]' started.
+Test Case '-[PencilCADTests.SketchDimensionTests testTangentArcCanUseOtherSideAndFlipAfterCreation]' passed (0.001 seconds).
+Test Case '-[PencilCADTests.SketchDimensionTests testTextArcRadiusUpdatesLinkedPathAndRejectsImpossibleRadius]' started.
+Test Case '-[PencilCADTests.SketchDimensionTests testTextArcRadiusUpdatesLinkedPathAndRejectsImpossibleRadius]' passed (0.047 seconds).
+Test Case '-[PencilCADTests.SketchDimensionTests testTimelineCanRebuildEarlierStateAfterReopenClearsCache]' started.
+Test Case '-[PencilCADTests.SketchDimensionTests testTimelineCanRebuildEarlierStateAfterReopenClearsCache]' passed (0.003 seconds).
+Test Case '-[PencilCADTests.SketchDimensionTests testUndoAtCapacityRestoresConstraintBeforeNewEntityDimension]' started.
+Test Case '-[PencilCADTests.SketchDimensionTests testUndoAtCapacityRestoresConstraintBeforeNewEntityDimension]' passed (0.019 seconds).
+Test Suite 'SketchDimensionTests' passed at 2026-11-03 20:24:26.391.
+	 Executed 42 tests, with 0 failures (0 unexpected) in 0.408 (0.417) seconds
+Test Suite 'SketchTrimRegressionTests' started at 2026-11-03 20:24:26.391.
+Test Case '-[PencilCADTests.SketchTrimRegressionTests testClosedFitSplineTrimKeepsOtherSideOfIntersections]' started.
+Test Case '-[PencilCADTests.SketchTrimRegressionTests testClosedFitSplineTrimKeepsOtherSideOfIntersections]' passed (0.002 seconds).
+Test Case '-[PencilCADTests.SketchTrimRegressionTests testControlSplinesCanBeTrimmedOpenAndClosed]' started.
+Test Case '-[PencilCADTests.SketchTrimRegressionTests testControlSplinesCanBeTrimmedOpenAndClosed]' passed (0.004 seconds).
+Test Case '-[PencilCADTests.SketchTrimRegressionTests testCurvedFitSplineKeepsOriginalShapeOutsideRemovedInterval]' started.
+Test Case '-[PencilCADTests.SketchTrimRegressionTests testCurvedFitSplineKeepsOriginalShapeOutsideRemovedInterval]' passed (0.009 seconds).
+Test Case '-[PencilCADTests.SketchTrimRegressionTests testEllipseAndSplineWithoutCutsStillDeleteWholeEntity]' started.
+Test Case '-[PencilCADTests.SketchTrimRegressionTests testEllipseAndSplineWithoutCutsStillDeleteWholeEntity]' passed (0.001 seconds).
+Test Case '-[PencilCADTests.SketchTrimRegressionTests testEllipseTrimKeepsSmoothOppositeArcAndCanUndo]' started.
+Test Case '-[PencilCADTests.SketchTrimRegressionTests testEllipseTrimKeepsSmoothOppositeArcAndCanUndo]' passed (0.010 seconds).
+Test Case '-[PencilCADTests.SketchTrimRegressionTests testOpenFitSplineTrimRemovesOnlyIntervalBetweenTwoCuts]' started.
+Test Case '-[PencilCADTests.SketchTrimRegressionTests testOpenFitSplineTrimRemovesOnlyIntervalBetweenTwoCuts]' passed (0.001 seconds).
+Test Case '-[PencilCADTests.SketchTrimRegressionTests testOpenSplineWithOneCutKeepsSideOppositeTap]' started.
+Test Case '-[PencilCADTests.SketchTrimRegressionTests testOpenSplineWithOneCutKeepsSideOppositeTap]' passed (0.001 seconds).
+Test Case '-[PencilCADTests.SketchTrimRegressionTests testSwipeTrimAlsoCutsEllipseAndRestoresWithUndo]' started.
+Test Case '-[PencilCADTests.SketchTrimRegressionTests testSwipeTrimAlsoCutsEllipseAndRestoresWithUndo]' passed (0.009 seconds).
+Test Suite 'SketchTrimRegressionTests' passed at 2026-11-03 20:24:26.428.
+	 Executed 8 tests, with 0 failures (0 unexpected) in 0.035 (0.037) seconds
+Test Suite 'PencilCADTests.xctest' passed at 2026-11-03 20:24:26.428.
+	 Executed 117 tests, with 0 failures (0 unexpected) in 7.820 (7.856) seconds
+Test Suite 'All tests' passed at 2026-11-03 20:24:26.429.
+	 Executed 117 tests, with 0 failures (0 unexpected) in 7.820 (7.859) seconds
+2026-11-03 20:24:26.449 xcodebuild[72025:31058136] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-11-03 20:24:26.449 xcodebuild[72025:31058136] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-11-03 20:24:26.450 xcodebuild[72025:31058136] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-11-03 20:24:26.733 xcodebuild[72025:31058136] [MT] IDETestOperationsObserverDebug: 19.466 elapsed -- Testing started completed.
+2026-11-03 20:24:26.733 xcodebuild[72025:31058136] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-11-03 20:24:26.733 xcodebuild[72025:31058136] [MT] IDETestOperationsObserverDebug: 19.466 sec, +19.466 sec -- end
+
+Test session results, code coverage, and logs:
+	/tmp/PencilCAD_B31_Derived/Logs/Test/Test-PencilCAD-2026.11.03_20-23-53-+0100.xcresult
+
+** TEST SUCCEEDED **
+
+Testing started

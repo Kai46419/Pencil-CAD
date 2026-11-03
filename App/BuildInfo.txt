@@ -1,1 +1,1 @@
-03.11.2026 · Skizzenbögen, Textpfad, Linienwinkel und Werkzeugrad (Build 28)
+03.11.2026 · Verlauf: unabhängige Körper, sichere Fehlerfortsetzung und Snapshot-Erholung (Build 34)

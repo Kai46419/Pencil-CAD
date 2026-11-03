@@ -4,6 +4,140 @@ import simd
 
 @MainActor
 final class FeatureTimelinePersistenceTests: XCTestCase {
+    func testFailedFilletDoesNotBlockMoveOnAnotherBody() throws {
+        try XCTSkipUnless(PCKShape.kernelAvailable)
+        let project = Project(id: UUID(), name: "Rundung und unabhängiger Körper", modified: Date())
+        defer { try? FileManager.default.removeItem(at: project.folder) }
+        let model = ModelStore(folder: project.folder)
+        model.previewInsert(.box, size: [10, 10, 10], at: .zero)
+        model.commitPreview()
+        model.previewInsert(.box, size: [5, 5, 5], at: [30, 0, 0])
+        model.commitPreview()
+        model.selectBodies([1])
+        model.setMoveOffset([0, 2, 0])
+        model.commitPreview()
+
+        var invalidFillet = Feature(name: "Abrunden", kind: .fillet)
+        invalidFillet.data.target = 0
+        invalidFillet.data.edges = [try XCTUnwrap(ModelStore.edgeSignature(model.bodies[0].shape,
+                                                                             edge: 1, body: 0))]
+        invalidFillet.parameters = [.length("radius", "Radius", 0)]
+        var list = model.features
+        list.insert(invalidFillet, at: 2)
+        let run = try XCTUnwrap(model.runFeatures(&list, from: 2, sketches: model.sketches,
+                                                 values: model.variableValues))
+        XCTAssertTrue(list[2].failed)
+        XCTAssertFalse(list[3].failed)
+        XCTAssertEqual(run.bodies.count, 2)
+        let box = try XCTUnwrap(run.bodies[1].shape.boundingBox).map(\.doubleValue)
+        XCTAssertEqual(box[1], -0.5, accuracy: 1e-5)
+        XCTAssertNil(model.featureRecorder.cache[list[3].id],
+                     "Ein teilweise ungültiger Stand darf keine Cachebasis werden")
+    }
+
+    func testSkippedMultiBodyStepBlocksLaterOtherwiseIndependentMove() throws {
+        try XCTSkipUnless(PCKShape.kernelAvailable)
+        let project = Project(id: UUID(), name: "Abhängigkeiten über mehrere Körper", modified: Date())
+        defer { try? FileManager.default.removeItem(at: project.folder) }
+        let model = ModelStore(folder: project.folder)
+        model.previewInsert(.box, size: [10, 10, 10], at: .zero)
+        model.commitPreview()
+        model.previewInsert(.box, size: [5, 5, 5], at: [30, 0, 0])
+        model.commitPreview()
+        model.selectBodies([1])
+        model.setMoveOffset([0, 2, 0])
+        model.commitPreview()
+
+        var failedMove = Feature(name: "Ungültige Verschiebung", kind: .move)
+        failedMove.data.bodies = [0]
+        failedMove.parameters = [.length("x", "X", 0)]
+        failedMove.parameters[0].formula = "unbekannt"
+        var combined = Feature(name: "Zusammenführen", kind: .boolean)
+        combined.data.target = 0
+        combined.data.tools = [1]
+        var list = model.features
+        list.insert(contentsOf: [failedMove, combined], at: 2)
+        let run = try XCTUnwrap(model.runFeatures(&list, from: 2, sketches: model.sketches,
+                                                 values: model.variableValues))
+        XCTAssertTrue(list[2].failed)
+        XCTAssertTrue(list[3].failed)
+        XCTAssertTrue(list[4].failed, "Der übersprungene Mehrkörper-Schritt könnte die Körperindizes ändern")
+        XCTAssertEqual(run.bodies.count, 2)
+    }
+
+    func testIndependentBodyReplaysAfterLocalFailureAndRecovers() throws {
+        try XCTSkipUnless(PCKShape.kernelAvailable)
+        let project = Project(id: UUID(), name: "Unabhängiger Verlauf", modified: Date())
+        defer { try? FileManager.default.removeItem(at: project.folder) }
+        let model = ModelStore(folder: project.folder)
+        model.previewInsert(.box, size: [10, 10, 10], at: .zero)
+        model.commitPreview()
+        model.previewInsert(.box, size: [5, 5, 5], at: [30, 0, 0])
+        model.commitPreview()
+        for (body, offset) in [(0, SIMD3<Double>(1, 0, 0)),
+                               (1, SIMD3<Double>(0, 2, 0)),
+                               (0, SIMD3<Double>(0, 0, 3))] {
+            model.selectBodies([body])
+            model.setMoveOffset(offset)
+            model.commitPreview()
+        }
+        XCTAssertEqual(model.features.map(\.kind), [.primitive, .primitive, .move, .move, .move])
+        var broken = model.features
+        let parameter = try XCTUnwrap(broken[2].parameters.firstIndex { $0.key == "x" })
+        broken[2].parameters[parameter].formula = "unbekannt"
+        let run = try XCTUnwrap(model.runFeatures(&broken, from: 2, sketches: model.sketches,
+                                                 values: model.variableValues))
+        XCTAssertTrue(broken[2].failed)
+        XCTAssertFalse(broken[3].failed, "Körper B ist von der fehlgeschlagenen Änderung an A unabhängig")
+        XCTAssertTrue(broken[4].failed, "Spätere Änderungen an A bleiben gesperrt")
+        XCTAssertEqual(run.bodies.count, 2)
+        let second = try XCTUnwrap(run.bodies[1].shape.boundingBox).map(\.doubleValue)
+        XCTAssertEqual(second[1], -0.5, accuracy: 1e-5)
+
+        broken[2].parameters[parameter].formula = nil
+        broken[2].parameters[parameter].value = 1
+        model.replayFeatures(from: 2, features: broken, sketches: nil, name: "Parameter reparieren")
+        XCTAssertTrue(model.features.allSatisfy { !$0.failed })
+        let first = try XCTUnwrap(model.bodies[0].shape.boundingBox).map(\.doubleValue)
+        XCTAssertEqual(first[0], -4, accuracy: 1e-5)
+        XCTAssertEqual(first[2], 3, accuracy: 1e-5)
+        let ids = model.features.map(\.id)
+        let reopened = ModelStore(folder: project.folder)
+        XCTAssertEqual(reopened.features.map(\.id), ids)
+        XCTAssertTrue(reopened.features.allSatisfy { !$0.failed })
+        XCTAssertEqual(reopened.bodies.count, 2)
+    }
+
+    func testFullSnapshotResumesAfterEarlierFailure() throws {
+        try XCTSkipUnless(PCKShape.kernelAvailable && PCKShape.stepAvailable)
+        let project = Project(id: UUID(), name: "Snapshot-Erholung", modified: Date())
+        defer { try? FileManager.default.removeItem(at: project.folder) }
+        let model = ModelStore(folder: project.folder)
+        model.previewInsert(.box, size: [10, 10, 10], at: .zero)
+        model.commitPreview()
+        model.previewInsert(.box, size: [5, 5, 5], at: [30, 0, 0])
+        model.commitPreview()
+        model.commit([model.bodies[0]], name: "Gespeicherter Stand")
+        model.previewInsert(.box, size: [4, 4, 4], at: [50, 0, 0])
+        model.commitPreview()
+        XCTAssertEqual(model.features.map(\.kind), [.primitive, .primitive, .snapshot, .primitive])
+        XCTAssertEqual(model.features[2].data.snapshot?.full, true)
+        var changed = model.features
+        let x = try XCTUnwrap(changed[0].parameters.firstIndex { $0.key == "x" })
+        changed[0].parameters[x].value = -1
+        let run = try XCTUnwrap(model.runFeatures(&changed, from: 0, sketches: model.sketches,
+                                                 values: model.variableValues))
+        XCTAssertTrue(changed[0].failed)
+        XCTAssertTrue(changed[1].failed)
+        XCTAssertFalse(changed[2].failed, "Der vollständige gespeicherte Stand kann den Zustand wiederherstellen")
+        XCTAssertFalse(changed[3].failed)
+        XCTAssertEqual(run.bodies.count, 2)
+        if run.bodies.count == 2 {
+            XCTAssertEqual(run.bodies[0].shape.volume, 1_000, accuracy: 1e-5)
+            XCTAssertEqual(run.bodies[1].shape.volume, 64, accuracy: 1e-5)
+        }
+    }
+
     func testProject14ScrewTapOverridesFilletAndCanMove() throws {
         try XCTSkipUnless(PCKShape.kernelAvailable && PCKShape.stepAvailable)
         let project = Project(id: UUID(), name: "Projekt-14-Regression", modified: Date())
