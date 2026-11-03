@@ -66,9 +66,10 @@ struct OrderedAttempt {
 }
 
 /// Ineinanderlaufende Rundungen (Kai: zweite variable Rundung an einer Kante, die an eine schon verrundete Kante
-/// grenzt): Geometrie der gemeinsamen Rundung, gemerkt je Kantenauswahl.
+/// grenzt; Rundungen mehrerer Kanten, die sich in einer Ecke überschneiden): Geometrie der gemeinsamen Rundung,
+/// gemerkt je Kantenauswahl.
 struct BlendMergeGeometry {
-    /// Index der vorigen Rundung (letztes Feature)
+    /// Index der angrenzenden früheren Rundung (die letzte oder eine bis blendSearchDepth Schritte davor)
     var index: Int
     /// Körper vor der vorigen Rundung
     var shape: PCKShape
@@ -82,6 +83,9 @@ struct BlendMergeGeometry {
 struct BlendMergeMemo {
     var key: BlendPlacementKey
     var geometry: BlendMergeGeometry?
+    /// Nachbau mit einer früheren Rundung (previewMergedBlend): gelungene und fehlgeschlagene Werte
+    var succeeded: [OrderedAttemptKey: OrderedAttempt] = [:]
+    var failed: Set<OrderedAttemptKey> = []
 }
 
 /// Gemerkte Suche (plan nil = keine längere frühere Kante, bisheriger Weg).
@@ -358,10 +362,13 @@ extension ModelStore {
 
     // MARK: Ineinanderlaufende Rundungen
 
-    /// Grenzt die gewählte Kante an Kanten der vorigen Rundung (letztes Feature, derselbe Körper),
-    /// wird beides in EINEM Abrunden gerechnet (wie Fusion 360 mit beiden Kanten in einer Rundung): saubere Ecke,
-    /// und OCCT muss nicht eine Rundung auf die schon gerundete Fläche setzen (das hing bei variablen Radien).
-    /// Liefert die zusammengefasste Rundung (ersetzt die vorige), den Körper davor und alle Kanten.
+    /// Grenzt die gewählte Kante an Kanten einer früheren Rundung (derselbe Körper; die letzte oder bis zu
+    /// blendSearchDepth Schritte davor), wird beides in EINEM Abrunden gerechnet – wie in Fusion, wenn man Kanten
+    /// zum vorhandenen Fillet-Feature hinzufügt („the selection set updates“), bzw. wie ein Fillet mit mehreren
+    /// Kantensätzen („selection sets“) verschiedener Radien: OCCT rechnet alle Kanten einer Ecke gemeinsam
+    /// (Rolling-Ball-Ecke, der Standard-Eckentyp in Fusion und Shapr3D), statt eine Rundung auf die schon
+    /// gerundete Fläche zu setzen (das lief am Tangentenbogen der ersten Rundung weiter: Artefakte, Abbrüche).
+    /// Liefert die zusammengefasste Rundung (ersetzt die frühere), den Körper davor und alle Kanten.
     func blendMerge(body: Int, value: Double, end: Double?) -> (feature: Feature, index: Int, shape: PCKShape,
                                                                    edges: [Int], radii: [Double]?)? {
         guard edgeOperation == .fillet, value.isFinite, value > 0,
@@ -414,23 +421,10 @@ extension ModelStore {
 
     private func findBlendMerge(body: Int, shape: PCKShape) -> BlendMergeGeometry? {
         let list = features
-        guard PCKShape.kernelAvailable, let index = list.indices.last else { return nil }
-        let previous = list[index]
-        guard previous.kind == .fillet, !previous.isSuppressed, !previous.failed,
-              let signatures = previous.data.edges, let first = signatures.first,
-              (previous.data.target ?? first.body) == body else { return nil }
-        // Die Körper müssen der Stand nach der vorigen Rundung sein
-        guard let after = featureRecorder.cache[previous.id], after.indices.contains(body),
-              after[body].shape === shape else { return nil }
-        let earlier: PCKShape
-        if let saved = featureRecorder.preBlendShape,
-           saved.featureID == previous.id, saved.body == body {
-            earlier = saved.shape
-        } else {
-            guard let before = featureState(before: index), before.indices.contains(body) else { return nil }
-            earlier = before[body].shape
-        }
-        guard let previousEdges = try? Self.matchEdges(signatures, in: earlier), !previousEdges.isEmpty else { return nil }
+        guard PCKShape.kernelAvailable, !list.isEmpty else { return nil }
+        // Die Körper müssen der Stand nach dem letzten Feature sein
+        if let after = featureRecorder.cache[list[list.count - 1].id],
+           !(after.indices.contains(body) && after[body].shape === shape) { return nil }
         let pieces = selectedEdges.filter { $0.body == body }.map(\.edge)
         guard !pieces.isEmpty else { return nil }
         let trace = EdgeTrace(shape)
@@ -442,25 +436,131 @@ extension ModelStore {
             samples.append(points)
             directions.append(Self.edgeSignature(shape, edge: piece, body: body)?.direction)
         }
-        // Wo lagen die gewählten Stücke vor der vorigen Rundung? (Die Rundung kürzt die Nachbarkante nur.)
-        guard let newEdges = Self.originalEdges(samples, directions: directions, in: earlier),
-              !newEdges.contains(where: { previousEdges.contains($0) }) else { return nil }
-        // Grenzen sie an eine Kante der vorigen Rundung (gemeinsamer Eckpunkt)?
-        let earlierTrace = EdgeTrace(earlier)
-        let previousPoints = previousEdges.flatMap { earlierTrace.samples($0) }
-        let touches = newEdges.contains { edge in
-            earlierTrace.samples(edge).contains { point in
-                previousPoints.contains { simd_distance($0, point) < 1e-3 }
+        // Rückwärts durch den Verlauf: die jüngste Rundung dieses Körpers, an deren Kanten die Auswahl grenzt.
+        // Schritte dazwischen (andere Rundungen, Schnitte …) sind erlaubt, solange die gewählten Stücke vor der
+        // Rundung schon auf einer Kante lagen (originalEdges); sonst lohnt weiter zurück nichts.
+        var index = list.count - 1
+        var steps = 0
+        while index >= 0, steps < Self.blendSearchDepth {
+            let previous = list[index]
+            let current = index
+            index -= 1
+            steps += 1
+            // Ein Snapshot speichert einen festen Körperstand. Ein Nachbau vor ihm
+            // würde die neue Rundung beim Abspielen wieder überschreiben.
+            if previous.kind == .snapshot { return nil }
+            guard previous.kind == .fillet, !previous.isSuppressed, !previous.failed,
+                  let signatures = previous.data.edges, let first = signatures.first,
+                  (previous.data.target ?? first.body) == body else { continue }
+            let earlier: PCKShape
+            if current == list.count - 1, let saved = featureRecorder.preBlendShape,
+               saved.featureID == previous.id, saved.body == body {
+                earlier = saved.shape
+            } else {
+                guard let before = featureState(before: current), before.indices.contains(body) else { return nil }
+                earlier = before[body].shape
             }
+            guard let previousEdges = try? Self.matchEdges(signatures, in: earlier), !previousEdges.isEmpty else { continue }
+            // Wo lagen die gewählten Stücke vor dieser Rundung? (Die Rundung kürzt die Nachbarkante nur.)
+            // Gar nicht (erst danach entstanden) bzw. Teil dieser Rundung selbst: keine Zusammenfassung
+            guard let newEdges = Self.originalEdges(samples, directions: directions, in: earlier),
+                  !newEdges.contains(where: { previousEdges.contains($0) }) else { return nil }
+            // Grenzen sie an eine Kante dieser Rundung (gemeinsamer Eckpunkt)?
+            let earlierTrace = EdgeTrace(earlier)
+            let previousPoints = previousEdges.flatMap { earlierTrace.samples($0) }
+            let touches = newEdges.contains { edge in
+                earlierTrace.samples(edge).contains { point in
+                    previousPoints.contains { simd_distance($0, point) < 1e-3 }
+                }
+            }
+            guard touches else { continue }
+            var newSignatures: [EdgeSignature] = []
+            for edge in newEdges {
+                guard let signature = Self.edgeSignature(earlier, edge: edge, body: body) else { return nil }
+                newSignatures.append(signature)
+            }
+            return BlendMergeGeometry(index: current, shape: earlier, previousEdges: previousEdges, newEdges: newEdges,
+                                      signatures: newSignatures)
         }
-        guard touches else { return nil }
-        var newSignatures: [EdgeSignature] = []
-        for edge in newEdges {
-            guard let signature = Self.edgeSignature(earlier, edge: edge, body: body) else { return nil }
-            newSignatures.append(signature)
+        return nil
+    }
+
+    // MARK: Zusammenfassen mit einer früheren Rundung (nicht der letzten): Nachbau ab dort
+
+    /// setEdgeValue: Grenzt die Auswahl an eine frühere Rundung, die nicht das letzte Feature ist, wird sie dort
+    /// als weiterer Kantensatz eingetragen und der Verlauf ab dieser Rundung neu gerechnet.
+    /// true = diese Anfrage wird hier bearbeitet; eine direkte Teilrundung ist dann kein Ersatz.
+    func previewMergedBlend(body: Int, value: Double) -> Bool {
+        guard edgeOperation == .fillet, edgePartialRange == nil, value > 0, bodies.indices.contains(body) else { return false }
+        let key = currentOrderedKey(value: value)
+        guard let merge = blendMerge(body: body, value: value, end: key.end),
+              merge.index < features.count - 1 else { return false }
+        if let known = featureRecorder.blendMerge?.succeeded[key] {
+            showMergedBlend(known, index: merge.index)
+            return true
         }
-        return BlendMergeGeometry(index: index, shape: earlier, previousEdges: previousEdges, newEdges: newEdges,
-                                  signatures: newSignatures)
+        if featureRecorder.blendMerge?.failed.contains(key) ?? false {
+            dropPreview()
+            message = "Gemeinsame Rundung an dieser Ecke mit diesem Radius nicht möglich."
+            return true
+        }
+        guard !blendJobs.overdue else {
+            dropPreview()
+            message = Self.blendTooHeavyMessage
+            return true
+        }
+        blendJobs.orderedToken += 1
+        let token = blendJobs.orderedToken
+        let generation = blendJobs.generation
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.orderedDelay) { [weak self] in
+            guard let self, self.blendJobs.orderedToken == token, self.blendJobs.generation == generation else { return }
+            self.runMergedBlend(body: body, key: key)
+        }
+        message = "Gemeinsame Rundung wird berechnet …"
+        return true
+    }
+
+    /// Entprellter Nachbau: features[merge.index] durch die zusammengefasste Rundung ersetzen, ab dort neu rechnen.
+    private func runMergedBlend(body: Int, key: OrderedAttemptKey) {
+        guard bodies.indices.contains(body), edgeOperation == .fillet, currentOrderedKey(value: edgeValue) == key,
+              let merge = blendMerge(body: body, value: key.value, end: key.end),
+              features.indices.contains(merge.index) else { return }
+        var list = features
+        let failedBefore = list.map(\.failed)
+        list[merge.index] = merge.feature
+        var states: [UUID: [SceneBody]] = [:]
+        var outcome: OrderedAttempt?
+        if let run = runFeatures(&list, from: merge.index, sketches: sketches, values: variableValues,
+                                 collect: { id, state in states[id] = state }),
+           !list[merge.index].failed, run.bodies.count == bodies.count,
+           !list.indices.contains(where: { $0 > merge.index && list[$0].failed && !failedBefore[$0] }) {
+            outcome = OrderedAttempt(bodies: carryingBodyDetails(run.bodies), features: list, states: states,
+                                     amount: key.value)
+        }
+        guard let outcome else {
+            featureRecorder.blendMerge?.failed.insert(key)
+            dropPreview()
+            message = "Gemeinsame Rundung an dieser Ecke mit diesem Radius nicht möglich."
+            return
+        }
+        if (featureRecorder.blendMerge?.succeeded.count ?? 0) >= 4 { featureRecorder.blendMerge?.succeeded = [:] }
+        featureRecorder.blendMerge?.succeeded[key] = outcome
+        // Die gemeinsame Rundung hat Vorrang: direkte Vorschau aus dem Hintergrund verwerfen
+        supersedeBlendJobs()
+        showMergedBlend(outcome, index: merge.index)
+        blendJobs.finished?()
+    }
+
+    private func showMergedBlend(_ attempt: OrderedAttempt, index: Int) {
+        guard let body = selectedEdges.first?.body, bodies.indices.contains(body),
+              attempt.features.indices.contains(index) else { return }
+        previewHiddenSketch = bodies[body].sketchID
+        showPreview(attempt.bodies, name: attempt.features[index].name)
+        // Nach showPreview (das die Aufzeichnung leert): beim Übernehmen gilt die geänderte Liste
+        featureRecorder.orderedPreview = OrderedBlendPreview(features: attempt.features, states: attempt.states)
+        let later = features.count - 1 - index
+        message = "Zu „\(features[index].name)“ (Schritt \(index + 1)) als weiterer Kantensatz hinzugefügt, "
+            + "\(later) spätere\(later == 1 ? "r Schritt" : " Schritte") neu gerechnet – die Rundungen laufen in der Ecke sauber ineinander."
     }
 
     // MARK: Rückfall: alle Teilstücke einer geraden Kante

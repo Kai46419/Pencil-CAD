@@ -1,6 +1,13 @@
 # PencilCAD
 
-## iPad-Teststand Build 16 vom 30.10.2026
+## iPad-Teststand Build 33 vom 03.11.2026
+
+Aktueller Prüfbericht: `BUILD_33_AENDERUNGEN_UND_TESTS.md`. Abrunden/Fasen: 4/5 für die geprüften
+Einzel- und Mehrkantenecken sowie den Verlauf-Nachbau. Ein geometrisch ungültiger Radius bleibt abgelehnt;
+Projekt 21 mit 27,5 mm ist ein solcher Standardfillet-Grenzfall. Ellipsen und Splines lassen sich ab
+Build 32 an Schnittpunkten abschnittsweise beschneiden.
+
+### Frühere Berichte
 
 Die neuen Änderungen und Grenzen stehen in `BUILD_16_AENDERUNGEN_UND_TESTS.md`, `BUILD_14_AENDERUNGEN_UND_TESTS.md` und `BUILD_13_AENDERUNGEN_UND_TESTS.md`.
 Build 11 und 12 wurden nach Abrundungsabstürzen zurückgezogen; die Befunde stehen in ihren Berichten.

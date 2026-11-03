@@ -541,6 +541,30 @@ final class SheetKernelIntegrationTests: XCTestCase {
         XCTAssertNil(IsolatedBlend.run(shape: shape, edges: [22], mode: 0, value: 27.5))
     }
 
+    func testThreeBoxCornerEdgesBlendTogetherAsValidSolid() throws {
+        let shape = PCKShape.box(width: 20, depth: 20, height: 20)
+        let edges = Set((1...shape.faceCount).flatMap { shape.edgeNumbers(ofFace: $0).map(\.intValue) })
+        let geometry = edges.compactMap { number -> (Int, [Double])? in
+            guard let values = shape.geometry(ofEdge: number)?.map(\.doubleValue), values.count >= 8,
+                  values[0] == 0 else { return nil }
+            return (number, values)
+        }
+        let origin = SIMD3<Double>(
+            geometry.flatMap { [$0.1[2], $0.1[5]] }.min() ?? 0,
+            geometry.flatMap { [$0.1[3], $0.1[6]] }.min() ?? 0,
+            geometry.flatMap { [$0.1[4], $0.1[7]] }.min() ?? 0)
+        let corner = geometry.filter { _, g in
+            simd_distance(SIMD3<Double>(g[2], g[3], g[4]), origin) < 1e-6
+                || simd_distance(SIMD3<Double>(g[5], g[6], g[7]), origin) < 1e-6
+        }.map(\.0).sorted()
+        XCTAssertEqual(corner.count, 3)
+        let rounded = try XCTUnwrap(shape.filleting(edges: corner.map(NSNumber.init(value:)), radius: 3))
+        XCTAssertTrue(rounded.isBRepValid)
+        XCTAssertTrue(rounded.isClosedSolid)
+        XCTAssertLessThan(rounded.volume, shape.volume)
+        XCTAssertTrue(rounded.isValidBlendPreview(from: shape))
+    }
+
     func testLargestValidRadiusForProject21CurvedEdge() throws {
         let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "Project21_CurvedExtrusion", withExtension: "step"))
         let shape = try XCTUnwrap(PCKShape.readSTEP(path: url.path)?.first)
@@ -719,6 +743,50 @@ final class SheetKernelIntegrationTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(editedVolume), volumes[1], accuracy: 0.01)
         XCTAssertGreaterThan(volumes[0] - volumes[1], 1)
         XCTAssertGreaterThan(volumes[1] - volumes[2], 50)
+    }
+
+    func testAdjacentFilletCanReplayAnInterveningIndependentFeature() async throws {
+        let project = Project(id: UUID(), name: "Eckenverlauf", modified: Date())
+        defer { try? FileManager.default.removeItem(at: project.folder) }
+        try FileManager.default.createDirectory(at: project.folder, withIntermediateDirectories: true)
+        for name in ["features", "sketches", "bodies", "project"] {
+            let source = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "Project8_Adjacent_\(name)", withExtension: "json"))
+            try FileManager.default.copyItem(at: source, to: project.folder.appending(path: "\(name).json"))
+        }
+        let step = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "Project8_AdjacentFilletInput", withExtension: "step"))
+        try FileManager.default.copyItem(at: step, to: project.folder.appending(path: "model.step"))
+        let model = ModelStore(folder: project.folder)
+        XCTAssertEqual(model.features.count, 3)
+        model.previewInsert(.box, size: [5, 5, 5], at: [100, 0, 0])
+        model.commitPreview()
+        XCTAssertEqual(model.features.count, 4)
+        XCTAssertEqual(model.bodies.count, 2)
+        model.toggleEdge(EdgeRef(body: 0, edge: 30))
+        let merge = try XCTUnwrap(model.blendMerge(body: 0, value: 1.5, end: nil))
+        XCTAssertEqual(merge.index, 2)
+        var edited = model.features
+        edited[merge.index] = merge.feature
+        let run = try XCTUnwrap(model.runFeatures(&edited, from: merge.index, sketches: model.sketches,
+                                                 values: model.variableValues))
+        XCTAssertEqual(run.bodies.count, 2)
+        XCTAssertFalse(edited[merge.index].failed)
+        XCTAssertTrue(run.bodies[0].shape.isClosedSolid)
+        XCTAssertEqual(run.bodies[1].shape.volume, 125, accuracy: 1e-5)
+        model.setEdgeValue(27.5)
+        for _ in 0..<100 where model.message?.contains("wird berechnet") == true {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        XCTAssertNil(model.featureRecorder.orderedPreview)
+        XCTAssertFalse(model.hasPreview, "Ein fehlgeschlagener Nachbau darf keine direkte Teilrundung zeigen")
+        model.setEdgeValue(1.5)
+        for _ in 0..<100 where model.featureRecorder.orderedPreview == nil {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        XCTAssertNotNil(model.featureRecorder.orderedPreview, model.message ?? "Kein gemeinsamer Nachbau")
+        model.commitPreview()
+        XCTAssertEqual(model.features.count, 4)
+        XCTAssertEqual(model.bodies.count, 2)
+        XCTAssertTrue(model.bodies[0].shape.isClosedSolid)
     }
 
     func testProject8AdjacentFilletReopensWithoutFirstHistoryReplay() throws {

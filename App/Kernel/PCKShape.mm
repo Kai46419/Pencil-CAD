@@ -2334,6 +2334,11 @@ static TopoDS_Shape blendEdges(const TopoDS_Shape &shape, const std::vector<Topo
             current = blendOnce(current, step, value, chamfer);
             if (current.IsNull()) return TopoDS_Shape();
         }
+        // Der sequenzielle Rückfall ist nur vollständig, wenn keine ursprünglich gewählte
+        // Kante unverrundet übrig bleibt. Eine bloß gekürzte Nachbarkante zählt nicht.
+        for (const auto &edge : mergedEdges) {
+            if (!matchEdges({edge}, current).empty()) return TopoDS_Shape();
+        }
         return current;
     } catch (...) {
         return TopoDS_Shape();

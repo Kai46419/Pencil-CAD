@@ -262,7 +262,11 @@ extension ModelStore {
                               partialRange: partialRange,
                               featureIDs: features.map(\.id))
         let numbers = blendEdges.filter { $0.body == body }.map { NSNumber(value: $0.edge) }
-        let merge = operation == .fillet && partialRange == nil ? blendMerge(body: body, value: value, end: end) : nil
+        // Eine frühere Rundung braucht zuerst einen vollständigen Nachbau des Verlaufs.
+        // Nur die unmittelbar letzte Rundung darf hier direkt ersetzt werden.
+        let merge = operation == .fillet && partialRange == nil
+            ? blendMerge(body: body, value: value, end: end).flatMap { $0.index == features.count - 1 ? $0 : nil }
+            : nil
         let input = BlendJobInput(operation: operation, shape: shape, edges: numbers, value: value, second: second,
                                   end: end, partialRange: partialRange, mergeShape: merge?.shape,
                                   mergeEdges: (merge?.edges ?? []).map { NSNumber(value: $0) },

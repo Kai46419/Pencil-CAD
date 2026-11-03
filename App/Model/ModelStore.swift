@@ -746,6 +746,10 @@ final class ModelStore: ObservableObject {
         // Kante an die vorige Rundung, beide zusammen
         let blendEdges = completesEdgeChain && edgePartialRange == nil
             ? completedEdgeChain(selectedEdges, body: body) : selectedEdges
+        // Liegt die benachbarte Rundung weiter zurück, wird sie nach kurzer Ruhe
+        // zusammen mit den späteren Verlaufsschritten neu berechnet.
+        if edgeOperation == .fillet && edgePartialRange == nil,
+           previewMergedBlend(body: body, value: value) { return }
         if edgePartialRange != nil && blendEdges.count != 1 {
             message = "Teilabrundung: genau eine Kante wählen."
             dropPreview()
