@@ -10,7 +10,17 @@ extension Workspace {
         let savedStep = GridSettings.stored(in: project.folder) ?? sketch.gridStep
         sketch.gridStep = unit.gridSteps.contains(where: { abs($0 - savedStep) < 1e-9 })
             ? savedStep : unit.nearestGridStep(to: savedStep)
+        // Alte grid.json-Dateien enthalten nur die Rasterweite: diese als feste Auswahl behandeln.
+        sketch.options.gridAuto = GridSettings.storedAutomatic(in: project.folder)
+            ?? (GridSettings.stored(in: project.folder) == nil)
         sketch.gridStorageFolder = project.folder
+        let activeSketch = sketch
+        let folder = project.folder
+        sketch.options.onGridAutoChange = { [weak activeSketch] automatic in
+            guard let activeSketch else { return }
+            GridSettings.store(activeSketch.gridStep, automatic: automatic, in: folder)
+            activeSketch.objectWillChange.send()
+        }
     }
 
     /// Fenster wird (wieder) aktiv: Die Einheit dieses Projekts gilt. LengthUnit.current ist global – mit zwei

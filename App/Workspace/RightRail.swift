@@ -1,6 +1,10 @@
 import SwiftUI
 import simd
 
+@MainActor private func fixedGridSelection(_ sketch: SketchController) -> Binding<Double> {
+    Binding(get: { sketch.gridStep }, set: { sketch.chooseGridStep($0) })
+}
+
 /// Seitenleisten-Fenster rechts.
 enum SidePanel: String, Identifiable {
     case history = "Verlauf"
@@ -104,7 +108,9 @@ struct SnapMenu: View {
                     }
                 }
                 .disabled(!sketch.snapEnabled)
-                Picker("Raster", selection: $sketch.gridStep) {
+                Toggle("Automatisch (1-2-5)", isOn: Binding(
+                    get: { sketch.options.gridAuto }, set: { sketch.options.gridAuto = $0 }))
+                Picker("Raster", selection: fixedGridSelection(sketch)) {
                     ForEach(gridSteps, id: \.self) { step in
                         Text(LengthUnit.current.gridNumber(step)).tag(step)
                     }
@@ -195,13 +201,13 @@ struct RightRail: View {
     /// Rastermaß als runder Knopf.
     private var gridMenu: some View {
         Menu {
-            Picker("Raster", selection: $sketch.gridStep) {
+            Picker("Raster", selection: fixedGridSelection(sketch)) {
                 ForEach(Self.gridSteps, id: \.self) { step in
                     Text(LengthUnit.current.gridLabel(step)).tag(step)
                 }
             }
         } label: {
-            Text(LengthUnit.current.gridNumber(sketch.gridStep))
+            Text(sketch.isActive && sketch.options.gridAuto ? "Auto" : LengthUnit.current.gridNumber(sketch.gridStep))
                 .font(.system(size: 13, weight: .semibold).monospacedDigit())
                 .frame(width: 44, height: 44)
                 .floatingSurface(in: Circle())
@@ -441,18 +447,18 @@ struct PaletteViewControls: View {
                        isOn: Binding(get: { sketch.options.gridAuto }, set: { sketch.options.gridAuto = $0 }))
                 Divider()
             }
-            Picker("Raster", selection: $sketch.gridStep) {
+            Picker("Raster", selection: fixedGridSelection(sketch)) {
                 ForEach(Self.gridSteps, id: \.self) { step in
                     Text(LengthUnit.current.gridLabel(step)).tag(step)
                 }
             }
         } label: {
             VStack(spacing: -1) {
-                Text(LengthUnit.current.gridNumber(sketch.gridStep))
+                Text(sketch.isActive && sketch.options.gridAuto ? "Auto" : LengthUnit.current.gridNumber(sketch.gridStep))
                     .font(.system(size: 11, weight: .semibold).monospacedDigit())
                     .lineLimit(1)
                     .minimumScaleFactor(0.6)
-                Text(LengthUnit.current.symbol)
+                Text(sketch.isActive && sketch.options.gridAuto ? "Raster" : LengthUnit.current.symbol)
                     .font(.system(size: 9, weight: .semibold))
                     .lineLimit(1)
             }

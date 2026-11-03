@@ -149,19 +149,29 @@ enum LengthUnit: String, CaseIterable, Identifiable, Codable {
 /// Das U-Raster ist eine Projekteinstellung; Ziehpfeile und Skizzenfang verwenden denselben Wert in mm.
 struct GridSettings: Codable {
     let stepMillimeters: Double
+    /// Fehlt in älteren Projekten; ein vorhandenes Rastermaß war dort eine ausdrückliche Wahl.
+    let automatic: Bool?
 
-    static func stored(in folder: URL?) -> Double? {
+    private static func read(in folder: URL?) -> Self? {
         guard let url = folder?.appending(path: "grid.json"),
               let data = try? Data(contentsOf: url),
-              let value = try? JSONDecoder().decode(Self.self, from: data).stepMillimeters,
-              value.isFinite, value > 0 else { return nil }
-        return value
+              let setting = try? JSONDecoder().decode(Self.self, from: data),
+              setting.stepMillimeters.isFinite, setting.stepMillimeters > 0 else { return nil }
+        return setting
     }
 
-    static func store(_ step: Double, in folder: URL?) {
+    static func stored(in folder: URL?) -> Double? {
+        read(in: folder)?.stepMillimeters
+    }
+
+    static func storedAutomatic(in folder: URL?) -> Bool? {
+        read(in: folder)?.automatic
+    }
+
+    static func store(_ step: Double, automatic: Bool, in folder: URL?) {
         guard step.isFinite, step > 0,
               let folder,
-              let data = try? JSONEncoder().encode(Self(stepMillimeters: step)) else { return }
+              let data = try? JSONEncoder().encode(Self(stepMillimeters: step, automatic: automatic)) else { return }
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let url = folder.appending(path: "grid.json")
         try? data.write(to: url, options: .atomic)
