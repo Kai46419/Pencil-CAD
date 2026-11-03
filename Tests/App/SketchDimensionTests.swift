@@ -666,7 +666,7 @@ final class SketchDimensionTests: XCTestCase {
         XCTAssertEqual(shape.volume, 1000, accuracy: 1e-5)
     }
 
-    func testAdjacentSecondFilletAfterLargeFirstFillet() throws {
+    func testAdjacentSecondFilletRejectsPartialSelectionAfterLargeFirstFillet() throws {
         try XCTSkipUnless(PCKShape.kernelAvailable)
         let base = PCKShape.box(width: 25, depth: 25, height: 12.5)
         let face = try XCTUnwrap((1...base.faceCount).first {
@@ -676,7 +676,10 @@ final class SketchDimensionTests: XCTestCase {
         let pushed = try XCTUnwrap(base.extruding(face: face, distance: 8.5))
         let first = try XCTUnwrap(pushed.filleting(edges: [8], radius: 9))
         XCTAssertTrue(first.isClosedSolid)
-        let second = try XCTUnwrap(first.filleting(edges: [3, 9], radius: 2))
+        XCTAssertNil(first.filleting(edges: [9], radius: 2))
+        XCTAssertNil(first.filleting(edges: [3, 9], radius: 2),
+                     "Kante 9 darf nicht stillschweigend aus der Auswahl verschwinden")
+        let second = try XCTUnwrap(first.filleting(edges: [3], radius: 2))
         XCTAssertTrue(second.isClosedSolid)
         XCTAssertGreaterThan(second.volume, 0)
         let mesh = second.triangulate(deflection: 0.05)

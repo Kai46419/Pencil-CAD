@@ -2292,13 +2292,19 @@ static TopoDS_Shape blendOnce(const TopoDS_Shape &shape, const std::vector<TopoD
         if (chamfer) {
             BRepFilletAPI_MakeChamfer maker(shape);
             for (const auto &edge : edges) maker.Add(value, edge);
+            for (const auto &edge : edges) {
+                if (maker.Contour(edge) == 0) return TopoDS_Shape();
+            }
             maker.Build();
             if (maker.IsDone()) return validSolid(maker.Shape());
         } else {
             BRepFilletAPI_MakeFillet maker(shape);
             for (const auto &edge : edges) maker.Add(value, edge);
+            for (const auto &edge : edges) {
+                if (maker.Contour(edge) == 0) return TopoDS_Shape();
+            }
             maker.Build();
-            if (maker.IsDone()) return validSolid(maker.Shape());
+            if (maker.IsDone() && maker.NbFaultyContours() == 0) return validSolid(maker.Shape());
         }
     } catch (...) {
     }
@@ -2638,9 +2644,10 @@ static std::vector<TopoDS_Edge> edgesFromNumbers(const TopTools_IndexedMapOfShap
             const int contour = maker.Contour(edge);
             if (contour > 0) maker.SetRadius(radius, contour, edge);
             else maker.Add(radius, edge);
+            if (maker.Contour(edge) == 0) return nil;
         }
         maker.Build();
-        if (!maker.IsDone() || maker.Shape().IsNull()) return nil;
+        if (!maker.IsDone() || maker.NbFaultyContours() > 0 || maker.Shape().IsNull()) return nil;
         const TopoDS_Shape checked = validSolid(maker.Shape());
         return checked.IsNull() ? nil : [[[PCKShape alloc] initWithShape:checked] meshCompleteFillet];
     } catch (...) {
@@ -2711,9 +2718,12 @@ static std::vector<TopoDS_Edge> edgesFromNumbers(const TopTools_IndexedMapOfShap
         TopExp::MapShapesAndAncestors(_shape, TopAbs_EDGE, TopAbs_FACE, edgeFaces);
         BRepFilletAPI_MakeChamfer chamfer(_shape);
         int added = 0;
-        for (const auto &edge : edgesFromNumbers(_edges, numbers)) {
-            if (!edgeFaces.Contains(edge) || edgeFaces.FindFromKey(edge).IsEmpty()) continue;
+        const std::vector<TopoDS_Edge> edges = edgesFromNumbers(_edges, numbers);
+        if (edges.size() != numbers.count) return nil;
+        for (const auto &edge : edges) {
+            if (!edgeFaces.Contains(edge) || edgeFaces.FindFromKey(edge).IsEmpty()) return nil;
             chamfer.Add(distance, distance2, edge, TopoDS::Face(edgeFaces.FindFromKey(edge).First()));
+            if (chamfer.Contour(edge) == 0) return nil;
             added += 1;
         }
         if (added == 0) return nil;
@@ -2733,9 +2743,12 @@ static TopoDS_Shape variableFilletOnce(const TopoDS_Shape &shape, const std::vec
         return TopoDS_Shape();
     try {
         BRepFilletAPI_MakeFillet maker(shape);
-        for (const auto &edge : edges) maker.Add(r1, r2, edge);
+        for (const auto &edge : edges) {
+            maker.Add(r1, r2, edge);
+            if (maker.Contour(edge) == 0) return TopoDS_Shape();
+        }
         maker.Build();
-        if (maker.IsDone() && !maker.Shape().IsNull()) return validSolid(maker.Shape());
+        if (maker.IsDone() && maker.NbFaultyContours() == 0 && !maker.Shape().IsNull()) return validSolid(maker.Shape());
     } catch (...) {
     }
     return TopoDS_Shape();

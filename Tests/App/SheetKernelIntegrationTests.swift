@@ -488,6 +488,49 @@ final class SheetKernelIntegrationTests: XCTestCase {
         XCTAssertLessThan(result.volume, box.volume)
     }
 
+    func testFilletRejectsCylinderSeamInsteadOfSilentlyRoundingOnlyTop() throws {
+        let cylinder = try XCTUnwrap(PCKShape.cylinder(base: .zero, axis: [0, 0, 1], radius: 10, height: 20))
+        let top = try XCTUnwrap(IsolatedBlend.run(shape: cylinder, edges: [1], mode: 0, value: 2))
+        XCTAssertLessThan(top.volume, cylinder.volume)
+        XCTAssertNil(IsolatedBlend.run(shape: cylinder, edges: [2], mode: 0, value: 2))
+        XCTAssertNil(IsolatedBlend.run(shape: cylinder, edges: [1, 2], mode: 0, value: 2),
+                     "Eine Nahtkante darf nicht stillschweigend aus einer Mehrfachauswahl verschwinden")
+    }
+
+    func testChamferRejectsCylinderSeamInsteadOfSilentlyChamferingOnlyTop() throws {
+        let cylinder = try XCTUnwrap(PCKShape.cylinder(base: .zero, axis: [0, 0, 1], radius: 10, height: 20))
+        let top = try XCTUnwrap(IsolatedBlend.run(shape: cylinder, edges: [1], mode: 1, value: 2))
+        XCTAssertLessThan(top.volume, cylinder.volume)
+        XCTAssertNil(IsolatedBlend.run(shape: cylinder, edges: [2], mode: 1, value: 2))
+        XCTAssertNil(IsolatedBlend.run(shape: cylinder, edges: [1, 2], mode: 1, value: 2),
+                     "Eine Nahtkante darf nicht stillschweigend aus einer Mehrfachauswahl verschwinden")
+    }
+
+    func testVariableFilletRejectsCylinderSeamInsteadOfSilentlyRoundingOnlyTop() throws {
+        let cylinder = try XCTUnwrap(PCKShape.cylinder(base: .zero, axis: [0, 0, 1], radius: 10, height: 20))
+        XCTAssertNil(cylinder.filleting(edges: [1, 2], radius: 2, endRadius: 1))
+    }
+
+    func testPerEdgeRadiiRejectCylinderSeamInsteadOfSilentlyRoundingOnlyTop() throws {
+        let cylinder = try XCTUnwrap(PCKShape.cylinder(base: .zero, axis: [0, 0, 1], radius: 10, height: 20))
+        XCTAssertNil(cylinder.filleting(edges: [1, 2], radii: [2, 1]))
+    }
+
+    func testAsymmetricChamferRejectsCylinderSeamInsteadOfSilentlyChamferingOnlyTop() throws {
+        let cylinder = try XCTUnwrap(PCKShape.cylinder(base: .zero, axis: [0, 0, 1], radius: 10, height: 20))
+        XCTAssertNil(cylinder.chamfering(edges: [1, 2], distance: 2, distance2: 1))
+    }
+
+    func testProject8MixedEdgeSelectionDoesNotReturnSingleEdgeFillet() throws {
+        let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "Project8_AdjacentFilletInput", withExtension: "step"))
+        let shape = try XCTUnwrap(PCKShape.readSTEP(path: url.path)?.first)
+        let one = try XCTUnwrap(shape.filleting(edges: [20], radius: 3))
+        if let both = shape.filleting(edges: [11, 20], radius: 3) {
+            XCTAssertGreaterThan(abs(both.volume - one.volume), 1e-3,
+                                 "Die Mehrfachauswahl darf nicht dieselbe Teilrundung wie Kante 20 liefern")
+        }
+    }
+
     func testFilletRejectsEntireSelectionWhenOneEdgeNumberIsStale() throws {
         let box = PCKShape.box(width: 20, depth: 20, height: 10)
         let edge = try XCTUnwrap(box.edgeNumbers(ofFace: 1).first)
