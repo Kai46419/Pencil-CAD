@@ -177,6 +177,9 @@ struct FeatureData: Codable {
     var edges: [EdgeSignature]?
     /// Parameter-Schlüssel je Kante bei gemeinsam berechneten Rundungen mit verschiedenen Radien.
     var edgeRadiusKeys: [String]?
+    /// Optionaler Eingabemodus für eine konstante Rundung zwischen ebenen Flächen.
+    /// Der Radius bleibt als Kernel-Parameter gespeichert; chordWidth ist das bearbeitbare Nutzereingabemaß.
+    var chordFactor: Double?
     var faces: [FaceSignature]?
     /// Ziel-Körper (Index)
     var target: Int?
@@ -419,6 +422,31 @@ extension ModelStore {
         feature.data.target = body
         let used = edges ?? selectedEdges
         featureRecorder.preview = PendingFeature(feature: feature, edges: used.filter { $0.body == body })
+    }
+
+    /// Die Sehnenbreite an der fertigen Vorschau und damit am nächsten Verlaufsschritt erhalten.
+    /// Ein mit einer früheren Rundung verschmolzener Mehrfachradius bleibt im Radiusmodus.
+    func noteBlendChord(width: Double, factor: Double) {
+        guard width.isFinite, width > 0, factor.isFinite, factor > 0 else { return }
+        if var pending = featureRecorder.preview, pending.feature.kind == .fillet,
+           pending.feature.value("end") == nil, pending.feature.value("startPercent") == nil {
+            let actualWidth = (pending.feature.value("radius") ?? width / factor) * factor
+            pending.feature.data.chordFactor = factor
+            pending.feature.parameters.append(.length("chordWidth", "Sehnenbreite", actualWidth))
+            featureRecorder.preview = pending
+            return
+        }
+        guard var ordered = featureRecorder.orderedPreview else { return }
+        let oldIDs = Set(features.map(\.id))
+        let newIndices = ordered.features.indices.filter {
+            !oldIDs.contains(ordered.features[$0].id) && ordered.features[$0].kind == .fillet
+        }
+        guard newIndices.count == 1 else { return }
+        let index = newIndices[0]
+        let actualWidth = (ordered.features[index].value("radius") ?? width / factor) * factor
+        ordered.features[index].data.chordFactor = factor
+        ordered.features[index].parameters.append(.length("chordWidth", "Sehnenbreite", actualWidth))
+        featureRecorder.orderedPreview = ordered
     }
 
     /// Feature „Abrunden“ bzw. „Fase“ mit seinen Werten (ohne Kanten und Ziel).
@@ -1065,6 +1093,15 @@ extension ModelStore {
             } catch {
                 throw FeatureError("Formel „\(formula)“: \(error.localizedDescription)")
             }
+        }
+        if feature.kind == .fillet, let factor = feature.data.chordFactor,
+           let width = feature.value("chordWidth"),
+           let index = feature.parameters.firstIndex(where: { $0.key == "radius" }) {
+            guard factor.isFinite, factor > 0, width.isFinite, width > 0 else {
+                throw FeatureError("Sehnenbreite muss größer als 0 sein.")
+            }
+            feature.parameters[index].value = width / factor
+            feature.parameters[index].formula = nil
         }
     }
 

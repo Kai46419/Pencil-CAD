@@ -18,11 +18,14 @@ struct FeaturePanel: View {
 
     @State private var showsInfo = false
     @AppStorage(CornerConfirm.storageKey) private var cornerConfirm = true
+    @AppStorage("PencilCAD.filletFloatingWindow") private var floatingWindow = true
 
     private var driver: ModelCommandDriver.Type? { ModelCommands.driver(command.id) }
+    private var usesFloatingWindow: Bool { command.id == .fillet && floatingWindow }
 
     var body: some View {
-        PaletteWindow {
+        PaletteWindow(width: usesFloatingWindow ? 320 : PaletteStyle.width,
+                      showsTop: !usesFloatingWindow, maxContentHeight: usesFloatingWindow ? 380 : 620) {
             VStack(spacing: 8) {
                 PaletteViewControls(workspace: workspace, sketch: workspace.sketch, panel: $panel, screenshot: screenshot)
                 // Großer Haken und großes Kreuz unter dem Ansichtswürfel (CornerConfirm.swift)
@@ -90,6 +93,11 @@ struct FeaturePanel: View {
             }
         }
         Menu {
+            if command.id == .fillet {
+                Toggle(isOn: $floatingWindow) {
+                    Label("Schwebendes Fenster", systemImage: "macwindow")
+                }
+            }
             Toggle(isOn: previewBinding) {
                 Label("Vorschau", systemImage: "eye")
             }
