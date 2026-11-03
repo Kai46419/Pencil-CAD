@@ -23,6 +23,13 @@ struct DrawingSheet: View {
     // Winkelmaße von Hand (Punkt 15): Werkzeug, erste angetippte Kante, Auswahl, Verschieben
     @State private var manualAngles: [DrawingAngle] = []
     @State private var angleTool = false
+    @State private var manualLengths: [DrawingLength] = []
+    @State private var lengthTool = false
+    @State private var lengthKind = DrawingLengthKind.aligned
+    @State private var firstVertex: DrawingVertex?
+    @State private var selectedLength: UUID?
+    @State private var draggedLength: UUID?
+    @State private var dragStartLengthHandle = Point2.zero
     @State private var pickedEdge: (Point2, Point2)?
     @State private var pickedTap = Point2.zero
     @State private var selectedAngle: UUID?
@@ -105,8 +112,8 @@ struct DrawingSheet: View {
                         Label("Sichern", systemImage: "square.and.arrow.down")
                     }
                     .disabled(layout == nil || isWorking)
-                    if selectedAngle != nil {
-                        Button("Winkelmaß löschen", systemImage: "trash", role: .destructive) { deleteSelectedAngle() }
+                    if selectedAngle != nil || selectedLength != nil {
+                        Button("Maß löschen", systemImage: "trash", role: .destructive) { deleteSelectedDimension() }
                     }
                     if let shareURL {
                         ShareLink(item: shareURL)
@@ -170,6 +177,22 @@ struct DrawingSheet: View {
             .onChange(of: angleTool) { _, _ in
                 pickedEdge = nil
                 angleHint = nil
+                if angleTool { lengthTool = false; firstVertex = nil }
+            }
+            Toggle(isOn: $lengthTool) {
+                Label("Längenmaß setzen", systemImage: "ruler")
+            }
+            .toggleStyle(.button)
+            .onChange(of: lengthTool) { _, _ in
+                firstVertex = nil
+                angleHint = nil
+                if lengthTool { angleTool = false; pickedEdge = nil }
+            }
+            if lengthTool {
+                Picker("Messart", selection: $lengthKind) {
+                    ForEach(DrawingLengthKind.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.menu)
             }
             Text(angleHint ?? angleToolText)
                 .font(.footnote)
@@ -181,6 +204,7 @@ struct DrawingSheet: View {
     }
 
     private var angleToolText: String {
+        if lengthTool { return firstVertex == nil ? "Ersten Endpunkt antippen" : "Zweiten Endpunkt derselben Ansicht antippen" }
         if angleTool { return pickedEdge == nil ? "Erste Kante antippen" : "Zweite Kante antippen" }
         if !manualAngles.isEmpty { return "Winkelmaß ziehen zum Verschieben, antippen zum Auswählen" }
         return ""
@@ -197,8 +221,15 @@ struct DrawingSheet: View {
         let k = Double(size.width) / TechnicalDrawing.sheetWidth
         let edge = pickedEdge
         let selected = manualAngles.first { $0.id == selectedAngle }.flatMap { TechnicalDrawing.angleShape($0) }
+        let selectedLinear = manualLengths.first { $0.id == selectedLength }.flatMap { TechnicalDrawing.lengthShape($0) }
+        let vertex = firstVertex?.point
         return Canvas { context, _ in
             func point(_ p: Point2) -> CGPoint { CGPoint(x: p.x * k, y: (TechnicalDrawing.sheetHeight - p.y) * k) }
+            if let vertex {
+                let p = point(vertex)
+                context.stroke(Path(ellipseIn: CGRect(x: p.x - 5, y: p.y - 5, width: 10, height: 10)),
+                               with: .color(.accentColor), lineWidth: 3)
+            }
             if let edge {
                 var path = Path()
                 path.move(to: point(edge.0))
@@ -212,6 +243,11 @@ struct DrawingSheet: View {
                 path.addRect(CGRect(x: min(a.x, b.x) - 3, y: min(a.y, b.y) - 3,
                                     width: abs(b.x - a.x) + 6, height: abs(b.y - a.y) + 6))
                 context.stroke(path, with: .color(.accentColor), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+            }
+            if let selectedLinear {
+                var path = Path()
+                path.addLines(selectedLinear.line.map(point))
+                context.stroke(path, with: .color(.accentColor), lineWidth: 3)
             }
         }
     }
@@ -233,6 +269,13 @@ struct DrawingSheet: View {
         }
     }
 
+    private func manualLength(at point: Point2, tolerance: Double) -> DrawingLength? {
+        manualLengths.first { length in
+            guard let shape = TechnicalDrawing.lengthShape(length) else { return false }
+            return TechnicalDrawing.hitsLength(shape, point, tolerance: tolerance)
+        }
+    }
+
     @MainActor
     private func dragChanged(_ value: DragGesture.Value, size: CGSize, k: Double) {
         if !isDragging || value.startLocation != dragStartLocation {
@@ -241,8 +284,20 @@ struct DrawingSheet: View {
             let hit = manualAngle(at: sheetPoint(value.startLocation, size: size), tolerance: 16 / k)
             draggedAngle = hit?.id
             dragStartHandle = hit?.handle ?? .zero
+            let linear = manualLength(at: sheetPoint(value.startLocation, size: size), tolerance: 16 / k)
+            draggedLength = hit == nil ? linear?.id : nil
+            dragStartLengthHandle = linear?.handle ?? .zero
         }
         let distance = hypot(Double(value.translation.width), Double(value.translation.height))
+        if let id = draggedLength, distance > 6,
+           let index = manualLengths.firstIndex(where: { $0.id == id }) {
+            let delta = Point2(Double(value.translation.width) / k, -Double(value.translation.height) / k)
+            manualLengths[index].handle = dragStartLengthHandle + delta
+            selectedLength = id
+            selectedAngle = nil
+            refreshAngleOverlay()
+            return
+        }
         guard let id = draggedAngle, distance > 6,
               let index = manualAngles.firstIndex(where: { $0.id == id }) else { return }
         let delta = Point2(Double(value.translation.width) / k, -Double(value.translation.height) / k)
@@ -254,9 +309,10 @@ struct DrawingSheet: View {
     @MainActor
     private func dragEnded(_ value: DragGesture.Value, size: CGSize, k: Double) {
         let moved = hypot(Double(value.translation.width), Double(value.translation.height)) > 6
-        let wasDragging = draggedAngle != nil
+        let wasDragging = draggedAngle != nil || draggedLength != nil
         isDragging = false
         draggedAngle = nil
+        draggedLength = nil
         if !moved {
             tapSheet(at: sheetPoint(value.location, size: size), tolerance: 16 / k)
         } else if wasDragging {
@@ -267,11 +323,44 @@ struct DrawingSheet: View {
     /// Antippen: Winkelmaß auswählen bzw. mit dem Werkzeug Kanten wählen.
     @MainActor
     private func tapSheet(at point: Point2, tolerance: Double) {
+        if let hit = manualLength(at: point, tolerance: tolerance) {
+            selectedLength = selectedLength == hit.id ? nil : hit.id
+            selectedAngle = nil
+            return
+        }
         if let hit = manualAngle(at: point, tolerance: tolerance) {
             selectedAngle = selectedAngle == hit.id ? nil : hit.id
+            selectedLength = nil
             return
         }
         selectedAngle = nil
+        selectedLength = nil
+        if lengthTool, let layout {
+            guard let vertex = TechnicalDrawing.nearestVertex(in: layout, to: point, maxDistance: tolerance) else {
+                angleHint = "Keinen Endpunkt getroffen – näher an eine Kante tippen"
+                return
+            }
+            guard let first = firstVertex else {
+                firstVertex = vertex
+                angleHint = nil
+                return
+            }
+            guard first.view == vertex.view else {
+                angleHint = "Beide Punkte müssen in derselben Ansicht liegen"
+                return
+            }
+            guard let length = TechnicalDrawing.length(from: first, to: vertex, kind: lengthKind) else {
+                angleHint = "Zwei verschiedene Punkte für dieses Maß wählen"
+                return
+            }
+            firstVertex = nil
+            angleHint = nil
+            manualLengths.append(length)
+            selectedLength = length.id
+            refreshAngleOverlay()
+            refreshShareFile()
+            return
+        }
         guard angleTool, let layout else { return }
         guard let edge = TechnicalDrawing.nearestEdge(in: layout, to: point, maxDistance: tolerance * 1.4) else {
             angleHint = "Keine Kante getroffen – näher an eine Linie tippen"
@@ -295,9 +384,11 @@ struct DrawingSheet: View {
     }
 
     @MainActor
-    private func deleteSelectedAngle() {
+    private func deleteSelectedDimension() {
         manualAngles.removeAll { $0.id == selectedAngle }
+        manualLengths.removeAll { $0.id == selectedLength }
         selectedAngle = nil
+        selectedLength = nil
         refreshAngleOverlay()
         refreshShareFile()
     }
@@ -308,6 +399,9 @@ struct DrawingSheet: View {
         var elements: [DrawingElement] = []
         for angle in manualAngles {
             if let shape = TechnicalDrawing.angleShape(angle) { elements += shape.elements }
+        }
+        for length in manualLengths {
+            if let shape = TechnicalDrawing.lengthShape(length) { elements += shape.elements }
         }
         angleOverlay = elements.isEmpty ? nil : TechnicalDrawing.overlayImage(elements, width: 1400)
     }
@@ -373,8 +467,14 @@ struct DrawingSheet: View {
             !TechnicalDrawing.containsEdge(result, angle.a0, angle.a1)
                 || !TechnicalDrawing.containsEdge(result, angle.b0, angle.b1)
         }
+        manualLengths.removeAll { length in
+            !TechnicalDrawing.containsVertex(length.from, in: result)
+                || !TechnicalDrawing.containsVertex(length.to, in: result)
+        }
         if let id = selectedAngle, !manualAngles.contains(where: { $0.id == id }) { selectedAngle = nil }
+        if let id = selectedLength, !manualLengths.contains(where: { $0.id == id }) { selectedLength = nil }
         pickedEdge = nil
+        firstVertex = nil
         refreshAngleOverlay()
         shareURL = writeShareFile(result)
         isWorking = false
@@ -386,7 +486,7 @@ struct DrawingSheet: View {
         let safeName = fileName.replacingOccurrences(of: "/", with: "-")
         let url = FileManager.default.temporaryDirectory.appending(path: "\(safeName).pdf")
         do {
-            try TechnicalDrawing.pdfData(TechnicalDrawing.withAngles(layout, manualAngles), title: projectName,
+            try TechnicalDrawing.pdfData(TechnicalDrawing.withDimensions(layout, angles: manualAngles, lengths: manualLengths), title: projectName,
                                          author: options.author).write(to: url)
             return url
         } catch {
@@ -397,7 +497,7 @@ struct DrawingSheet: View {
     @MainActor
     private func save(pdf: Bool) {
         guard let base = layout else { return }
-        let layout = TechnicalDrawing.withAngles(base, manualAngles)
+        let layout = TechnicalDrawing.withDimensions(base, angles: manualAngles, lengths: manualLengths)
         exportFile = ExportFile(data: pdf ? TechnicalDrawing.pdfData(layout, title: projectName, author: options.author)
                                           : TechnicalDrawing.dxfData(layout))
         exportType = pdf ? .pdf : .dxfFile

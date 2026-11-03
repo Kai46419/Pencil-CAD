@@ -125,6 +125,8 @@ struct DrawingOptions: Equatable {
 /// Fertig angeordnetes Blatt.
 struct DrawingLayout {
     var elements: [DrawingElement] = []
+    /// Sichtbare Ansichtsgeometrie und ihr Maßstab für manuelle Maße.
+    var views: [DrawingView: (scale: Double, visible: [[Point2]])] = [:]
     var scaleText = "1:1"
     var approximate = false
 }
@@ -308,6 +310,7 @@ enum TechnicalDrawing {
             }
             let lines = projection.visible.map { $0.map(map) }
             for line in lines { out.elements.append(.polyline(line, .visible)) }
+            out.views[view] = (scale, lines)
             if view != .iso { angleViews.append((lines: lines, scale: scale)) }
         }
         place(.front, at: frontOrigin, scale: s, bounds: front)
