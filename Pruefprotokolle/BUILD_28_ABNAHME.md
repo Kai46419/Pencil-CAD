@@ -1,11 +1,14 @@
-# Build 28 – virtuelles Abnahmeprotokoll
+# Build 28 – Abnahmeprotokoll
 
 | Prüfung | Ergebnis |
 | --- | --- |
 | Gezielte Skizzen-Tests | 42/42 bestanden |
 | Vollständige iOS-Simulator-Suite | 84/84 bestanden |
 | iOS-Release-Build ohne Gerätesignierung | `xcodebuild build` für `generic/platform=iOS`: erfolgreich; Buildnummer 28 |
-| iPad-Installation und realer Pencil-Test | Nicht durchgeführt: iPad abgezogen |
+| Signierter iPad-Release-Build | Erfolgreich; `CFBundleVersion = 28`; `codesign --verify --deep --strict` bestanden |
+| Installation und Start auf Kais iPad | Erfolgreich; installierte Version 28, PencilCAD-Prozess gestartet |
+| Projektdaten | Vorher 125 Dateien gesichert; nach Installation und Start 125/125 bytegleich, keine Datei entfernt oder verändert |
+| Manueller Pencil-Pro-Test | Offen: Stifthaptik und neue Skizzenabläufe müssen noch praktisch geprüft werden |
 | ZIP-Integrität und SHA-256 | Siehe Prüfsummen-Datei im Ausgabeverzeichnis |
 
-Der Build ist für den nächsten iPad-Test vorbereitet; er gilt bis dahin nicht als auf dem Gerät abgenommen.
+Der Build ist für den manuellen iPad-Test bereit. Aus Installation und Prozessstart folgt noch keine Abnahme der Stiftinteraktion.

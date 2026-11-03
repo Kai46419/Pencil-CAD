@@ -10,4 +10,7 @@ iOS Release:
 xcodebuild build -project PencilCAD.xcodeproj -scheme PencilCAD -configuration Release -destination generic/platform=iOS CODE_SIGNING_ALLOWED=NO
 ** BUILD SUCCEEDED **
 CFBundleVersion: 28
-iPad-Test: nicht durchgeführt (iPad abgezogen)
+iPad-Release-Build: erfolgreich, codesign-Verifikation bestanden
+Installation: Build 28 auf Kais iPad installiert und gestartet
+Dokumente: 125 von 125 gesicherten Dateien nach Installation bytegleich
+Manueller Pencil-Pro-Test: noch offen

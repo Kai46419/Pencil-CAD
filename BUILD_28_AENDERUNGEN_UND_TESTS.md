@@ -13,6 +13,7 @@
 - Gezielte Modelltests für Bogenfang, Bogenseite und Undo, Textpfad-Radius, Linienwinkel und Werkzeugrad: bestanden.
 - Vollständige Simulator-Suite: 84/84 Tests bestanden.
 - iOS-Release-Build für `generic/platform=iOS` ohne Gerätesignierung erfolgreich. Das ist eine Kompilationsprüfung, keine installierbare oder auf dem iPad getestete Version.
-- Reale Pencil-Pro-Haptik, Sichtbarkeit der Texte und Interaktion auf dem iPad sind **noch nicht** geprüft, weil das iPad abgezogen ist. Der Simulator kann keine fühlbare Stifthaptik belegen.
+- Signierter iPad-Release-Build erstellt, Signatur geprüft, auf Kais iPad installiert und gestartet. Die 125 vor der Installation gesicherten App-Dokumente waren danach bytegleich vorhanden.
+- Reale Pencil-Pro-Haptik, Sichtbarkeit der Werkzeugnamen und die fünf neuen Skizzenabläufe sind **noch nicht** durch einen manuellen Praxistest bestätigt. Der Simulator kann keine fühlbare Stifthaptik belegen.
 
 Siehe `Pruefprotokolle/BUILD_28_ABNAHME.md` für Build- und Paketprüfung.
