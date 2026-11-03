@@ -1,0 +1,15 @@
+{
+  "build": 30,
+  "device": "iPad von Kai (00008132-001C65AC0160C01C)",
+  "failingTestsObservedBeforeFix": 3,
+  "targetedTestsPassedOnSimulator": 3,
+  "simulatorTestsPassed": 94,
+  "targetedTestsPassedOnIPad": 3,
+  "ipadFullTestsPassed": 94,
+  "releaseInstalledVersion": "30",
+  "releaseLaunched": true,
+  "projectFilesBefore": 135,
+  "projectFilesAfter": 135,
+  "projectFilesByteIdentical": true,
+  "manualPencilFilletFlowTested": false
+}

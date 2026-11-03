@@ -488,6 +488,31 @@ final class SheetKernelIntegrationTests: XCTestCase {
         XCTAssertLessThan(result.volume, box.volume)
     }
 
+    func testFilletRejectsEntireSelectionWhenOneEdgeNumberIsStale() throws {
+        let box = PCKShape.box(width: 20, depth: 20, height: 10)
+        let edge = try XCTUnwrap(box.edgeNumbers(ofFace: 1).first)
+        XCTAssertNotNil(box.filleting(edges: [edge], radius: 2))
+        XCTAssertNil(box.filleting(edges: [edge, NSNumber(value: Int.max)], radius: 2),
+                     "Eine veraltete Kante darf keine scheinbar erfolgreiche Teilrundung ergeben")
+    }
+
+    func testChamferRejectsEntireSelectionWhenOneEdgeNumberIsStale() throws {
+        let box = PCKShape.box(width: 20, depth: 20, height: 10)
+        let edge = try XCTUnwrap(box.edgeNumbers(ofFace: 1).first)
+        XCTAssertNotNil(box.chamfering(edges: [edge], distance: 2))
+        XCTAssertNil(box.chamfering(edges: [edge, NSNumber(value: Int.max)], distance: 2),
+                     "Eine veraltete Kante darf keine scheinbar erfolgreiche Teilfase ergeben")
+    }
+
+    func testBlendWorkerDoesNotPreviewSubsetOfStaleSelection() throws {
+        let box = PCKShape.box(width: 20, depth: 20, height: 10)
+        let edge = try XCTUnwrap(box.edgeNumbers(ofFace: 1).first)
+        let selection = [edge, NSNumber(value: Int.max)]
+        XCTAssertNil(IsolatedBlend.run(shape: box, edges: selection, mode: 0, value: 2))
+        XCTAssertNil(IsolatedBlend.run(shape: box, edges: selection, mode: 1, value: 2))
+        XCTAssertEqual(box.volume, 4_000, accuracy: 0.01)
+    }
+
     func testSinglePlanarFilletVolumeBoundRejectsExcessMaterialLoss() throws {
         let source = PCKShape.box(width: 20, depth: 20, height: 10)
         let edge = try XCTUnwrap(source.edgeNumbers(ofFace: 1).first)

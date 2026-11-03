@@ -2608,12 +2608,12 @@ static std::vector<TopoDS_Edge> edgeVector(const TopTools_IndexedMapOfShape &map
     return result.IsNull() ? nil : [[PCKShape alloc] initWithShape:result];
 }
 
-/// Kanten aus Nummern (ab 1); ungültige Nummern werden übersprungen.
+/// Kanten aus Nummern (ab 1); eine veraltete Nummer macht die gesamte Auswahl ungültig.
 static std::vector<TopoDS_Edge> edgesFromNumbers(const TopTools_IndexedMapOfShape &edges, NSArray<NSNumber *> *numbers) {
     std::vector<TopoDS_Edge> result;
     for (NSNumber *number in numbers) {
         const NSInteger index = number.integerValue;
-        if (index < 1 || index > edges.Extent()) continue;
+        if (index < 1 || index > edges.Extent()) return {};
         result.push_back(TopoDS::Edge(edges(int(index))));
     }
     return result;
