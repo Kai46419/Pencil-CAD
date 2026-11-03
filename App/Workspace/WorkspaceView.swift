@@ -45,6 +45,7 @@ private struct WorkspaceContent: View {
     @State private var arPreview: URL?
     /// Zeitleiste des Verlaufs: automatisch, ein- oder ausgeblendet (TimelineBar.swift)
     @AppStorage(TimelineVisibility.storageKey) private var timelineVisibility = TimelineVisibility.automatic.rawValue
+    @AppStorage("PencilCAD.filletFloatingWindow") private var filletFloatingWindow = true
     /// Wie weit die Bildschirmtastatur die Leisten von unten verdeckt (über dem unteren sicheren Rand). Eigener Wert
     /// statt SwiftUI-Tastaturausweichen: Nach einem App-Wechsel mit offener Tastatur blieb der Tastaturbereich
     /// sonst stehen – Verlaufsleiste mitten im Bild, rechtes Fenster abgeschnitten (Kai).
@@ -126,6 +127,9 @@ private struct WorkspaceContent: View {
                                 .id(ObjectIdentifier(command))
                                 .padding(.bottom, 84)
                                 .transition(.opacity.combined(with: .move(edge: .trailing)))
+                            if command.id == .fillet && filletFloatingWindow {
+                                RightRail(workspace: workspace, sketch: sketch, panel: $panel, screenshot: takeScreenshot)
+                            }
                         } else {
                             // Körper gewählt: Schnellwahl „Oberfläche“ links neben der Leiste (SurfaceQuickPalette.swift);
                             // bei offenem Eigenschaften-Fenster steht sie dort

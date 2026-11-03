@@ -691,6 +691,49 @@ final class SketchDimensionTests: XCTestCase {
         }
     }
 
+    func testFilletChordWidthUsesActualPlanarFaceAngle() throws {
+        try XCTSkipUnless(PCKShape.kernelAvailable)
+        let box = PCKShape.box(width: 20, depth: 20, height: 20)
+        let model = ModelStore(folder: nil)
+        model.commit([model.newBody(box, name: "Quader")], name: "Test")
+        let edge = try XCTUnwrap(box.edgeNumbers(ofFace: 1).first?.intValue)
+        let factor = try XCTUnwrap(EdgeBlendCommand.chordFactor([EdgeRef(body: 0, edge: edge)], model: model))
+        XCTAssertEqual(factor, sqrt(2), accuracy: 1e-6)
+        let chordWidth = 1.5
+        let rounded = try XCTUnwrap(box.filleting(edges: [NSNumber(value: edge)], radius: chordWidth / factor))
+        XCTAssertTrue(rounded.isClosedSolid)
+        XCTAssertLessThan(rounded.volume, box.volume)
+    }
+
+    func testFilletChordWidthStaysEditableInFeatureHistory() throws {
+        try XCTSkipUnless(PCKShape.kernelAvailable)
+        let box = PCKShape.box(width: 20, depth: 20, height: 20)
+        let model = ModelStore(folder: nil)
+        model.commit([model.newBody(box, name: "Quader")], name: "Quader")
+        let edge = try XCTUnwrap(box.edgeNumbers(ofFace: 1).first?.intValue)
+        let reference = EdgeRef(body: 0, edge: edge)
+        let factor = try XCTUnwrap(EdgeBlendCommand.chordFactor([reference], model: model))
+        let rounded = try XCTUnwrap(box.filleting(edges: [NSNumber(value: edge)], radius: 1.5 / factor))
+        _ = CommandSync.edges([reference], model)
+        model.noteBlend(.fillet, value: 1.5 / factor, edges: [reference])
+        model.noteBlendChord(width: 1.5, factor: factor)
+        model.featureRecorder.pending = model.featureRecorder.preview
+        model.featureRecorder.preview = nil
+        model.commit([model.bodies[0].with(rounded)], name: "Abrunden")
+        let saved = try XCTUnwrap(model.features.last)
+        XCTAssertEqual(saved.value("chordWidth"), 1.5)
+        XCTAssertEqual(saved.data.chordFactor, factor)
+        var parameters = saved.parameters
+        let index = try XCTUnwrap(parameters.firstIndex(where: { $0.key == "chordWidth" }))
+        parameters[index].value = 2
+        model.updateFeature(saved.id, parameters: parameters)
+        let changed = try XCTUnwrap(model.features.first(where: { $0.id == saved.id }))
+        XCTAssertFalse(changed.failed, changed.problem ?? "Nachbau fehlgeschlagen")
+        XCTAssertEqual(changed.value("chordWidth"), 2)
+        XCTAssertEqual(changed.value("radius") ?? 0, 2 / factor, accuracy: 1e-6)
+        XCTAssertTrue(model.bodies[0].shape.isClosedSolid)
+    }
+
     func testSingleBoxEdgeCanRoundPastAdjacentFace() throws {
         try XCTSkipUnless(PCKShape.kernelAvailable)
         let box = PCKShape.box(width: 20, depth: 20, height: 20)

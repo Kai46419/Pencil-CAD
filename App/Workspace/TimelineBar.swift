@@ -346,6 +346,12 @@ struct FeatureEditor: View {
     @State private var editingKey: String?
     @State private var problem: String?
 
+    private var visibleParameters: [FeatureParameter] {
+        feature.parameters.filter {
+            !(feature.kind == .fillet && feature.data.chordFactor != nil && $0.key == "radius")
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
@@ -371,7 +377,7 @@ struct FeatureEditor: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
-            ForEach(feature.parameters) { parameter in
+            ForEach(visibleParameters) { parameter in
                 HStack(spacing: 8) {
                     Text(parameter.title)
                         .foregroundStyle(.secondary)
@@ -380,7 +386,7 @@ struct FeatureEditor: View {
                     // Wert sofort, sonst „Übernehmen“ (damit mehrere Werte nacheinander geändert werden können).
                     KeypadField(title: parameter.title, text: draft(parameter.key), isEditing: editingFlag(parameter.key),
                                 unitSymbol: Self.unitLabel(parameter.unit), minHeight: 30,
-                                onCommit: { if feature.parameters.count == 1 { apply() } })
+                                onCommit: { if visibleParameters.count == 1 { apply() } })
                         .padding(.horizontal, 6)
                         .frame(width: 130)
                         .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 6))

@@ -35,6 +35,7 @@ enum EdgeBlendCommand {
             cmd.putNumber("startPercent", 20)
             cmd.putNumber("stopPercent", 80)
             cmd.choices["continuity"] = "g1"
+            cmd.choices["measurement"] = "radius"
         } else {
             cmd.choices["selectionScope"] = "edge"
             cmd.choices["type"] = "equal"
@@ -126,7 +127,68 @@ enum EdgeBlendCommand {
         guard let adopted else { return }
         CommandPicks.setItems(kept, cmd, "edges")
         cmd.putNumber(valueKey(operation), adopted)
+        if operation == .fillet { cmd.choices["measurement"] = "radius" }
         model.message = "\(operation == .fillet ? "Radius" : "Fase") übernommen: \(LengthUnit.current.format(adopted))"
+    }
+
+    /// Sehnenbreite einer kreisförmigen Rundung zwischen zwei ebenen Flächen.
+    /// Für gekrümmte Nachbarflächen gibt es keinen eindeutigen Normalenwinkel.
+    static func chordFactor(_ edges: [EdgeRef], model: ModelStore) -> Double? {
+        guard !edges.isEmpty else { return nil }
+        let grouped = Dictionary(grouping: edges, by: \.body)
+        var common: Double?
+        for (body, bodyEdges) in grouped {
+            guard model.bodies.indices.contains(body) else { return nil }
+            let shape = model.bodies[body].shape
+            guard shape.faceCount > 0 else { return nil }
+            let wanted = Set(bodyEdges.map(\.edge))
+            var normalsByEdge: [Int: [SIMD3<Double>]] = [:]
+            for faceNumber in 1...shape.faceCount {
+                let matches = Set(shape.edgeNumbers(ofFace: faceNumber).map(\.intValue)).intersection(wanted)
+                guard !matches.isEmpty else { continue }
+                guard let plane = model.plane(of: FaceRef(body: body, face: faceNumber)) else { return nil }
+                for edgeNumber in matches { normalsByEdge[edgeNumber, default: []].append(plane.normal) }
+            }
+            for edge in bodyEdges {
+                guard let normals = normalsByEdge[edge.edge], normals.count == 2 else { return nil }
+                let cosine = max(-1.0, min(1.0, simd_dot(normals[0], normals[1])))
+                let factor = 2 * sin(acos(cosine) / 2)
+                guard factor.isFinite, factor > 1e-4 else { return nil }
+                if let common, abs(common - factor) > 1e-4 { return nil }
+                common = factor
+            }
+        }
+        return common
+    }
+
+    /// Beim Ziehen des Pfeils bleibt die Geometrie unverändert; der Flächenwinkel muss nur
+    /// nach einer neuen Kantenauswahl erneut gelesen werden.
+    static func cachedChordFactor(_ edges: [EdgeRef], _ cmd: ModelCommand, model: ModelStore) -> Double? {
+        guard !edges.isEmpty else { return nil }
+        let key = edges.map { edge in
+            let shape = model.bodies.indices.contains(edge.body) ? String(describing: ObjectIdentifier(model.bodies[edge.body].shape)) : "?"
+            return "\(edge.body):\(edge.edge):\(shape)"
+        }.sorted().joined(separator: "|")
+        if cmd.choice("chordSelection", default: "") == key,
+           let saved = Double(cmd.values["chordFactor"] ?? ""), saved > 0 { return saved }
+        let factor = chordFactor(edges, model: model)
+        cmd.choices["chordSelection"] = key
+        if let factor { cmd.putNumber("chordFactor", factor) }
+        else { cmd.values.removeValue(forKey: "chordFactor") }
+        return factor
+    }
+
+    static func setFilletMeasurement(_ measurement: String, _ cmd: ModelCommand, _ ws: Workspace) {
+        if measurement == "chord" {
+            let edges = CommandPicks.edges(cmd, "edges", model: ws.model)
+            guard let factor = cachedChordFactor(edges, cmd, model: ws.model) else {
+                cmd.error = "Sehnenbreite braucht eine Kante zwischen zwei ebenen Flächen."
+                return
+            }
+            cmd.putNumber("chordWidth", cmd.number("radius", default: 2) * factor)
+        }
+        cmd.choices["measurement"] = measurement
+        CommandCache.refreshNow(cmd, ws)
     }
 
     static func refresh(_ operation: EdgeOperation, _ cmd: ModelCommand, _ ws: Workspace) -> String? {
@@ -146,7 +208,17 @@ enum EdgeBlendCommand {
             model.dropPreview()
             return nil
         }
-        let value = cmd.number(valueKey(operation), default: 1)
+        let value: Double
+        if operation == .fillet && cmd.choice("measurement", default: "radius") == "chord" {
+            guard let factor = cachedChordFactor(sameBody, cmd, model: model) else {
+                model.dropPreview()
+                return "Sehnenbreite braucht Kanten zwischen ebenen Flächen mit gleichem Winkel."
+            }
+            value = cmd.number("chordWidth", default: 2 * factor) / factor
+            if abs(cmd.number("radius", default: 0) - value) > 1e-9 { cmd.putNumber("radius", value) }
+        } else {
+            value = cmd.number(valueKey(operation), default: 1)
+        }
         guard value > 0 else { return "Der Wert muss größer als 0 sein." }
         // Ergebnis aus dem Hintergrund (BlendJobs.swift): Fehlertext im Panel nachtragen
         model.blendJobs.finished = { [weak ws, weak cmd] in
@@ -208,6 +280,10 @@ enum EdgeBlendCommand {
             cmd.previewEnabled = true
             _ = refresh(operation, cmd, ws)
         }
+        if operation == .fillet && cmd.choice("measurement", default: "radius") == "chord",
+           let factor = cachedChordFactor(CommandPicks.edges(cmd, "edges", model: ws.model), cmd, model: ws.model) {
+            ws.model.noteBlendChord(width: cmd.number("chordWidth", default: 0), factor: factor)
+        }
         LegacyFinish.commit(ws)
     }
 
@@ -227,6 +303,10 @@ enum EdgeBlendCommand {
         let displayed = CommandFormat.plain(max(0, value))
         guard cmd.values[key] != displayed else { return }
         cmd.values[key] = displayed
+        if operation == .fillet && cmd.choice("measurement", default: "radius") == "chord",
+           let factor = cachedChordFactor(CommandPicks.edges(cmd, "edges", model: ws.model), cmd, model: ws.model) {
+            cmd.putNumber("chordWidth", max(0, value) * factor)
+        }
         _ = refresh(operation, cmd, ws)
     }
 }
@@ -336,9 +416,19 @@ private struct FilletRows: View {
     @ObservedObject var cmd: ModelCommand
     let workspace: Workspace
     @ObservedObject var model: ModelStore
+    @AppStorage("PencilCAD.filletFloatingWindow") private var floatingWindow = true
 
     private var isVariable: Bool { cmd.isOn("variable", default: false) }
     private var isPartial: Bool { cmd.isOn("partial", default: false) }
+    private var usesChord: Bool { cmd.choice("measurement", default: "radius") == "chord" }
+
+    private func step(_ direction: Double) {
+        let key = usesChord ? "chordWidth" : "radius"
+        let current = cmd.number(key, default: 2)
+        let amount = max(0.001, min(0.1, workspace.sketch.gridStep))
+        cmd.putNumber(key, max(0.001, current + direction * amount))
+        CommandCache.refreshNow(cmd, workspace)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: PaletteStyle.spacing) {
@@ -349,8 +439,28 @@ private struct FilletRows: View {
                               selected: cmd.choice("selectionScope", default: "edge")) { id in
                 EdgeBlendCommand.setFilletSelectionScope(id, cmd, workspace)
             }
-            CommandNumberRow(title: isVariable ? "Anfang" : "Radius", cmd: cmd, key: "radius", fallback: 2,
-                            workspace: workspace) { max(0, $0) }
+            if !isVariable && !isPartial {
+                CommandSegmentRow(title: "Maß", options: [CommandChoice(id: "radius", title: "Radius"),
+                                                          CommandChoice(id: "chord", title: "Sehnenbreite")],
+                                  selected: cmd.choice("measurement", default: "radius")) { id in
+                    EdgeBlendCommand.setFilletMeasurement(id, cmd, workspace)
+                }
+            }
+            HStack(alignment: .bottom, spacing: 5) {
+                if floatingWindow && !isVariable && !isPartial {
+                    Button { step(-1) } label: { Image(systemName: "minus").frame(width: 36, height: 36) }
+                        .buttonStyle(.bordered)
+                        .accessibilityLabel("Maß verringern")
+                }
+                CommandNumberRow(title: isVariable ? "Anfang" : usesChord && !isPartial ? "Sehnenbreite" : "Radius",
+                                 cmd: cmd, key: usesChord && !isVariable && !isPartial ? "chordWidth" : "radius",
+                                 fallback: 2, workspace: workspace) { max(0, $0) }
+                if floatingWindow && !isVariable && !isPartial {
+                    Button { step(1) } label: { Image(systemName: "plus").frame(width: 36, height: 36) }
+                        .buttonStyle(.bordered)
+                        .accessibilityLabel("Maß erhöhen")
+                }
+            }
             if !isVariable && !isPartial {
                 PrimaryWideButton(title: model.isBlendMaximumComputing ? "Radius wird geprüft …" : "Maximal gültigen Radius finden",
                                   systemImage: "arrow.up.to.line", isPrimary: false) {
@@ -359,7 +469,7 @@ private struct FilletRows: View {
                         CommandCache.refreshNow(cmd, workspace)
                     }
                 }
-                .disabled(model.selectedEdges.count != 1 || model.isBlendComputing || model.isBlendMaximumComputing)
+                .disabled(usesChord || model.selectedEdges.count != 1 || model.isBlendComputing || model.isBlendMaximumComputing)
             }
             CommandSegmentRow(title: "Typ", options: [CommandChoice(id: "constant", title: "Konstant"),
                                                       CommandChoice(id: "variable", title: "Variabel"),
@@ -367,6 +477,7 @@ private struct FilletRows: View {
                               selected: isPartial ? "partial" : isVariable ? "variable" : "constant") { id in
                 cmd.flags["variable"] = id == "variable"
                 cmd.flags["partial"] = id == "partial"
+                if id != "constant" { cmd.choices["measurement"] = "radius" }
                 if id == "variable", cmd.values["end"] == nil {
                     cmd.putNumber("end", max(cmd.number("radius", default: 2) * 2, 1))
                 }
@@ -401,6 +512,12 @@ private struct FilletRows: View {
             }
             PaletteSection("Optionen") {
                 CommandPreviewRow(cmd: cmd, workspace: workspace)
+            }
+            if floatingWindow {
+                Text("G2, alternative Eckübergänge und Y-Blend erfordern zusätzliche Kernel-Geometrie.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             EdgeStatus(model: model)
         }

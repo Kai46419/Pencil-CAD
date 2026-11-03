@@ -40,6 +40,9 @@ enum PaletteStyle {
 /// Ansichtsknöpfe, darunter Kopf, scrollender Mittelteil und fester Fuß. Alles hat feste Breite, damit nichts
 /// außerhalb des Fensters Berührungen abfängt (eine zu breite ScrollView hatte das Zeichnen blockiert).
 struct PaletteWindow<Top: View, Header: View, Middle: View, Footer: View>: View {
+    var width: CGFloat = PaletteStyle.width
+    var showsTop = true
+    var maxContentHeight: CGFloat = 620
     @ViewBuilder let top: Top
     @ViewBuilder let header: Header
     @ViewBuilder let middle: Middle
@@ -48,20 +51,24 @@ struct PaletteWindow<Top: View, Header: View, Middle: View, Footer: View>: View 
     /// Höhe des scrollbaren Mittelteils; kurze Inhalte machen das Fenster nicht unnötig hoch
     @State private var contentHeight: CGFloat = 240
 
+    private var contentWidth: CGFloat { width - 2 * PaletteStyle.inset }
+
     var body: some View {
         VStack(spacing: 0) {
-            top
-                .frame(width: PaletteStyle.contentWidth)
-                .padding(PaletteStyle.inset)
-            PaletteRule()
+            if showsTop {
+                top
+                    .frame(width: contentWidth)
+                    .padding(PaletteStyle.inset)
+                PaletteRule()
+            }
             header
-                .frame(width: PaletteStyle.contentWidth, alignment: .leading)
+                .frame(width: contentWidth, alignment: .leading)
                 .padding(PaletteStyle.inset)
                 .background(PaletteStyle.header)
             PaletteRule()
             ScrollView(.vertical, showsIndicators: true) {
                 middle
-                    .frame(width: PaletteStyle.contentWidth, alignment: .leading)
+                    .frame(width: contentWidth, alignment: .leading)
                     .padding(PaletteStyle.inset)
                     .background {
                         GeometryReader { proxy in
@@ -70,16 +77,16 @@ struct PaletteWindow<Top: View, Header: View, Middle: View, Footer: View>: View 
                     }
             }
             .scrollDismissesKeyboard(.interactively)
-            .frame(width: PaletteStyle.width)
-            .frame(maxHeight: contentHeight)
+            .frame(width: width)
+            .frame(maxHeight: min(contentHeight, maxContentHeight))
             .onPreferenceChange(PaletteContentHeightKey.self) { contentHeight = $0 }
             PaletteRule()
             footer
-                .frame(width: PaletteStyle.contentWidth)
+                .frame(width: contentWidth)
                 .padding(PaletteStyle.inset)
                 .background(PaletteStyle.header)
         }
-        .frame(width: PaletteStyle.width)
+        .frame(width: width)
         .background(PaletteStyle.background)
         .clipShape(RoundedRectangle(cornerRadius: PaletteStyle.radius, style: .continuous))
         .overlay {
