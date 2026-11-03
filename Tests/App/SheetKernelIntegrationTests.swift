@@ -116,6 +116,7 @@ final class SheetKernelIntegrationTests: XCTestCase {
         let flat = try workspace.model.flatPattern(of: body)
         XCTAssertEqual(flat.bends.count, 4)
         XCTAssertGreaterThan(flat.size.x * flat.size.y, 0)
+        XCTAssertNil(ModelStore.sheetOverlapProblem(flat), "Benachbarte Laschen müssen einen gültigen Zuschnitt ergeben.")
         let laserDXF = try workspace.model.exportFlatPatternDXF(of: body)
         let drawingDXF = try workspace.model.exportFlatDrawingDXF(of: body)
         let bendCSV = try workspace.model.exportBendTableCSV(of: body)
@@ -131,6 +132,35 @@ final class SheetKernelIntegrationTests: XCTestCase {
         XCTAssertEqual(reopened.model.sheetBodies.count, 1)
         XCTAssertEqual(reopened.model.bodies[0].sheetMetal?.steps.count,
                        workspace.model.bodies[body].sheetMetal?.steps.count)
+    }
+
+    func testFlatPatternRejectsCrossingAndOverlappingContours() {
+        let emptyPart = FlatPattern(json: ["outline": [[]]])
+        XCTAssertNotNil(ModelStore.sheetOverlapProblem(emptyPart))
+        let crossing = FlatPattern(json: ["outline": [[[0, 0], [4, 4], [0, 4], [4, 0]]]])
+        XCTAssertNotNil(ModelStore.sheetOverlapProblem(crossing))
+
+        let overlap = FlatPattern(json: ["outline": [[[0, 0], [4, 0], [4, 4], [0, 4],
+                                                       [0, 2], [3, 2], [3, 0], [1, 0], [1, 1], [0, 1]]]])
+        XCTAssertNotNil(ModelStore.sheetOverlapProblem(overlap))
+
+        let valid = FlatPattern(json: ["outline": [[[0, 0], [4, 0], [4, 4], [0, 4], [0, 0]]]])
+        XCTAssertNil(ModelStore.sheetOverlapProblem(valid))
+    }
+
+    func testSheetBoxWithUnequalAdjacentFlangesHasUsableFlatPattern() throws {
+        let project = Project(id: UUID(), name: "Blechkasten ungleiche Laschen", modified: Date())
+        defer { try? FileManager.default.removeItem(at: project.folder) }
+        let model = Workspace(project: project).model
+        let spec = SheetBoxSpec(length: 120, width: 80, thickness: 2, radius: 2,
+                                outer: false, heights: [12, 18, 25, 32])
+        XCTAssertTrue(model.createSheetBox(spec))
+        let body = try XCTUnwrap(model.sheetBodies.first)
+        XCTAssertTrue(model.bodies[body].shape.isClosedSolid)
+        let flat = try model.flatPattern(of: body)
+        XCTAssertEqual(flat.bends.count, 4)
+        XCTAssertNil(ModelStore.sheetOverlapProblem(flat))
+        XCTAssertGreaterThan(try Data(contentsOf: model.exportFlatPatternDXF(of: body)).count, 100)
     }
 
     func testSheetConversionPreviewDoesNotLeaveSourceFiles() throws {
