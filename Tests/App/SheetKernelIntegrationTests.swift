@@ -166,6 +166,98 @@ final class SheetKernelIntegrationTests: XCTestCase {
         XCTAssertFalse(try reopened.model.flatPattern(of: 0).outline.isEmpty)
     }
 
+    func testConvertedSheetRebuildKeepsPreviousSourceAndReopensFromNewOne() throws {
+        let project = Project(id: UUID(), name: "Blechquelle im Verlauf", modified: Date())
+        defer { try? FileManager.default.removeItem(at: project.folder) }
+        let model = Workspace(project: project).model
+        model.previewInsert(.box, size: [80, 60, 2.5], at: .zero)
+        model.commitPreview()
+        let plan = try XCTUnwrap(model.suggestSheetConversion(of: 0))
+        XCTAssertTrue(model.convertToSheet(0, baseFace: plan.baseFace, openEdges: [],
+                                           plateOnly: true))
+        let oldFile = try XCTUnwrap(model.sheetInfo(0)?.sourceFile)
+        let oldURL = model.sheetDocument.storageDirectory.appending(path: oldFile)
+        let oldBytes = try Data(contentsOf: oldURL)
+
+        let primitive = try XCTUnwrap(model.features.first { $0.kind == .primitive })
+        var parameters = primitive.parameters
+        let width = try XCTUnwrap(parameters.firstIndex { $0.key == "x" })
+        parameters[width].value = 100
+        model.updateFeature(primitive.id, parameters: parameters)
+
+        XCTAssertTrue(model.features.allSatisfy { !$0.failed }, model.message ?? "Nachbau fehlgeschlagen")
+        let newFile = try XCTUnwrap(model.sheetInfo(0)?.sourceFile)
+        XCTAssertNotEqual(newFile, oldFile, "Der Nachbau darf die gespeicherte Quelle nicht überschreiben")
+        XCTAssertEqual(try Data(contentsOf: oldURL), oldBytes)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: model.sheetDocument.storageDirectory.appending(path: newFile).path))
+        XCTAssertFalse(try model.flatPattern(of: 0).outline.isEmpty)
+
+        model.undo()
+        XCTAssertEqual(model.sheetInfo(0)?.sourceFile, oldFile)
+        XCTAssertFalse(try model.flatPattern(of: 0).outline.isEmpty)
+        model.redo()
+        XCTAssertEqual(model.sheetInfo(0)?.sourceFile, newFile)
+        XCTAssertFalse(try model.flatPattern(of: 0).outline.isEmpty)
+
+        let reopened = Workspace(project: project).model
+        XCTAssertEqual(reopened.sheetInfo(0)?.sourceFile, newFile)
+        XCTAssertFalse(try reopened.flatPattern(of: 0).outline.isEmpty)
+    }
+
+    func testDiscardedSheetHistoryPreviewRemovesOnlyItsReplaySource() throws {
+        let project = Project(id: UUID(), name: "Blechvorschau verwerfen", modified: Date())
+        defer { try? FileManager.default.removeItem(at: project.folder) }
+        let model = Workspace(project: project).model
+        model.previewInsert(.box, size: [80, 60, 2.5], at: .zero)
+        model.commitPreview()
+        let plan = try XCTUnwrap(model.suggestSheetConversion(of: 0))
+        XCTAssertTrue(model.convertToSheet(0, baseFace: plan.baseFace, openEdges: [], plateOnly: true))
+        let oldFile = try XCTUnwrap(model.sheetInfo(0)?.sourceFile)
+        let directory = model.sheetDocument.storageDirectory
+        let oldBytes = try Data(contentsOf: directory.appending(path: oldFile))
+
+        var list = model.features
+        let width = try XCTUnwrap(list[0].parameters.firstIndex { $0.key == "x" })
+        list[0].parameters[width].value = 100
+        let run = try XCTUnwrap(model.runFeatures(&list, from: 0, sketches: model.sketches,
+                                                 values: model.variableValues, collect: { _, _ in }))
+        let previewFile = try XCTUnwrap(run.bodies[0].sheetMetal?.sourceFile)
+        XCTAssertNotEqual(previewFile, oldFile)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appending(path: previewFile).path))
+        model.showPreview(run.bodies, name: "Blechvorschau")
+        model.cancelPreview()
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appending(path: previewFile).path))
+        XCTAssertEqual(try Data(contentsOf: directory.appending(path: oldFile)), oldBytes)
+        XCTAssertEqual(model.sheetInfo(0)?.sourceFile, oldFile)
+    }
+
+    func testFailedSheetConversionReplayPreservesSourceAndCleansWorkFile() throws {
+        let project = Project(id: UUID(), name: "Blechumwandlung fehlgeschlagen", modified: Date())
+        defer { try? FileManager.default.removeItem(at: project.folder) }
+        let model = Workspace(project: project).model
+        model.previewInsert(.box, size: [80, 60, 2.5], at: .zero)
+        model.commitPreview()
+        let plan = try XCTUnwrap(model.suggestSheetConversion(of: 0))
+        XCTAssertTrue(model.convertToSheet(0, baseFace: plan.baseFace, openEdges: [], plateOnly: true))
+        let source = try XCTUnwrap(model.sheetInfo(0)?.sourceFile)
+        let directory = model.sheetDocument.storageDirectory
+        let bytes = try Data(contentsOf: directory.appending(path: source))
+
+        var list = model.features
+        var conversion = try XCTUnwrap(list[1].data.sheet)
+        let index = try XCTUnwrap(conversion.steps.indices.last)
+        conversion.steps[index].command.params["body"] = "unbekannter_koerper"
+        list[1].data.sheet = conversion
+        _ = try XCTUnwrap(model.runFeatures(&list, from: 1, sketches: model.sketches,
+                                            values: model.variableValues))
+
+        XCTAssertTrue(list[1].failed)
+        XCTAssertEqual(try Data(contentsOf: directory.appending(path: source)), bytes)
+        let names = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+        XCTAssertFalse(names.contains { $0.hasPrefix(".working-") || $0.hasPrefix("replay-") })
+    }
+
     func testSheetContourFlangeAndRuleValues() throws {
         let kernel = try SheetKernel()
         var rule = SheetRule(name: "Testblech", thickness: 1.5, kFactor: 0.4, bendRadius: 2)
