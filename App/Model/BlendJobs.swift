@@ -32,8 +32,17 @@ struct BlendJobResult {
     var amount: Double
     /// Mit der vorigen Rundung zusammengefasst
     var merged = false
-    /// Zeitlimit überschritten
+    /// Zeitlimit überschritten (Host-Zeitlimit oder Worker-Zeitlimit; nur dieser Wert ist gesperrt)
     var timedOut = false
+    /// Worker-Prozess abgebrochen bzw. Auswahl nach einem früheren Abbruch gesperrt
+    var crashed = false
+    /// Zusammenfassen mit der letzten Rundung gescheitert; bewusst kein Rückfall auf eine Rundung auf der schon
+    /// gerundeten Fläche (Schwacher Bugfix 3)
+    var mergeFailed = false
+    /// Diagnose nach einem Fehlschlag mit mehreren Kanten: Kanten, die OCCT gar nicht annimmt (nil = noch unbekannt)
+    var unblendable: [Int]? = nil
+    /// Build 42: Rundung mit Optionen (Setback/G2 …) vom Worker abgelehnt – kein stiller Rückfall auf Standard
+    var optionsFailed = false
 }
 
 /// Eingaben für den Hintergrund: nur Kopien und Zahlen, nichts aus dem Vordergrund.
@@ -50,6 +59,8 @@ struct BlendJobInput {
     var mergeShape: PCKShape?
     var mergeEdges: [NSNumber] = []
     var mergeRadii: [Double]? = nil
+    /// Build 42: normalisierte Rundungsoptionen (nil = Standard); nur bei konstanter Rundung
+    var options: BlendOptions? = nil
 }
 
 struct BlendJobKey: Equatable {
@@ -60,6 +71,8 @@ struct BlendJobKey: Equatable {
     var end: Double?
     var partialRange: ClosedRange<Double>?
     var featureIDs: [UUID]
+    /// Build 42: normalisierte Rundungsoptionen (nil = Standard); requestBlend setzt sie ausdrücklich.
+    var options: BlendOptions?
 }
 
 /// Eine Anfrage (Vorschau für einen Wert).
@@ -98,57 +111,90 @@ final class BlendJobs {
 
     var running: Bool { current != nil }
 
-    static let timeLimit = 8.0
+    /// Build 42: dasselbe Limit wie der Worker (nicht doppelt pflegen)
+    static let timeLimit: TimeInterval = IsolatedBlend.workerTimeout
     static let memoLimit = 24
 }
 
 /// Rechnen im Hintergrund (nur Kernel-Aufrufe an Kopien, kein Zugriff auf den ModelStore).
 enum BlendKernel {
+    /// Genau EIN Worker-Lauf je Anfrage: so bleibt isBlendComputing höchstens BlendJobs.timeLimit gesetzt
+    /// (früher Merge + Rückfall = zwei Läufe mit je 8 s gegen ein Zeitlimit von 8 s).
     static func run(_ input: BlendJobInput) -> BlendJobResult {
         let value = input.value
-        if input.operation == .fillet, let range = input.partialRange {
-            let shape = input.edges.count == 1
-                ? IsolatedBlend.run(shape: input.shape, edges: input.edges, mode: 2, value: value,
-                                    start: range.lowerBound, stop: range.upperBound) : nil
-            return BlendJobResult(shape: shape, amount: value)
+        // Build 42: Optionen gelten nur für Rundungen; Fase ignoriert sie (hat keine)
+        let options = input.operation == .fillet ? input.options?.normalized : nil
+        func result(_ done: (shape: PCKShape?, outcome: IsolatedBlend.Outcome), merged: Bool = false,
+                    mergeAttempt: Bool = false) -> BlendJobResult {
+            var out = BlendJobResult(shape: done.shape, amount: value, merged: merged && done.shape != nil)
+            out.timedOut = done.shape == nil && done.outcome == .timedOut
+            out.crashed = done.shape == nil && done.outcome == .crashed
+            // Nur ein echter Fehlschlag der gemeinsamen Rundung; Absturz/Zeitlimit haben eigene Meldungen
+            out.mergeFailed = mergeAttempt && done.shape == nil && done.outcome == .answered
+            out.optionsFailed = options != nil && done.shape == nil && done.outcome == .answered
+            return out
         }
-        if input.operation == .fillet, let mergeShape = input.mergeShape, !input.mergeEdges.isEmpty {
-            let merged: PCKShape?
-            if let radii = input.mergeRadii {
-                merged = IsolatedBlend.run(shape: mergeShape, edges: input.mergeEdges, mode: 5,
-                                           value: value, radii: radii)
-            } else if let end = input.end {
-                merged = IsolatedBlend.run(shape: mergeShape, edges: input.mergeEdges, mode: 3,
-                                           value: value, second: end)
-            } else {
-                merged = IsolatedBlend.run(shape: mergeShape, edges: input.mergeEdges, mode: 0, value: value)
-            }
-            if let merged { return BlendJobResult(shape: merged, amount: value, merged: true) }
-            // Nach einem Worker-Abbruch darf der Fallback keinen zweiten nativen Fillet starten.
-            if IsolatedBlend.wasBlocked(shape: mergeShape, edges: input.mergeEdges,
-                                        mode: input.mergeRadii != nil ? 5 : input.end == nil ? 0 : 3) {
+        if let options {
+            // Setback/G2 nur bei konstanter Rundung: Teil/variabel mit Optionen startet nicht (kein Rückfall)
+            guard input.partialRange == nil, input.end == nil, options.isValid else {
                 return BlendJobResult(shape: nil, amount: value)
             }
+        }
+        if input.operation == .fillet, let range = input.partialRange {
+            guard input.edges.count == 1 else { return BlendJobResult(shape: nil, amount: value) }
+            return result(IsolatedBlend.runReporting(shape: input.shape, edges: input.edges, mode: 2, value: value,
+                                                     start: range.lowerBound, stop: range.upperBound))
+        }
+        if input.operation == .fillet, let mergeShape = input.mergeShape, !input.mergeEdges.isEmpty {
+            // Schwacher Bugfix 3: Grenzt die Auswahl an die letzte Rundung, gilt wie beim Merge mit einer früheren
+            // Rundung (BlendBeforeCuts.previewMergedBlend) „keine direkte Teilrundung als Ersatz“. Scheitert die
+            // gemeinsame Rundung, wird NICHT auf den direkten Fillet auf der schon gerundeten Fläche ausgewichen
+            // (lief am Tangentenbogen der ersten Rundung weiter: Artefakte, Kais Fall). Ergebnis nil, Meldung in
+            // applyBlendResult.
+            let attempt: (shape: PCKShape?, outcome: IsolatedBlend.Outcome)
+            if let radii = input.mergeRadii {
+                attempt = IsolatedBlend.runReporting(shape: mergeShape, edges: input.mergeEdges, mode: 5,
+                                                 value: value, radii: radii, options: options)
+            } else if let end = input.end {
+                attempt = IsolatedBlend.runReporting(shape: mergeShape, edges: input.mergeEdges, mode: 3,
+                                                 value: value, second: end)
+            } else {
+                attempt = IsolatedBlend.runReporting(shape: mergeShape, edges: input.mergeEdges, mode: 0,
+                                                     value: value, options: options)
+            }
+            return result(attempt, merged: true, mergeAttempt: true)
         }
         let shape = input.shape
         let numbers = input.edges
         if input.operation == .fillet, let end = input.end {
-            return BlendJobResult(shape: IsolatedBlend.run(shape: shape, edges: numbers, mode: 3,
-                                                             value: value, second: end), amount: value)
+            return result(IsolatedBlend.runReporting(shape: shape, edges: numbers, mode: 3, value: value, second: end))
         }
         if input.operation == .chamfer, let second = input.second {
-            return BlendJobResult(shape: IsolatedBlend.run(shape: shape, edges: numbers, mode: 4,
-                                                             value: value, second: second),
-                                  amount: value)
+            return result(IsolatedBlend.runReporting(shape: shape, edges: numbers, mode: 4, value: value,
+                                                     second: second))
         }
         let chamfer = input.operation == .chamfer
-        return BlendJobResult(shape: IsolatedBlend.run(shape: shape, edges: numbers,
-                                                         mode: chamfer ? 1 : 0, value: value), amount: value)
+        return result(IsolatedBlend.runReporting(shape: shape, edges: numbers, mode: chamfer ? 1 : 0, value: value,
+                                                 options: options))
+    }
+
+    /// Meldung aus der Diagnose (IsolatedBlend.unblendableEdges); nil, wenn keine Kante auffällt.
+    static func unblendableMessage(_ edges: [Int], chamfer: Bool) -> String? {
+        guard !edges.isEmpty else { return nil }
+        let verb = chamfer ? "gefast" : "abgerundet"
+        if edges.count == 1 {
+            return "Kante \(edges[0]) ist eine Naht- oder tangentiale Kante und kann nicht \(verb) werden – "
+                + "aus der Auswahl entfernen."
+        }
+        let list = edges.map(String.init).joined(separator: ", ")
+        return "Kanten \(list) sind Naht- oder tangentiale Kanten und können nicht \(verb) werden – "
+            + "aus der Auswahl entfernen."
     }
 }
 
 /// Sucht auf ausdrücklichen Wunsch den größten geprüften Radius einer Einzelkante.
-/// Jeder Versuch läuft im isolierten Kernelprozess; ein Absturz oder Zeitlimit beendet die Suche.
+/// Jeder Versuch läuft im isolierten Kernelprozess; ein Absturz beendet die Suche. Ein Zeitlimit sperrt seit
+/// Build 41 nur diesen einen Radius (IsolatedBlend.ValueKey) und zählt hier als „geht nicht“ – die Suche läuft weiter.
 enum BlendMaximumSearch {
     static func find(shape: PCKShape, edge: Int, ceiling: Double) -> Double? {
         guard edge > 0, ceiling.isFinite, ceiling >= 0.01 else { return nil }
@@ -177,6 +223,9 @@ enum BlendMaximumSearch {
 
 extension ModelStore {
     static let blendTooHeavyMessage = "Rundung zu aufwendig bzw. nicht möglich – Radius verkleinern."
+    /// Schwacher Bugfix 6: ein Zeitlimit ist kein Absturz – nur dieser Wert ist gesperrt
+    static let blendTimeLimitMessage = "Zeitlimit überschritten – diese Rundung bzw. Fase ist zu aufwendig. "
+        + "Anderen Wert versuchen oder weniger Kanten wählen."
 
     /// Sucht auf Wunsch eine gültige Geometriegrenze. Kein weiterer OCCT-Aufruf beim normalen Ziehen.
     @MainActor
@@ -185,6 +234,11 @@ extension ModelStore {
               selectedEdges.count == 1, let selected = selectedEdges.first,
               bodies.indices.contains(selected.body), !isBlendComputing, !isBlendMaximumComputing else {
             message = "Maximalradius: eine Kante und eine konstante Rundung wählen; laufende Vorschau abwarten."
+            return
+        }
+        // Build 42: die Suche prüft nur die Standard-Rundung (Rolling Ball, G1) – mit Optionen wäre ihr Ergebnis falsch
+        guard effectiveBlendOptions == nil else {
+            message = Self.blendMaximumNeedsStandardMessage
             return
         }
         let source = bodies[selected.body].shape
@@ -258,9 +312,11 @@ extension ModelStore {
         }
         let shape = bodies[body].shape
         let partialRange = operation == .fillet ? edgePartialRange : nil
+        // Build 42: Rundungsoptionen (nil = Standard, Fase: immer nil)
+        let options = effectiveBlendOptions
         let key = BlendJobKey(edges: blendEdges, operation: operation, value: value, second: second, end: end,
                               partialRange: partialRange,
-                              featureIDs: features.map(\.id))
+                              featureIDs: features.map(\.id), options: options)
         let numbers = blendEdges.filter { $0.body == body }.map { NSNumber(value: $0.edge) }
         // Eine frühere Rundung braucht zuerst einen vollständigen Nachbau des Verlaufs.
         // Nur die unmittelbar letzte Rundung darf hier direkt ersetzt werden.
@@ -270,7 +326,7 @@ extension ModelStore {
         let input = BlendJobInput(operation: operation, shape: shape, edges: numbers, value: value, second: second,
                                   end: end, partialRange: partialRange, mergeShape: merge?.shape,
                                   mergeEdges: (merge?.edges ?? []).map { NSNumber(value: $0) },
-                                  mergeRadii: merge?.radii)
+                                  mergeRadii: merge?.radii, options: options)
         let request = BlendJobRequest(key: key, generation: blendJobs.generation, body: body, source: shape,
                                       selection: selectedEdges, blendEdges: blendEdges, input: input,
                                       mergeFeature: merge?.feature, mergeIndex: merge?.index)
@@ -313,7 +369,8 @@ extension ModelStore {
         // öffnet das Projekt normal (das Feature wurde nie übernommen)
         let marker = request.mergeFeature ?? Self.blendFeature(request.input.operation, value: request.input.value,
                                                                second: request.input.second, end: request.input.end,
-                                                               partialRange: request.input.partialRange)
+                                                               partialRange: request.input.partialRange,
+                                                               options: request.input.options)
         HangGuard.willRun(marker, in: folder)
         // Im Hintergrund nur an unabhängigen Kopien rechnen (die Kopie kostet Millisekunden; erst hier, damit beim
         // Ziehen wartende Anfragen nicht jedes Mal kopieren)
@@ -405,11 +462,44 @@ extension ModelStore {
         blendJobs.memo = memo
     }
 
+    /// Startet die Diagnose (Worker-Modus 6) im Hintergrund; das Ergebnis ersetzt die Meldung, solange die Anfrage
+    /// noch gilt, und wird beim gemerkten Fehlschlag mitgespeichert (kein zweiter Lauf für dieselben Werte).
+    private func diagnoseUnblendableEdges(_ request: BlendJobRequest) {
+        let input = request.input
+        // Wie startBlendJob: nur an einer unabhängigen Kopie rechnen (der Vordergrund vernetzt das Original)
+        guard let copy = input.shape.independentCopy(), copy !== input.shape else { return }
+        let chamfer = input.operation == .chamfer
+        let box = UncheckedBox((copy, input.edges, input.value, chamfer))
+        let pending = UncheckedBox(request)
+        KernelThread.start("PencilCAD.blend.diagnose") { [weak self] in
+            let bad = IsolatedBlend.unblendableEdges(shape: box.value.0, edges: box.value.1, value: box.value.2,
+                                                     chamfer: box.value.3)
+            let out = UncheckedBox(bad)
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                // Keine Auskunft (Worker nicht verfügbar) als leere Liste merken: kein zweiter Lauf
+                let bad = out.value ?? []
+                let request = pending.value
+                if let index = self.blendJobs.memo.lastIndex(where: {
+                    $0.key == request.key && $0.source === request.source && $0.result.shape == nil
+                }) {
+                    self.blendJobs.memo[index].result.unblendable = bad
+                }
+                guard self.isCurrentBlend(request), !self.hasPreview,
+                      let text = BlendKernel.unblendableMessage(bad, chamfer: chamfer) else { return }
+                self.message = text
+                self.blendJobs.finished?()
+            }
+        }
+    }
+
     /// Gilt die Anfrage noch (keine neuere, gleicher Körper, gleiche Auswahl)?
     private func isCurrentBlend(_ request: BlendJobRequest) -> Bool {
         request.generation == blendJobs.generation && bodies.indices.contains(request.body)
             && bodies[request.body].shape === request.source && selectedEdges == request.selection
             && edgeOperation == request.key.operation
+            // Build 42: eine Vorschau mit anderen Rundungsoptionen gilt nicht mehr
+            && effectiveBlendOptions == request.key.options
     }
 
     /// Ergebnis als Vorschau zeigen bzw. melden, warum es nicht geht.
@@ -423,18 +513,36 @@ extension ModelStore {
                 dropPreview()
                 return
             }
-            let mode = operation == .fillet ? (input.partialRange != nil ? 2 : input.end != nil ? 3 : 0)
-                : (input.second != nil ? 4 : 1)
-            if IsolatedBlend.wasBlocked(shape: input.shape, edges: input.edges, mode: mode)
-                || (input.mergeShape.map { IsolatedBlend.wasBlocked(shape: $0, edges: input.mergeEdges,
-                                                                      mode: input.mergeRadii != nil ? 5 : input.end == nil ? 0 : 3) } ?? false) {
+            // Absturz und Zeitlimit kommen als Kennzeichen aus BlendKernel.run (kein erneutes Serialisieren des
+            // Körpers auf dem Main-Thread wie früher über IsolatedBlend.wasBlocked, N3).
+            if result.timedOut {
+                // Schwacher Bugfix 6: Zeitlimit ≠ Absturz; andere Werte derselben Auswahl bleiben möglich
+                message = Self.blendTimeLimitMessage
+                dropPreview()
+                return
+            }
+            if result.crashed {
                 message = "Geometriekernel bei dieser Kantenauswahl abgebrochen. Auswahl oder Körper ändern; Projekt bleibt erhalten."
                 dropPreview()
                 return
             }
-            if result.timedOut {
-                message = Self.blendTooHeavyMessage
-            } else if input.partialRange != nil {
+            if let options = input.options, operation == .fillet,
+               result.optionsFailed || input.partialRange != nil || input.end != nil {
+                // Build 42: kein stiller Rückfall auf Rolling Ball/G1 – Meldung mit Ausweg (C4 vergleicht die Texte)
+                message = Self.blendOptionsFailureMessage(options, constantOnly: input.partialRange != nil
+                                                          || input.end != nil)
+                dropPreview()
+                return
+            }
+            if result.mergeFailed {
+                let name = request.mergeIndex.flatMap { features.indices.contains($0) ? features[$0].name : nil }
+                    ?? "der vorigen Rundung"
+                message = "Gemeinsame Rundung mit ‚\(name)‘ nicht möglich – Radius verkleinern oder die frühere "
+                    + "Rundung zuerst ändern."
+                dropPreview()
+                return
+            }
+            if input.partialRange != nil {
                 message = "Teilabrundung mit diesem Radius und Abschnitt nicht möglich – Start, Ende oder Radius ändern."
             } else if let end = input.end {
                 // Wert bleibt stehen (kein Zurückspringen), Körper unverändert, „OK“ übernimmt nicht
@@ -450,6 +558,17 @@ extension ModelStore {
                 message = "\(operation.rawValue) an dieser Kante nicht möglich."
             }
             dropPreview()
+            // Diagnose bei mehreren Kanten (konstante Rundung bzw. Fase mit einem Abstand): die Meldung nennt die
+            // Kante, die OCCT gar nicht annimmt, statt pauschal „Kontur nicht möglich“.
+            if input.edges.count > 1, input.partialRange == nil, input.end == nil, input.second == nil {
+                if let known = result.unblendable {
+                    if let text = BlendKernel.unblendableMessage(known, chamfer: operation == .chamfer) {
+                        message = text
+                    }
+                } else {
+                    diagnoseUnblendableEdges(request)
+                }
+            }
             return
         }
         var preview = bodies
@@ -471,6 +590,7 @@ extension ModelStore {
         message = result.amount < input.value - 1e-9
             ? "\(operation.rawValue): größter möglicher Wert hier \(result.amount.formatted()) mm." : nil
         noteBlend(operation, value: result.amount, second: input.second, end: input.end,
-                  partialRange: input.partialRange, edges: request.blendEdges)
+                  partialRange: input.partialRange, edges: request.blendEdges,
+                  options: operation == .fillet ? input.options : nil)
     }
 }

@@ -437,11 +437,20 @@ extension ModelStore {
     func sheetRebuildBodies(usingRule rule: SheetRule) {
         let replace = { (steps: inout [SheetStep]) -> Bool in
             var touched = false
-            for k in steps.indices where steps[k].command.command == "sheet.manage_rules"
-                && steps[k].command.params["name"]?.asString == rule.name {
+            for k in steps.indices where steps[k].command.command == "sheet.manage_rules" {
+                let name = steps[k].command.params["name"]?.asString
                 let active = steps[k].command.params["active"]?.asBool ?? true
-                steps[k].command = rule.command(active: active)
-                touched = true
+                if name == rule.name {
+                    steps[k].command = rule.command(active: active)
+                    touched = true
+                } else if let name, Self.sheetBaseRuleName(steps[k], name: name) == rule.name {
+                    // D5 (Build 41): abgeleitete Regel „<Regel> · Spalt x mm“: Werte der Basisregel, eigener Spalt
+                    var derived = rule
+                    derived.name = name
+                    derived.gap = Self.sheetNumber(steps[k].command.params["gap"]) ?? rule.gap
+                    steps[k].command = derived.command(active: active)
+                    touched = true
+                }
             }
             return touched
         }
@@ -482,6 +491,14 @@ extension ModelStore {
         }
         if touched { commit(result, name: "Blechregel „\(rule.name)“ ändern") }
         if !problems.isEmpty { message = problems.joined(separator: " · ") }
+    }
+
+    /// D5 (Build 41): Basisregel eines Regelschritts – gespeichert (baseRule), bei alten Daten aus dem Namen
+    /// „<Regel> · Spalt x mm“ (sheetConvertSteps). nil = keine abgeleitete Regel.
+    nonisolated static func sheetBaseRuleName(_ step: SheetStep, name: String) -> String? {
+        if let base = step.baseRule { return base }
+        guard let range = name.range(of: " · Spalt ", options: .backwards), name.hasSuffix(" mm") else { return nil }
+        return String(name[..<range.lowerBound])
     }
 
     // MARK: Nachbau im Verlauf
@@ -632,6 +649,15 @@ extension ModelStore {
                 }
                 result.append(parameter)
             }
+            // D2 (Build 41): Flankenhöhe einer Kantung steht nicht im sheet.fold, sondern im Messbezug
+            if let reference = step.foldReference, step.command.params["height"] == nil {
+                let key = "\(index).height"
+                var parameter = FeatureParameter.length(key, prefix + "Höhe", reference.height)
+                if let previous = old.first(where: { $0.key == key }), abs(previous.value - reference.height) < 1e-9 {
+                    parameter.formula = previous.formula
+                }
+                result.append(parameter)
+            }
         }
         return result
     }
@@ -641,11 +667,17 @@ extension ModelStore {
         var result = steps
         for parameter in parameters {
             let parts = parameter.key.split(separator: ".", maxSplits: 1).map(String.init)
-            guard parts.count == 2, let index = Int(parts[0]), result.indices.contains(index),
-                  result[index].command.params[parts[1]] != nil else { continue }
+            guard parts.count == 2, let index = Int(parts[0]), result.indices.contains(index) else { continue }
+            if parts[1] == "height", result[index].command.params["height"] == nil,
+               result[index].foldReference != nil {
+                result[index].foldReference?.height = parameter.value
+                continue
+            }
+            guard result[index].command.params[parts[1]] != nil else { continue }
             let value: SheetJSON = parameter.unit == .angle ? SheetCommand.degrees(parameter.value) : .number(parameter.value)
             result[index].command.params[parts[1]] = value
         }
-        return result
+        // D2 (Build 41): Biegelinie aus Höhe und (evtl. geändertem) Winkel bzw. Radius neu rechnen
+        return result.map { $0.refoldedFromReference() }
     }
 }

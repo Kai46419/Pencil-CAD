@@ -45,11 +45,31 @@ private struct WorkspaceContent: View {
     @State private var arPreview: URL?
     /// Zeitleiste des Verlaufs: automatisch, ein- oder ausgeblendet (TimelineBar.swift)
     @AppStorage(TimelineVisibility.storageKey) private var timelineVisibility = TimelineVisibility.automatic.rawValue
-    @AppStorage("PencilCAD.filletFloatingWindow") private var filletFloatingWindow = true
+    @AppStorage(FilletWindowLayout.storageKey) private var filletFloatingWindow = true
+    /// S5 (Build 41): Fenstermodus nur bei regulärer Breite – Size Class und gemessene Größe des Arbeitsbereichs
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @State private var workspaceSize: CGSize = .zero
     /// Wie weit die Bildschirmtastatur die Leisten von unten verdeckt (über dem unteren sicheren Rand). Eigener Wert
     /// statt SwiftUI-Tastaturausweichen: Nach einem App-Wechsel mit offener Tastatur blieb der Tastaturbereich
     /// sonst stehen – Verlaufsleiste mitten im Bild, rechtes Fenster abgeschnitten (Kai).
     @State private var keyboardLift: CGFloat = 0
+
+    /// Fenstermodus für Rundung/Fase erlaubt (sonst automatisch Panel)
+    private var floatingWindowAllowed: Bool {
+        FilletWindowLayout.allowed(sizeClass: horizontalSizeClass, width: workspaceSize.width)
+    }
+
+    /// Querformat: erst dann gilt die 380-pt-Grenze des Fensters
+    private var isLandscape: Bool {
+        workspaceSize.width > workspaceSize.height
+    }
+
+    /// S6: Höhe, die dem Mittelteil des rechten Fensters bleibt, solange die Tastatur Platz nimmt (oben 76 pt,
+    /// unten 84 pt Abstand, etwa 230 pt für Kopf, Fuß und Haken/Kreuz). nil = keine Tastatur.
+    private var panelHeightLimit: CGFloat? {
+        guard keyboardLift > 0, workspaceSize.height > 0 else { return nil }
+        return workspaceSize.height - keyboardLift - 76 - 84 - 230
+    }
 
     private var projectName: String {
         projects.project(workspace.project.id)?.name ?? workspace.project.name
@@ -123,11 +143,12 @@ private struct WorkspaceContent: View {
                                 .transition(.opacity.combined(with: .move(edge: .trailing)))
                         } else if let command = workspace.command {
                             FeaturePanel(workspace: workspace, model: model, command: command, panel: $panel,
-                                         screenshot: takeScreenshot)
+                                         screenshot: takeScreenshot, allowsFloatingWindow: floatingWindowAllowed,
+                                         isLandscape: isLandscape, heightLimit: panelHeightLimit)
                                 .id(ObjectIdentifier(command))
                                 .padding(.bottom, 84)
                                 .transition(.opacity.combined(with: .move(edge: .trailing)))
-                            if command.id == .fillet && filletFloatingWindow {
+                            if FilletWindowLayout.applies(to: command.id) && filletFloatingWindow && floatingWindowAllowed {
                                 RightRail(workspace: workspace, sketch: sketch, panel: $panel, screenshot: takeScreenshot)
                             }
                         } else {
@@ -166,6 +187,14 @@ private struct WorkspaceContent: View {
         }
         // Auch der Rahmen selbst schrumpft nicht mit der Tastatur (sonst wirkt das Ausweichen von außen weiter)
         .ignoresSafeArea(.keyboard)
+        // S5: Größe des Arbeitsbereichs (Split View, Slide Over, Drehen) für den Fenstermodus messen
+        .background {
+            GeometryReader { proxy in
+                Color.clear
+                    .onAppear { workspaceSize = proxy.size }
+                    .onChange(of: proxy.size) { _, size in workspaceSize = size }
+            }
+        }
         .hoverTipLayer()
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
             updateKeyboardLift(note)
@@ -539,13 +568,15 @@ private struct WorkspaceContent: View {
     }
 
     /// In der Skizze nimmt Rückgängig zuerst Skizzenschritte zurück.
+    /// C2 (Build 41): In der Skizze nimmt Rückgängig nur Skizzenschritte zurück – kein Rückfall auf das Modell-Undo,
+    /// das sonst Körper bzw. die Skizzenliste unter der offenen Skizze zurücknimmt.
     private var canUndo: Bool {
-        (sketch.isActive && sketch.canUndo) || model.canUndo
+        sketch.isActive ? sketch.canUndo : model.canUndo
     }
 
     private func undo() {
-        if sketch.isActive, sketch.canUndo {
-            sketch.undo()
+        if sketch.isActive {
+            if sketch.canUndo { sketch.undo() }
         } else {
             model.undo()
         }
@@ -553,8 +584,9 @@ private struct WorkspaceContent: View {
 
     // MARK: Tastatur
 
-    /// Tastaturrahmen (Bildschirmkoordinaten) ins eigene Fenster umrechnen. Schwebende bzw. geteilte Tastatur
-    /// (schmaler als das halbe Fenster) verdeckt keine Leiste fest: dann nichts anheben.
+    /// Tastaturrahmen (Bildschirmkoordinaten) ins eigene Fenster umrechnen. S6 (Build 41): auch eine schwebende bzw.
+    /// geteilte Tastatur (schmaler als das halbe Fenster) zählt, sobald sie in den rechten Streifen des Fensters
+    /// (rechtes Panel samt OK-Fuß) reicht; dann wird angehoben und das Panel kürzer (panelHeightLimit).
     private func updateKeyboardLift(_ note: Notification) {
         guard let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
               let window = Self.activeWindow, let screenSpace = window.windowScene?.screen.coordinateSpace else {
@@ -562,11 +594,21 @@ private struct WorkspaceContent: View {
             return
         }
         let local = window.convert(frame, from: screenSpace)
-        guard local.width >= window.bounds.width * 0.5, local.height > 0 else {
+        guard local.height > 0, local.intersects(window.bounds) else {
             setKeyboardLift(0, note: note)
             return
         }
-        let overlap = window.bounds.maxY - local.minY - window.safeAreaInsets.bottom
+        if local.width < window.bounds.width * 0.5 {
+            // Schwebende Tastatur: nur, wenn sie das rechte Fenster (320–380 pt + Rand) berühren kann
+            let panelStrip = CGRect(x: window.bounds.maxX - 400, y: window.bounds.minY,
+                                    width: 400, height: window.bounds.height)
+            guard local.intersects(panelStrip) else {
+                setKeyboardLift(0, note: note)
+                return
+            }
+        }
+        // Höchstens 60 % der Fensterhöhe (eine ganz oben abgelegte schwebende Tastatur hebt nicht alles weg)
+        let overlap = min(window.bounds.maxY - local.minY - window.safeAreaInsets.bottom, window.bounds.height * 0.6)
         setKeyboardLift(max(0, overlap), note: note)
     }
 

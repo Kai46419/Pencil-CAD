@@ -291,6 +291,8 @@ final class ViewportView: MTKView {
         let startParameter: Float
         let step: Double
         var lastAppliedValue: Double?
+        /// N3 (Build 41): offener Befehl beim Ansetzen (abgebrochenes Ziehen setzt nur ihn zurück)
+        var command: ObjectIdentifier?
     }
 
     /// Drehen am Ring: Ring wie beim Ansetzen (dreht nicht mit), Winkel des Ansatzpunkts, aufsummierter
@@ -932,6 +934,8 @@ final class ViewportView: MTKView {
             addTextDeformHandles(to: &groups, sketch: sketch, perPoint: perPoint, world: world)
             // Linie beim Zeichnen: Graphit wie die fertigen Linien, offene Enden als kleine Punkte
             let preview = sketch.previewPolylines
+            // Build 43: gleiche Richtung (grün) bzw. gleiche Länge (gelb) wie vorhandene Linien, beides = gestreift
+            let lineHints = sketch.lineMatchHints
             if !preview.isEmpty {
                 var previewEnds: [Point2] = []
                 if sketch.showsPoints {
@@ -944,11 +948,20 @@ final class ViewportView: MTKView {
                     }
                 }
                 // Eingerastet auf gleichen bzw. gespiegelten Winkel einer vorhandenen Linie: grün
-                let previewColor: SIMD3<Float> = sketch.equalLengthPreview != nil ? Self.equalLengthYellow
-                    : (sketch.showsAngleMatch || sketch.parallelPreview != nil ? Self.angleMatchGreen : Self.sketchGraphite)
+                let sameLength = sketch.equalLengthPreview != nil || !lineHints.equal.isEmpty
+                let sameAngle = sketch.showsAngleMatch || sketch.parallelPreview != nil || !lineHints.parallel.isEmpty
+                let previewColor: SIMD3<Float> = sameAngle ? Self.angleMatchGreen
+                    : (sameLength ? Self.equalLengthYellow : Self.sketchGraphite)
+                // Farbig etwas kräftiger, damit Grün und Gelb auf dem Stift-Strich auffallen
+                let previewWidth: Float = sameAngle || sameLength ? 2.6 : Self.sketchLineWidth
                 groups.append(LineGroup(polylines: preview.map { $0.map(world) }, color: previewColor,
-                                        width: Self.sketchLineWidth, dots: previewEnds.map(world),
+                                        width: previewWidth, dots: previewEnds.map(world),
                                         dotRadius: Self.sketchPointRadius))
+                if sameAngle, sameLength {
+                    let stripes = preview.flatMap { dashed($0, dash: 6 * perPoint) }
+                    groups.append(LineGroup(polylines: stripes.map { $0.map(world) }, color: Self.equalLengthYellow,
+                                            width: previewWidth))
+                }
             }
             // Beschneiden per Wischen: Spur des Stifts bzw. Fingers dünn rot (SketchCut.swift)
             let cutTrace = sketch.cutTrace
@@ -1013,12 +1026,32 @@ final class ViewportView: MTKView {
             }
             // Gleicher Winkel wie eine vorhandene Linie: diese leuchtet grün
             let matchingParallelLines = sketch.parallelLines + (sketch.parallelPreview.map { [$0] } ?? [])
+                + lineHints.parallel
             if !matchingParallelLines.isEmpty {
                 groups.append(LineGroup(polylines: matchingParallelLines.map { $0.map(world) },
                                         color: Self.angleMatchGreen, width: 4))
             }
+            // Build 43: Linien mit gleicher Länge gelb; ist eine zugleich parallel, gelb gestreift über dem Grün
+            if !lineHints.equal.isEmpty {
+                let parallelSet = lineHints.parallel
+                let both = lineHints.equal.filter { line in parallelSet.contains { $0 == line } }
+                let onlyEqual = lineHints.equal.filter { line in !parallelSet.contains { $0 == line } }
+                if !onlyEqual.isEmpty {
+                    groups.append(LineGroup(polylines: onlyEqual.map { $0.map(world) },
+                                            color: Self.equalLengthYellow, width: 3.5))
+                }
+                let stripes = both.flatMap { dashed($0, dash: 6 * perPoint) }
+                if !stripes.isEmpty {
+                    groups.append(LineGroup(polylines: stripes.map { $0.map(world) },
+                                            color: Self.equalLengthYellow, width: 4))
+                }
+            }
             if let match = sketch.equalLengthPreview {
-                groups.append(LineGroup(polylines: sketch.equalLengthReferenceLines.map { $0.map(world) },
+                // Build 43: zugleich parallele Bezugslinien bleiben grün-gelb gestreift (unten)
+                let plainReferences = sketch.equalLengthReferenceLines.filter { line in
+                    !lineHints.parallel.contains { $0 == line }
+                }
+                groups.append(LineGroup(polylines: plainReferences.map { $0.map(world) },
                                         color: Self.equalLengthYellow, width: 3.5))
                 let dashes = dashed(match.connector, dash: 4 * perPoint)
                 groups.append(LineGroup(polylines: dashes.map { $0.map(world) },
@@ -1865,6 +1898,10 @@ final class ViewportView: MTKView {
                 let start = atan2(dimension.reference.y, dimension.reference.x)
                 let u = Point2(cos(start), sin(start))
                 let v = Point2(cos(start + dimension.sweep), sin(start + dimension.sweep))
+                if dimension.id.hasSuffix("-absangle") {
+                    // Build 43: Winkel zur Waagerechten – kurzer gestrichelter waagerechter Bezugsschenkel
+                    lines += dashed([a, a + u * 44 * perPoint], dash: 3 * perPoint)
+                }
                 if abs(abs(dimension.sweep) - .pi / 2) < 0.05 * .pi / 180 {
                     // Rechter Winkel: kleines Quadrat im Scheitel (Kai)
                     let size = 12 * perPoint
@@ -2227,7 +2264,8 @@ final class ViewportView: MTKView {
             let isAngle = sketch.visibleDimensions.first { $0.id == field.dimensionID }?.kind == .angle
             let value = try isAngle ? Formula.evaluate(text, variables: values)
                 : Formula.evaluateLength(text, variables: values)
-            guard value > 0 else {
+            // Build 43: Winkel zur Waagerechten darf 0 bzw. negativ sein (−30° = schräg nach unten)
+            guard value > 0 || field.dimensionID.hasSuffix("-absangle") else {
                 sketch.notice = "Das Maß muss größer als 0 sein."
                 return
             }
@@ -2481,6 +2519,17 @@ final class ViewportView: MTKView {
                 continue
             }
             let distance = point.distance(toSegment: a, b)
+            // N2 (Build 41): der Kantenpfeil sitzt an der Kantenmitte. Antippen an der Kante selbst bzw. neben dem
+            // Fuß (erstes Viertel des Pfeils) geht an die Kantenauswahl weiter (abwählen, Nachbarkante wählen);
+            // nur der Pfeil selbst fängt die Berührung.
+            if handle.kind == .edge {
+                let ab = CGPoint(x: b.x - a.x, y: b.y - a.y)
+                let lengthSquared = ab.x * ab.x + ab.y * ab.y
+                if lengthSquared > 100 {
+                    let t = ((point.x - a.x) * ab.x + (point.y - a.y) * ab.y) / lengthSquared
+                    if t < 0.25 { continue }
+                }
+            }
             if distance <= 30, distance < (best?.distance ?? .infinity) {
                 best = (distance, handle)
             }
@@ -2732,7 +2781,8 @@ final class ViewportView: MTKView {
            let handle = handleHit(at: touch.location(in: self)),
            let parameter = axisParameter(at: touch.location(in: self), handle: handle) {
             handleDrag = HandleDragState(touch: touch, handle: handle, startParameter: parameter,
-                                         step: dragStep(at: handle.base, for: handle.kind))
+                                         step: dragStep(at: handle.base, for: handle.kind),
+                                         command: workspace?.command.map { ObjectIdentifier($0) })
             gizmoHover = nil
             refresh()
             return
@@ -2975,6 +3025,12 @@ final class ViewportView: MTKView {
         if let drag = handleDrag, touches.contains(drag.touch) {
             handleDrag = nil
             if drag.handle.kind == .offset { sketch?.endOffsetSnap() }
+            // N3 (Build 41): Systemgeste bricht das Ziehen ab → Wert vom Ansetzen wiederherstellen (kein halb
+            // gezogener Radius). Nur, solange derselbe Befehl offen ist (Rundung ↔ Fase kann gewechselt haben).
+            if let applied = drag.lastAppliedValue, applied != drag.handle.value, let workspace,
+               drag.command == workspace.command.map({ ObjectIdentifier($0) }) {
+                workspace.apply(drag.handle.kind, value: drag.handle.value)
+            }
             refresh()
             return
         }

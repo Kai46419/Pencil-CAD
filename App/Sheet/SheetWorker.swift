@@ -21,10 +21,17 @@ func sheetWriteSTEP(_ shape: PCKShape, to url: URL, limit: Double = SheetWorker.
         }
         return
     }
-    try SheetWorker.run(limit: limit) { () throws -> Void in
-        guard PCKShape.writeSTEP([copy], path: path) else {
-            throw SheetKernelError("Körper ließ sich nicht als STEP schreiben.")
+    do {
+        try SheetWorker.run(limit: limit) { () throws -> Void in
+            guard PCKShape.writeSTEP([copy], path: path) else {
+                throw SheetKernelError("Körper ließ sich nicht als STEP schreiben.")
+            }
         }
+    } catch {
+        // S1 (Build 41): nach Zeitlimit schreibt der weiterlaufende Auftrag die Datei trotzdem – nach seinem Ende
+        // (gleiche serielle Warteschlange) löschen; bei anderem Fehler eine halb geschriebene Datei ebenso
+        SheetWorker.removeWhenIdle(url)
+        throw error
     }
 }
 
@@ -68,6 +75,14 @@ enum SheetWorker {
     static let stackSize = 16 << 20
     private static let queue = DispatchQueue(label: "PencilCAD.sheet", qos: .userInitiated)
     private static let state = SheetWorkerState()
+
+    /// S1 (Build 41): Datei löschen, sobald alle bisher eingereihten Aufträge fertig sind (auch ein hängender Auftrag
+    /// nach Zeitlimit: die serielle Warteschlange wartet auf dessen Thread).
+    static func removeWhenIdle(_ url: URL) {
+        queue.async {
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
 
     /// Arbeit im Hintergrund ausführen und höchstens limit Sekunden auf das Ergebnis warten. Auch alles STEP-Lesen und
     /// -Schreiben des Blechmoduls läuft hier (eine serielle Warteschlange: OCCT-STEP nutzt globale Einstellungen).

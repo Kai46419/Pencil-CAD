@@ -958,10 +958,59 @@ enum SheetFoldDriver: SheetEditableDriver {
             model.message = "Feste Seite: Fläche noch einmal antippen."
             return true
         }
+        // D6 (Build 41): bei sichtbarer Vorschau liegt der Tippunkt auf dem gefalteten Vorschaukörper. Die Fläche ist
+        // schon auf den Ausgangskörper abgebildet (Workspace.commandTapped), der Punkt jetzt ebenso.
+        guard let fixed = originalPoint(point, on: face, model) else {
+            model.message = "Feste Seite: Fläche noch einmal antippen."
+            return true
+        }
         cmd.setItems("fixed", [.face(face)])
-        cmd.values["fixedPoint"] = "\(point.x),\(point.y),\(point.z)"
+        cmd.values["fixedPoint"] = "\(fixed.x),\(fixed.y),\(fixed.z)"
         ws.refreshCommandPreview()
         return true
+    }
+
+    /// D6: nächster Punkt derselben Fläche am Ausgangskörper (ohne Vorschau: der Punkt selbst).
+    @MainActor static func originalPoint(_ point: SIMD3<Double>, on face: FaceRef, _ model: ModelStore) -> SIMD3<Double>? {
+        guard model.hasPreview else { return point }
+        guard model.bodies.indices.contains(face.body) else { return nil }
+        let shown = model.shownBodies
+        if shown.indices.contains(face.body), shown[face.body].shape === model.bodies[face.body].shape { return point }
+        let mesh = Mesh(model.bodies[face.body].shape.triangulate(deflection: 0.05), body: face.body)
+        let p = SIMD3<Float>(point)
+        var best: (distance: Float, point: SIMD3<Float>)?
+        for t in 0..<min(mesh.triangleCount, mesh.triangleFaces.count) where mesh.triangleFaces[t] == face {
+            let a = mesh.vertices[Int(mesh.indices[t * 3])].position
+            let b = mesh.vertices[Int(mesh.indices[t * 3 + 1])].position
+            let c = mesh.vertices[Int(mesh.indices[t * 3 + 2])].position
+            let q = closestPoint(p, a, b, c)
+            let d = simd_distance(p, q)
+            if best.map({ d < $0.distance }) ?? true { best = (d, q) }
+        }
+        return best.map { SIMD3<Double>($0.point) }
+    }
+
+    /// Nächster Punkt eines Dreiecks (Ericson, Real-Time Collision Detection 5.1.5).
+    static func closestPoint(_ p: SIMD3<Float>, _ a: SIMD3<Float>, _ b: SIMD3<Float>, _ c: SIMD3<Float>) -> SIMD3<Float> {
+        let ab = b - a, ac = c - a, ap = p - a
+        let d1 = simd_dot(ab, ap), d2 = simd_dot(ac, ap)
+        if d1 <= 0, d2 <= 0 { return a }
+        let bp = p - b
+        let d3 = simd_dot(ab, bp), d4 = simd_dot(ac, bp)
+        if d3 >= 0, d4 <= d3 { return b }
+        let vc = d1 * d4 - d3 * d2
+        if vc <= 0, d1 >= 0, d3 <= 0 { return a + ab * (d1 / (d1 - d3)) }
+        let cp = p - c
+        let d5 = simd_dot(ab, cp), d6 = simd_dot(ac, cp)
+        if d6 >= 0, d5 <= d6 { return c }
+        let vb = d5 * d2 - d1 * d6
+        if vb <= 0, d2 >= 0, d6 <= 0 { return a + ac * (d2 / (d2 - d6)) }
+        let va = d3 * d6 - d5 * d4
+        if va <= 0, d4 - d3 >= 0, d5 - d6 >= 0 { return b + (c - b) * ((d4 - d3) / ((d4 - d3) + (d5 - d6))) }
+        let sum = va + vb + vc
+        guard abs(sum) > 1e-12 else { return a }
+        let v = vb / sum, w = vc / sum
+        return a + ab * v + ac * w
     }
 
     @MainActor static func fixedPoint(_ cmd: ModelCommand) -> SIMD3<Double>? {
@@ -1108,6 +1157,15 @@ enum SheetPerforateDriver: SheetEditableDriver {
             model.dropPreview()
             return diameter > 0 ? "Die Teilung muss größer als der Durchmesser sein." : "Der Durchmesser muss größer als 0 sein."
         }
+        // D10 (Build 41): Lochzahl vorab schätzen (Blechfläche / Teilung²), ab 20 000 ablehnen (SheetKit liefert
+        // höchstens so viele Löcher, MAX_PERFORATION_HOLES in psk.rs)
+        let estimate = estimatedHoleCount(area: sheetArea(body, model), pitch: pitch)
+        guard estimate < Double(maxHoles) else {
+            model.dropPreview()
+            // Int(…) erst nach Klemmen: eine winzige Teilung (pitch² → 0) ergibt ∞, und Int(∞) bricht ab
+            let shown = estimate.isFinite ? String(Int(min(estimate, 1e12).rounded())) : "unendlich viele"
+            return "Etwa \(shown) Löcher – höchstens \(maxHoles) möglich. Teilung vergrößern."
+        }
         guard cmd.previewEnabled else {
             model.dropPreview()
             return nil
@@ -1116,6 +1174,23 @@ enum SheetPerforateDriver: SheetEditableDriver {
                                              pattern: cmd.option("pattern", default: "staggered"))
         if model.appendSheetCommand(command, to: body, preview: true) { return nil }
         return SheetPick.failure(model, "Perforieren nicht möglich.")
+    }
+
+    /// D10: Höchstzahl der Löcher (wie MAX_PERFORATION_HOLES in SheetKit/src/psk.rs)
+    static let maxHoles = 20_000
+
+    /// D10: geschätzte Lochzahl = Fläche / Teilung² (Rand und Lochbild vernachlässigt, eher zu hoch)
+    static func estimatedHoleCount(area: Double, pitch: Double) -> Double {
+        guard area > 0, pitch > 0 else { return 0 }
+        return area / (pitch * pitch)
+    }
+
+    /// D10: Fläche einer Blechseite ≈ halbe Oberfläche des Körpers (Stirnflächen vernachlässigt)
+    @MainActor static func sheetArea(_ body: Int, _ model: ModelStore) -> Double {
+        guard model.bodies.indices.contains(body) else { return 0 }
+        let shape = model.bodies[body].shape
+        guard shape.faceCount > 0, shape.faceCount < 20_000 else { return 0 }
+        return (1...shape.faceCount).reduce(0.0) { $0 + shape.area(ofFace: $1) } / 2
     }
 
     static func canCommit(_ cmd: ModelCommand, _ ws: Workspace) -> Bool {

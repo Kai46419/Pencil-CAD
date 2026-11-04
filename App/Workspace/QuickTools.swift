@@ -155,7 +155,9 @@ struct QuickToolsPalette: View {
                     sketch.snapEnabled.toggle()
                 },
                 Item(id: "Rückgängig", systemImage: "arrow.uturn.backward") {
-                    if sketch.canUndo { sketch.undo() } else { model.undo() }
+                    // C2 (Build 41): im Skizzenmodus nur Skizzenschritte – kein Rückfall auf das Modell-Undo, das
+                    // sonst unbemerkt Körper bzw. die Skizzenliste unter der offenen Skizze zurücknimmt
+                    if sketch.canUndo { sketch.undo() }
                 },
             ]
         }

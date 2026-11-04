@@ -553,8 +553,9 @@ struct ParameterCard: View {
                     .controlSize(.small)
                     .disabled(model.selectedEdges.count != 1 || model.edgeEndValue != nil
                               || model.edgePartialRange != nil || model.isBlendComputing
-                              || model.isBlendMaximumComputing)
+                              || model.isBlendMaximumComputing || model.effectiveBlendOptions != nil)
                     .hoverTip("Maximal gültiger Radius", "Prüft die gewählte Kante im isolierten Kernel und übernimmt den größten gültigen Radius. Der angegebene Wert bleibt unverändert, bis du Max. antippst.")
+                    edgeBlendOptionsMenu
                     // Variable Rundung (Fusion 360): Radius wächst bzw. schrumpft entlang der Kante
                     Toggle("Variabel", isOn: Binding(get: { model.edgeEndValue != nil }, set: { on in
                         if on { model.setEdgePartialRange(nil, update: false) }
@@ -611,6 +612,79 @@ struct ParameterCard: View {
                     .fixedSize()
             }
         }
+    }
+
+    /// Build 42 (C7): Rundungsoptionen kompakt als Menü (Ecken, Stetigkeit, Profil); nur was der Kernel kann, nur bei
+    /// konstanter Rundung. Setback hier immer 1,5 × Radius (Handeingabe im Abrunden-Panel).
+    private var edgeBlendOptionsMenu: some View {
+        let current = model.edgeBlendOptions
+        let constant = model.edgeEndValue == nil && model.edgePartialRange == nil
+        let radius = max(model.edgeValue, 0.01)
+        let choose: ((inout BlendOptions) -> Void) -> Void = { change in
+            guard let next = BlendOptionsForm.variant(of: current, change) else { return }
+            model.setEdgeBlendOptions(next, update: true)
+        }
+        let canSetback = BlendOptionsForm.variant(of: current) {
+            $0.corner = .setback
+            $0.setback = BlendOptions.defaultSetback(radius: radius)
+        } != nil
+        let canG2 = BlendOptionsForm.variant(of: current) { $0.continuity = .g2 } != nil
+        let canConic = BlendOptionsForm.variant(of: current) {
+            $0.continuity = .g2
+            $0.profile = .conic
+            $0.rho = $0.rho ?? BlendOptionKeys.defaultRho
+        } != nil
+        return Menu {
+            Section("Ecken") {
+                Button {
+                    choose { $0.corner = .rollingBall }
+                } label: {
+                    Label("Rolling Ball", systemImage: current.corner == .rollingBall ? "checkmark" : "circle")
+                }
+                Button {
+                    choose {
+                        $0.corner = .setback
+                        $0.setback = BlendOptions.defaultSetback(radius: radius)
+                    }
+                } label: {
+                    Label("Setback (1,5 × Radius)", systemImage: current.corner == .setback ? "checkmark" : "circle")
+                }
+                .disabled(!canSetback)
+            }
+            Section("Stetigkeit") {
+                Button {
+                    choose { $0.continuity = .g1 }
+                } label: {
+                    Label("G1", systemImage: current.continuity == .g1 ? "checkmark" : "circle")
+                }
+                Button {
+                    choose { $0.continuity = .g2 }
+                } label: {
+                    Label("G2", systemImage: current.continuity == .g2 && current.profile == .circle ? "checkmark" : "circle")
+                }
+                .disabled(!canG2)
+                Button {
+                    choose {
+                        $0.continuity = .g2
+                        $0.profile = .conic
+                        $0.rho = $0.rho ?? BlendOptionKeys.defaultRho
+                    }
+                } label: {
+                    Label("G2 Kegelschnitt (Rho 0,5)", systemImage: current.profile == .conic ? "checkmark" : "circle")
+                }
+                .disabled(!canConic)
+            }
+            Button("Standard", systemImage: "arrow.counterclockwise") {
+                model.setEdgeBlendOptions(.standard, update: true)
+            }
+            .disabled(current.isStandard)
+        } label: {
+            Label(current.isStandard ? "Optionen" : BlendOptionsForm.summary(current), systemImage: "gearshape")
+                .lineLimit(1)
+        }
+        .fixedSize()
+        .disabled(!constant)
+        .hoverTip("Rundungsoptionen", "Ecken (Rolling Ball oder Setback) und Stetigkeit G1/G2 – nur was der Geometriekernel kann.")
     }
 
     /// Gewählte Skizzenbereiche extrudieren (Pfeil oder Wert). Kompakt in zwei Zeilen: In einer Zeile

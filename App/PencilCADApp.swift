@@ -38,6 +38,8 @@ struct RootView: View {
             WorkspaceView(workspace: workspace) {
                 workspace.model.commitPreview()
                 workspace.saveThumbnail()
+                // C4 (Build 41): laufenden STL-/3MF-Import abbrechen; danach speichert dieses Modell nicht mehr
+                workspace.model.close()
                 // Sauber geschlossen: keine Hänger-Marke übrig lassen (HangGuard.swift)
                 HangGuard.clear(in: workspace.project.folder)
                 projects.touch(workspace.project.id)

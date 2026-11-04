@@ -266,8 +266,14 @@ enum SheetConvertDriver: MainCommandDriver {
                 model.message = "Als Grundfläche eine ebene Fläche antippen."
                 return true
             }
-            guard !model.isSheetBody(face.body) else {
-                model.message = "„\(model.bodies[face.body].name)“ ist schon ein Blechkörper."
+            // N6 (Build 41): geprüft wird der abgebildete Ausgangskörper (face ist bei Vorschau schon über
+            // originalFace abgebildet), mit derselben Regel wie sheetConvertPlan: ein außerhalb des Blechmoduls
+            // veränderter Blechkörper darf neu umgewandelt werden.
+            guard model.bodies.indices.contains(face.body),
+                  !model.isSheetBody(face.body) || model.sheetBodyIsModified(face.body) else {
+                if model.bodies.indices.contains(face.body) {
+                    model.message = "„\(model.bodies[face.body].name)“ ist schon ein Blechkörper."
+                }
                 return true
             }
             choose(base: face, cmd, model, suggest: false)

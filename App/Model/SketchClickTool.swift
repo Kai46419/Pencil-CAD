@@ -11,6 +11,8 @@ import simd
 struct SketchClickPoint {
     var point: Point2
     var target: SnapTarget?
+    /// Build 43: zusätzlich gleich lang wie diese Linie (Parallel- bzw. Rechtwinkelfang mit gleicher Länge)
+    var alsoEqual: SketchCurveRef? = nil
 }
 
 /// Werkzeugart der Klickfolge.
@@ -109,6 +111,11 @@ struct SketchClickState {
     /// Ausdrücklich gemerkte Spurpunkte (Stift 0,5 s schweben lassen, Stift drücken, Finger-Doppeltipp; nochmal
     /// entmerkt): liefern Objektfangspuren (SketchInference.trackLeads), die neuesten zuletzt
     var pinned: [Point2] = []
+    /// Build 43 (Linie endet nach dem Strich): Ende der zuletzt gezeichneten Linie. Hier wieder ansetzen bzw. es
+    /// antippen zeichnet weiter (auch knapp daneben oder bei ausgeschaltetem Fang)
+    var lastLineEnd: SketchPointRef?
+    /// Build 43: Anfang der Kontur über das Weiterzeichnen hinweg (zurück am Anfang = geschlossen, wie im Linienzug)
+    var contourFirst: Point2?
 
     var isEmpty: Bool { points.isEmpty && picks.isEmpty }
 }
@@ -538,11 +545,32 @@ extension SketchController {
                                              tolerance: metrics.refine) {
             result = match
         }
+        // Build 43 (Kai, Parallelogramm): Parallel bzw. rechtwinklig UND gleich lang – bisher schloss der Parallelfang
+        // den Längenfang aus, die Gegenseite wurde nie gelb. Die Richtung bleibt, die Länge rastet ein.
         if clickKind == .line, let anchor = click.points.last?.point,
-           lockedValue("Länge") == nil, !arcModifier {
+           snapEnabled, snapKinds.contains(.equalLength), !snapSuspended, !arcModifier,
+           lockedValue("Länge") == nil, !hasLockedBox {
+            switch result.target {
+            case .some(.parallel), .some(.perpendicular):
+                if let match = inference.equalLength(from: anchor, toward: result.point, raw: raw,
+                                                     tolerance: metrics.refine),
+                   case .equalLength(let ref)? = match.target, inference.curve(ref)?.construction == false {
+                    result.point = match.point
+                    result.alsoEqual = ref
+                    if result.guide != nil { result.guide = (anchor, match.point) }
+                }
+            default:
+                break
+            }
+        }
+        if clickKind == .line, let anchor = click.points.last?.point,
+           lockedValue("Länge") == nil, !arcModifier, result.alsoEqual == nil {
             switch result.target {
             case nil, .some(.grid):
-                result.point = steppedLineEnd(raw, from: anchor)
+                // Build 41: gerasterten Punkt (XY-Raster) als Richtung nehmen, nicht den rohen Stiftpunkt –
+                // außer er fällt auf den Startpunkt (sonst Länge 0 statt mindestens eines Schritts)
+                let direction = simd_distance(result.point, anchor) > 1e-9 ? result.point : raw
+                result.point = steppedLineEnd(direction, from: anchor)
             case .some(.horizontal), .some(.vertical), .some(.angle),
                  .some(.parallel), .some(.perpendicular):
                 result.point = steppedLineEnd(result.point, from: anchor)
@@ -645,7 +673,7 @@ extension SketchController {
         if secondTap {
             // Erst beim Abheben klar: Tippen (Doppeltipp) oder Ziehen
         } else if click.points.isEmpty, kind.pressPlacesFirstPoint {
-            clickPlace(candidate)
+            clickPlace(lineContinuation(raw: raw, fresh: fresh, metrics: metrics) ?? candidate)
             placedFirst = !click.points.isEmpty
         } else if kind == .line, let last = click.points.last, simd_distance(last.point, fresh.point) > metrics.tapSlop {
             // Knapp neben dem Zugende aufgesetzt (ohne anderen Punktfang, z. B. auf dem letzten Stück selbst):
@@ -738,7 +766,7 @@ extension SketchController {
         activeCandidate = nil
         if press.secondTap, dragged, click.points.isEmpty, kind.pressPlacesFirstPoint {
             // Doppeltippen und gleich ziehen: wie Aufsetzen–Ziehen–Abheben von A nach B
-            clickPlace(press.fresh)
+            clickPlace(lineContinuation(raw: press.raw, fresh: press.fresh, metrics: metrics) ?? press.fresh)
             if !click.points.isEmpty {
                 candidate = clickCandidate(raw, tolerance: tolerance)
                 clickPlace(candidate)
@@ -756,12 +784,29 @@ extension SketchController {
             clickPlace(candidate)
         }
         // Merken fürs Doppeltippen; „begonnen“ = vorher lief nichts, jetzt eine Form bzw. ein Linienzug
-        click.lastTap = dragged ? nil
+        // Build 43: Ein Tipp, der einen Einzelstrich abschließt, ist kein erstes Tippen eines Doppeltipps – sonst ginge
+        // schnelles erneutes Antippen des Linienendes (Weiterzeichnen) verloren
+        let endedStroke = kind == .line && lineSingleStroke && !press.startedEmpty && click.points.isEmpty
+        click.lastTap = dragged || endedStroke ? nil
             : SketchClickState.Tap(time: now, raw: raw, startedShape: press.startedEmpty && !click.points.isEmpty)
         click.hover = nil
         // Nach dem Abheben nur noch die gemerkten Fangpunkte zeigen (die in Stiftnähe folgen beim Schweben)
         clickTrackedPoints = click.tracked
         changed()
+    }
+
+    /// Build 43: Ansetzen am Ende der zuletzt gezeichneten Linie (bzw. knapp daneben, ohne anderen Punktfang)
+    /// setzt den neuen Strich genau dort an – mit dem Linienende als Fang, damit Ecke und Winkel zum vorigen
+    /// Strich stimmen. nil = nicht in der Nähe bzw. Linienzug-Modus.
+    private func lineContinuation(raw: Point2, fresh: SnapCandidate, metrics: SnapMetrics) -> SnapCandidate? {
+        guard clickKind == .line, lineSingleStroke, let ref = click.lastLineEnd,
+              entities.indices.contains(ref.entity), ref.index <= 1,
+              case .line(let a, let b) = entities[ref.entity] else { return nil }
+        let end = ref.index == 1 ? b : a
+        guard simd_distance(end, raw) <= metrics.chainReach else { return nil }
+        // Ein anderer Punktfang (z. B. ein näherer Endpunkt) gewinnt
+        if fresh.target?.isPointSnap == true, simd_distance(fresh.point, end) > 1e-9 { return nil }
+        return SnapCandidate(point: end, target: .point(ref), guide: nil, label: "")
     }
 
     /// Neuer Linienzug ab dem Fang beim Aufsetzen.
@@ -800,7 +845,7 @@ extension SketchController {
 
     private func clickPlace(_ candidate: SnapCandidate) {
         guard let kind = clickKind else { return }
-        let point = SketchClickPoint(point: candidate.point, target: candidate.target)
+        let point = SketchClickPoint(point: candidate.point, target: candidate.target, alsoEqual: candidate.alsoEqual)
         defer { if options.midpointOnly { options.midpointOnly = false } }
         // Gesetzte Punkte bleiben für die Ausrichtung gemerkt (auch frühere Ecken des Linienzugs)
         rememberTracked(inference.trackKind(candidate.target, at: candidate.point) ?? .endpoint, candidate.point)
@@ -839,7 +884,13 @@ extension SketchController {
     private func placeLinePoint(_ point: SketchClickPoint) {
         guard let last = click.points.last else {
             click.points = [point]
-            click.chainFirst = point.point
+            if lineSingleStroke, case .point(let ref?)? = point.target, ref == click.lastLineEnd,
+               let first = click.contourFirst {
+                // Weitergezeichnet: die Kontur beginnt weiter beim ersten Strich
+                click.chainFirst = first
+            } else {
+                click.chainFirst = point.point
+            }
             placedPointCount += 1
             return
         }
@@ -859,6 +910,15 @@ extension SketchController {
             click.points = []
             click.chainFirst = nil
             tool = .select
+            return
+        }
+        if lineSingleStroke {
+            // Build 43 (Kai): Der Strich endet hier. Länge und Winkel stehen als änderbare Maße an der Linie
+            // (editableIndex); weiter geht es erst, wenn das Linienende wieder angetippt bzw. dort angesetzt wird.
+            click.contourFirst = click.chainFirst
+            click.points = []
+            click.chainFirst = nil
+            click.lastLineEnd = SketchPointRef(entity: index, index: 1)
             return
         }
         click.points = [SketchClickPoint(point: point.point, target: .point(SketchPointRef(entity: index, index: 1)))]
@@ -1031,7 +1091,8 @@ extension SketchController {
     }
 
     var polygonSideCount: Int {
-        let locked = lockedValue("Seiten").map { Int($0.rounded()) }
+        // Seitenzahl erst klemmen, dann wandeln (1e20 bzw. NaN stürzte ab)
+        let locked = lockedValue("Seiten").map { clampedCount($0, min: 3, max: 200) }
         return max(locked ?? polygonSides, 3)
     }
 
@@ -1135,6 +1196,9 @@ extension SketchController {
         guard let kind = clickKind else { return nil }
         let n = click.points.count
         switch kind {
+        case .line where lineSingleStroke:
+            return n == 0 ? "Linie: von A nach B ziehen oder A und B antippen · Maße an der Linie antippen zum Ändern · Linienende antippen bzw. dort ansetzen zeichnet weiter"
+                : "Linie: Ende antippen (Länge/Winkel eintippbar) – der Strich endet dort"
         case .line:
             return n == 0 ? "Linie: Punkte antippen (auch doppeltippen) – oder von A nach B ziehen"
                 : "Linie: nächsten Punkt antippen (Länge/Winkel eintippbar) · doppeltippen, letzten Punkt erneut antippen oder „Fertig“ beendet · Anfang antippen schließt"
@@ -1184,5 +1248,55 @@ extension SketchController {
         case .point:
             return "Punkt: antippen"
         }
+    }
+}
+
+// MARK: - Build 43: Farbhinweise beim Zeichnen einer Linie (Kai)
+
+// „Wenn ich denselben Winkel habe wie die erste Linie, soll mein Strich grün werden. Wenn ich die Länge von irgendeiner
+// dieser bis jetzt gezeichneten Konstruktionen habe, wird die Linie gelb, und auch die dazugehörige Linie.“
+// Geprüft wird die gezeigte Vorschau selbst (nach allen Fängen): genau gleiche Richtung wie eine vorhandene Linie
+// (parallel, gleicher Winkel zur Waagerechten) = grün, genau gleiche Länge = gelb – jeweils mit allen passenden
+// Linien. Beides zugleich: grün-gelb gestreift. Die Fänge Parallel und Gleiche Länge machen die Werte genau.
+extension SketchController {
+    struct LineMatchHints {
+        /// Vorhandene Linien mit derselben Richtung (grün)
+        var parallel: [[Point2]] = []
+        /// Vorhandene Linien mit derselben Länge (gelb)
+        var equal: [[Point2]] = []
+
+        var isEmpty: Bool { parallel.isEmpty && equal.isEmpty }
+    }
+
+    /// Richtungsgleichheit: Kreuzprodukt der Einheitsvektoren (≈ Winkel im Bogenmaß; 1e-7 ≈ 0,000006°)
+    static let lineMatchAngleTolerance = 1e-7
+
+    /// Hinweise für das Gummiband der Linie; leer ohne laufenden Strich bzw. bei anderen Werkzeugen.
+    var lineMatchHints: LineMatchHints {
+        guard clickKind == .line, let a = click.points.last?.point, let b = click.hover?.point else {
+            return LineMatchHints()
+        }
+        return Self.lineMatches(from: a, to: b, curves: inference.curves)
+    }
+
+    /// Passende Linien zu a→b unter den (nicht konstruktiven) geraden Kurven der Skizze.
+    static func lineMatches(from a: Point2, to b: Point2, curves: [SketchInference.Curve]) -> LineMatchHints {
+        let v = b - a
+        let length = simd_length(v)
+        guard length > 1e-9, length.isFinite else { return LineMatchHints() }
+        let u = v / length
+        let lengthTolerance = max(1e-6, length * 1e-9)
+        var hints = LineMatchHints()
+        var seen = Set<SketchCurveRef>()
+        for curve in curves where !curve.construction {
+            guard case .line(let p, let q) = curve.shape, seen.insert(curve.ref).inserted else { continue }
+            let w = q - p
+            let l = simd_length(w)
+            guard l > 1e-9, l.isFinite else { continue }
+            let d = w / l
+            if abs(u.x * d.y - u.y * d.x) < lineMatchAngleTolerance { hints.parallel.append([p, q]) }
+            if abs(l - length) <= lengthTolerance { hints.equal.append([p, q]) }
+        }
+        return hints
     }
 }

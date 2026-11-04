@@ -224,6 +224,8 @@ struct SnapCandidate {
     var label: String = ""
     /// Weitere gestrichelte Hilfslinien (Ausrichtung an Punkten, Verlängerungen, Winkelstrahl), zusätzlich zu guide.
     var guides: [(Point2, Point2)] = []
+    /// Build 43: Parallel- bzw. Rechtwinkelfang, der zugleich auf die Länge dieser Linie eingerastet ist
+    var alsoEqual: SketchCurveRef? = nil
 
     static func free(_ p: Point2) -> SnapCandidate { SnapCandidate(point: p, target: nil, guide: nil, label: "") }
 
