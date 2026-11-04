@@ -359,6 +359,7 @@ private struct PaletteMoreSection: View {
                 CheckRow(title: "Hilfslinien", icon: "square.dashed", isOn: $sketch.showsConstruction)
                 CheckRow(title: "Maße als Schloss", icon: "lock", isOn: $sketch.collapsesLockedDimensions)
                 CheckRow(title: "Bestimmtheit", icon: "checkmark.seal", isOn: $sketch.showsDefinition)
+                CheckRow(title: "Linie endet nach Strich", icon: "line.diagonal", isOn: $sketch.lineSingleStroke)
                 CheckRow(title: "Auto-Bedingungen", icon: "wand.and.rays", isOn: $sketch.autoConstrain)
                 PaletteRule()
                     .padding(.vertical, 4)

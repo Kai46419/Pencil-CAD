@@ -692,6 +692,11 @@ final class SketchController: ObservableObject {
     @Published var snapHaptics = UserDefaults.standard.object(forKey: "snapHaptics") as? Bool ?? true {
         didSet { UserDefaults.standard.set(snapHaptics, forKey: "snapHaptics") }
     }
+    /// Build 43 (Kai): Die Linie endet nach jedem Strich; Länge und Winkel bleiben als Maße zum Ändern stehen.
+    /// Weitergezeichnet wird, indem man das Linienende wieder antippt bzw. dort ansetzt. Aus = Linienzug wie bisher.
+    @Published var lineSingleStroke = UserDefaults.standard.object(forKey: "lineSingleStroke") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(lineSingleStroke, forKey: "lineSingleStroke") }
+    }
     /// Kurzer akustischer Klick, wenn der Fang „Gleiche Länge“ neu einrastet.
     @Published var equalLengthClick = UserDefaults.standard.object(forKey: "equalLengthClick") as? Bool ?? true {
         didSet { UserDefaults.standard.set(equalLengthClick, forKey: "equalLengthClick") }
@@ -2442,7 +2447,8 @@ final class SketchController: ObservableObject {
             var copy = placedOutside(pair.element)
             if copy.id.isEmpty { copy.id = "live-\(pair.offset)" }
             // Kai: jedes änderbare Maß hat ein Schloss – rot (frei), antippen legt den aktuellen Wert fest
-            if copy.lockState == nil, copy.isEditable {
+            // Build 43: Winkel zur Waagerechten hat kein Schloss (es gibt dafür keine Bedingung)
+            if copy.lockState == nil, copy.isEditable, !copy.id.hasSuffix("-absangle") {
                 switch copy.target {
                 case .entity, .create: copy.lockState = false
                 case .display, .constraint, .live: break
@@ -2564,7 +2570,12 @@ final class SketchController: ObservableObject {
             result = Self.dimensions(of: entities[index], editable: true)
                 .filter { !fixed.contains($0.kind) }
                 .map { $0.tagged("e\(index)-\($0.kind)", .entity(index)) }
-            if !isInProgress { result += neighborAngles(of: index) }
+            if !isInProgress {
+                let corners = neighborAngles(of: index)
+                result += corners
+                // Build 43 (Kai): einzelne Linie nach dem Strich – Winkel zur Waagerechten zum Ändern
+                if corners.isEmpty, let angle = absoluteLineAngle(of: index) { result.append(angle) }
+            }
         } else if !isInProgress {
             result = selectionDimensions
         }
@@ -2625,6 +2636,85 @@ final class SketchController: ObservableObject {
                 .tagged("e\(index)-angle\(k)", .create(.angle(theirs, mine, degrees: stored))))
         }
         return result
+    }
+
+    /// Build 43: Winkel einer frei stehenden Linie zur Waagerechten (−180…180°, wie das Wertfeld beim Zeichnen),
+    /// am Linienanfang. Nur wenn keine andere Linie an einem Ende anschließt (dann zeigt neighborAngles den
+    /// Eckwinkel) und kein Winkelmaß die Linie schon führt.
+    private func absoluteLineAngle(of index: Int) -> SketchDimension? {
+        guard lineSingleStroke, clickKind == .line, entities.indices.contains(index),
+              case .line(let a, let b) = entities[index], simd_distance(a, b) > 1e-9 else { return nil }
+        let touches = entities.indices.contains { other in
+            guard other != index, !construction.contains(other), case .line(let c, let d) = entities[other] else {
+                return false
+            }
+            return [c, d].contains { simd_distance($0, a) < 1e-6 || simd_distance($0, b) < 1e-6 }
+        }
+        guard !touches else { return nil }
+        let angled = constraints.contains { constraint in
+            switch constraint.variant {
+            case .angle(let x, let y, _), .parallel(let x, let y), .perpendicular(let x, let y),
+                 .equalAngle(let x, let y, _):
+                return x.entity == index || y.entity == index
+            default:
+                return false
+            }
+        }
+        guard !angled else { return nil }
+        let v = b - a
+        let sweep = atan2(v.y, v.x)
+        let bisector = Point2(cos(sweep / 2), sin(sweep / 2))
+        var dimension = SketchDimension(kind: .angle, value: sweep * 180 / .pi,
+                                        position: a + bisector * simd_distance(a, b) * 0.45,
+                                        direction: bisector, isEditable: true, span: [a, b])
+        dimension.reference = Point2(1, 0)
+        dimension.sweep = sweep
+        return dimension.tagged("e\(index)-absangle", .entity(index))
+    }
+
+    /// Build 43: Winkel der frei stehenden Linie zur Waagerechten eingeben – sie dreht sich um ihren Anfang
+    /// (bzw. um ihr Ende, wenn der Anfang festliegt); Länge und Anschlüsse bleiben. Waagerecht/senkrecht
+    /// bekommt mit „Auto-Bedingungen“ die Bedingung H/V, eine alte H/V-Bedingung der Linie fällt weg.
+    private func setLineAngle(of index: Int, degrees: Double) {
+        guard degrees.isFinite, entities.indices.contains(index), case .line(let a, let b) = entities[index] else { return }
+        let length = simd_distance(a, b)
+        guard length > 1e-9 else { return }
+        let radians = degrees * .pi / 180
+        let direction = Point2(cos(radians), sin(radians))
+        let line = SketchCurveRef(entity: index, index: 0)
+        let beforeConstraints = constraints
+        constraints.removeAll { constraint in
+            switch constraint.variant {
+            case .horizontal(let c), .vertical(let c): return c == line
+            default: return false
+            }
+        }
+        var aroundStart = entities, aroundEnd = entities
+        aroundStart[index] = .line(a, a + direction * length)
+        aroundEnd[index] = .line(b - direction * length, b)
+        let focus: Set<Int> = [index]
+        let tiers = [[DimensionTrial(entities: aroundStart, focus: focus, pinned: focus)],
+                     [DimensionTrial(entities: aroundEnd, focus: focus, pinned: focus)]]
+        let before = entities
+        guard let found = solveDimensionTrials(tiers, before: before) else {
+            constraints = beforeConstraints
+            notice = dimensionConflictNotice
+            return
+        }
+        let reduced = constraints
+        constraints = beforeConstraints
+        remember()
+        constraints = reduced
+        entities = found.entities
+        if autoConstrain, case .line(let p, let q) = entities[index] {
+            if abs(q.y - p.y) < 1e-9 {
+                constraints.append(SketchConstraint(variant: .horizontal(line)))
+            } else if abs(q.x - p.x) < 1e-9 {
+                constraints.append(SketchConstraint(variant: .vertical(line)))
+            }
+        }
+        notice = found.isGlobal ? widerDimensionNotice : nil
+        entitiesChanged()
     }
 
     /// Wie bei Shapr3D: Maße zur Auswahl. Ein Element zeigt seine Maße, zwei Punkte ihren Abstand,
@@ -2829,6 +2919,10 @@ final class SketchController: ObservableObject {
                 notice = "Maß festgelegt: \(dimension.value.formatted(.number.precision(.fractionLength(0...2))))"
             }
             return
+        case .entity where id.hasSuffix("-absangle"):
+            // Kein Winkelmaß zur Waagerechten als Bedingung: waagerecht/senkrecht festlegen geht über H/V
+            notice = "Den Winkel zur Waagerechten kann man nur eintippen – festlegen geht als Winkel zu einer anderen Linie oder mit Waagerecht/Senkrecht."
+            return
         case .entity:
             setDimension(id: id, to: dimension.value)
             return
@@ -2857,6 +2951,12 @@ final class SketchController: ObservableObject {
         // Wertfeld der Klickfolge: auch negative Werte (Bogenwinkel im Uhrzeigersinn)
         if let dimension = dimensions.first(where: { $0.id == id }), case .live(let key) = dimension.target {
             lockLiveValue(key, text: expression ?? Self.liveText(value, key: key), variables: variableValues)
+            return
+        }
+        // Build 43: Winkel der frei stehenden Linie zur Waagerechten, auch 0° und negativ
+        if id.hasSuffix("-absangle"), value.isFinite, let dimension = dimensions.first(where: { $0.id == id }),
+           case .entity(let index) = dimension.target {
+            setLineAngle(of: index, degrees: value)
             return
         }
         guard value.isFinite, value > 0, let dimension = dimensions.first(where: { $0.id == id }) else { return }
