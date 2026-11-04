@@ -291,6 +291,8 @@ final class ViewportView: MTKView {
         let startParameter: Float
         let step: Double
         var lastAppliedValue: Double?
+        /// N3 (Build 41): offener Befehl beim Ansetzen (abgebrochenes Ziehen setzt nur ihn zurück)
+        var command: ObjectIdentifier?
     }
 
     /// Drehen am Ring: Ring wie beim Ansetzen (dreht nicht mit), Winkel des Ansatzpunkts, aufsummierter
@@ -2481,6 +2483,17 @@ final class ViewportView: MTKView {
                 continue
             }
             let distance = point.distance(toSegment: a, b)
+            // N2 (Build 41): der Kantenpfeil sitzt an der Kantenmitte. Antippen an der Kante selbst bzw. neben dem
+            // Fuß (erstes Viertel des Pfeils) geht an die Kantenauswahl weiter (abwählen, Nachbarkante wählen);
+            // nur der Pfeil selbst fängt die Berührung.
+            if handle.kind == .edge {
+                let ab = CGPoint(x: b.x - a.x, y: b.y - a.y)
+                let lengthSquared = ab.x * ab.x + ab.y * ab.y
+                if lengthSquared > 100 {
+                    let t = ((point.x - a.x) * ab.x + (point.y - a.y) * ab.y) / lengthSquared
+                    if t < 0.25 { continue }
+                }
+            }
             if distance <= 30, distance < (best?.distance ?? .infinity) {
                 best = (distance, handle)
             }
@@ -2732,7 +2745,8 @@ final class ViewportView: MTKView {
            let handle = handleHit(at: touch.location(in: self)),
            let parameter = axisParameter(at: touch.location(in: self), handle: handle) {
             handleDrag = HandleDragState(touch: touch, handle: handle, startParameter: parameter,
-                                         step: dragStep(at: handle.base, for: handle.kind))
+                                         step: dragStep(at: handle.base, for: handle.kind),
+                                         command: workspace?.command.map { ObjectIdentifier($0) })
             gizmoHover = nil
             refresh()
             return
@@ -2975,6 +2989,12 @@ final class ViewportView: MTKView {
         if let drag = handleDrag, touches.contains(drag.touch) {
             handleDrag = nil
             if drag.handle.kind == .offset { sketch?.endOffsetSnap() }
+            // N3 (Build 41): Systemgeste bricht das Ziehen ab → Wert vom Ansetzen wiederherstellen (kein halb
+            // gezogener Radius). Nur, solange derselbe Befehl offen ist (Rundung ↔ Fase kann gewechselt haben).
+            if let applied = drag.lastAppliedValue, applied != drag.handle.value, let workspace,
+               drag.command == workspace.command.map({ ObjectIdentifier($0) }) {
+                workspace.apply(drag.handle.kind, value: drag.handle.value)
+            }
             refresh()
             return
         }

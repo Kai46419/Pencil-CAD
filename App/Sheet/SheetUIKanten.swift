@@ -12,8 +12,9 @@ import simd
 // Rechnung (SolidCraft crates/doc/src/sheet.rs `add_fold`, `HeightFrom::before_leg`): `sheet.fold` mit
 // position „centerline“ legt die Mitte der Biegezone (Breite BA = θ·(R + K·T)) auf die Linie; die Seite zur Kante
 // hin bewegt sich und behält ihre flache Länge s (Schenkel). Die Flankenlänge H wird wie bei der Lasche am
-// virtuellen Scheitel gemessen: Außenmaß H = s + (R + T)·tan(θ/2), Innenmaß H = s + R·tan(θ/2) (über 90° wie
-// SolidCraft „tangent“: R + T bzw. R). Die Biegelinie liegt also im Abstand d = H − Vorlauf + BA/2 von der Kante.
+// virtuellen Scheitel gemessen: Außenmaß H = s + (R + T)·tan(θ/2), Innenmaß H = s + R·tan(θ/2) – D1 (Build 41):
+// auch über 90° (vorher R + T bzw. R, z. B. 135°: 2,41·(R + T) statt R + T). Die Biegelinie liegt also im Abstand
+// d = H − Vorlauf + BA/2 von der Kante.
 // Mehrere Kanten zugleich: gegenüberliegende Kanten und Laschen eines ausgeklinkten Zuschnitts (wie Kais Kreuzform)
 // gehen in einem Schritt. Treffen sich zwei Kanten an einer Ecke ohne Freischnitt, meldet das Panel die nötige
 // Ausklinkung (Abstand der Biegelinie + BA/2 je Seite): SolidCraft kantet nur, was die Kontur des Zuschnitts
@@ -29,11 +30,13 @@ enum SheetBendMath {
         degrees * .pi / 180 * (radius + kFactor * thickness)
     }
 
-    /// Anteil der Flankenlänge vor dem geraden Schenkel (SolidCraft `HeightFrom::before_leg`; über 90° „tangent“).
+    /// Anteil der Flankenlänge vor dem geraden Schenkel bis zum virtuellen Scheitel (SolidCraft
+    /// `HeightFrom::before_leg`): (R + T)·tan(θ/2) außen bzw. R·tan(θ/2) innen, für alle Winkel. Gegen 180° wächst
+    /// tan(θ/2) unbegrenzt: höchstens 179° rechnen (die Flanke ist dann ohnehin zu kurz).
     static func beforeLeg(angle degrees: Double, radius: Double, thickness: Double, outer: Bool) -> Double {
         let base = outer ? radius + thickness : radius
-        guard degrees <= 90 + 1e-9 else { return base }
-        return base * tan(degrees * .pi / 360)
+        let clamped = min(max(degrees, 0), 179)
+        return base * tan(clamped * .pi / 360)
     }
 
     /// Abstand der Biegelinie (Mitte der Biegezone) von der Kante im flachen Blech; nil = Flanke kürzer als die Biegung.
@@ -372,14 +375,22 @@ enum SheetKantenDriver: MainCommandDriver {
         guard let body = computed.folds.first?.edge.body else { return nil }
         let angle = cmd.number("angle", default: 90)
         let radius = cmd.optionalNumber("radius")
+        let rule = Self.rule(of: body, model)
+        let height = cmd.number("height", default: 40)
+        let outer = cmd.option("measure", default: "outer") == "outer"
         var steps: [SheetStep] = []
         for fold in computed.folds {
             let pick = fold.edge
             // Punkt auf der Seite, die stehen bleibt: knapp hinter der Biegezone, auf der angetippten Fläche
             let fixed = pick.mid + pick.inward * (fold.offset + fold.allowance / 2 + 0.5)
             let flip = simd_dot(legSide(pick.thickness, cmd), pick.thickness) < 0
-            steps.append(SheetStep("Kanten", .fold(from: fold.from, to: fold.to, angle: angle, radius: radius,
-                                                   position: "centerline", fixed: fixed, flip: flip)))
+            var step = SheetStep("Kanten", .fold(from: fold.from, to: fold.to, angle: angle, radius: radius,
+                                                 position: "centerline", fixed: fixed, flip: flip))
+            // D2 (Build 41): Messbezug mitspeichern – der Nachbau rechnet die Linie aus Höhe und Winkel neu
+            step.foldReference = SheetFoldReference(a: pick.a, b: pick.b, mid: pick.mid, inward: pick.inward,
+                                                    height: height, outer: outer, thickness: rule.thickness,
+                                                    kFactor: rule.kFactor, radius: Self.radius(cmd, rule))
+            steps.append(step)
         }
         guard !steps.isEmpty else { return nil }
         return (body, steps)

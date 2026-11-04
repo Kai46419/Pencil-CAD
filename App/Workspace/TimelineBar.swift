@@ -246,6 +246,18 @@ struct TimelineBar: View {
                     // Unterdrückt: farbiges Bild grau und blass (SF Symbols färbt chipColor)
                     .saturation(feature.isSuppressed ? 0 : 1)
                     .opacity(feature.isSuppressed && ToolIcon.isCustom(feature.systemImage) ? 0.5 : 1)
+                    .overlay(alignment: .bottomLeading) {
+                        // Build 42: Abzeichen „SB“/„G2“ für Rundungen mit Optionen
+                        if feature.kind == .fillet, let badge = BlendOptionsForm.badge(feature.blendOptions) {
+                            Text(badge)
+                                .font(.system(size: 7, weight: .bold))
+                                .foregroundStyle(Color.accentColor)
+                                .padding(.horizontal, 2)
+                                .background(Color(.systemBackground).opacity(0.85), in: Capsule())
+                                .offset(x: -2, y: 2)
+                                .accessibilityLabel(BlendOptionsForm.summary(feature.blendOptions))
+                        }
+                    }
                 if feature.failed {
                     Image(systemName: "exclamationmark.circle.fill")
                         .font(.system(size: 10, weight: .bold))
@@ -345,11 +357,20 @@ struct FeatureEditor: View {
     /// Feld, dessen Ziffernblock gerade offen ist
     @State private var editingKey: String?
     @State private var problem: String?
+    /// Build 42: gewählte Rundungsoptionen (nur Ecken/Stetigkeit/Profil/Überlauf; Setback/Rho stehen in drafts)
+    @State private var blendChoice = BlendOptions.standard
 
     private var visibleParameters: [FeatureParameter] {
         feature.parameters.filter {
             !(feature.kind == .fillet && feature.data.chordFactor != nil && $0.key == "radius")
+                && !FeatureEdit.isBlendOptionParameter($0.key, of: feature)
         }
+    }
+
+    private var showsBlendOptions: Bool { FeatureEdit.allowsBlendOptions(feature) }
+    /// Setback- bzw. Rho-Feld sichtbar: OK am Ziffernblock übernimmt dann nicht sofort (mehrere Werte)
+    private var showsBlendValueRows: Bool {
+        showsBlendOptions && (blendCurrent.corner == .setback || blendCurrent.profile == .conic)
     }
 
     var body: some View {
@@ -378,26 +399,10 @@ struct FeatureEditor: View {
                     .foregroundStyle(.secondary)
             }
             ForEach(visibleParameters) { parameter in
-                HStack(spacing: 8) {
-                    Text(parameter.title)
-                        .foregroundStyle(.secondary)
-                    Spacer(minLength: 8)
-                    // Kleiner Ziffernblock am Feld statt der großen Bildschirmtastatur. OK übernimmt bei nur einem
-                    // Wert sofort, sonst „Übernehmen“ (damit mehrere Werte nacheinander geändert werden können).
-                    KeypadField(title: parameter.title, text: draft(parameter.key), isEditing: editingFlag(parameter.key),
-                                unitSymbol: Self.unitLabel(parameter.unit), minHeight: 30,
-                                onCommit: { if visibleParameters.count == 1 { apply() } })
-                        .padding(.horizontal, 6)
-                        .frame(width: 130)
-                        .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 6))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 6)
-                                .stroke(Color(.separator), lineWidth: 0.5)
-                        }
-                    Text(Self.unitLabel(parameter.unit))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 26, alignment: .leading)
-                }
+                valueRow(key: parameter.key, title: parameter.title, unit: Self.unitLabel(parameter.unit))
+            }
+            if showsBlendOptions {
+                blendOptionRows
             }
             if !feature.parameters.isEmpty {
                 Text("Zahl oder Formel mit Variablen, z. B. „breite / 2“ oder „10 mm + wand“.")
@@ -431,7 +436,102 @@ struct FeatureEditor: View {
         }
         .padding(16)
         .frame(width: 340)
-        .onAppear { drafts = initialTexts }
+        .onAppear {
+            drafts = initialTexts
+            if feature.kind == .fillet {
+                blendChoice = BlendOptionsForm.cleaned(feature.blendOptions)
+                let defaults = FeatureEdit.defaultBlendTexts(feature)
+                if drafts[BlendOptionKeys.setback] == nil { drafts[BlendOptionKeys.setback] = defaults.setback }
+                if drafts[BlendOptionKeys.rhoPercent] == nil { drafts[BlendOptionKeys.rhoPercent] = defaults.rhoPercent }
+            }
+        }
+    }
+
+    /// Wertzeile: Titel, Feld mit kleinem Ziffernblock, Einheit
+    private func valueRow(key: String, title: String, unit: String) -> some View {
+        HStack(spacing: 8) {
+            Text(title)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 8)
+            // Kleiner Ziffernblock am Feld statt der großen Bildschirmtastatur. OK übernimmt bei nur einem
+            // Wert sofort, sonst „Übernehmen“ (damit mehrere Werte nacheinander geändert werden können).
+            KeypadField(title: title, text: draft(key), isEditing: editingFlag(key),
+                        unitSymbol: unit, minHeight: 30,
+                        onCommit: { if visibleParameters.count == 1 && !showsBlendValueRows { apply() } })
+                .padding(.horizontal, 6)
+                .frame(width: 130)
+                .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 6))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color(.separator), lineWidth: 0.5)
+                }
+            Text(unit)
+                .foregroundStyle(.secondary)
+                .frame(width: 26, alignment: .leading)
+        }
+    }
+
+    // MARK: Rundungsoptionen (Build 42, C6)
+
+    /// Für die Freigabe: Wahlen mit den gespeicherten bzw. Vorgabewerten
+    private var blendCurrent: BlendOptions {
+        var options = BlendOptionsForm.cleaned(blendChoice)
+        let radius = feature.value("radius") ?? 2
+        if options.corner == .setback {
+            options.setback = feature.blendOptions.setback ?? BlendOptions.defaultSetback(radius: radius)
+        }
+        if options.profile == .conic { options.rho = feature.blendOptions.rho ?? BlendOptionKeys.defaultRho }
+        return options
+    }
+
+    private func chooseBlend(_ change: (inout BlendOptions) -> Void) {
+        guard let next = BlendOptionsForm.variant(of: blendCurrent, change) else { return }
+        blendChoice = next
+    }
+
+    private func blendEnabled(_ change: (inout BlendOptions) -> Void) -> Bool {
+        BlendOptionsForm.variant(of: blendCurrent, change) != nil
+    }
+
+    @ViewBuilder private var blendOptionRows: some View {
+        let options = blendCurrent
+        let radius = feature.value("radius") ?? 2
+        let setSetback: (inout BlendOptions) -> Void = {
+            $0.corner = .setback
+            $0.setback = $0.setback ?? BlendOptions.defaultSetback(radius: radius)
+        }
+        let setConic: (inout BlendOptions) -> Void = {
+            $0.continuity = .g2
+            $0.profile = .conic
+            $0.rho = $0.rho ?? BlendOptionKeys.defaultRho
+        }
+        CommandSegmentRow(title: "Ecken", options: [
+            CommandChoice(id: BlendOptions.Corner.rollingBall.rawValue, title: "Rolling Ball"),
+            CommandChoice(id: BlendOptions.Corner.setback.rawValue, title: "Setback", isEnabled: blendEnabled(setSetback)),
+        ], selected: options.corner.rawValue) { id in
+            if id == BlendOptions.Corner.setback.rawValue { chooseBlend(setSetback) } else { chooseBlend { $0.corner = .rollingBall } }
+        }
+        if options.corner == .setback {
+            valueRow(key: BlendOptionKeys.setback, title: "Setback-Abstand", unit: LengthUnit.current.symbol)
+        }
+        CommandSegmentRow(title: "Stetigkeit", options: [
+            CommandChoice(id: BlendOptions.Continuity.g1.rawValue, title: "G1"),
+            CommandChoice(id: BlendOptions.Continuity.g2.rawValue, title: "G2", isEnabled: blendEnabled { $0.continuity = .g2 }),
+        ], selected: options.continuity.rawValue) { id in
+            if id == BlendOptions.Continuity.g2.rawValue { chooseBlend { $0.continuity = .g2 } }
+            else { chooseBlend { $0.continuity = .g1 } }
+        }
+        if options.continuity == .g2 {
+            CommandSegmentRow(title: "Profil", options: [
+                CommandChoice(id: BlendOptions.Profile.circle.rawValue, title: "Kreis"),
+                CommandChoice(id: BlendOptions.Profile.conic.rawValue, title: "Kegelschnitt", isEnabled: blendEnabled(setConic)),
+            ], selected: options.profile.rawValue) { id in
+                if id == BlendOptions.Profile.conic.rawValue { chooseBlend(setConic) } else { chooseBlend { $0.profile = .circle } }
+            }
+            if options.profile == .conic {
+                valueRow(key: BlendOptionKeys.rhoPercent, title: "Profil Rho", unit: "%")
+            }
+        }
     }
 
     private func draft(_ key: String) -> Binding<String> {
@@ -458,7 +558,7 @@ struct FeatureEditor: View {
         switch parameter.unit {
         case .length: return LengthUnit.current.number(parameter.value)
         case .angle, .percent: return NumberField.format(parameter.value)
-        case .count: return String(Int(parameter.value.rounded()))
+        case .count: return String(clampedCount(parameter.value))
         }
     }
 
@@ -492,9 +592,23 @@ struct FeatureEditor: View {
                 return
             }
         }
+        // Build 42 (C6): Rundungsoptionen
+        let resolved: (options: BlendOptions, changed: Bool)?
+        do {
+            resolved = try FeatureEdit.resolveBlendOptions(blendChoice, setbackText: drafts[BlendOptionKeys.setback],
+                                                           rhoPercentText: drafts[BlendOptionKeys.rhoPercent],
+                                                           feature: feature, parameters: &parameters, variables: values)
+        } catch {
+            problem = "Rundungsoptionen: \(error.localizedDescription)"
+            return
+        }
         problem = nil
         close()
-        if changed {
+        if let resolved {
+            if changed || resolved.changed {
+                model.updateFeature(feature.id, parameters: parameters, blendOptions: resolved.options)
+            }
+        } else if changed {
             model.updateFeature(feature.id, parameters: parameters)
         }
     }

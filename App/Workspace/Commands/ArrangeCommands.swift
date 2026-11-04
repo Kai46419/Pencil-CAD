@@ -76,7 +76,7 @@ enum MoveCommand {
         }
         let copies = cmd.isOn("copy", default: false)
         model.moveCopies = copies
-        model.moveArrayCount = copies ? min(max(Int(cmd.number("count", default: 1).rounded()), 1), 200) : 1
+        model.moveArrayCount = copies ? clampedCount(cmd.number("count", default: 1), min: 1, max: 200) : 1
         model.moveArrayDivides = cmd.option("array", default: "times") == "divide"
         let bodies = CommandPicks.bodies(cmd, "bodies", model: model)
         let changed = CommandSync.bodies(bodies, model)
@@ -514,7 +514,7 @@ enum PatternCommand {
     }
 
     static func count(_ cmd: ModelCommand, _ key: String, default fallback: Int) -> Int {
-        min(max(Int(cmd.number(key, default: Double(fallback)).rounded()), 1), 500)
+        clampedCount(cmd.number(key, default: Double(fallback)), min: 1, max: 500)
     }
 }
 

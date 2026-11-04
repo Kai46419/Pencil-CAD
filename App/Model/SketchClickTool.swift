@@ -542,7 +542,10 @@ extension SketchController {
            lockedValue("Länge") == nil, !arcModifier {
             switch result.target {
             case nil, .some(.grid):
-                result.point = steppedLineEnd(raw, from: anchor)
+                // Build 41: gerasterten Punkt (XY-Raster) als Richtung nehmen, nicht den rohen Stiftpunkt –
+                // außer er fällt auf den Startpunkt (sonst Länge 0 statt mindestens eines Schritts)
+                let direction = simd_distance(result.point, anchor) > 1e-9 ? result.point : raw
+                result.point = steppedLineEnd(direction, from: anchor)
             case .some(.horizontal), .some(.vertical), .some(.angle),
                  .some(.parallel), .some(.perpendicular):
                 result.point = steppedLineEnd(result.point, from: anchor)
@@ -1031,7 +1034,8 @@ extension SketchController {
     }
 
     var polygonSideCount: Int {
-        let locked = lockedValue("Seiten").map { Int($0.rounded()) }
+        // Seitenzahl erst klemmen, dann wandeln (1e20 bzw. NaN stürzte ab)
+        let locked = lockedValue("Seiten").map { clampedCount($0, min: 3, max: 200) }
         return max(locked ?? polygonSides, 3)
     }
 

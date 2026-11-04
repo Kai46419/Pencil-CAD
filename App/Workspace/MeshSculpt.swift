@@ -518,12 +518,13 @@ final class MeshSculpt: ObservableObject {
         isBusy = true
         model.message = "Netz wird in einen Körper umgewandelt …"
         Task {
-            let box = await Task.detached(priority: .userInitiated) { () -> UncheckedBox<(IndexedMesh, PCKShape?)> in
+            // B8 (Build 41): OCCT auf dem großen Stapel (KernelThread, 32 MB) statt Task.detached (512 KB)
+            let box = await KernelThread.value("PencilCAD.sculpt") { () -> UncheckedBox<(IndexedMesh, PCKShape?)> in
                 var mesh = snapshot
                 // Beim Formen zusammengefallene Dreiecke entfernen, sonst bleibt der Körper offen
                 _ = MeshRepair.removeDegenerate(&mesh)
                 return UncheckedBox((mesh, MeshSolid.shape(from: mesh)))
-            }.value
+            }
             self.finishSave(box.value.1, mesh: box.value.0, generation: target, expected: expected, body: index,
                             model: model)
         }
@@ -630,10 +631,11 @@ final class MeshSculpt: ObservableObject {
         isBusy = true
         model.message = "\(name) …"
         Task {
-            let box = await Task.detached(priority: .userInitiated) { () -> UncheckedBox<(IndexedMesh, String, PCKShape?)> in
+            // B8 (Build 41): OCCT auf dem großen Stapel (KernelThread, 32 MB) statt Task.detached (512 KB)
+            let box = await KernelThread.value("PencilCAD.sculpt.rebuild") { () -> UncheckedBox<(IndexedMesh, String, PCKShape?)> in
                 let (mesh, note) = change(source)
                 return UncheckedBox((mesh, note, MeshSolid.shape(from: mesh)))
-            }.value
+            }
             self.isBusy = false
             let (mesh, note, shape) = box.value
             guard model.bodies.indices.contains(index), model.bodies[index].shape === expected else {

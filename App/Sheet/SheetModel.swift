@@ -20,10 +20,66 @@ struct SheetStep: Codable, Hashable, Identifiable {
     var command: SheetCommand
     /// Nach dem Ausführen heißt der erzeugte bzw. geänderte Körper der Sitzung so (z. B. „$src“); nil = keiner
     var alias: String? = nil
+    /// D5 (Build 41): Regelschritt einer abgeleiteten Regel („<Regel> · Spalt x mm“): Name der Basisregel, damit
+    /// eine Änderung dieser Regel (z. B. der Dicke) auch hier wirkt. nil = keine abgeleitete Regel bzw. alte Daten.
+    var baseRule: String? = nil
+    /// D2 (Build 41): Messbezug einer Kantung aus „Kanten“ (Kante, Flankenhöhe), damit der Nachbau die Biegelinie
+    /// neu rechnet, wenn Winkel, Radius oder Höhe im Verlauf geändert werden. nil = alte Daten bzw. andere Schritte.
+    var foldReference: SheetFoldReference? = nil
 
     init(_ title: String, _ command: SheetCommand) {
         self.title = title
         self.command = command
+    }
+}
+
+/// D2 (Build 41): Kante im flachen Blech und Flankenhöhe einer Kantung („Kanten“) – daraus rechnet
+/// `SheetStep.refoldedFromReference()` die Biegelinie (sheet.fold `points`) und die feste Seite (`fixed`) neu.
+struct SheetFoldReference: Codable, Hashable {
+    /// Enden und Mitte der angetippten Außenkante, Richtung ins Material
+    var a: SIMD3<Double>
+    var b: SIMD3<Double>
+    var mid: SIMD3<Double>
+    var inward: SIMD3<Double>
+    /// Flankenhöhe und Maßbezug (Außen- bzw. Innenmaß)
+    var height: Double
+    var outer: Bool
+    /// Werte der Regel beim Anlegen (Biegeradius wie gerechnet: Vorgabe des Panels bzw. der Regel)
+    var thickness: Double
+    var kFactor: Double
+    var radius: Double
+}
+
+extension SheetStep {
+    /// D2: sheet.fold aus dem Messbezug neu rechnen (Winkel und ggf. Radius aus den Parametern des Schritts).
+    /// Unverändert, wenn kein Messbezug gespeichert ist oder die Flanke kürzer als die Biegung wäre.
+    func refoldedFromReference() -> SheetStep {
+        guard let reference = foldReference, command.command == "sheet.fold" else { return self }
+        let angle = SheetFoldReference.number(command.params["angle"]) ?? 90
+        let radius = SheetFoldReference.number(command.params["radius"]) ?? reference.radius
+        guard let offset = SheetBendMath.lineOffset(height: reference.height, angle: angle, radius: radius,
+                                                    thickness: reference.thickness, kFactor: reference.kFactor,
+                                                    outer: reference.outer) else { return self }
+        let allowance = SheetBendMath.allowance(angle: angle, radius: radius, thickness: reference.thickness,
+                                                kFactor: reference.kFactor)
+        var copy = self
+        copy.command.params["points"] = [SheetJSON(reference.a + reference.inward * offset),
+                                         SheetJSON(reference.b + reference.inward * offset)]
+        copy.command.params["fixed"] = SheetJSON(reference.mid + reference.inward * (offset + allowance / 2 + 0.5))
+        return copy
+    }
+}
+
+extension SheetFoldReference {
+    /// Zahl bzw. „<Zahl> deg“/„<Zahl> mm“ (wie ModelStore.sheetNumber, ohne Bezug auf den ModelStore)
+    static func number(_ value: SheetJSON?) -> Double? {
+        guard let value else { return nil }
+        if let number = value.asDouble { return number }
+        guard var text = value.asString?.trimmingCharacters(in: .whitespaces) else { return nil }
+        for unit in ["deg", "mm", "°"] where text.hasSuffix(unit) {
+            text = String(text.dropLast(unit.count)).trimmingCharacters(in: .whitespaces)
+        }
+        return Double(text)
     }
 }
 
@@ -76,6 +132,18 @@ struct SheetRule: Codable, Hashable, Identifiable, Sendable {
 
     /// Tatsächlicher Biegeradius (nil = Dicke)
     var effectiveBendRadius: Double { bendRadius ?? thickness }
+
+    /// D7 (Build 41): Vergleichsform – Felder, deren nil die Vorgabe bedeutet, mit der Vorgabe des Panels gefüllt
+    /// (Eckform „notch“, Winkelangabe „bend“). Das Panel setzt sie immer, gespeicherte Regeln oft nicht.
+    var normalized: SheetRule {
+        var copy = self
+        if copy.cornerReliefShape == nil { copy.cornerReliefShape = "notch" }
+        if copy.angleDisplay == nil { copy.angleDisplay = "bend" }
+        return copy
+    }
+
+    /// Gleich bis auf Vorgabewerte (nil == Standard)
+    func isEquivalent(to other: SheetRule) -> Bool { normalized == other.normalized }
 
     static let cornerShapes: [(key: String, title: String)] = [
         ("notch", "Ausklinkung"), ("round", "Rund"), ("rectangular", "Rechteckig"), ("tear", "Reißen"),
@@ -338,6 +406,23 @@ final class SheetDocument: ObservableObject {
     init(folder: URL?) {
         self.folder = folder
         load()
+        pruneWorkingFiles()
+    }
+
+    /// S1 (Build 41): Arbeitsdateien „.working-*.step“ der Wiedergabe (SheetReplaySource) bleiben nach einem
+    /// App-Abbruch liegen. Beim Öffnen löschen, was älter als 10 Minuten ist (ein noch laufender Auftrag nach einem
+    /// Zeitlimit desselben Prozesses schreibt jüngere Dateien und räumt sie selbst weg).
+    private func pruneWorkingFiles() {
+        guard let folder else { return }
+        let directory = folder.appending(path: "sheet", directoryHint: .isDirectory)
+        let manager = FileManager.default
+        guard let names = try? manager.contentsOfDirectory(atPath: directory.path(percentEncoded: false)) else { return }
+        let limit = Date().addingTimeInterval(-600)
+        for name in names where name.hasPrefix(".working-") && name.hasSuffix(".step") {
+            let url = directory.appending(path: name)
+            let modified = (try? manager.attributesOfItem(atPath: url.path(percentEncoded: false)))?[.modificationDate] as? Date
+            if (modified ?? .distantPast) < limit { try? manager.removeItem(at: url) }
+        }
     }
 
     var activeRule: SheetRule { rules.first { $0.name == activeRuleName } ?? rules.first ?? .standard }
@@ -600,7 +685,8 @@ extension ModelStore {
     func setSheetRule(_ rule: SheetRule, active: Bool = true) {
         let old = sheetDocument.rule(named: rule.name)
         sheetDocument.store(rule, active: active)
-        if let old, old != rule { sheetRebuildBodies(usingRule: rule) }
+        // D7 (Build 41): OK ohne Änderung baut nicht alles neu (nil und Vorgabewert gelten als gleich)
+        if let old, !old.isEquivalent(to: rule) { sheetRebuildBodies(usingRule: rule) }
     }
 
     func setActiveSheetRule(_ name: String) { sheetDocument.setActive(name) }
@@ -631,10 +717,34 @@ extension ModelStore {
         return pattern
     }
 
-    /// Flachmuster als DXF in eine temporäre Datei (für den Teilen-Dialog).
-    func exportFlatPatternDXF(of body: Int, options: SheetDXFOptions = SheetDXFOptions()) throws -> URL {
-        if let problem = Self.sheetOverlapProblem(try flatPattern(of: body)) {
-            throw SheetKernelError("DXF Export nicht möglich: \(problem)")
+    /// S2/N5 (Build 41): Überlappungsprüfung vor jedem Export (DXF, PDF der Abwicklung). Wirft bei einem Problem;
+    /// ein Hinweis (z. B. Kontur zu groß für die Prüfung) geht in die Meldungszeile statt still zu entfallen.
+    func sheetCheckBeforeExport(_ flat: FlatPattern, what: String) throws {
+        let check = Self.sheetOverlapCheckOffMain(flat)
+        if let problem = check.problem { throw SheetKernelError("\(what) Export nicht möglich: \(problem)") }
+        if let warning = check.warning { message = "\(what): \(warning)" }
+    }
+
+    /// N5 (Build 41): die Prüfung (bis 4000² Streckenpaare je Kontur) läuft auf dem großen Stapel (KernelThread)
+    /// statt auf dem Main Actor; der Aufrufer wartet höchstens 20 s, danach gilt sie als nicht geprüft (Hinweis).
+    nonisolated static func sheetOverlapCheckOffMain(_ flat: FlatPattern) -> (problem: String?, warning: String?) {
+        let box = UncheckedBox(flat)
+        guard let result = KernelThread.wait("PencilCAD.sheet.overlap", limit: 20, {
+            UncheckedBox(sheetOverlapCheck(box.value))
+        }) else {
+            return (nil, "Überlappung nicht geprüft (Prüfung zu aufwendig).")
+        }
+        return result.value
+    }
+
+    /// Flachmuster als DXF in eine temporäre Datei (für den Teilen-Dialog). flat: schon berechnetes Flachmuster
+    /// (N5: nicht zweimal rechnen); checked: Überlappung schon geprüft.
+    func exportFlatPatternDXF(of body: Int, options: SheetDXFOptions = SheetDXFOptions(), flat: FlatPattern? = nil,
+                              checked: Bool = false) throws -> URL {
+        if !checked {
+            let pattern: FlatPattern
+            if let flat { pattern = flat } else { pattern = try flatPattern(of: body) }
+            try sheetCheckBeforeExport(pattern, what: "DXF")
         }
         let session = try sheetSession(body)
         let url = SheetKernel.temporaryURL("dxf", name: Self.sheetFileName(bodies[body].name))

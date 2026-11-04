@@ -794,14 +794,16 @@ final class SheetKernelIntegrationTests: XCTestCase {
         XCTAssertTrue(IsolatedBlend.wasBlocked(shape: complex, edges: [complexEdge], mode: 0))
     }
 
-    func testFailedMergeStillFallsBackWhenWorkerReturnsNormally() throws {
+    func testFailedMergeDoesNotFallBackWhenWorkerReturnsNormally() throws {
         let box = PCKShape.box(width: 20, depth: 20, height: 10)
         let edge = try XCTUnwrap(box.edgeNumbers(ofFace: 1).first)
         let input = BlendJobInput(operation: .fillet, shape: box, edges: [edge], value: 2,
                                   second: nil, end: nil, partialRange: nil,
                                   mergeShape: box, mergeEdges: [NSNumber(value: Int.max)])
         let result = BlendKernel.run(input)
-        XCTAssertTrue(try XCTUnwrap(result.shape).isClosedSolid)
+        // Build 41 (Schwacher Bugfix 3): kein direkter Fillet nach gescheitertem Merge mit der letzten Rundung
+        XCTAssertNil(result.shape)
+        XCTAssertTrue(result.mergeFailed)
         XCTAssertFalse(result.merged)
         XCTAssertFalse(IsolatedBlend.wasBlocked(shape: box, edges: [NSNumber(value: Int.max)], mode: 0))
     }

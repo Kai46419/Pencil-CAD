@@ -436,9 +436,11 @@ struct FlatDrawingSheet: View {
         for view in [DrawingView.front, .left, .top, .iso] {
             let projection: DrawingProjection
             if inBackground {
-                projection = await Task.detached(priority: .userInitiated) {
-                    TechnicalDrawing.project(copies, view: view)
-                }.value
+                // B8 (Build 41): auf dem großen Stapel (KernelThread, 32 MB) statt Task.detached (512 KB)
+                let job = UncheckedBox(copies)
+                projection = await KernelThread.value("PencilCAD.flatDrawing") {
+                    TechnicalDrawing.project(job.value, view: view)
+                }
             } else {
                 projection = TechnicalDrawing.project([shape], view: view)
             }
@@ -470,6 +472,8 @@ struct FlatDrawingSheet: View {
         guard let layout else { return }
         let url = FileManager.default.temporaryDirectory.appending(path: "\(fileName).pdf")
         do {
+            // S2 (Build 41): auch die PDF-Abwicklung erst nach der Überlappungsprüfung (wie DXF)
+            try model.sheetCheckBeforeExport(try model.flatPattern(of: bodyIndex), what: "PDF")
             try? FileManager.default.removeItem(at: url)
             try FlatDrawing.pdfData(layout, title: "Abwicklung " + bodyName, author: author).write(to: url)
             SheetShare.present([url])

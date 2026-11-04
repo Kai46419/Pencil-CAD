@@ -54,6 +54,8 @@ struct OrderedAttemptKey: Hashable {
     var value: Double
     var second: Double?
     var end: Double?
+    /// Build 42: normalisierte Rundungsoptionen (nil = Standard); eine Setback-Vorschau ist keine Rolling-Ball-Vorschau
+    var options: BlendOptions? = nil
 }
 
 /// Gelungener Versuch „Rundung vor Schnitt“ (Vorschau samt umgestellter Liste).
@@ -182,7 +184,8 @@ extension ModelStore {
         let operation = edgeOperation
         return OrderedAttemptKey(operation: operation, value: value,
                                  second: operation == .chamfer ? edgeSecondValue : nil,
-                                 end: operation == .fillet ? edgeEndValue : nil)
+                                 end: operation == .fillet ? edgeEndValue : nil,
+                                 options: effectiveBlendOptions)
     }
 
     /// Entprellter Versuch „Rundung vor Schnitt“ (Main-Thread, Nachbau ab der Einfügestelle). Ergebnis bzw.
@@ -195,7 +198,7 @@ extension ModelStore {
         // Keine automatische Suche nach einem kleineren Wert: OCCT kann bei solchen zusätzlichen
         // Rundungsversuchen abstürzen. Der verlangte Wert gelingt oder bleibt ohne Änderung.
         guard let attempt = orderedBlend(plan, operation: operation, value: value,
-                                         second: key.second, end: key.end) else {
+                                         second: key.second, end: key.end, options: key.options) else {
             featureRecorder.blendPlacement?.plan?.failed.insert(key)
             return
         }
@@ -231,9 +234,12 @@ extension ModelStore {
     /// Verlauf mit der Rundung an plan.position neu rechnen (ohne den Zwischenstand-Speicher zu ändern).
     /// nil, wenn die Rundung oder ein danach folgender, vorher gelungener Schritt fehlschlägt.
     private func orderedBlend(_ plan: BlendPlan, operation: EdgeOperation, value: Double, second: Double?,
-                              end: Double?) -> (bodies: [SceneBody], features: [Feature], states: [UUID: [SceneBody]])? {
+                              end: Double?, options: BlendOptions? = nil)
+        -> (bodies: [SceneBody], features: [Feature], states: [UUID: [SceneBody]])? {
         guard plan.position < features.count else { return nil }
-        var feature = Self.blendFeature(operation, value: value, second: second, end: end)
+        // Build 42: Optionen am eingefügten Feature; replayBlend reicht sie an den Worker durch
+        var feature = Self.blendFeature(operation, value: value, second: second, end: end,
+                                        options: operation == .fillet ? options : nil)
         feature.data.target = plan.body
         feature.data.edges = plan.signatures
         var list = features
@@ -375,6 +381,9 @@ extension ModelStore {
               let geometry = blendMergeGeometry(body: body) else { return nil }
         let previous = features[geometry.index]
         guard let radius = previous.value("radius"), radius.isFinite, radius > 0 else { return nil }
+        // Build 42: nur bei gleichen Rundungsoptionen zusammenfassen (sonst blendMergeOptionsConflict: Meldung,
+        // kein Rückfall). Die zusammengefasste Rundung übernimmt die Optionen der früheren (gleich).
+        guard previous.blendOptions.normalized == effectiveBlendOptions else { return nil }
         switch (previous.value("end"), end) {
         case (nil, nil):
             break
@@ -389,6 +398,21 @@ extension ModelStore {
         feature.id = UUID()
         feature.failed = false
         feature.problem = nil
+        // Schwacher Bugfix 4: Die zusammengefasste Rundung bleibt im Radiusmodus. Eine Sehnenbreite der früheren
+        // Rundung (chordFactor/chordWidth) galt nur für deren Kantensatz; bliebe sie stehen, setzte evaluateFormulas
+        // beim Nachbau den Schlüssel „radius“ – und damit ggf. auch die neuen Kanten – aus chordWidth/Faktor neu.
+        // Der Radius selbst ist schon ausgewertet in den Parametern gespeichert.
+        // Kennzeichen für noteBlendChord: das Feature ERSETZT features[index] (gleiche Anzahl Features), ist also
+        // kein neues Feature – dort keine Sehnen-Felder setzen (Edit-Anweisung in HANDOFF-A.md).
+        if let factor = previous.data.chordFactor, factor.isFinite, factor > 0,
+           let width = previous.value("chordWidth"), width.isFinite, width > 0,
+           let index = feature.parameters.firstIndex(where: { $0.key == "radius" }) {
+            // Wie evaluateFormulas: der Radius des früheren Kantensatzes folgt aus der Sehnenbreite
+            feature.parameters[index].value = width / factor
+            feature.parameters[index].formula = nil
+        }
+        feature.data.chordFactor = nil
+        feature.parameters.removeAll { $0.key == "chordWidth" }
         feature.data.edges = (previous.data.edges ?? []) + geometry.signatures
         var keys = oldKeys
         if let same = feature.parameters.first(where: { abs($0.value - value) < 1e-6 && $0.key.hasPrefix("radius") }) {
@@ -406,6 +430,18 @@ extension ModelStore {
         featureRecorder.preBlendCandidate = (feature.id, body, geometry.shape)
         return (feature, geometry.index, geometry.shape, geometry.previousEdges + geometry.newEdges,
                 feature.data.edgeRadiusKeys == nil ? nil : values)
+    }
+
+    /// Build 42: Grenzt die Auswahl an eine frühere Rundung mit ANDEREN Rundungsoptionen, wird nicht zusammengefasst
+    /// (eine Rolling-Ball- und eine Setback-Ecke lassen sich nicht in einem Fillet rechnen) und auch nicht direkt auf
+    /// die gerundete Fläche ausgewichen: Meldung zum Angleichen. nil = kein Konflikt.
+    func blendMergeOptionsConflict(body: Int) -> String? {
+        guard edgeOperation == .fillet, edgePartialRange == nil, bodies.indices.contains(body),
+              let geometry = blendMergeGeometry(body: body), features.indices.contains(geometry.index) else { return nil }
+        let previous = features[geometry.index]
+        guard previous.value("radius") != nil,
+              previous.blendOptions.normalized != effectiveBlendOptions else { return nil }
+        return Self.blendMergeOptionsDiffer(previous.name)
     }
 
     /// Gemerkte bzw. neue Suche (je Kantenauswahl, Körper und Verlauf).
@@ -504,7 +540,12 @@ extension ModelStore {
             message = "Gemeinsame Rundung an dieser Ecke mit diesem Radius nicht möglich."
             return true
         }
-        guard !blendJobs.overdue else {
+        // N8: nur ablehnen, wenn genau DIESE Rundung (gleicher Körper, gleiche Auswahl und Werte) noch überfällig
+        // rechnet – ein fremder, überfälliger Job hat mit dem Nachbau ab der früheren Rundung nichts zu tun.
+        if blendJobs.overdue, let running = blendJobs.current, running.source === bodies[body].shape,
+           running.selection == selectedEdges, running.key.operation == key.operation,
+           abs(running.key.value - key.value) < 1e-9, running.key.end == key.end,
+           running.key.options == key.options {
             dropPreview()
             message = Self.blendTooHeavyMessage
             return true

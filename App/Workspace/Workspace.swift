@@ -279,6 +279,8 @@ final class Workspace: ObservableObject {
     @Published private(set) var sketchNumber = 0
     /// Gespeicherte Skizze, die gerade bearbeitet wird (nil = neue Skizze).
     @Published private(set) var editingSketchIndex: Int?
+    /// C2 (Build 41): dieselbe Skizze über ihre ID – „Fertig“ ersetzt nur sie, nie eine andere unter demselben Index
+    @Published private(set) var editingSketchID: UUID?
     /// Werkzeugrad (Stift drücken bzw. doppeltippen) an dieser Stelle des Viewports.
     @Published var quickToolsLocation: CGPoint?
     /// Werkzeug unter dem schwebenden Stift; nil bedeutet kein Treffer.
@@ -444,6 +446,8 @@ final class Workspace: ObservableObject {
     var currentCamera: (() -> OrbitCamera?)?
     /// Gespeicherte Ansichten dieses Projekts
     @Published private(set) var savedViews: [SavedView] = []
+    /// N1 (Build 41): Netz des Ausgangskörpers für Kantentreffer während einer Vorschau (wie ModelStore.originalMesh)
+    private var originalEdgeMesh: (shape: PCKShape, body: Int, mesh: Mesh)?
 
     /// safeOpen: übrig gebliebene Hänger-Marke → sicherer Modus (HangGuard.swift)
     init(project: Project, safeOpen: HangGuard.Marker? = nil) {
@@ -552,6 +556,7 @@ final class Workspace: ObservableObject {
         // Jede Skizze beginnt mit dem Pfeil (Auswählen), nicht mit dem zuletzt benutzten Werkzeug
         sketch.tool = .select
         editingSketchIndex = nil
+        editingSketchID = nil
         model.commitPreview()
         model.resetSelection()
         sketch.plane = plane
@@ -585,6 +590,7 @@ final class Workspace: ObservableObject {
         tool = .select
         sketch.tool = .select
         editingSketchIndex = nil
+        editingSketchID = nil
         model.commitPreview()
         sketchOnBody = false
         if let face = model.selection, let plane = model.plane(of: face) {
@@ -628,6 +634,7 @@ final class Workspace: ObservableObject {
         sketch.isActive = false
         sketch.modelGuides = SketchGuides()
         editingSketchIndex = nil
+        editingSketchID = nil
         send(.look(SIMD3<Float>(1, -1, 0.85)))
     }
 
@@ -636,8 +643,9 @@ final class Workspace: ObservableObject {
         let entities = sketch.entities
         let hasRegions = sketch.hasProfile
         if !entities.isEmpty {
+            // C2 (Build 41): Index erst jetzt über die ID auflösen (ModelStore.storeSketch(replacingID:))
             model.storeSketch(plane: sketch.plane, entities: entities, constraints: sketch.constraints,
-                              construction: sketch.construction, replacing: editingSketchIndex)
+                              construction: sketch.construction, replacingID: editingSketchID)
         }
         endSketch()
         if hasRegions {
@@ -659,6 +667,7 @@ final class Workspace: ObservableObject {
                     construction: stored.construction)
         refreshSketchGuides()
         editingSketchIndex = index
+        editingSketchID = stored.id
         send(.alignToSketchPlane)
     }
 
@@ -2578,12 +2587,23 @@ extension Workspace {
         guard let cmd = command, let driver = commandDriver else { return }
         // Während der Vorschau zeigt das Netz andere Flächennummern: echte Fläche unter dem Punkt suchen
         let face: FaceRef? = model.hasPreview ? tappedFace.flatMap { model.originalFace($0, near: point) } : tappedFace
-        let edgeRef: EdgeRef? = edge.flatMap { model.bodies.indices.contains($0.body) ? $0 : nil }
+        // N1 (Build 41): Kantennummern der Vorschau ebenso auf den Ausgangskörper abbilden. Blechbefehle bilden
+        // Kanten selbst über die Vorschau ab (SheetEdgePicks.midpoint an shownBodies) – dort unverändert lassen.
+        let mapsEdges = model.hasPreview && !cmd.id.rawValue.hasPrefix("sheet")
+        let edgeRef: EdgeRef? = edge.flatMap { found -> EdgeRef? in
+            guard model.bodies.indices.contains(found.body) else { return nil }
+            return mapsEdges ? originalEdge(found) : found
+        }
+        // Kante nur in der Vorschau (keine passende Kante am Ausgangskörper): nicht als Tippen ins Leere werten
+        if edge != nil, edgeRef == nil, face == nil, region == nil { return }
         let tap = CommandTap(face: face, edge: edgeRef, region: region, point: point.map { SIMD3<Double>($0) })
         if driver.tapped(tap, cmd, self) { return }
         if tap.isEmpty {
             // Ins Leere: ein Extrudieren ohne Ergebnis schließt wie „Auswahl aufheben“ (Shapr3D)
             if cmd.id == .extrude, cmd.editing == nil, !model.hasPreview { cancelCommand() }
+            // Shapr3D: Tippen ins Leere beendet auch Abrunden bzw. Fasen mit gültiger Vorschau (wie „Done“)
+            if cmd.id == .fillet || cmd.id == .chamfer, cmd.editing == nil, tappedFace == nil, edge == nil,
+               canConfirmCommand { confirmCommand() }
             return
         }
         if route(tap, into: cmd) {
@@ -2592,6 +2612,47 @@ extension Workspace {
         } else if cmd.inputs.indices.contains(cmd.activeInput) {
             model.message = cmd.inputs[cmd.activeInput].hint
         }
+    }
+
+    /// N1 (Build 41): Kante der Vorschau → Kante des echten Körpers. Bezug ist der Mittelpunkt der getroffenen
+    /// Vorschaukante; gewählt wird die Kante des Ausgangsnetzes mit dem kleinsten Abstand zu diesem Punkt.
+    /// nil = keine passende Kante (z. B. Körper nur in der Vorschau).
+    private func originalEdge(_ edge: EdgeRef) -> EdgeRef? {
+        let shown = model.shownBodies
+        let shape = model.bodies[edge.body].shape
+        if shown.indices.contains(edge.body), shown[edge.body].shape === shape { return edge }
+        let segments = model.mesh.edgeSegments(of: [edge])
+        guard segments.count >= 2 else { return nil }
+        // Mittelpunkt der Polylinie (halbe Länge)
+        var total: Float = 0
+        for i in stride(from: 0, to: segments.count - 1, by: 2) { total += simd_length(segments[i + 1] - segments[i]) }
+        var center = (segments[0] + segments[1]) / 2
+        var walked: Float = 0
+        for i in stride(from: 0, to: segments.count - 1, by: 2) {
+            let length = simd_length(segments[i + 1] - segments[i])
+            if walked + length >= total / 2, length > 0 {
+                center = segments[i] + (segments[i + 1] - segments[i]) * ((total / 2 - walked) / length)
+                break
+            }
+            walked += length
+        }
+        let original: Mesh
+        if let cached = originalEdgeMesh, cached.shape === shape, cached.body == edge.body {
+            original = cached.mesh
+        } else {
+            original = Mesh(shape.triangulate(deflection: 0.05), body: edge.body)
+            originalEdgeMesh = (shape, edge.body, original)
+        }
+        var best: (distance: Float, edge: EdgeRef)?
+        for (i, ref) in original.edgeRefs.enumerated() where ref.edge > 0 && i * 2 + 1 < original.edges.count {
+            let a = original.edges[i * 2], b = original.edges[i * 2 + 1]
+            let ab = b - a
+            let lengthSquared = simd_length_squared(ab)
+            let t = lengthSquared > 0 ? min(max(simd_dot(center - a, ab) / lengthSquared, 0), 1) : 0
+            let distance = simd_length(a + t * ab - center)
+            if best.map({ distance < $0.distance }) ?? true { best = (distance, ref) }
+        }
+        return best?.edge
     }
 
     /// Pick ins aktive Feld bzw. ins nächste Feld, das ihn annimmt (Fokus springt dorthin).
