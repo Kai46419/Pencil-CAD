@@ -787,7 +787,6 @@ final class SketchController: ObservableObject {
         self.constraints = constraints
         self.construction = construction
         selection = []
-        referenceLine = nil
         marks = []
         guideLines = []
         selectedMarks = []

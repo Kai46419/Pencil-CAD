@@ -29,8 +29,7 @@ extension SketchController {
     /// false = keine passende Linie (oder nicht das Linienwerkzeug).
     @discardableResult
     func toggleReferenceLine(at p: Point2, tolerance: Double) -> Bool {
-        // Nur vor einer Linie: bei gesetztem Startpunkt soll Verweilen über einer Linie den Endpunkt dort lassen
-        guard clickKind == .line, click.points.isEmpty, tolerance > 0, tolerance.isFinite else { return false }
+        guard clickKind == .line, tolerance > 0, tolerance.isFinite else { return false }
         var best: (distance: Double, index: Int)?
         for index in entities.indices where !construction.contains(index) {
             guard case .line(let a, let b) = entities[index] else { continue }
