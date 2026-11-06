@@ -364,15 +364,23 @@ final class SketchController: ObservableObject {
     /// Ein XY-Raster allein kann bei diagonalen Linien keine gerasterte Länge garantieren.
     /// Build 41: nur mit eingeschaltetem Rasterfang (snapKinds .grid); mindestens ein Schritt – unter halber
     /// Schrittweite fiel der Endpunkt sonst auf den Startpunkt (Länge 0).
-    func steppedLineEnd(_ directionPoint: Point2, from start: Point2) -> Point2 {
-        guard snapEnabled, !snapSuspended, !options.gridAuto, snapKinds.contains(.grid),
-              gridStep.isFinite, gridStep > 0 else { return directionPoint }
-        let delta = directionPoint - start
+    /// Build 46 (Kai): Länge immer in Schritten – die gewählte Rasterweite, sonst (Auto bzw. Raster aus) 1 mm.
+    /// roundAngle = freie Richtung (ohne Leitlinie): Winkel zur Waagerechten in ganzen Grad.
+    func steppedLineEnd(_ directionPoint: Point2, from start: Point2, roundAngle: Bool = false) -> Point2 {
+        guard snapEnabled, !snapSuspended else { return directionPoint }
+        let explicit = !options.gridAuto && snapKinds.contains(.grid) && gridStep.isFinite && gridStep > 0
+        let step = explicit ? gridStep : 1
+        var delta = directionPoint - start
         let length = simd_length(delta)
         guard length.isFinite, length > 1e-9 else { return directionPoint }
-        let steps = max(1, (length / gridStep).rounded())
+        if roundAngle {
+            let degrees = (atan2(delta.y, delta.x) * 180 / .pi).rounded()
+            let radians = degrees * .pi / 180
+            delta = Point2(cos(radians), sin(radians)) * length
+        }
+        let steps = max(1, (length / step).rounded())
         guard steps.isFinite else { return directionPoint }
-        return start + delta * (steps * gridStep / length)
+        return start + delta * (steps * step / length)
     }
     /// Fang insgesamt (Magnet in der rechten Leiste)
     @Published var snapEnabled = true
@@ -4481,7 +4489,7 @@ final class SketchController: ObservableObject {
                 // Build 41: gerasterten Punkt (XY-Raster) als Richtung nehmen, nicht den rohen Stiftpunkt –
                 // außer er fällt auf den Startpunkt (sonst Länge 0 statt mindestens eines Schritts)
                 let direction = simd_distance(result.point, anchor) > 1e-9 ? result.point : p
-                result.point = steppedLineEnd(direction, from: anchor)
+                result.point = steppedLineEnd(direction, from: anchor, roundAngle: true)
             case .some(.angle), .some(.parallel):
                 result.point = steppedLineEnd(result.point, from: anchor)
             default:

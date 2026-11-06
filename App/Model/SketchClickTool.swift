@@ -570,7 +570,7 @@ extension SketchController {
                 // Build 41: gerasterten Punkt (XY-Raster) als Richtung nehmen, nicht den rohen Stiftpunkt –
                 // außer er fällt auf den Startpunkt (sonst Länge 0 statt mindestens eines Schritts)
                 let direction = simd_distance(result.point, anchor) > 1e-9 ? result.point : raw
-                result.point = steppedLineEnd(direction, from: anchor)
+                result.point = steppedLineEnd(direction, from: anchor, roundAngle: true)
             case .some(.horizontal), .some(.vertical), .some(.angle),
                  .some(.parallel), .some(.perpendicular), .some(.mirroredAngle):
                 result.point = steppedLineEnd(result.point, from: anchor)
