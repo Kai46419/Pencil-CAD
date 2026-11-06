@@ -273,7 +273,6 @@ final class SketchDimensionTests: XCTestCase {
         sketch.load(plane: .ground, entities: [.line([0, 0], [20, 0])])
         sketch.options.inputStyle = .solidcraft
         sketch.tool = .polyline
-        sketch.pairConstructionLine = false
 
         XCTAssertTrue(sketch.captureHovered(at: [0, 0], tolerance: 1))
         XCTAssertEqual(sketch.click.pinned.count, 1)
@@ -283,22 +282,24 @@ final class SketchDimensionTests: XCTestCase {
         XCTAssertTrue(sketch.capturedPoints.isEmpty)
         XCTAssertEqual(try XCTUnwrap(sketch.marks.first).x, 10, accuracy: 1e-8)
         XCTAssertEqual(try XCTUnwrap(sketch.marks.first).y, 0, accuracy: 1e-8)
-        XCTAssertTrue(sketch.guideLines.isEmpty, "Build 64: keine nicht fangbare Mittellinie mehr")
+        let midline = try XCTUnwrap(sketch.guideLines.first)
+        XCTAssertEqual(midline.lines.count, 2)
+        XCTAssertEqual(midline.lines[0].count, 2)
+        XCTAssertEqual(midline.lines[1].count, 2)
 
         XCTAssertTrue(sketch.captureHovered(at: [20, 0], tolerance: 1))
         XCTAssertEqual(sketch.click.pinned.count, 1, "Erneutes Schweben muss den Spurpunkt entmerken")
     }
 
-    func testClassicHoverStillCreatesTwoPointMidpoint() throws {
+    func testClassicHoverStillCreatesTwoPointMidline() throws {
         let sketch = SketchController()
         sketch.load(plane: .ground, entities: [.line([0, 0], [20, 0])])
         sketch.options.inputStyle = .classic
         sketch.tool = .polyline
-        sketch.pairConstructionLine = false
         XCTAssertTrue(sketch.captureHovered(at: [0, 0], tolerance: 1))
         XCTAssertTrue(sketch.captureHovered(at: [20, 0], tolerance: 1))
         XCTAssertEqual(try XCTUnwrap(sketch.marks.first).x, 10, accuracy: 1e-8)
-        XCTAssertTrue(sketch.guideLines.isEmpty)
+        XCTAssertEqual(sketch.guideLines.first?.lines.count, 2)
         XCTAssertTrue(sketch.click.pinned.isEmpty)
     }
 

@@ -1627,15 +1627,19 @@ final class SketchController: ObservableObject {
             var lineAdded = false
             if simd_distance(a, b) > 1e-6, !marks.contains(where: { simd_distance($0, middle) < 1e-6 }) {
                 // Build 64 (Kai): Mitte als fangbarer Hilfspunkt (Dreieck); die Verbindung der beiden Punkte
-                // wahlweise als echte Konstruktionslinie (fangbar, löschbar) statt der nicht fangbaren Mittellinie.
+                // wahlweise zusätzlich als echte Konstruktionslinie (fangbar, löschbar).
                 marks.append(middle)
+                // Mittellinie (Verbindung und Mittelsenkrechte) bleibt: Kreismitten fangen an ihren Schnitten
+                let half = simd_distance(a, b) * 0.6
+                let across = rightNormal(b - a)
+                guideLines.append((middle, [[a, b], [middle - across * half, middle + across * half]]))
                 if pairConstructionLine { lineAdded = addPairConstructionLine(a, b) }
             }
             capturedPoints = []
             // Wie Messen: Abstand und Lage der beiden Punkte gleich mit anzeigen
             let d = b - a
             let mm = { (value: Double) in value.formatted(.number.precision(.fractionLength(0...3))) }
-            notice = "Abstand \(mm(simd_length(d))) mm (ΔX \(mm(abs(d.x))), ΔY \(mm(abs(d.y)))) – Mitte gesetzt (Dreieck, fangbar)" + (lineAdded ? ", Verbindung als Konstruktionslinie." : ".")
+            notice = "Abstand \(mm(simd_length(d))) mm (ΔX \(mm(abs(d.x))), ΔY \(mm(abs(d.y)))) – Mitte gesetzt (Dreieck, fangbar)" + (lineAdded ? ", Verbindung als Konstruktionslinie." : ", gestrichelt die Mittellinie.")
         } else {
             notice = "Punkt 1 gemerkt – zweiten Punkt merken (Stift darüber drücken bzw. doppeltippen)."
         }

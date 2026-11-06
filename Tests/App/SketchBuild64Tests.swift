@@ -29,7 +29,7 @@ final class SketchBuild64Tests: XCTestCase {
         XCTAssertEqual(middle.x, 10, accuracy: 1e-8)
         XCTAssertEqual(middle.y, 15, accuracy: 1e-8)
         XCTAssertEqual(sketch.entities.count, 2, "Ohne Schalter keine Linie anlegen")
-        XCTAssertTrue(sketch.guideLines.isEmpty)
+        XCTAssertEqual(sketch.guideLines.count, 1)
         // Die Mitte ist fangbar
         let snapped = sketch.solidCraftSnap([10.2, 15.1], tolerance: 1, prev: nil, lineTool: true)
         XCTAssertEqual(simd_distance(snapped.point, middle), 0, accuracy: 1e-8)
