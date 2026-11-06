@@ -89,8 +89,6 @@ extension SketchController {
         beginCommit()
         let index = appendCommitted(.line(a, b))
         let line = SketchCurveRef(entity: index, index: 0)
-        // Build 45: der Bezug gilt für eine Linie
-        referenceLine = nil
         let p0 = SketchPointRef(entity: index, index: 0), p1 = SketchPointRef(entity: index, index: 1)
         var variants = pointConstraints(p0, target: start.target)
         variants += lineEndConstraints(end.target, end: p1, line: line)

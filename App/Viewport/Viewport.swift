@@ -932,10 +932,6 @@ final class ViewportView: MTKView {
             addTextTransformHandles(to: &groups, sketch: sketch, perPoint: perPoint, world: world)
             // Verformungsgriffe am gewählten Text (SketchTextDeformHandles.swift)
             addTextDeformHandles(to: &groups, sketch: sketch, perPoint: perPoint, world: world)
-            // Build 45: Bezugslinie (Schweben bzw. Finger) blau und kräftig
-            if let reference = sketch.referenceLinePolyline {
-                groups.append(LineGroup(polylines: [reference.map(world)], color: Self.hoverBlue, width: 4))
-            }
             // Linie beim Zeichnen: Graphit wie die fertigen Linien, offene Enden als kleine Punkte
             let preview = sketch.previewPolylines
             // Build 43: gleiche Richtung (grün) bzw. gleiche Länge (gelb) wie vorhandene Linien, beides = gestreift
@@ -3136,13 +3132,6 @@ final class ViewportView: MTKView {
             default:
                 break
             }
-            // Build 45: Im Linienwerkzeug macht ein Fingertipp auf eine Linie sie zur Bezugslinie (Stift zeichnet)
-            if !sketch.fingerDraws, sketch.clickKind == .line, sketch.click.points.isEmpty,
-               let point = sketchPoint(at: location), sketch.toggleReferenceLine(at: point, tolerance: snapTolerance) {
-                selectionFeedback.selectionChanged()
-                refresh()
-                return
-            }
             // Finger tippt Elemente an (Auswahl für Einschränkungen, Löschen, Konstruktion)
             if !sketch.entities.isEmpty, let point = sketchPoint(at: location) {
                 sketch.select(at: point, tolerance: snapTolerance)
@@ -3354,11 +3343,6 @@ final class ViewportView: MTKView {
                     }
                 }
             }) {
-                self.refresh()
-            } else if sketch.toggleReferenceLine(at: point, tolerance: self.snapTolerance) {
-                // Build 45: über einer Linie (nicht an ihren Enden) schweben = Bezugslinie für die nächste Linie
-                self.selectionFeedback.selectionChanged()
-                self.selectionFeedback.prepare()
                 self.refresh()
             }
         }

@@ -136,8 +136,6 @@ struct SnapTracking {
     /// Spurpunkte (Objektfangspur): Start des laufenden Linienzugs und per Schweben, Drücken bzw. Doppeltippen
     /// gemerkte Punkte – dort zusätzlich Spuren senkrecht zu jeder anliegenden schrägen Linie (trackLeads)
     var traces: [Point2] = []
-    /// Build 45: Bezugslinie (Schweben bzw. Finger) – ihre Leitlinien fangen weiter und haben Vorrang
-    var reference: SketchCurveRef?
 }
 
 /// Leitlinie eines Fangs: Strahl ab origin in Richtung dir (Einheitsvektor, zum Stift hin), gültig ab minAlong,
@@ -354,7 +352,7 @@ struct SketchInference {
     /// Länge einer geraden Kurve übernehmen, ohne die aktuelle Richtung zu verändern.
     /// Verglichen wird mit der rohen Stiftposition, damit ein Rasterfang die Entscheidung nicht verfälscht.
     func equalLength(from anchor: Point2, toward directionPoint: Point2, raw: Point2,
-                     tolerance: Double, reference: SketchCurveRef? = nil) -> SnapCandidate? {
+                     tolerance: Double) -> SnapCandidate? {
         let vector = directionPoint - anchor
         let currentLength = simd_length(vector)
         guard currentLength > 1e-9, currentLength.isFinite, tolerance > 0 else { return nil }
@@ -366,11 +364,9 @@ struct SketchInference {
             guard length > 1e-9, length.isFinite else { continue }
             let point = anchor + unit * length
             let distance = simd_distance(raw, point)
-            // Build 45: Länge der Bezugslinie fängt dreimal so weit und gewinnt bei ähnlicher Abweichung
-            let isReference = curve.ref == reference
-            guard distance <= (isReference ? tolerance * 3 : tolerance) else { continue }
+            guard distance <= tolerance else { continue }
             // Zuerst Längenabweichung, dann Nähe der Bezugsgeraden als deterministischer Gleichstand.
-            let score = (isReference ? distance * 0.4 : distance) + simd_distance((a + b) / 2, (anchor + point) / 2) * 1e-6
+            let score = distance + simd_distance((a + b) / 2, (anchor + point) / 2) * 1e-6
             let candidate = SnapCandidate(point: point, target: .equalLength(curve.ref), guide: nil, label: "=")
             if best == nil || score < best!.score { best = (score, candidate) }
         }
@@ -601,37 +597,28 @@ struct SketchInference {
                                      reach: angular(length, minimum: tol * 0.5), tolerance: tol, overshoot: overshoot)
             }
             // Parallel bzw. senkrecht zu einer schrägen Linie (achsparallele Richtungen übernimmt H/V)
-            if lineTool, kinds.contains(.parallel) || tracking.reference != nil, length >= tol * 2 {
+            if lineTool, kinds.contains(.parallel), length >= tol * 2 {
                 for curve in curves where !curve.construction {
                     guard case .line(let a, let b) = curve.shape else { continue }
-                    // Build 45: die Bezugslinie fängt dreimal so weit und gewinnt bei ähnlichem Abstand
-                    let isReference = curve.ref == tracking.reference
-                    if !isReference && !kinds.contains(.parallel) { continue }
-                    let reach = isReference ? tol * 3 : tol
-                    let weight = isReference ? 0.6 : 1
                     let segment = b - a
                     let l = simd_length(segment)
                     guard l > 1e-9 else { continue }
                     let d = segment / l
                     guard abs(d.x) >= 1e-9, abs(d.y) >= 1e-9 else { continue }
-                    // Am Ende dieser Linie übernimmt der Winkel zum vorigen Stück („Ext“, „⊥“) – außer sie ist der Bezug
-                    let touchesPrev = simd_distance(a, prev) < 1e-9 || simd_distance(b, prev) < 1e-9
-                    if touchesPrev && !isReference { continue }
-                    if !touchesPrev {
-                        for (isParallel, base) in [(true, d), (false, Point2(-d.y, d.x))] {
-                            let dir = simd_dot(v, base) < 0 ? -base : base
-                            let target: SnapTarget = isParallel ? .parallel(curve.ref) : .perpendicular(curve.ref)
-                            result.append(SnapLead(origin: prev, dir: dir, minAlong: tol * 2, reach: reach,
-                                                   weight: weight, target: target, label: isParallel ? "//" : "⊥",
-                                                   rounding: .length, overshoot: overshoot))
-                        }
+                    // Am Ende dieser Linie übernimmt der Winkel zum vorigen Stück („Ext“, „⊥“)
+                    if simd_distance(a, prev) < 1e-9 || simd_distance(b, prev) < 1e-9 { continue }
+                    for (isParallel, base) in [(true, d), (false, Point2(-d.y, d.x))] {
+                        let dir = simd_dot(v, base) < 0 ? -base : base
+                        let target: SnapTarget = isParallel ? .parallel(curve.ref) : .perpendicular(curve.ref)
+                        result.append(SnapLead(origin: prev, dir: dir, minAlong: tol * 2, reach: tol, weight: 1,
+                                               target: target, label: isParallel ? "//" : "⊥", rounding: .length,
+                                               overshoot: overshoot))
                     }
-                    // Build 44 (Kai): gleicher Winkel gespiegelt (Trapez-Schenkel), bei 45° fällt er mit ⊥ zusammen.
-                    // Build 45: an der Bezugslinie auch vom gemeinsamen Ende aus (Spitze eines „V“).
+                    // Build 44 (Kai): gleicher Winkel gespiegelt (Trapez-Schenkel), bei 45° fällt er mit ⊥ zusammen
                     let mirror = Point2(d.x, -d.y)
                     if abs(d.x * mirror.y - d.y * mirror.x) > 1e-6, abs(simd_dot(d, mirror)) > 1e-6 {
                         let dir = simd_dot(v, mirror) < 0 ? -mirror : mirror
-                        result.append(SnapLead(origin: prev, dir: dir, minAlong: tol * 2, reach: reach, weight: weight,
+                        result.append(SnapLead(origin: prev, dir: dir, minAlong: tol * 2, reach: tol, weight: 1,
                                                target: .mirroredAngle(curve.ref), label: "∠=", rounding: .length,
                                                overshoot: overshoot))
                     }

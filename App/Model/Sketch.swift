@@ -694,10 +694,6 @@ final class SketchController: ObservableObject {
     }
     /// Build 43 (Kai): Die Linie endet nach jedem Strich; Länge und Winkel bleiben als Maße zum Ändern stehen.
     /// Weitergezeichnet wird, indem man das Linienende wieder antippt bzw. dort ansetzt. Aus = Linienzug wie bisher.
-    /// Build 45 (Kai): Bezugslinie für die nächste Linie – Stift 0,5 s darüber schweben lassen bzw. mit dem Finger
-    /// antippen. Die neue Linie rastet daran deutlich stärker parallel, gespiegelt, rechtwinklig und gleich lang ein
-    /// (SketchReferenceLine.swift).
-    @Published var referenceLine: SketchCurveRef?
     @Published var lineSingleStroke = UserDefaults.standard.object(forKey: "lineSingleStroke") as? Bool ?? true {
         didSet { UserDefaults.standard.set(lineSingleStroke, forKey: "lineSingleStroke") }
     }

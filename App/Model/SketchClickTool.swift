@@ -215,7 +215,6 @@ extension SketchController {
         if !fresh {
             tracking.angleSteps = clickKind == .line || clickKind == .rectangleThreePoint && click.points.count == 1
             if tracking.angleSteps { tracking.previous = previousSegment() }
-            if clickKind == .line { tracking.reference = validReferenceLine }
         }
         guard snapKinds.contains(.alignment) else { return tracking }
         // Spurpunkte: Start des Linienzugs (immer) und die ausdrücklich gemerkten
@@ -543,7 +542,7 @@ extension SketchController {
            snapEnabled, snapKinds.contains(.equalLength), !snapSuspended, !arcModifier,
            lockedValue("Länge") == nil, lengthMayReplace,
            let match = inference.equalLength(from: anchor, toward: result.point, raw: raw,
-                                             tolerance: metrics.refine, reference: validReferenceLine) {
+                                             tolerance: metrics.refine) {
             result = match
         }
         // Build 43 (Kai, Parallelogramm): Parallel bzw. rechtwinklig UND gleich lang – bisher schloss der Parallelfang
@@ -554,7 +553,7 @@ extension SketchController {
             switch result.target {
             case .some(.parallel), .some(.perpendicular), .some(.mirroredAngle):
                 if let match = inference.equalLength(from: anchor, toward: result.point, raw: raw,
-                                                     tolerance: metrics.refine, reference: validReferenceLine),
+                                                     tolerance: metrics.refine),
                    case .equalLength(let ref)? = match.target, inference.curve(ref)?.construction == false {
                     result.point = match.point
                     result.alsoEqual = ref
