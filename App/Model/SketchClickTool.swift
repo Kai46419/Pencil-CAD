@@ -739,7 +739,7 @@ extension SketchController {
         guard let best else { return }
         // Abstand vom Stift (nicht vom auf mm gerasterten Ende) bis zum Treffer, längs der Linie
         let penGap = simd_dot(best.point - raw, u)
-        if penGap <= metrics.pointPick, simd_dot(raw - a, u) > 0, result.alsoEqual == nil {
+        if abs(penGap) <= metrics.pointPick, simd_dot(raw - a, u) > 0, result.alsoEqual == nil {
             if case .equalLength? = result.target { return }
             result.point = best.point
             result.target = .onCurve(best.ref)
