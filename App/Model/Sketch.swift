@@ -2598,7 +2598,7 @@ final class SketchController: ObservableObject {
                 let corners = neighborAngles(of: index)
                 result += corners
                 // Build 43 (Kai): einzelne Linie nach dem Strich – Winkel zur Waagerechten zum Ändern
-                if corners.isEmpty, let angle = absoluteLineAngle(of: index) { result.append(angle) }
+                if corners.isEmpty, let angle = absoluteLineAngle(of: index, selected: tool == .select) { result.append(angle) }
             }
         } else if !isInProgress {
             result = selectionDimensions
