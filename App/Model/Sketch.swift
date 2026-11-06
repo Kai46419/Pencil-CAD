@@ -2665,10 +2665,11 @@ final class SketchController: ObservableObject {
     /// Build 43: Winkel einer frei stehenden Linie zur Waagerechten (−180…180°, wie das Wertfeld beim Zeichnen),
     /// am Linienanfang. Nur wenn keine andere Linie an einem Ende anschließt (dann zeigt neighborAngles den
     /// Eckwinkel) und kein Winkelmaß die Linie schon führt.
-    private func absoluteLineAngle(of index: Int) -> SketchDimension? {
-        guard lineSingleStroke, clickKind == .line, entities.indices.contains(index),
+    /// Build 55 (Kai): selected = mit dem Auswahlwerkzeug gewählte Linie – dort auch mit angeschlossenen Linien.
+    private func absoluteLineAngle(of index: Int, selected: Bool = false) -> SketchDimension? {
+        guard selected || (lineSingleStroke && clickKind == .line), entities.indices.contains(index),
               case .line(let a, let b) = entities[index], simd_distance(a, b) > 1e-9 else { return nil }
-        let touches = entities.indices.contains { other in
+        let touches = !selected && entities.indices.contains { other in
             guard other != index, !construction.contains(other), case .line(let c, let d) = entities[other] else {
                 return false
             }
@@ -2775,9 +2776,12 @@ final class SketchController: ObservableObject {
                                 SketchPointRef(entity: ref.entity, index: ends.1))
             }
             let fixed = fixedKinds(of: ref.entity)
-            return Self.dimensions(of: entities[ref.entity], editable: true)
+            var shown = Self.dimensions(of: entities[ref.entity], editable: true)
                 .filter { !fixed.contains($0.kind) }
                 .map { $0.tagged("s\(ref.entity)-\($0.kind)", .entity(ref.entity)) }
+            // Build 55 (Kai): gewählte Linie zeigt auch den Winkel zur Waagerechten zum Ändern
+            if let angle = absoluteLineAngle(of: ref.entity, selected: true) { shown.append(angle) }
+            return shown
         case (2, 0):
             guard points[0] != points[1] else { return [] }
             return distance(points[0], points[1])
