@@ -629,8 +629,53 @@ final class Workspace: ObservableObject {
         send(.alignToSketchPlane)
     }
 
+    // MARK: Automatisches Sichern der offenen Skizze (Build 61, Kai)
+
+    /// Stand der offenen, noch nicht mit „Fertig“ übernommenen Skizze. Ein Update der App beendete sie bisher
+    /// sofort, und alles seit dem Öffnen der Skizze war verloren.
+    struct SketchDraft: Codable {
+        var plane: SketchPlane
+        var entities: [SketchEntity]
+        var constraints: [SketchConstraint]
+        var construction: Set<Int>
+        var editingID: UUID?
+    }
+
+    private var sketchDraftURL: URL { project.folder.appending(path: "sketch-draft.json") }
+
+    /// Offene Skizze sichern (nach jeder Änderung, kurz verzögert, und beim Wechsel in den Hintergrund).
+    func saveSketchDraft() {
+        guard sketch.isActive, !sketch.isChoosingPlane, !model.loadFailed else { return }
+        guard !sketch.entities.isEmpty else {
+            discardSketchDraft()
+            return
+        }
+        let draft = SketchDraft(plane: sketch.plane, entities: sketch.entities, constraints: sketch.constraints,
+                                construction: sketch.construction, editingID: editingSketchID)
+        guard let data = try? JSONEncoder().encode(draft) else { return }
+        try? data.write(to: sketchDraftURL, options: .atomic)
+    }
+
+    func discardSketchDraft() {
+        try? FileManager.default.removeItem(at: sketchDraftURL)
+    }
+
+    /// Beim Öffnen des Projekts: eine nicht beendete Skizze als Skizze übernehmen (bearbeitete ersetzt ihr Original).
+    func restoreSketchDraft() {
+        guard !sketch.isActive, !model.loadFailed, let data = try? Data(contentsOf: sketchDraftURL) else { return }
+        guard let draft = try? JSONDecoder().decode(SketchDraft.self, from: data), !draft.entities.isEmpty else {
+            discardSketchDraft()
+            return
+        }
+        model.storeSketch(plane: draft.plane, entities: draft.entities, constraints: draft.constraints,
+                          construction: draft.construction, replacingID: draft.editingID)
+        discardSketchDraft()
+        model.message = "Nicht beendete Skizze wiederhergestellt."
+    }
+
     /// Skizze verlassen, ohne zu speichern; danach wieder 3D-Ansicht.
     func endSketch() {
+        discardSketchDraft()
         sketch.isActive = false
         sketch.modelGuides = SketchGuides()
         editingSketchIndex = nil

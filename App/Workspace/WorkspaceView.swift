@@ -1,3 +1,4 @@
+import Combine
 import PhotosUI
 import QuickLook
 import SwiftUI
@@ -237,8 +238,15 @@ private struct WorkspaceContent: View {
                 if let image { insertImage(image) }
             }
         }
+        // Build 61 (Kai): offene Skizze nach jeder Änderung sichern – ein App-Update beendet die App sofort
+        .onReceive(sketch.$entities.combineLatest(sketch.$constraints)
+            .debounce(for: .milliseconds(400), scheduler: RunLoop.main)) { _ in
+            workspace.saveSketchDraft()
+        }
+        .onAppear { workspace.restoreSketchDraft() }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active {
+                workspace.saveSketchDraft()
                 // Tastatur vor dem Wechsel schließen: kommt die App zurück, steht kein Versatz mehr
                 dismissKeyboard()
                 workspace.saveThumbnail()
