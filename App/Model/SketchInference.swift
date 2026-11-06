@@ -319,13 +319,15 @@ struct SketchInference {
     // MARK: Stufe 0: vorhandener Punkt
 
     /// Nächster Skizzenpunkt unter dem Stift (Bildschirmabstand < 8 pt + Bonus), bei Gleichstand der bewegliche.
-    func pointHit(_ lp: Point2, metrics: SnapMetrics, kinds: Set<SnapKind>, extra: [Point2]) -> Node? {
+    func pointHit(_ lp: Point2, metrics: SnapMetrics, kinds: Set<SnapKind>, extra: [Point2],
+                  reach: Double? = nil) -> Node? {
+        let pick = reach ?? metrics.pointPick
         var best: (distance: Double, node: Node)?
         let all = nodes + extra.map { Node(point: $0, ref: nil, isCenter: false, movable: true) }
         for node in all {
             if node.isCenter ? !kinds.contains(.center) : !kinds.contains(.endpoint) { continue }
             let d = simd_distance(node.point, lp)
-            guard d < metrics.pointPick else { continue }
+            guard d < pick else { continue }
             if let current = best {
                 let tie = abs(d - current.distance) < 1e-9
                 if tie ? !(node.movable && !current.node.movable) : d >= current.distance { continue }
@@ -384,7 +386,10 @@ struct SketchInference {
                 tracking: SnapTracking = SnapTracking()) -> SnapCandidate {
         // An dicht beieinanderliegenden Enden und Konstruktionslinien zählt der dem Stift nähere
         // Schnittpunkt. Sonst verdrängt der größere Endpunkt-Fangradius den exakt getroffenen Schnitt.
-        let node = pointHit(lp, metrics: metrics, kinds: kinds, extra: extra)
+        // Build 46 (Kai): Ansetzen an Linienanfang bzw. -ende (noch kein voriger Punkt) fängt 1,6-mal so weit,
+        // wie das Weiterzeichnen am Zugende (chainReach) – knapp daneben getippt landet trotzdem auf dem Punkt
+        let node = pointHit(lp, metrics: metrics, kinds: kinds, extra: extra,
+                            reach: prev == nil ? metrics.chainReach : nil)
         let crossing = !midOnly && kinds.contains(.intersection)
             ? nearestCrossing(lp, tolerance: metrics.refine, extra: extra) : nil
         if let crossing {
