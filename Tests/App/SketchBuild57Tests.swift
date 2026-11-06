@@ -62,3 +62,23 @@ final class SketchBuild57Tests: XCTestCase {
                       "Gewählte verbundene Linie: Winkel fehlt – \(sketch.visibleDimensions.map(\.id))")
     }
 }
+
+/// Build 60 (Kai): 3-Tangenten-Kreis bei sehr kleinen Maßen liegt genau an.
+@MainActor
+final class SketchBuild60Tests: XCTestCase {
+    func testTinyTangentCircleTouchesExactly() throws {
+        let lines: [SketchEntity] = [.line([0, 0], [0.03, 0]), .line([0, 0], [0, 0.03]), .line([0.03, 0], [0, 0.03])]
+        let circle: SketchEntity = .circle(center: [0.008, 0.009], radius: 0.007)
+        let constraints = (0..<3).map {
+            SketchConstraint(variant: .tangent(SketchCurveRef(entity: $0, index: 0), SketchCurveRef(entity: 3, index: 0),
+                                               outside: true))
+        }
+        let solved = try XCTUnwrap(ConstraintSolver.solve(lines + [circle], constraints: constraints, locked: [0, 1, 2]))
+        guard case .circle(let c, let r) = solved[3] else { return XCTFail("Kreis fehlt") }
+        // Inkreis des rechtwinkligen Dreiecks mit Katheten 0,03: r = (a + b − c) / 2
+        let expected = (0.03 + 0.03 - 0.03 * 2.0.squareRoot()) / 2
+        XCTAssertEqual(r, expected, accuracy: 1e-9)
+        XCTAssertEqual(c.x, expected, accuracy: 1e-9)
+        XCTAssertEqual(c.y, expected, accuracy: 1e-9)
+    }
+}
