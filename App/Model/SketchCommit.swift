@@ -92,6 +92,8 @@ extension SketchController {
         let p0 = SketchPointRef(entity: index, index: 0), p1 = SketchPointRef(entity: index, index: 1)
         var variants = pointConstraints(p0, target: start.target)
         variants += lineEndConstraints(end.target, end: p1, line: line)
+        // Build 43: Parallel und zugleich gleich lang (z. B. Gegenseite im Parallelogramm)
+        if let ref = end.alsoEqual, lockedValue("Länge") == nil { variants.append(.equalLength(ref, line)) }
         // Genau waagerecht bzw. senkrecht (Achsfang): H/V, außer ein getippter Winkel legt die Richtung fest
         if lockedValue("Winkel") == nil {
             if abs(b.y - a.y) < 1e-9 {
@@ -126,6 +128,8 @@ extension SketchController {
             return [.parallel(c, line)]
         case .perpendicular(let c):
             return [.perpendicular(c, line)]
+        case .mirroredAngle(let c):
+            return [.equalAngle(c, line, mirrored: true)]
         case .equalLength(let c):
             return [.equalLength(c, line)]
         case .angle, .aligned:

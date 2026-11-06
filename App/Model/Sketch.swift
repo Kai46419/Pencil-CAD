@@ -362,15 +362,25 @@ final class SketchController: ObservableObject {
 
     /// Die U-Schrittweite gilt beim freien Linienziehen auch für die Länge ab dem Startpunkt.
     /// Ein XY-Raster allein kann bei diagonalen Linien keine gerasterte Länge garantieren.
-    func steppedLineEnd(_ directionPoint: Point2, from start: Point2) -> Point2 {
-        guard snapEnabled, !snapSuspended, !options.gridAuto,
-              gridStep.isFinite, gridStep > 0 else { return directionPoint }
-        let delta = directionPoint - start
+    /// Build 41: nur mit eingeschaltetem Rasterfang (snapKinds .grid); mindestens ein Schritt – unter halber
+    /// Schrittweite fiel der Endpunkt sonst auf den Startpunkt (Länge 0).
+    /// Build 46 (Kai): Länge immer in Schritten – die gewählte Rasterweite, sonst (Auto bzw. Raster aus) 1 mm.
+    /// roundAngle = freie Richtung (ohne Leitlinie): Winkel zur Waagerechten in ganzen Grad.
+    func steppedLineEnd(_ directionPoint: Point2, from start: Point2, roundAngle: Bool = false) -> Point2 {
+        guard snapEnabled, !snapSuspended else { return directionPoint }
+        // Build 58 (Kai): die gewählte Weite („U“) ist immer die Zeichnungseinheit, auch ohne Rasterfang
+        let step = gridStep.isFinite && gridStep > 0 ? gridStep : 1
+        var delta = directionPoint - start
         let length = simd_length(delta)
         guard length.isFinite, length > 1e-9 else { return directionPoint }
-        let steps = (length / gridStep).rounded()
+        if roundAngle {
+            let degrees = (atan2(delta.y, delta.x) * 180 / .pi).rounded()
+            let radians = degrees * .pi / 180
+            delta = Point2(cos(radians), sin(radians)) * length
+        }
+        let steps = max(1, (length / step).rounded())
         guard steps.isFinite else { return directionPoint }
-        return start + delta * (steps * gridStep / length)
+        return start + delta * (steps * step / length)
     }
     /// Fang insgesamt (Magnet in der rechten Leiste)
     @Published var snapEnabled = true
@@ -581,9 +591,18 @@ final class SketchController: ObservableObject {
             // Einmal während eines Strichs aufgelegt, bleibt der Strich ein Bogen (auch wenn der Finger
             // inzwischen verrutscht oder abgehoben wurde)
             if arcModifier, dragStart != nil { startArcMidStroke() }
+            // Build 53 (Kai): Finger auf, während die Linie gelb (gleich lang wie eine andere) ist – die Länge bleibt,
+            // der Stift dreht nur noch; ohne Gelb hält der Finger an Punkten fest (fingerPointLock)
+            if arcModifier, !oldValue {
+                fingerLengthLock = options.isSolidCraft ? currentEqualLengthLock() : nil
+            } else if !arcModifier {
+                fingerLengthLock = nil
+            }
             if arcModifier != oldValue { changed() }
         }
     }
+    /// Mit dem Finger festgehaltene Linienlänge (Build 53); ref = gleich lange Linie für die Bedingung
+    var fingerLengthLock: (length: Double, ref: SketchCurveRef?)?
     private var arcLatched = false
     /// Bogen ohne Finger (Werkzeugrad bzw. Knopf „Bogen“): der nächste Strich mit dem Linienwerkzeug wird ein
     /// tangentialer Bogen, danach geht es mit Linien weiter
@@ -678,6 +697,10 @@ final class SketchController: ObservableObject {
             inference = SketchInference(entities: entities, construction: construction, modelPoints: modelGuides.points)
         }
     }
+    /// Build 64 (Kai): Zwei per Schweben gemerkte Punkte zusätzlich mit einer Konstruktionslinie verbinden
+    @Published var pairConstructionLine = UserDefaults.standard.object(forKey: "pairConstructionLine") as? Bool ?? false {
+        didSet { UserDefaults.standard.set(pairConstructionLine, forKey: "pairConstructionLine") }
+    }
     /// Shapr3D „Zeigen › Leitpunkte“: Knoten in Stiftnähe anzeigen
     @Published var showsGuidePoints = UserDefaults.standard.object(forKey: "showsGuidePoints") as? Bool ?? true {
         didSet { UserDefaults.standard.set(showsGuidePoints, forKey: "showsGuidePoints") }
@@ -689,6 +712,11 @@ final class SketchController: ObservableObject {
     /// Kurzes Klicken im Stift bzw. iPad, wenn ein neuer Fangpunkt greift (Haptik wie bei SketchUp-Inferenzen)
     @Published var snapHaptics = UserDefaults.standard.object(forKey: "snapHaptics") as? Bool ?? true {
         didSet { UserDefaults.standard.set(snapHaptics, forKey: "snapHaptics") }
+    }
+    /// Build 43 (Kai): Die Linie endet nach jedem Strich; Länge und Winkel bleiben als Maße zum Ändern stehen.
+    /// Weitergezeichnet wird, indem man das Linienende wieder antippt bzw. dort ansetzt. Aus = Linienzug wie bisher.
+    @Published var lineSingleStroke = UserDefaults.standard.object(forKey: "lineSingleStroke") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(lineSingleStroke, forKey: "lineSingleStroke") }
     }
     /// Kurzer akustischer Klick, wenn der Fang „Gleiche Länge“ neu einrastet.
     @Published var equalLengthClick = UserDefaults.standard.object(forKey: "equalLengthClick") as? Bool ?? true {
@@ -1101,7 +1129,7 @@ final class SketchController: ObservableObject {
         if let drag = selectDrag {
             if drag.hasMoved {
                 entities = drag.original
-                undoStack.removeLast()
+                if let mark = drag.undoBefore { rollBackUndo(mark) } else if !undoStack.isEmpty { undoStack.removeLast() }
                 entitiesChanged()
             }
             selectDrag = nil
@@ -1539,13 +1567,19 @@ final class SketchController: ObservableObject {
 
     /// Stift drücken bzw. doppeltippen beim Schweben: liegt ein Fangpunkt (Ende, Mitte, Zentrum, Schnittpunkt,
     /// Hilfspunkt) unter dem Stift, wird er gemerkt. false = nichts in der Nähe.
-    func captureHovered(at p: Point2, tolerance: Double, onRemembered: (() -> Void)? = nil) -> Bool {
+    /// pairs = false: nur Spurpunkt merken. Seit Build 64 schwebt der Stift wieder mit pairs = true:
+    /// zwei Punkte ergeben die fangbare Mitte, die Verbindung optional als Konstruktionslinie.
+    func captureHovered(at p: Point2, tolerance: Double, pairs: Bool = true, onRemembered: (() -> Void)? = nil) -> Bool {
         // SolidCraft-Klickwerkzeug: derselbe Punkt speist sowohl Objektfangspuren als auch die bisherige
         // Paarfunktion für Abstand, Mittelpunkt und gestrichelte Mittellinie.
         if options.isSolidCraft, clickKind != nil {
             guard let memory = togglePinnedPoint(at: p, tolerance: tolerance) else { return false }
             if memory.added {
-                if captureSnappedPoint(memory.point) { onRemembered?() }
+                if !pairs {
+                    onRemembered?()
+                } else if captureSnappedPoint(memory.point) {
+                    onRemembered?()
+                }
             } else {
                 capturedPoints.removeAll { simd_distance($0, memory.point) < 1e-6 }
             }
@@ -1554,6 +1588,7 @@ final class SketchController: ObservableObject {
             changed()
             return true
         }
+        guard pairs else { return false }
         // Auch Körperecken und Kantenmitten (3D-Leitpunkte): auf einer Körperfläche gibt es anfangs nur diese
         let kinds: Set<SnapKind> = [.endpoint, .midpoint, .center, .intersection, .modelPoint]
         guard withHelperSnap(snapIndex.snap(p, tolerance: tolerance * 1.5, kinds: kinds,
@@ -1589,21 +1624,40 @@ final class SketchController: ObservableObject {
         if capturedPoints.count >= 2 {
             let a = capturedPoints[0], b = capturedPoints[1]
             let middle = (a + b) / 2
+            var lineAdded = false
             if simd_distance(a, b) > 1e-6, !marks.contains(where: { simd_distance($0, middle) < 1e-6 }) {
+                // Build 64 (Kai): Mitte als fangbarer Hilfspunkt (Dreieck); die Verbindung der beiden Punkte
+                // wahlweise zusätzlich als echte Konstruktionslinie (fangbar, löschbar).
                 marks.append(middle)
-                // Mittellinie: Verbindung der beiden Punkte und Mittelsenkrechte
+                // Mittellinie (Verbindung und Mittelsenkrechte) bleibt: Kreismitten fangen an ihren Schnitten
                 let half = simd_distance(a, b) * 0.6
                 let across = rightNormal(b - a)
                 guideLines.append((middle, [[a, b], [middle - across * half, middle + across * half]]))
+                if pairConstructionLine { lineAdded = addPairConstructionLine(a, b) }
             }
             capturedPoints = []
             // Wie Messen: Abstand und Lage der beiden Punkte gleich mit anzeigen
             let d = b - a
             let mm = { (value: Double) in value.formatted(.number.precision(.fractionLength(0...3))) }
-            notice = "Abstand \(mm(simd_length(d))) mm (ΔX \(mm(abs(d.x))), ΔY \(mm(abs(d.y)))) – Mitte gesetzt (Dreieck, fangbar), gestrichelt die Mittellinie."
+            notice = "Abstand \(mm(simd_length(d))) mm (ΔX \(mm(abs(d.x))), ΔY \(mm(abs(d.y)))) – Mitte gesetzt (Dreieck, fangbar)" + (lineAdded ? ", Verbindung als Konstruktionslinie." : ", gestrichelt die Mittellinie.")
         } else {
             notice = "Punkt 1 gemerkt – zweiten Punkt merken (Stift darüber drücken bzw. doppeltippen)."
         }
+        return true
+    }
+
+    /// Build 64: Verbindung zweier gemerkter Punkte als Konstruktionslinie (nicht doppelt anlegen)
+    private func addPairConstructionLine(_ a: Point2, _ b: Point2) -> Bool {
+        let exists = entities.indices.contains { index in
+            guard construction.contains(index), case .line(let p, let q) = entities[index] else { return false }
+            return (simd_distance(p, a) < 1e-6 && simd_distance(q, b) < 1e-6)
+                || (simd_distance(p, b) < 1e-6 && simd_distance(q, a) < 1e-6)
+        }
+        guard !exists else { return false }
+        remember()
+        entities.append(.line(a, b))
+        construction.insert(entities.count - 1)
+        entitiesChanged()
         return true
     }
 
@@ -1620,9 +1674,10 @@ final class SketchController: ObservableObject {
         let radius = chamfer ? chamferDistance : filletRadius
         guard radius > 0 else { return }
         let before = (entities: entities, constraints: constraints, construction: construction)
+        let undoBefore = undoMark()
         remember()
         func fail(_ message: String) {
-            undoStack.removeLast()
+            rollBackUndo(undoBefore)
             entities = before.entities
             constraints = before.constraints
             construction = before.construction
@@ -1672,6 +1727,12 @@ final class SketchController: ObservableObject {
             if case .coincident = constraint.variant { return Set(constraint.entities) == pair }
             return false
         }
+        // C7 (Build 41): übernommene Bedingungen der gekürzten Linien behalten, solange sie noch gelten (waagerecht,
+        // parallel, Maße der anderen Seiten …); Maße bzw. Punkte an der weggerundeten Ecke gelten nicht mehr
+        constraints.removeAll { constraint in
+            !constraint.isSuspended && !pair.isDisjoint(with: constraint.entities)
+                && !ConstraintSolver.satisfies([constraint], in: entities)
+        }
         entities.append(chamfer ? .line(t1, t2) : .arc(start: t1, mid: mid, end: t2))
         let arc = entities.count - 1
         if construction.contains(lines[0]) { construction.insert(arc) }
@@ -1717,16 +1778,37 @@ final class SketchController: ObservableObject {
             return
         }
         let wasConstruction = construction.contains(index)
+        // C7 (Build 41): Bedingungen und Maße am Element merken, removeEntities verwirft sie
+        let attached = constraints.filter { $0.entities.contains(index) }
         removeEntities([index])
         let count = closed ? points.count : points.count - 1
         guard count > 0 else { return }
+        /// Kante k → Index der neuen Linie
+        var lineOf: [Int: Int] = [:]
         for k in 0..<count {
             let a = points[k], b = points[(k + 1) % points.count]
             guard simd_distance(a, b) > 1e-9 else { continue }
             entities.append(.line(a, b))
+            lineOf[k] = entities.count - 1
             if wasConstruction { construction.insert(entities.count - 1) }
             connect(entities.count - 1)
         }
+        // Kante k → Linie k; Ecke k → Anfang von Linie k bzw. Ende von Linie k − 1. Die Rechteckmitte (Punkt 4) gibt
+        // es als Linienpunkt nicht: Bedingungen daran entfallen wie bisher. Andere Elemente rücken wie in
+        // removeEntities um eins nach vorn.
+        let shifted: (Int) -> Int? = { $0 == index ? nil : ($0 > index ? $0 - 1 : $0) }
+        let point: (SketchPointRef) -> SketchPointRef? = { ref in
+            guard ref.entity == index else { return shifted(ref.entity).map { SketchPointRef(entity: $0, index: ref.index) } }
+            guard ref.index >= 0, ref.index < points.count else { return nil }
+            if let line = lineOf[ref.index] { return SketchPointRef(entity: line, index: 0) }
+            let previous = ref.index == 0 ? (closed ? count - 1 : -1) : ref.index - 1
+            return lineOf[previous].map { SketchPointRef(entity: $0, index: 1) }
+        }
+        let curve: (SketchCurveRef) -> SketchCurveRef? = { ref in
+            guard ref.entity == index else { return shifted(ref.entity).map { SketchCurveRef(entity: $0, index: ref.index) } }
+            return lineOf[ref.index].map { SketchCurveRef(entity: $0, index: 0) }
+        }
+        constraints += attached.compactMap { $0.remappedRefs(point: point, curve: curve) }
     }
 
     // MARK: Pfeil-Werkzeug (Auswählen, Verschieben, Größe ändern)
@@ -1753,6 +1835,8 @@ final class SketchController: ObservableObject {
         /// Fang ohne das gezogene Element (sonst rastet es an seiner alten Lage ein)
         var snapIndex: SnapIndex
         var hasMoved = false
+        /// Rückgängig-Stapel vor dem ersten Bewegen (Abbrechen rollt dorthin zurück)
+        var undoBefore: (stack: [Snapshot], textUndoCount: Int?)? = nil
         /// Vollständig bemaßte Gruppe: wird als Ganzes verschoben, nie verzerrt (Kai: Langloch)
         var rigid: Set<Int>? = nil
     }
@@ -1798,6 +1882,7 @@ final class SketchController: ObservableObject {
             // Kleines Zittern beim Tippen ist noch kein Ziehen
             guard simd_distance(p, drag.start) > tolerance * 0.15 else { return }
             drag.hasMoved = true
+            drag.undoBefore = undoMark()
             remember()
         }
         let raw = drag.grab + (p - drag.start)
@@ -2387,6 +2472,18 @@ final class SketchController: ObservableObject {
         }
     }
 
+    /// Stand des Rückgängig-Stapels vor remember() (Build 41, schwacher Bugfix 5): Zurückrollen mit rollBackUndo
+    /// stellt ihn ganz wieder her. remember() + removeLast() verlor bei vollem 200er-Stapel jedes Mal den ältesten
+    /// Schritt (remember hatte ihn schon vorn entfernt).
+    private func undoMark() -> (stack: [Snapshot], textUndoCount: Int?) {
+        (undoStack, textDeformSession?.undoCount)
+    }
+
+    private func rollBackUndo(_ mark: (stack: [Snapshot], textUndoCount: Int?)) {
+        undoStack = mark.stack
+        if let count = mark.textUndoCount { textDeformSession?.undoCount = count }
+    }
+
     // MARK: Maße am Element
 
     /// Maße der laufenden Eingabe (nur Anzeige) bzw. des zuletzt gezeichneten Elements (änderbar).
@@ -2397,7 +2494,8 @@ final class SketchController: ObservableObject {
             var copy = placedOutside(pair.element)
             if copy.id.isEmpty { copy.id = "live-\(pair.offset)" }
             // Kai: jedes änderbare Maß hat ein Schloss – rot (frei), antippen legt den aktuellen Wert fest
-            if copy.lockState == nil, copy.isEditable {
+            // Build 43: Winkel zur Waagerechten hat kein Schloss (es gibt dafür keine Bedingung)
+            if copy.lockState == nil, copy.isEditable, !copy.id.hasSuffix("-absangle") {
                 switch copy.target {
                 case .entity, .create: copy.lockState = false
                 case .display, .constraint, .live: break
@@ -2519,7 +2617,12 @@ final class SketchController: ObservableObject {
             result = Self.dimensions(of: entities[index], editable: true)
                 .filter { !fixed.contains($0.kind) }
                 .map { $0.tagged("e\(index)-\($0.kind)", .entity(index)) }
-            if !isInProgress { result += neighborAngles(of: index) }
+            if !isInProgress {
+                let corners = neighborAngles(of: index)
+                result += corners
+                // Build 43 (Kai): einzelne Linie nach dem Strich – Winkel zur Waagerechten zum Ändern
+                if corners.isEmpty, let angle = absoluteLineAngle(of: index, selected: tool == .select) { result.append(angle) }
+            }
         } else if !isInProgress {
             result = selectionDimensions
         }
@@ -2582,6 +2685,86 @@ final class SketchController: ObservableObject {
         return result
     }
 
+    /// Build 43: Winkel einer frei stehenden Linie zur Waagerechten (−180…180°, wie das Wertfeld beim Zeichnen),
+    /// am Linienanfang. Nur wenn keine andere Linie an einem Ende anschließt (dann zeigt neighborAngles den
+    /// Eckwinkel) und kein Winkelmaß die Linie schon führt.
+    /// Build 55 (Kai): selected = mit dem Auswahlwerkzeug gewählte Linie – dort auch mit angeschlossenen Linien.
+    private func absoluteLineAngle(of index: Int, selected: Bool = false) -> SketchDimension? {
+        guard selected || (lineSingleStroke && clickKind == .line), entities.indices.contains(index),
+              case .line(let a, let b) = entities[index], simd_distance(a, b) > 1e-9 else { return nil }
+        let touches = !selected && entities.indices.contains { other in
+            guard other != index, !construction.contains(other), case .line(let c, let d) = entities[other] else {
+                return false
+            }
+            return [c, d].contains { simd_distance($0, a) < 1e-6 || simd_distance($0, b) < 1e-6 }
+        }
+        guard !touches else { return nil }
+        let angled = constraints.contains { constraint in
+            switch constraint.variant {
+            case .angle(let x, let y, _), .parallel(let x, let y), .perpendicular(let x, let y),
+                 .equalAngle(let x, let y, _):
+                return x.entity == index || y.entity == index
+            default:
+                return false
+            }
+        }
+        guard !angled else { return nil }
+        let v = b - a
+        let sweep = atan2(v.y, v.x)
+        let bisector = Point2(cos(sweep / 2), sin(sweep / 2))
+        var dimension = SketchDimension(kind: .angle, value: sweep * 180 / .pi,
+                                        position: a + bisector * simd_distance(a, b) * 0.45,
+                                        direction: bisector, isEditable: true, span: [a, b])
+        dimension.reference = Point2(1, 0)
+        dimension.sweep = sweep
+        return dimension.tagged("e\(index)-absangle", .entity(index))
+    }
+
+    /// Build 43: Winkel der frei stehenden Linie zur Waagerechten eingeben – sie dreht sich um ihren Anfang
+    /// (bzw. um ihr Ende, wenn der Anfang festliegt); Länge und Anschlüsse bleiben. Waagerecht/senkrecht
+    /// bekommt mit „Auto-Bedingungen“ die Bedingung H/V, eine alte H/V-Bedingung der Linie fällt weg.
+    private func setLineAngle(of index: Int, degrees: Double) {
+        guard degrees.isFinite, entities.indices.contains(index), case .line(let a, let b) = entities[index] else { return }
+        let length = simd_distance(a, b)
+        guard length > 1e-9 else { return }
+        let radians = degrees * .pi / 180
+        let direction = Point2(cos(radians), sin(radians))
+        let line = SketchCurveRef(entity: index, index: 0)
+        let beforeConstraints = constraints
+        constraints.removeAll { constraint in
+            switch constraint.variant {
+            case .horizontal(let c), .vertical(let c): return c == line
+            default: return false
+            }
+        }
+        var aroundStart = entities, aroundEnd = entities
+        aroundStart[index] = .line(a, a + direction * length)
+        aroundEnd[index] = .line(b - direction * length, b)
+        let focus: Set<Int> = [index]
+        let tiers = [[DimensionTrial(entities: aroundStart, focus: focus, pinned: focus)],
+                     [DimensionTrial(entities: aroundEnd, focus: focus, pinned: focus)]]
+        let before = entities
+        guard let found = solveDimensionTrials(tiers, before: before) else {
+            constraints = beforeConstraints
+            notice = dimensionConflictNotice
+            return
+        }
+        let reduced = constraints
+        constraints = beforeConstraints
+        remember()
+        constraints = reduced
+        entities = found.entities
+        if autoConstrain, case .line(let p, let q) = entities[index] {
+            if abs(q.y - p.y) < 1e-9 {
+                constraints.append(SketchConstraint(variant: .horizontal(line)))
+            } else if abs(q.x - p.x) < 1e-9 {
+                constraints.append(SketchConstraint(variant: .vertical(line)))
+            }
+        }
+        notice = found.isGlobal ? widerDimensionNotice : nil
+        entitiesChanged()
+    }
+
     /// Wie bei Shapr3D: Maße zur Auswahl. Ein Element zeigt seine Maße, zwei Punkte ihren Abstand,
     /// Punkt und Linie den senkrechten Abstand, zwei Linien ihren Winkel (bzw. Abstand, wenn parallel).
     private var selectionDimensions: [SketchDimension] {
@@ -2616,9 +2799,12 @@ final class SketchController: ObservableObject {
                                 SketchPointRef(entity: ref.entity, index: ends.1))
             }
             let fixed = fixedKinds(of: ref.entity)
-            return Self.dimensions(of: entities[ref.entity], editable: true)
+            var shown = Self.dimensions(of: entities[ref.entity], editable: true)
                 .filter { !fixed.contains($0.kind) }
                 .map { $0.tagged("s\(ref.entity)-\($0.kind)", .entity(ref.entity)) }
+            // Build 55 (Kai): gewählte Linie zeigt auch den Winkel zur Waagerechten zum Ändern
+            if let angle = absoluteLineAngle(of: ref.entity, selected: true) { shown.append(angle) }
+            return shown
         case (2, 0):
             guard points[0] != points[1] else { return [] }
             return distance(points[0], points[1])
@@ -2784,6 +2970,10 @@ final class SketchController: ObservableObject {
                 notice = "Maß festgelegt: \(dimension.value.formatted(.number.precision(.fractionLength(0...2))))"
             }
             return
+        case .entity where id.hasSuffix("-absangle"):
+            // Kein Winkelmaß zur Waagerechten als Bedingung: waagerecht/senkrecht festlegen geht über H/V
+            notice = "Den Winkel zur Waagerechten kann man nur eintippen – festlegen geht als Winkel zu einer anderen Linie oder mit Waagerecht/Senkrecht."
+            return
         case .entity:
             setDimension(id: id, to: dimension.value)
             return
@@ -2812,6 +3002,12 @@ final class SketchController: ObservableObject {
         // Wertfeld der Klickfolge: auch negative Werte (Bogenwinkel im Uhrzeigersinn)
         if let dimension = dimensions.first(where: { $0.id == id }), case .live(let key) = dimension.target {
             lockLiveValue(key, text: expression ?? Self.liveText(value, key: key), variables: variableValues)
+            return
+        }
+        // Build 43: Winkel der frei stehenden Linie zur Waagerechten, auch 0° und negativ
+        if id.hasSuffix("-absangle"), value.isFinite, let dimension = dimensions.first(where: { $0.id == id }),
+           case .entity(let index) = dimension.target {
+            setLineAngle(of: index, degrees: value)
             return
         }
         guard value.isFinite, value > 0, let dimension = dimensions.first(where: { $0.id == id }) else { return }
@@ -3662,6 +3858,7 @@ final class SketchController: ObservableObject {
             if case .point(let p) = ref { return p }
             return nil
         })
+        let undoBefore = undoMark()
         remember()
         let before = constraints.count
         constraints.removeAll { constraint in
@@ -3671,7 +3868,7 @@ final class SketchController: ObservableObject {
             return points.isEmpty && !chosen.isDisjoint(with: constraint.entities)
         }
         if constraints.count == before {
-            undoStack.removeLast()
+            rollBackUndo(undoBefore)
             notice = "An der Auswahl hängen keine Einschränkungen."
         } else {
             notice = nil
@@ -3694,6 +3891,7 @@ final class SketchController: ObservableObject {
             notice = kind.selectionHint
             return
         }
+        let undoBefore = undoMark()
         remember()
         let before = entities, beforeConstraints = constraints
         constraints += new.map { SketchConstraint(variant: $0) }
@@ -3707,7 +3905,7 @@ final class SketchController: ObservableObject {
         } else {
             entities = before
             constraints = beforeConstraints
-            undoStack.removeLast()
+            rollBackUndo(undoBefore)
             notice = "„\(kind.rawValue)“ widerspricht den vorhandenen Einschränkungen."
         }
         editableIndex = nil
@@ -4324,7 +4522,10 @@ final class SketchController: ObservableObject {
         if tool == .polyline, !arcActive, let anchor {
             switch result.kind {
             case nil, .some(.grid):
-                result.point = steppedLineEnd(p, from: anchor)
+                // Build 41: gerasterten Punkt (XY-Raster) als Richtung nehmen, nicht den rohen Stiftpunkt –
+                // außer er fällt auf den Startpunkt (sonst Länge 0 statt mindestens eines Schritts)
+                let direction = simd_distance(result.point, anchor) > 1e-9 ? result.point : p
+                result.point = steppedLineEnd(direction, from: anchor, roundAngle: true)
             case .some(.angle), .some(.parallel):
                 result.point = steppedLineEnd(result.point, from: anchor)
             default:
@@ -4731,6 +4932,7 @@ extension SketchController {
     /// spätere Aufrufe keinen. Ein festes Maß gleicher Art zieht mit. false = Wert nicht erreichbar, Maße wie vorher.
     func dragEntityDimension(_ kind: SketchDimension.Kind, of index: Int, to value: Double, begin: Bool) -> Bool {
         guard entities.indices.contains(index), value.isFinite, value > 0 else { return false }
+        let undoBeforeBegin = undoMark()
         if begin { remember() }
         let savedUndo = undoStack
         let beforeConstraints = constraints, beforeEntities = entities
@@ -4749,7 +4951,7 @@ extension SketchController {
         if !reached {
             entities = beforeEntities
             constraints = beforeConstraints
-            if begin, !undoStack.isEmpty { undoStack.removeLast() }
+            if begin { rollBackUndo(undoBeforeBegin) }
             entitiesChanged()
         }
         return reached
@@ -5117,5 +5319,47 @@ extension SketchController {
         if let index, sketchText(at: index) != nil { selectText(at: index) }
         notice = nil
         changed()
+    }
+}
+
+// MARK: - Verweise einzeln umschreiben (C7, Build 41)
+
+extension SketchConstraint {
+    /// Wie remapped, aber je Punkt- bzw. Kurvenverweis (z. B. Rechteckkante k → eigene Linie). nil, wenn ein
+    /// Verweis wegfällt.
+    fileprivate func remappedRefs(point p: (SketchPointRef) -> SketchPointRef?,
+                                  curve c: (SketchCurveRef) -> SketchCurveRef?) -> SketchConstraint? {
+        let v: Variant?
+        switch variant {
+        case .parallel(let a, let b): v = c(a).flatMap { a in c(b).map { .parallel(a, $0) } }
+        case .perpendicular(let a, let b): v = c(a).flatMap { a in c(b).map { .perpendicular(a, $0) } }
+        case .tangent(let a, let b, let o): v = c(a).flatMap { a in c(b).map { .tangent(a, $0, outside: o) } }
+        case .coincident(let a, let b): v = p(a).flatMap { a in p(b).map { .coincident(a, $0) } }
+        case .pointOnCurve(let a, let b): v = p(a).flatMap { a in c(b).map { .pointOnCurve(a, $0) } }
+        case .midpoint(let a, let b): v = p(a).flatMap { a in c(b).map { .midpoint(a, $0) } }
+        case .concentric(let a, let b): v = c(a).flatMap { a in c(b).map { .concentric(a, $0) } }
+        case .horizontal(let a): v = c(a).map { .horizontal($0) }
+        case .vertical(let a): v = c(a).map { .vertical($0) }
+        case .horizontalPoints(let a, let b): v = p(a).flatMap { a in p(b).map { .horizontalPoints(a, $0) } }
+        case .verticalPoints(let a, let b): v = p(a).flatMap { a in p(b).map { .verticalPoints(a, $0) } }
+        case .equalLength(let a, let b): v = c(a).flatMap { a in c(b).map { .equalLength(a, $0) } }
+        case .equalRadius(let a, let b): v = c(a).flatMap { a in c(b).map { .equalRadius(a, $0) } }
+        case .equalAngle(let a, let b, let m): v = c(a).flatMap { a in c(b).map { .equalAngle(a, $0, mirrored: m) } }
+        case .symmetric(let a, let b, let axis):
+            v = p(a).flatMap { a in p(b).flatMap { b in c(axis).map { .symmetric(a, b, axis: $0) } } }
+        case .lock(let a, let at): v = p(a).map { .lock($0, at: at) }
+        case .distance(let a, let b, let value): v = p(a).flatMap { a in p(b).map { .distance(a, $0, value: value) } }
+        case .pointLineDistance(let a, let b, let value):
+            v = p(a).flatMap { a in c(b).map { .pointLineDistance(a, $0, value: value) } }
+        case .angle(let a, let b, let degrees): v = c(a).flatMap { a in c(b).map { .angle(a, $0, degrees: degrees) } }
+        case .radius(let a, let value, let diameter): v = c(a).map { .radius($0, value: value, diameter: diameter) }
+        }
+        let suspended = isSuspended, expression = expression
+        return v.map { variant -> SketchConstraint in
+            var constraint = SketchConstraint(variant: variant)
+            constraint.isSuspended = suspended
+            constraint.expression = expression
+            return constraint
+        }
     }
 }

@@ -37,11 +37,13 @@ else
   echo "ein Team wählen und dieses Skript erneut starten (oder PENCILCAD_TEAM in signing.env eintragen)."
 fi
 
-# Versionsnummer für den Startbildschirm: Build = Anzahl der Commits, dazu Commit und Datum
+# Versionsnummer für den Startbildschirm: Build = Nummer aus dem letzten Commit-Titel „Build N: …“
+# (Kai: gleiche Nummer wie in den Nachrichten), ohne solchen Titel die Anzahl der Commits; dazu Commit und Datum
 export PENCILCAD_BUILD="${PENCILCAD_BUILD:-7}"
 build_info="$(cat App/BuildInfo.txt 2>/dev/null || true)"
 if [[ -e .git ]]; then
-  export PENCILCAD_BUILD="$(git rev-list --count HEAD 2>/dev/null || echo 1)"
+  titled="$(git log -200 --format=%s 2>/dev/null | grep -m1 -oE '^Build [0-9]+' | grep -oE '[0-9]+' || true)"
+  export PENCILCAD_BUILD="${titled:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}"
   build_info="$(git log -1 --format='%h · %cd' --date=format:'%d.%m.%Y %H:%M' 2>/dev/null || true)"
   printf '%s\n' "${build_info:-unbekannter Stand}" > App/BuildInfo.txt
 fi

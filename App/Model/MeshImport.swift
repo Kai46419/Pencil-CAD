@@ -90,10 +90,23 @@ extension ModelStore {
         }
         let name = url.deletingPathExtension().lastPathComponent
         message = "\(kind) wird gelesen und in einen Körper umgewandelt …"
-        Task {
-            let box = await Task.detached(priority: .userInitiated) { () -> UncheckedBox<MeshImportResult> in
+        // C4/N3 (Build 41): Import an diese Instanz und diesen Stand binden. Ein neuer Import, close() oder ein
+        // gelöschter Ordner lassen das Ergebnis verfallen, statt später ein anderes bzw. gelöschtes Projekt zu
+        // überschreiben. Ein früherer, noch laufender Import wird abgebrochen.
+        meshImportTask?.cancel()
+        meshImportGeneration += 1
+        let generation = meshImportGeneration
+        meshImportTask = Task { [weak self] in
+            // B8: OCCT (MeshSolid/PCKShape) auf dem großen Stapel (KernelThread, 32 MB) statt Task.detached (512 KB)
+            let box = await KernelThread.value("PencilCAD.meshImport") { () -> UncheckedBox<MeshImportResult> in
                 UncheckedBox(MeshImporter.convert(data, name: name, fileExtension: fileExtension))
-            }.value
+            }
+            guard let self, !Task.isCancelled, generation == self.meshImportGeneration else { return }
+            self.meshImportTask = nil
+            guard self.canWriteProject || self.folder == nil else {
+                // Projekt inzwischen geschlossen, neu geöffnet oder gelöscht: nichts übernehmen
+                return
+            }
             self.finishMeshImport(box.value, kind: kind)
             done?()
         }

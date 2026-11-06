@@ -251,8 +251,11 @@ extension ModelStore {
         }
         var params: SheetJSON = ["body": "$src", "face": SheetJSON(basePoint), "rule": .string(rule.name)]
         if !plateOnly, !bendPoints.isEmpty { params["bends"] = .array(bendPoints.map { SheetJSON($0) }) }
+        var ruleStep = SheetStep(rule.command(active: true).title, rule.command(active: true))
+        // D5 (Build 41): Basisregel merken – eine spätere Änderung (z. B. Dicke) dieser Regel wirkt auch hier
+        if rule.name != base.name { ruleStep.baseRule = base.name }
         return [
-            SheetStep(rule.command(active: true).title, rule.command(active: true)),
+            ruleStep,
             SheetStep("Ausgangskörper", SheetCommand("psk.import_step", ["path": "$source", "name": "Quelle"]), alias: "$src"),
             SheetStep("In Blech umwandeln", SheetCommand("sheet.convert", params), alias: "$sheet"),
         ]
@@ -291,28 +294,70 @@ extension ModelStore {
         }
     }
 
+    /// Höchstzahl der Punkte einer Kontur für die Selbstschnitt-Prüfung (Paare wachsen quadratisch)
+    nonisolated static let sheetOverlapPointLimit = 4000
+
     /// Überlappt sich das Flachmuster (Kontur schneidet sich selbst, Teile liegen übereinander)?
     nonisolated static func sheetOverlapProblem(_ flat: FlatPattern) -> String? {
-        guard !flat.outline.isEmpty else { return "Das Flachmuster ist leer." }
+        sheetOverlapCheck(flat).problem
+    }
+
+    /// S2 (Build 41): Prüfung samt Hinweis. problem sperrt den Export; warning meldet, was nicht geprüft werden
+    /// konnte (Kontur über 4000 Punkte – vorher still übersprungen). Ausschnitte (cutouts) werden mitgeprüft:
+    /// kein Selbstschnitt, innerhalb der Außenkontur, nicht ineinander.
+    nonisolated static func sheetOverlapCheck(_ flat: FlatPattern) -> (problem: String?, warning: String?) {
+        guard !flat.outline.isEmpty else { return ("Das Flachmuster ist leer.", nil) }
         for loop in flat.outline {
             guard loop.count >= 3, loop.allSatisfy({ $0.x.isFinite && $0.y.isFinite }) else {
-                return "Die Abwicklung enthält eine unvollständige Kontur."
+                return ("Die Abwicklung enthält eine unvollständige Kontur.", nil)
             }
         }
-        for loop in flat.outline where loop.count <= 4000 && polylineIntersectsItself(loop) {
-            return "Die Abwicklung überlappt sich – andere Kanten öffnen."
+        let limit = sheetOverlapPointLimit
+        var unchecked = 0
+        for loop in flat.outline {
+            guard loop.count <= limit else {
+                unchecked += 1
+                continue
+            }
+            if polylineIntersectsItself(loop) { return ("Die Abwicklung überlappt sich – andere Kanten öffnen.", nil) }
         }
+        let cutouts = flat.cutouts.filter { $0.count >= 3 }
+        for cutout in cutouts {
+            guard cutout.allSatisfy({ $0.x.isFinite && $0.y.isFinite }) else {
+                return ("Die Abwicklung enthält einen unvollständigen Ausschnitt.", nil)
+            }
+            guard cutout.count <= limit else {
+                unchecked += 1
+                continue
+            }
+            if polylineIntersectsItself(cutout) {
+                return ("Ein Ausschnitt der Abwicklung überlappt sich selbst.", nil)
+            }
+            // Ein Ausschnitt muss in einem Teil liegen (mindestens ein Punkt im Inneren der Außenkontur)
+            if !flat.outline.contains(where: { outline in cutout.contains { polygonContains(outline, $0) } }) {
+                return ("Ein Ausschnitt liegt außerhalb der Abwicklung.", nil)
+            }
+        }
+        if cutouts.count > 1, cutouts.count <= 500 {
+            for (i, a) in cutouts.enumerated() {
+                for b in cutouts[(i + 1)...] where polygonContains(a, b[0]) || polygonContains(b, a[0]) {
+                    return ("Ausschnitte der Abwicklung liegen übereinander.", nil)
+                }
+            }
+        }
+        let warning: String? = unchecked == 0 ? nil
+            : "\(unchecked) Kontur\(unchecked == 1 ? "" : "en") mit über \(limit) Punkten nicht auf Überlappung geprüft."
         if flat.outline.count > 1 {
             for (i, a) in flat.outline.enumerated() {
                 for b in flat.outline[(i + 1)...] where !a.isEmpty && !b.isEmpty {
                     if polygonContains(a, b[0]) || polygonContains(b, a[0]) {
-                        return "Teile der Abwicklung liegen übereinander – andere Kanten öffnen."
+                        return ("Teile der Abwicklung liegen übereinander – andere Kanten öffnen.", warning)
                     }
                 }
             }
-            return "Die Abwicklung zerfällt in \(flat.outline.count) Teile – weniger Kanten öffnen."
+            return ("Die Abwicklung zerfällt in \(flat.outline.count) Teile – weniger Kanten öffnen.", warning)
         }
-        return nil
+        return (nil, warning)
     }
 
     /// Schneiden oder überdecken sich zwei nicht benachbarte Strecken des geschlossenen Linienzugs?

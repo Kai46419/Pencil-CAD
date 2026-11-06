@@ -66,8 +66,9 @@ final class SketchToolOptions: ObservableObject {
     @Published var moveDY: Double = 0
     @Published var moveAngle: Double = 0
     @Published var moveCopy = false
-    /// Raster 1-2-5 automatisch nach Zoom (SolidCraft), sonst feste Rasterweite
-    @Published var gridAuto = true {
+    /// Raster 1-2-5 automatisch nach Zoom (SolidCraft), sonst feste Rasterweite. Build 58 (Kai): Automatik
+    /// abgeschafft – die im „U“-Menü gewählte Weite gilt immer, auch als Längenschritt der Linie.
+    @Published var gridAuto = false {
         didSet { if gridAuto != oldValue { onGridAutoChange?(gridAuto) } }
     }
     /// Der Workspace speichert den Modus zusammen mit der Rasterweite im Projekt.

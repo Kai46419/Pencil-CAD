@@ -488,13 +488,17 @@ enum ConstraintSolver {
         var r = residuals(x)
         guard !r.isEmpty, r.allSatisfy(\.isFinite) else { return nil }
         guard !free.isEmpty else { return norm(r) < 1e-6 ? entities : nil }
-        for _ in 0..<40 {
-            if norm(r) < 1e-9 { break }
+        // Build 60 (Kai): sehr kleine Elemente (z. B. Tangentenkreis Ø 0,022 mm) – absolute 1e-5 mm waren dort
+        // sichtbar ungenau. Annahme- und Abbruchschwelle richten sich nach dem kleinsten beteiligten Element.
+        let accept = min(1e-5, max(1e-11, 1e-4 * smallestFeature(entities, involved)))
+        let finish = min(1e-9, accept * 1e-4)
+        for _ in 0..<60 {
+            if norm(r) < finish { break }
             // Jacobi-Matrix numerisch (m × n)
             let m = r.count, n = free.count
             var jacobian = [Double](repeating: 0, count: m * n)
             for (column, variable) in free.enumerated() {
-                let h = 1e-6 * max(1, abs(x[variable]))
+                let h = 1e-7 * max(1, abs(x[variable]))
                 var shifted = x
                 shifted[variable] += h
                 guard shifted[variable].isFinite, h.isFinite, h > 0 else { return nil }
@@ -541,7 +545,22 @@ enum ConstraintSolver {
             }
             if !improved { break }
         }
-        return norm(r) < 1e-5 ? build(x) : nil
+        return norm(r) < accept ? build(x) : nil
+    }
+
+    /// Kleinste Ausdehnung (Hüllquader) der beteiligten Elemente in mm; Punkte zählen nicht.
+    private static func smallestFeature(_ entities: [SketchEntity], _ involved: [Int]) -> Double {
+        var smallest = Double.infinity
+        for index in involved where entities.indices.contains(index) {
+            let points = entities[index].drawing.flatMap { $0 }
+            guard let first = points.first else { continue }
+            var lo = first, hi = first
+            for p in points { lo = simd_min(lo, p); hi = simd_max(hi, p) }
+            let size = max(hi.x - lo.x, hi.y - lo.y)
+            if case .point = entities[index] { continue }
+            if size > 1e-9 { smallest = min(smallest, size) }
+        }
+        return smallest.isFinite ? smallest : 1
     }
 
     /// Shapr3D „Sketch states“: Elemente, deren Parameter alle durch Einschränkungen festgelegt sind

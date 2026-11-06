@@ -15,19 +15,40 @@ struct FeaturePanel: View {
     @ObservedObject var command: ModelCommand
     @Binding var panel: SidePanel?
     let screenshot: () -> Void
+    /// S5 (Build 41): Fenstermodus nur bei regulärer Breite (WorkspaceView prüft Size Class und Fensterbreite)
+    var allowsFloatingWindow = true
+    /// S5: die 380-pt-Grenze des Fensters gilt nur im Querformat
+    var isLandscape = true
+    /// S6: größte Höhe des Mittelteils, solange die Tastatur Platz nimmt (nil = keine Grenze)
+    var heightLimit: CGFloat?
 
     @State private var showsInfo = false
+    /// Rundungsoptionen (Zahnrad beim Abrunden)
+    @State private var showsBlendSettings = false
     @AppStorage(CornerConfirm.storageKey) private var cornerConfirm = true
-    @AppStorage("PencilCAD.filletFloatingWindow") private var floatingWindow = true
+    @AppStorage(FilletWindowLayout.storageKey) private var floatingWindow = true
 
     private var driver: ModelCommandDriver.Type? { ModelCommands.driver(command.id) }
-    private var usesFloatingWindow: Bool { command.id == .fillet && floatingWindow }
+    private var usesFloatingWindow: Bool {
+        FilletWindowLayout.applies(to: command.id) && floatingWindow && allowsFloatingWindow
+    }
+
+    /// Höhe des scrollbaren Mittelteils: Fenster im Querformat 380 pt, sonst 620 pt; bei Tastatur höchstens heightLimit
+    private var contentHeightLimit: CGFloat {
+        let base: CGFloat = usesFloatingWindow && isLandscape ? 380 : 620
+        guard let heightLimit else { return base }
+        return max(120, min(base, heightLimit))
+    }
 
     var body: some View {
+        // S4 (Build 41): im Fenstermodus fehlte der obere Teil samt großem Haken/Kreuz. Ansichtswürfel und Knöpfe
+        // zeigt dort die RightRail daneben; Haken und Kreuz (CornerConfirm) stehen jetzt auch im Fenster.
         PaletteWindow(width: usesFloatingWindow ? 320 : PaletteStyle.width,
-                      showsTop: !usesFloatingWindow, maxContentHeight: usesFloatingWindow ? 380 : 620) {
+                      showsTop: !usesFloatingWindow || cornerConfirm, maxContentHeight: contentHeightLimit) {
             VStack(spacing: 8) {
-                PaletteViewControls(workspace: workspace, sketch: workspace.sketch, panel: $panel, screenshot: screenshot)
+                if !usesFloatingWindow {
+                    PaletteViewControls(workspace: workspace, sketch: workspace.sketch, panel: $panel, screenshot: screenshot)
+                }
                 // Großer Haken und großes Kreuz unter dem Ansichtswürfel (CornerConfirm.swift)
                 CornerConfirm(workspace: workspace, model: model, command: command)
             }
@@ -71,7 +92,48 @@ struct FeaturePanel: View {
         }
     }
 
+    /// Build 42: Zahnrad öffnet beim Abrunden die Rundungsoptionen (Shapr3D „Settings badge“); der Fenstermodus
+    /// steht dann im …-Menü („Schwebendes Fenster“). Beim Bearbeiten aus dem Verlauf stehen die Optionen im Panel.
+    private var gearOpensBlendSettings: Bool {
+        command.id == .fillet && command.editing == nil
+    }
+
     @ViewBuilder private var headerButtons: some View {
+        // Shapr3D „Settings badge“: beim Abrunden die Rundungsoptionen (Ecken, Stetigkeit, Profil), bei der Fase wie
+        // in Build 41 der Schalter zwischen schwebendem Fenster und Panel.
+        // Das Wertfeld am Pfeil ist ein UILabel ohne Tasten, deshalb steht das Zahnrad hier im Panelkopf.
+        if gearOpensBlendSettings {
+            let custom = !BlendOptionsForm.effectiveOptions(command).isStandard
+            Button {
+                showsBlendSettings.toggle()
+            } label: {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(custom ? Color.accentColor : Color.secondary)
+                    .frame(width: 32, height: PaletteStyle.iconButton)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Rundungsoptionen")
+            .accessibilityValue(BlendOptionsForm.summary(BlendOptionsForm.effectiveOptions(command)))
+            .hoverTip("Rundungsoptionen", "Ecken (Rolling Ball oder Setback), Stetigkeit G1/G2 und Profil.")
+            .popover(isPresented: $showsBlendSettings) {
+                BlendSettingsSheet(cmd: command, workspace: workspace, model: model)
+            }
+        } else if FilletWindowLayout.applies(to: command.id), allowsFloatingWindow {
+            Button {
+                floatingWindow.toggle()
+            } label: {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(floatingWindow ? Color.accentColor : Color.secondary)
+                    .frame(width: 32, height: PaletteStyle.iconButton)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(floatingWindow ? "Als Panel zeigen" : "Als schwebendes Fenster zeigen")
+            .hoverTip("Fenster", "Zwischen schwebendem Fenster und Panel umschalten.")
+        }
         if let text = driver?.explanation {
             Button {
                 showsInfo.toggle()
@@ -93,7 +155,7 @@ struct FeaturePanel: View {
             }
         }
         Menu {
-            if command.id == .fillet {
+            if FilletWindowLayout.applies(to: command.id) {
                 Toggle(isOn: $floatingWindow) {
                     Label("Schwebendes Fenster", systemImage: "macwindow")
                 }
@@ -219,6 +281,26 @@ struct FeaturePanel: View {
         .frame(width: 0, height: 0)
         .opacity(0)
         .accessibilityHidden(true)
+    }
+}
+
+// MARK: - Fenstermodus Rundung/Fase
+
+/// Schwebendes Fenster für Abrunden und Fasen (Build 38, Shapr3D-Abgleich), Regeln aus Build 41 (S5).
+enum FilletWindowLayout {
+    /// AppStorage-Schlüssel des Schalters (Zahnrad im Panelkopf bzw. Menü „Schwebendes Fenster“)
+    static let storageKey = "PencilCAD.filletFloatingWindow"
+    /// Mindestbreite des Arbeitsbereichs für den Fenstermodus (Panel 320 pt + RightRail + offenes Seitenpanel)
+    static let minimumWidth: CGFloat = 900
+
+    /// Befehle mit Fenstermodus: Abrunden und Fasen (Pfeil nach innen wechselt zwischen beiden)
+    static func applies(to id: ModelCommandID) -> Bool {
+        id == .fillet || id == .chamfer
+    }
+
+    /// Fenstermodus nur bei regulärer Breite (nicht Split View 1/3, Slide Over, iPhone), sonst automatisch Panel
+    static func allowed(sizeClass: UserInterfaceSizeClass?, width: CGFloat) -> Bool {
+        sizeClass == .regular && width >= minimumWidth
     }
 }
 

@@ -82,8 +82,9 @@ fn import_step(s: &mut Session, p: &Value) -> Result<Value, String> {
 }
 
 /// Höchstzahl gelieferter Perforationslöcher (wie SolidCrafts Flachansicht), damit ein feines
-/// Lochbild über eine große Tafel die App nicht mit Millionen Kreisen flutet.
-const MAX_PERFORATION_HOLES: usize = 1_000_000;
+/// Lochbild über eine große Tafel die App nicht mit Millionen Kreisen flutet. Build 41 (D10): 20 000 statt
+/// 1 000 000 – das Perforieren-Panel schätzt die Lochzahl (Fläche / Teilung²) und lehnt ab dieser Grenze ab.
+const MAX_PERFORATION_HOLES: usize = 20_000;
 
 /// `psk.perforation_holes {body?}` → `{body, holes:[{center:[x,y], radius, field}], count, truncated}`:
 /// die Lochmitten aller Perforationsfelder im Koordinatensystem von `sheet.flat_pattern`

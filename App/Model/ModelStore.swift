@@ -291,6 +291,10 @@ final class ModelStore: ObservableObject {
     /// Projektvariablen (Einfügen › Variable), nutzbar in jedem Zahlenfeld und in Skizzenmaßen
     @Published private(set) var variables: [ProjectVariable] = []
     @Published var message: String?
+    /// Build 41 (N1/C3): Grund, warum das Projekt nicht vollständig geladen wurde. Solange gesetzt, verweigert save()
+    /// das Überschreiben der Projektdateien (sonst bestätigte das nächste Speichern ein leeres bzw. unvollständiges
+    /// Modell und verwürfe die Sicherung der Speichertransaktion).
+    @Published private(set) var loadFailure: String?
 
     // Auswahl
     @Published private(set) var selection: FaceRef?
@@ -330,6 +334,9 @@ final class ModelStore: ObservableObject {
     @Published private(set) var edgeEndValue: Double?
     /// Teilabrundung einer einzelnen Kante; relative Positionen 0...1.
     @Published private(set) var edgePartialRange: ClosedRange<Double>?
+    /// Build 42: Rundungsoptionen (Ecken, Stetigkeit, Profil, Overflow) der nächsten Rundung; immer normalisiert
+    /// gespeichert (Standard = .standard). Gilt nur für Abrunden mit konstantem Radius (siehe effectiveBlendOptions).
+    @Published private(set) var edgeBlendOptions: BlendOptions = .standard
     /// Im Werkzeug „Einzelkante“ keine weiteren geradlinigen Teilstücke automatisch ergänzen.
     var completesEdgeChain = true
     /// Eine Rundung bzw. Fase rechnet im Hintergrund (BlendJobs.swift); „Fertig“ wartet so lange
@@ -457,13 +464,34 @@ final class ModelStore: ObservableObject {
     /// mit applyBoolean (MoldTools.swift)
     private var plainPreview = false
     /// Parametrischer Verlauf: Features in Reihenfolge, Zeitleiste unten (FeatureHistory.swift, TimelineBar.swift)
-    @Published var features: [Feature] = []
+    @Published var features: [Feature] = [] {
+        // N6 (Build 41): Zeitleisten-Stände nach Fehlern gelten nur für genau diese Liste
+        didSet { featureRecorder.timelineCache = [:] }
+    }
     let featureRecorder = FeatureRecorder()
     /// Blechmodul: Regeln, Sitzungen, Vorschau (App/Sheet/SheetModel.swift)
     lazy var sheetDocument = SheetDocument(folder: folder)
 
     /// Projektordner (model.step + bodies.json); nil = nichts speichern.
     let folder: URL?
+    /// Build 41 (C4/N3): Projekt geschlossen – nichts mehr speichern (später fertige Hintergrundarbeit verfällt).
+    private(set) var isClosed = false
+    /// Laufender Netzimport (MeshImport.swift); close() bricht ihn ab.
+    var meshImportTask: Task<Void, Never>?
+    /// Erhöht sich bei jedem Netzimport und beim Schließen: ein später fertiger älterer Import verfällt.
+    var meshImportGeneration = 0
+    /// N5: Körperformen beim letzten Laden bzw. Speichern. Dieselben Formen → model.step nicht neu schreiben und
+    /// nicht sichern (Umbenennen, Ausblenden, Farbe, Skizzen …).
+    private var savedShapes: [PCKShape]?
+    /// N4: Sprung über mehrere Verlaufsschritte – erst am Ende vernetzen und speichern.
+    private var batchesRestore = false
+    /// C4: neueste ModelStore-Instanz je Projektordner. Eine ältere (z. B. von einem noch laufenden Import gehalten)
+    /// speichert nicht mehr hinein und überschreibt so nicht das inzwischen neu geöffnete Projekt.
+    private static var folderOwners: [String: ObjectIdentifier] = [:]
+    /// N8: Modell-Undo höchstens so viele Schritte (jeder Eintrag hält alle Körper, Skizzen und Features).
+    static let maxUndoSteps = 200
+    static let loadFailedSaveMessage = "Projekt konnte nicht vollständig geladen werden – es wird nicht überschrieben."
+    var loadFailed: Bool { loadFailure != nil }
 
     var canUndo: Bool { !history.isEmpty || previewBodies != nil }
     var canRedo: Bool { !future.isEmpty }
@@ -495,11 +523,16 @@ final class ModelStore: ObservableObject {
     init(folder: URL?, safeOpen: HangGuard.Marker? = nil) {
         self.folder = folder
         if let folder {
+            // Ordner beim Öffnen anlegen (neues Projekt); save() legt später keinen gelöschten Ordner neu an (N3)
+            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            Self.folderOwners[Self.ownerKey(folder)] = ObjectIdentifier(self)
             do {
                 try ProjectSaveTransaction.recover(in: folder)
                 ProjectSaveTransaction.removeAbandonedStaging(in: folder)
             }
             catch {
+                // Nicht geladen: auch nicht speichern, sonst überschriebe das nächste Speichern die Sicherung
+                loadFailure = "Wiederherstellung fehlgeschlagen"
                 message = "Projektdateien konnten nicht wiederhergestellt werden: \(error.localizedDescription)"
                 return
             }
@@ -714,6 +747,64 @@ final class ModelStore: ObservableObject {
         if update, edgeValue > 0 { setEdgeValue(edgeValue) }
     }
 
+    /// Build 42: Rundungsoptionen setzen und die Vorschau erneuern (Muster setEdgeEndValue).
+    /// update false: nur setzen (gleich folgt setEdgeValue – nicht zweimal rechnen). Ungültig → Meldung, unverändert.
+    func setEdgeBlendOptions(_ options: BlendOptions, update: Bool = true) {
+        guard options.isValid else {
+            message = Self.blendOptionsInvalidMessage
+            return
+        }
+        let normalized = options.normalized ?? .standard
+        guard normalized != edgeBlendOptions else {
+            // Gleiche Wirkung: nicht neu rechnen (z. B. Setback-Abstand bei Rolling Ball geändert)
+            return
+        }
+        edgeBlendOptions = normalized
+        if update, edgeValue > 0 { setEdgeValue(edgeValue) }
+    }
+
+    /// Build 42: die Optionen, die für die laufende Rundung wirklich gelten: nil bei Standard und bei Fase.
+    /// Alle Merk-Schlüssel (BlendJobKey, OrderedAttemptKey, isCurrentBlend, N8) vergleichen diesen Wert.
+    var effectiveBlendOptions: BlendOptions? {
+        edgeOperation == .fillet ? edgeBlendOptions.normalized : nil
+    }
+
+    // Build 42, H-B2: Meldungstexte (Agent C vergleicht sie für die Knöpfe „Rolling Ball verwenden“/„G1 verwenden“)
+    static let blendSetbackFailedMessage =
+        "Setback-Ecke hier nicht möglich – Setback-Abstand ändern oder Ecken auf ‚Rolling Ball‘ stellen."
+    static let blendG2FailedMessage = "G2-Rundung hier nicht möglich – Stetigkeit G1 wählen oder Radius ändern."
+    static let blendOptionsConstantOnlyMessage =
+        "Setback und G2 nur bei konstanter Rundung (nicht Variabel/Teilweise)."
+    static let blendOptionsUnsupportedMessage = "Diese Rundungsoption kann der Geometriekernel noch nicht."
+    /// Vorlage: „%@“ = Name der früheren Rundung (blendMergeOptionsDiffer(_:) setzt ihn ein)
+    static let blendMergeOptionsDifferMessage =
+        "Gemeinsame Rundung mit ‚%@‘ hat andere Ecken-/Stetigkeitsoptionen – Optionen angleichen."
+    static let blendOptionsInvalidMessage =
+        "Rundungsoptionen ungültig: Setback-Abstand größer 0, Rho 0,1 … 0,9 (Kegelschnitt nur mit G2)."
+    static let blendMaximumNeedsStandardMessage =
+        "Maximalradius: nur bei Standard-Rundung (Rolling Ball, G1) – Optionen zurücksetzen."
+
+    static func blendMergeOptionsDiffer(_ name: String) -> String {
+        blendMergeOptionsDifferMessage.replacingOccurrences(of: "%@", with: name)
+    }
+
+    /// Meldung, wenn eine Rundung mit Optionen scheitert (kein stiller Rückfall auf Standard).
+    static func blendOptionsFailureMessage(_ options: BlendOptions, constantOnly: Bool = false) -> String {
+        if constantOnly { return blendOptionsConstantOnlyMessage }
+        if options.corner == .setback { return blendSetbackFailedMessage }
+        if options.continuity == .g2 { return blendG2FailedMessage }
+        return "Rundung mit diesen Optionen (\(options.shortLabel)) nicht möglich."
+    }
+
+    /// Hindernis für Rundungsoptionen vor jedem Rechnen; nil = keins (bzw. Standard).
+    func blendOptionsProblem() -> String? {
+        guard let options = effectiveBlendOptions else { return nil }
+        guard options.isValid else { return Self.blendOptionsInvalidMessage }
+        if edgeEndValue != nil || edgePartialRange != nil { return Self.blendOptionsConstantOnlyMessage }
+        guard PCKShape.supports(blendOptions: options.kernel) else { return Self.blendOptionsUnsupportedMessage }
+        return nil
+    }
+
     func setEdgePartialRange(_ range: ClosedRange<Double>?, update: Bool = true) {
         edgePartialRange = range
         if range != nil { edgeEndValue = nil }
@@ -738,6 +829,12 @@ final class ModelStore: ObservableObject {
             return
         }
         guard requireKernel() else { return }
+        // Build 42: Setback/G2 nur bei konstanter Rundung und wenn der Kernel sie kann – sonst Meldung statt Rückfall
+        if let problem = blendOptionsProblem() {
+            message = problem
+            dropPreview()
+            return
+        }
         // Rundung vor Schnitt (BlendBeforeCuts.swift): Wurde die Kante erst durch einen späteren Schnitt (z. B.
         // eine Text-Tasche) zerteilt, wird sie im Verlauf vor diesem Schnitt ganz verrundet und der Schnitt
         // schneidet danach wieder hinein (gemerkt sofort, sonst entprellt nach kurzer Ruhe)
@@ -746,6 +843,12 @@ final class ModelStore: ObservableObject {
         // Kante an die vorige Rundung, beide zusammen
         let blendEdges = completesEdgeChain && edgePartialRange == nil
             ? completedEdgeChain(selectedEdges, body: body) : selectedEdges
+        // Build 42: angrenzende frühere Rundung mit anderen Optionen – nicht zusammenfassen, nicht ausweichen
+        if let conflict = blendMergeOptionsConflict(body: body) {
+            message = conflict
+            dropPreview()
+            return
+        }
         // Liegt die benachbarte Rundung weiter zurück, wird sie nach kurzer Ruhe
         // zusammen mit den späteren Verlaufsschritten neu berechnet.
         if edgeOperation == .fillet && edgePartialRange == nil,
@@ -766,7 +869,15 @@ final class ModelStore: ObservableObject {
         let shown = previewBodies ?? bodies
         guard shown.indices.contains(face.body),
               let values = shown[face.body].shape.blend(ofFace: face.face)?.map(\.doubleValue),
-              values.count == 2, values[1] > 1e-6 else { return false }
+              values.count == 2, values[1] > 1e-6 else {
+            // Build 42: blend(ofFace:) kennt nur Zylinder/Torus – eine G2-Fläche (B-Spline) liefert nil
+            if shown.indices.contains(face.body), plane(of: face) == nil, cylinder(of: face) == nil,
+               features.contains(where: { $0.kind == .fillet && $0.data.target == face.body
+                                          && $0.blendOptions.continuity == .g2 }) {
+                message = "Wert einer G2-Rundung nicht übernehmbar – Radius eintippen."
+            }
+            return false
+        }
         let operation: EdgeOperation = values[0] == 1 ? .fillet : .chamfer
         let value = (values[1] * 100).rounded() / 100
         if edgeOperation != operation { edgeOperation = operation }
@@ -992,7 +1103,7 @@ final class ModelStore: ObservableObject {
 
     /// Einige Punkte sicher im Inneren eines Bereichs (außerhalb seiner Löcher): Schwerpunkt und zur Mitte
     /// gerückte Eckpunkte.
-    private static func interiorProbes(_ region: SketchRegion) -> [Point2] {
+    static func interiorProbes(_ region: SketchRegion) -> [Point2] {
         let polygon = region.polygon
         guard polygon.count >= 3 else { return [] }
         let center = polygon.reduce(Point2.zero, +) / Double(polygon.count)
@@ -1253,6 +1364,8 @@ final class ModelStore: ObservableObject {
         // Variable Rundung gilt nur für die eine Rundung, nicht für die nächste Auswahl bzw. das nächste Werkzeug
         edgeEndValue = nil
         edgePartialRange = nil
+        // Build 42: Rundungsoptionen gelten wie der Endradius nur für diese Rundung (Befehl setzt sie in refresh neu)
+        edgeBlendOptions = .standard
         faceValue = 0
         regionValue = 0
         moveOffset = .zero
@@ -1336,6 +1449,20 @@ final class ModelStore: ObservableObject {
     }
 
     // MARK: Skizzen
+
+    /// C2 (Build 41): bearbeitete Skizze über ihre ID ersetzen. Der Index wird erst beim Beenden aufgelöst, so trifft
+    /// „Fertig“ nie eine andere Skizze, auch wenn sich die Liste inzwischen verschoben hat (Undo, Löschen …).
+    /// Gibt es die Skizze nicht mehr, wird sie als neue Skizze gespeichert statt eine fremde zu überschreiben.
+    func storeSketch(plane: SketchPlane, entities: [SketchEntity], constraints: [SketchConstraint] = [],
+                     construction: Set<Int> = [], replacingID id: UUID?) {
+        var index: Int?
+        if let id { index = sketches.firstIndex { $0.id == id } }
+        storeSketch(plane: plane, entities: entities, constraints: constraints, construction: construction,
+                    replacing: index)
+        if id != nil, index == nil {
+            message = "Die bearbeitete Skizze gibt es nicht mehr – als neue Skizze gespeichert."
+        }
+    }
 
     /// Fertige Skizze ins Modell übernehmen (index = bestehende Skizze ersetzen).
     func storeSketch(plane: SketchPlane, entities: [SketchEntity], constraints: [SketchConstraint] = [],
@@ -1560,8 +1687,13 @@ final class ModelStore: ObservableObject {
     /// Springt im Verlauf zu dem Zustand nach step Schritten (0 = Anfang).
     func jump(toStep step: Int) {
         dropPreview()
+        // N4: Zwischenstände nicht einzeln vernetzen und speichern (N Schritte = N STEP-Dateien), nur am Ende
+        let start = history.count
+        batchesRestore = true
         while history.count > step, !history.isEmpty { undo() }
         while history.count < step, !future.isEmpty { redo() }
+        batchesRestore = false
+        if history.count != start { afterChange() }
     }
 
     // MARK: Dateien
@@ -1705,6 +1837,8 @@ final class ModelStore: ObservableObject {
                         constructions newConstructions: [ConstructionItem]? = nil,
                         canvases newCanvases: [CanvasImage]? = nil, name: String) {
         history.append(currentEntry(name: name))
+        // N8: älteste Schritte verwerfen (Speicher)
+        if history.count > Self.maxUndoSteps { history.removeFirst(history.count - Self.maxUndoSteps) }
         future.removeAll()
         let previous = bodies
         // Komponenten: Änderung einer Instanz auf alle übertragen (ModelComponents.swift)
@@ -1734,6 +1868,8 @@ final class ModelStore: ObservableObject {
     }
 
     private func afterChange() {
+        // N4: während jump(toStep:) erst nach dem letzten Schritt
+        guard !batchesRestore else { return }
         message = nil
         previewBodies = nil
         previewName = nil
@@ -1748,12 +1884,21 @@ final class ModelStore: ObservableObject {
     /// Nur vom Nachbau erzeugte Blechquellen löschen, wenn weder aktueller Stand,
     /// Vorschau, Undo/Redo noch ein zwischengespeicherter Verlauf sie verwenden.
     private func pruneSheetReplaySources() {
-        guard let folder else { return }
+        // Build 41: nach einem Ladefehler bzw. in einem geschlossenen/fremden Projekt nichts löschen – die Verweise
+        // aus den (nicht geladenen) Projektdateien fehlen sonst in `used`
+        guard let folder, !loadFailed, canWriteProject else { return }
         let directory = folder.appending(path: "sheet", directoryHint: .isDirectory)
         guard let files = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else {
             return
         }
-        let candidates = files.filter { $0.lastPathComponent.hasPrefix("replay-") && $0.pathExtension == "step" }
+        // S1 (Build 41, HANDOFF-C C1): auch Originalquellen aus „In Blech umwandeln“ (<UUID>.step, sheetConvertPlan) –
+        // nach Undo und neuer Aktion verweist nichts mehr auf sie. Arbeitsdateien „.working-*“ räumt SheetDocument
+        // beim Öffnen auf (SheetModel.swift pruneWorkingFiles), Zeitlimit-Dateien SheetWorker.removeWhenIdle.
+        let candidates = files.filter { file in
+            guard file.pathExtension == "step" else { return false }
+            let name = file.lastPathComponent
+            return name.hasPrefix("replay-") || UUID(uuidString: file.deletingPathExtension().lastPathComponent) != nil
+        }
         guard !candidates.isEmpty else { return }
         var used = Set<String>()
         func keep(_ bodies: [SceneBody]) {
@@ -1769,6 +1914,8 @@ final class ModelStore: ObservableObject {
         }
         keep(bodies)
         if let previewBodies { keep(previewBodies) }
+        // Quelle der sichtbaren Umwandeln-Vorschau (SheetDocument.previewSourceFile) nie löschen
+        if let file = sheetDocument.previewSourceFile { used.insert(file) }
         keep(features)
         for entry in history {
             keep(entry.bodies)
@@ -1803,6 +1950,7 @@ final class ModelStore: ObservableObject {
         edgeValue = 0
         edgeEndValue = nil
         edgePartialRange = nil
+        edgeBlendOptions = .standard
         faceValue = 0
         moveOffset = .zero
         movingSketch = nil
@@ -2308,30 +2456,33 @@ final class ModelStore: ObservableObject {
     private var variablesURL: URL? { folder?.appending(path: "variables.json") }
 
     /// skipModel: sicherer Modus (HangGuard.swift) – model.step und Verlauf nicht laden, openSafely baut nach.
+    /// Build 41 (N1/C3): Eine vorhandene, aber nicht lesbare Datei führt nicht mehr still zu einem leeren Teil des
+    /// Modells. Sie wird als „<name>.defekt-<Datum>“ kopiert, loadFailure gesetzt, und save() überschreibt nichts.
     private func load(skipModel: Bool = false) {
         // Verlauf erst nach den Körpern lesen (FeatureHistory.swift)
         defer { if !skipModel { loadFeatures() } }
-        if let url = variablesURL, let data = try? Data(contentsOf: url),
-           let stored = try? JSONDecoder().decode([ProjectVariable].self, from: data) {
+        if let stored = loadJSON([ProjectVariable].self, from: variablesURL) {
             variables = stored
         }
-        if let url = sketchesURL, let data = try? Data(contentsOf: url),
-           let stored = try? JSONDecoder().decode([StoredSketch].self, from: data) {
+        if let stored = loadJSON([StoredSketch].self, from: sketchesURL) {
             sketches = stored
         }
-        if let url = constructionsURL, let data = try? Data(contentsOf: url),
-           let stored = try? JSONDecoder().decode([ConstructionItem].self, from: data) {
+        if let stored = loadJSON([ConstructionItem].self, from: constructionsURL) {
             constructions = stored
         }
-        if let url = canvasesURL, let data = try? Data(contentsOf: url),
-           let stored = try? JSONDecoder().decode([CanvasImage].self, from: data) {
+        if let stored = loadJSON([CanvasImage].self, from: canvasesURL) {
             canvases = stored
         }
-        guard !skipModel, PCKShape.stepAvailable, let modelURL,
-              FileManager.default.fileExists(atPath: modelURL.path(percentEncoded: false)),
-              let shapes = PCKShape.readSTEPBodies(path: modelURL.path(percentEncoded: false)) else { return }
-        let metas = metaURL.flatMap { try? Data(contentsOf: $0) }
-            .flatMap { try? JSONDecoder().decode([BodyMeta].self, from: $0) } ?? []
+        guard !skipModel, PCKShape.stepAvailable, let modelURL else { return }
+        guard FileManager.default.fileExists(atPath: modelURL.path(percentEncoded: false)) else {
+            savedShapes = []
+            return
+        }
+        guard let shapes = PCKShape.readSTEPBodies(path: modelURL.path(percentEncoded: false)) else {
+            markLoadFailure("model.step ist nicht lesbar", file: modelURL)
+            return
+        }
+        let metas = loadJSON([BodyMeta].self, from: metaURL) ?? []
         bodies = shapes.enumerated().map { index, shape in
             if index < metas.count, metas[index].color.count == 3 {
                 let meta = metas[index]
@@ -2348,22 +2499,91 @@ final class ModelStore: ObservableObject {
             }
             return SceneBody(shape: shape, name: "Körper \(index + 1)", color: SceneBody.defaultColor)
         }
+        savedShapes = bodies.map(\.shape)
+    }
+
+    /// JSON-Datei des Projekts lesen. nil = fehlt (neues bzw. älteres Projekt) oder defekt; defekt setzt loadFailure.
+    private func loadJSON<T: Decodable>(_ type: T.Type, from url: URL?) -> T? {
+        guard let url, FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) else { return nil }
+        do {
+            return try JSONDecoder().decode(T.self, from: Data(contentsOf: url))
+        } catch {
+            markLoadFailure("\(url.lastPathComponent) ist nicht lesbar", file: url)
+            return nil
+        }
+    }
+
+    /// Build 41 (N1/C3): Ladefehler merken. Danach verweigert save() das Überschreiben; die Sicherung der
+    /// Speichertransaktion bleibt unberührt. file: defekte Datei, wird vorher als „<name>.defekt-<Datum>“ kopiert.
+    func markLoadFailure(_ reason: String, file: URL? = nil) {
+        if let file { Self.keepDefectCopy(of: file) }
+        loadFailure = loadFailure.map { "\($0); \(reason)" } ?? reason
+        message = "Projekt konnte nicht vollständig geladen werden (\(loadFailure ?? reason)). Änderungen werden nicht "
+            + "gespeichert; die betroffene Datei liegt zusätzlich als Kopie „….defekt-…“ im Projektordner."
+    }
+
+    /// Kopie „<name>.defekt-<Datum>“ neben der Datei (Original bleibt, da save() nicht mehr schreibt).
+    private static func keepDefectCopy(of file: URL) {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd-HHmmss"
+        let copy = file.deletingLastPathComponent()
+            .appending(path: "\(file.lastPathComponent).defekt-\(formatter.string(from: Date()))")
+        guard !FileManager.default.fileExists(atPath: copy.path(percentEncoded: false)) else { return }
+        try? FileManager.default.copyItem(at: file, to: copy)
+    }
+
+    private static func ownerKey(_ folder: URL) -> String {
+        folder.standardizedFileURL.path(percentEncoded: false)
+    }
+
+    /// Projekt schließen (Build 41, C4): laufenden Netzimport abbrechen, danach speichert diese Instanz nicht mehr.
+    func close() {
+        meshImportTask?.cancel()
+        meshImportTask = nil
+        meshImportGeneration += 1
+        isClosed = true
+    }
+
+    /// Darf diese Instanz in ihren Projektordner schreiben? (offen, neueste Instanz, Ordner vorhanden; C4/N3)
+    var canWriteProject: Bool {
+        guard let folder, !isClosed, Self.folderOwners[Self.ownerKey(folder)] == ObjectIdentifier(self) else {
+            return false
+        }
+        return FileManager.default.fileExists(atPath: folder.path(percentEncoded: false))
     }
 
     private func save() {
         guard let folder else { return }
+        // N1/C3: nach einem Ladefehler nichts überschreiben (die Dateien auf der Platte sind vollständiger)
+        guard !loadFailed else {
+            message = Self.loadFailedSaveMessage
+            return
+        }
+        // C4/N3: geschlossenes bzw. neu geöffnetes Projekt nicht überschreiben, gelöschten Ordner nicht neu anlegen
+        guard canWriteProject else {
+            if !isClosed { message = "Projekt ist nicht mehr geöffnet oder wurde gelöscht – nicht gespeichert." }
+            return
+        }
+        let manager = FileManager.default
         let stagedSTEP = folder.appending(path: ".model-\(UUID().uuidString).step")
-        defer { try? FileManager.default.removeItem(at: stagedSTEP) }
+        defer { try? manager.removeItem(at: stagedSTEP) }
         do {
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             let encoder = JSONEncoder()
-            let files: [(URL, Data)] = [
+            var files: [(URL, Data)] = [
                 (folder.appending(path: "sketches.json"), try encoder.encode(sketches)),
                 (folder.appending(path: "constructions.json"), try encoder.encode(constructions)),
                 (folder.appending(path: "canvases.json"), try encoder.encode(canvases)),
                 (folder.appending(path: "variables.json"), try encoder.encode(variables)),
             ]
-            if PCKShape.stepAvailable, !bodies.isEmpty {
+            let modelExists = modelURL.map { manager.fileExists(atPath: $0.path(percentEncoded: false)) } ?? false
+            // N5: model.step nur schreiben, wenn sich die Körperformen seit dem letzten Laden/Speichern geändert haben
+            var shapesChanged = true
+            if let savedShapes, savedShapes.count == bodies.count, bodies.isEmpty || modelExists {
+                shapesChanged = savedShapes.indices.contains { savedShapes[$0] !== bodies[$0].shape }
+            }
+            let writesSTEP = PCKShape.stepAvailable && !bodies.isEmpty && shapesChanged
+            if writesSTEP {
                 guard PCKShape.writeSTEP(bodies.map(\.shape), path: stagedSTEP.path(percentEncoded: false)) else {
                     throw CocoaError(.fileWriteUnknown)
                 }
@@ -2376,27 +2596,35 @@ final class ModelStore: ObservableObject {
                          sheetMetal: $0.sheetMetal, standardPart: $0.standardPart)
             }
             let metaData = try encoder.encode(metas)
-            try ProjectSaveTransaction.begin(in: folder)
+            let stepFiles = PCKShape.stepAvailable && modelURL != nil && metaURL != nil
+            if stepFiles, let metaURL { files.append((metaURL, metaData)) }
+            // N5: unveränderte JSON-Dateien weder schreiben noch sichern
+            files = files.filter { (try? Data(contentsOf: $0.0)) != $0.1 }
+            var changing = Set(files.map { $0.0.lastPathComponent })
+            if stepFiles {
+                changing.insert("features.json")
+                if writesSTEP || (bodies.isEmpty && modelExists) { changing.insert("model.step") }
+            }
+            try ProjectSaveTransaction.begin(in: folder, changing: changing)
             do {
                 for (url, data) in files { try data.write(to: url, options: .atomic) }
-                if PCKShape.stepAvailable, let modelURL, let metaURL {
+                if stepFiles, let modelURL {
                     if bodies.isEmpty {
-                        if FileManager.default.fileExists(atPath: modelURL.path(percentEncoded: false)) {
-                            try FileManager.default.removeItem(at: modelURL)
-                        }
-                    } else {
+                        if modelExists { try manager.removeItem(at: modelURL) }
+                    } else if writesSTEP {
                         try ProjectSaveTransaction.replace(stagedSTEP, with: modelURL)
                     }
-                    try metaData.write(to: metaURL, options: .atomic)
                     let newSnapshots = features.filter { feature in
                         guard feature.kind == .snapshot, !(feature.data.snapshot?.metas.isEmpty ?? true) else { return false }
                         let url = folder.appending(path: "features/\(feature.id.uuidString).step")
-                        return !FileManager.default.fileExists(atPath: url.path(percentEncoded: false))
+                        return !manager.fileExists(atPath: url.path(percentEncoded: false))
                     }
-                    saveFeatures()
+                    // Schwacher Bugfix 6: features.json atomar, Fehler beim Schreiben fester Stände brechen ab
+                    try writeFeatures()
                     try verifySavedFeatures(in: folder, newSnapshots: newSnapshots)
                 }
                 try ProjectSaveTransaction.commit(in: folder)
+                if stepFiles { savedShapes = bodies.map(\.shape) }
                 removeUnusedSnapshotFiles()
             } catch {
                 try ProjectSaveTransaction.recover(in: folder)
@@ -2446,9 +2674,17 @@ enum ProjectSaveTransaction {
     private struct Manifest: Codable {
         var existing: [String]
         var snapshots: [String]
+        /// N5 (Build 41): Dateien, die dieses Speichern nicht anfasst – nicht gesichert, beim Zurückrollen unberührt.
+        /// Fehlt in älteren Sicherungen (dort ist alles gesichert).
+        var untouched: [String]?
     }
 
     static func begin(in folder: URL) throws {
+        try begin(in: folder, changing: Set(names))
+    }
+
+    /// changing: Dateinamen, die das folgende Speichern schreiben oder löschen kann. Nur diese werden gesichert (N5).
+    static func begin(in folder: URL, changing: Set<String>) throws {
         try recover(in: folder)
         let manager = FileManager.default
         let preparing = folder.appending(path: ".model-save-preparing-\(UUID().uuidString)")
@@ -2456,7 +2692,7 @@ enum ProjectSaveTransaction {
         try manager.createDirectory(at: preparing, withIntermediateDirectories: false)
         do {
             var existing: [String] = []
-            for name in names {
+            for name in names where changing.contains(name) {
                 let source = folder.appending(path: name)
                 guard manager.fileExists(atPath: source.path(percentEncoded: false)) else { continue }
                 try manager.copyItem(at: source, to: preparing.appending(path: name))
@@ -2465,7 +2701,8 @@ enum ProjectSaveTransaction {
             let featureFolder = folder.appending(path: "features")
             let snapshots = ((try? manager.contentsOfDirectory(at: featureFolder, includingPropertiesForKeys: nil)) ?? [])
                 .filter { $0.pathExtension == "step" }.map(\.lastPathComponent)
-            let manifest = Manifest(existing: existing, snapshots: snapshots)
+            let untouched = names.filter { !changing.contains($0) }
+            let manifest = Manifest(existing: existing, snapshots: snapshots, untouched: untouched.isEmpty ? nil : untouched)
             try JSONEncoder().encode(manifest).write(to: preparing.appending(path: "manifest.json"), options: .atomic)
             try manager.moveItem(at: preparing, to: pending)
         } catch {
@@ -2485,7 +2722,8 @@ enum ProjectSaveTransaction {
         let manifest = try JSONDecoder().decode(Manifest.self,
                                                 from: Data(contentsOf: pending.appending(path: "manifest.json")))
         let existing = Set(manifest.existing)
-        for name in names {
+        let untouched = Set(manifest.untouched ?? [])
+        for name in names where !untouched.contains(name) {
             let destination = folder.appending(path: name)
             if existing.contains(name) {
                 let temporary = folder.appending(path: ".restore-\(UUID().uuidString)")

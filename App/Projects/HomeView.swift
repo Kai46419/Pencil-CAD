@@ -19,8 +19,8 @@ struct HomeView: View {
     @State private var isBulkDeleteShown = false
     @State private var showsBackups = false
     @State private var backupMessage: String?
-    /// Schalter „Helles Design“ (AppTheme); aus = Anthrazit nach SolidCraft
-    @AppStorage(AppTheme.lightKey) private var lightAppearance = false
+    /// Design (AppTheme): beobachtet, damit das Symbol im Knopf „Design“ mitwechselt
+    @AppStorage(AppTheme.modeKey) private var appearanceMode = ""
 
     private let columns = [GridItem(.adaptive(minimum: 220, maximum: 280), spacing: 24)]
 
@@ -183,11 +183,10 @@ struct HomeView: View {
         .buttonStyle(.bordered)
         .fixedSize(horizontal: true, vertical: false)
         // Helles bzw. dunkles Design (Anthrazit nach SolidCraft) für die ganze App
-        Button {
-            lightAppearance.toggle()
+        Menu {
+            AppearanceToggle()
         } label: {
-            Label(lightAppearance ? "Dunkles Design" : "Helles Design",
-                  systemImage: lightAppearance ? "moon" : "sun.max")
+            Label("Design", systemImage: AppTheme.mode.systemImage)
                 .padding(.horizontal, 6)
         }
         .buttonStyle(.bordered)

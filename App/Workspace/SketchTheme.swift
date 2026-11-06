@@ -11,13 +11,59 @@ import UIKit
 // SwiftUI- und UIKit-Flächen folgen dem colorScheme (WorkspaceView/HomeView setzen `.appTheme()`), Metal liest
 // `AppTheme.isDark`. Metal-Werte sind linear (die Ausgabe ist sRGB), aus den sRGB-Werten von SolidCraft berechnet.
 
+/// Design der App: hell, dunkel (Anthrazit) oder automatisch wie das iPad (Build 51, Kai).
+enum AppearanceMode: String, CaseIterable, Identifiable {
+    case light, dark, automatic
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .light: return "Hell"
+        case .dark: return "Dunkel"
+        case .automatic: return "Automatisch"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .light: return "sun.max"
+        case .dark: return "moon"
+        case .automatic: return "circle.lefthalf.filled"
+        }
+    }
+}
+
 /// Helles oder dunkles Design der App.
 enum AppTheme {
-    /// UserDefaults-Schlüssel des Schalters „Helles Design“
+    /// UserDefaults-Schlüssel des früheren Schalters „Helles Design“ (bleibt für ältere Einstellungen gültig)
     static let lightKey = "appearance.light"
+    /// Hell, Dunkel oder Automatisch (AppearanceMode.rawValue)
+    static let modeKey = "appearance.mode"
+    /// Zuletzt gesehenes Aussehen des iPads (für „Automatisch“ in Metal, das keine SwiftUI-Umgebung hat)
+    static let systemDarkKey = "appearance.systemDark"
 
-    /// true = Anthrazit (Standard), false = helles Design
-    static var isDark: Bool { !UserDefaults.standard.bool(forKey: lightKey) }
+    /// Gewähltes Design; ohne Wahl gilt der alte Schalter (aus = Anthrazit)
+    static var mode: AppearanceMode {
+        if let raw = UserDefaults.standard.string(forKey: modeKey), let mode = AppearanceMode(rawValue: raw) {
+            return mode
+        }
+        return UserDefaults.standard.bool(forKey: lightKey) ? .light : .dark
+    }
+
+    static func setMode(_ mode: AppearanceMode) {
+        UserDefaults.standard.set(mode.rawValue, forKey: modeKey)
+        if mode != .automatic { UserDefaults.standard.set(mode == .light, forKey: lightKey) }
+    }
+
+    /// true = Anthrazit, false = helles Design
+    static var isDark: Bool {
+        switch mode {
+        case .light: return false
+        case .dark: return true
+        case .automatic: return UserDefaults.standard.bool(forKey: systemDarkKey)
+        }
+    }
 
     static var colorScheme: ColorScheme { isDark ? .dark : .light }
 
@@ -30,30 +76,58 @@ enum AppTheme {
     static func towardBackground(_ color: SIMD3<Float>, _ amount: Float) -> SIMD3<Float> {
         color * (1 - amount) + viewportBackgroundLinear * amount
     }
+
+    /// Aussehen des iPads selbst (der Bildschirm kennt keine App-Vorgabe) merken, damit Metal bei „Automatisch“
+    /// mitzieht; schreibt nur bei einer Änderung (jede Änderung lässt den Viewport neu zeichnen).
+    @MainActor
+    static func noteSystemAppearance(fallback: ColorScheme) {
+        let screen = UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.screen }.first
+        let dark = screen.map { $0.traitCollection.userInterfaceStyle == .dark } ?? (fallback == .dark)
+        let stored = UserDefaults.standard.object(forKey: systemDarkKey) as? Bool
+        if stored != dark { UserDefaults.standard.set(dark, forKey: systemDarkKey) }
+    }
 }
 
-/// Setzt das Farbschema nach dem Schalter „Helles Design“.
+/// Setzt das Farbschema nach dem gewählten Design; „Automatisch“ folgt dem iPad.
 private struct AppThemeModifier: ViewModifier {
     @AppStorage(AppTheme.lightKey) private var light = false
+    @AppStorage(AppTheme.modeKey) private var modeRaw = ""
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var mode: AppearanceMode {
+        AppearanceMode(rawValue: modeRaw) ?? (light ? .light : .dark)
+    }
 
     func body(content: Content) -> some View {
-        content.preferredColorScheme(light ? .light : .dark)
+        content
+            .preferredColorScheme(mode == .automatic ? nil : (mode == .light ? .light : .dark))
+            .onAppear { AppTheme.noteSystemAppearance(fallback: colorScheme) }
+            .onChange(of: modeRaw) { _, _ in AppTheme.noteSystemAppearance(fallback: colorScheme) }
+            .onChange(of: colorScheme) { _, scheme in AppTheme.noteSystemAppearance(fallback: scheme) }
     }
 }
 
 extension View {
-    /// Anthrazit bzw. helles Design nach dem Schalter „Helles Design“.
+    /// Helles, dunkles oder automatisches Design nach der Wahl „Design“.
     func appTheme() -> some View {
         modifier(AppThemeModifier())
     }
 }
 
-/// Schalter „Helles Design“ für Menüs (z. B. Ansicht-Menü der rechten Leiste, Startseite).
+/// Wahl „Design“ (Hell, Dunkel, Automatisch) für Menüs (Ansicht-Menü der rechten Leiste, Startseite).
 struct AppearanceToggle: View {
     @AppStorage(AppTheme.lightKey) private var light = false
+    @AppStorage(AppTheme.modeKey) private var modeRaw = ""
 
     var body: some View {
-        Toggle("Helles Design", systemImage: "sun.max", isOn: $light)
+        Picker("Design", systemImage: "circle.lefthalf.filled", selection: Binding(
+            get: { AppearanceMode(rawValue: modeRaw) ?? (light ? .light : .dark) },
+            set: { AppTheme.setMode($0) })) {
+            ForEach(AppearanceMode.allCases) { mode in
+                Label(mode.title, systemImage: mode.systemImage).tag(mode)
+            }
+        }
+        .pickerStyle(.menu)
     }
 }
 

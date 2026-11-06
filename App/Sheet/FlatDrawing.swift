@@ -845,12 +845,14 @@ extension ModelStore {
     /// Abwicklung als Fertigungs-DXF (Kontur, gestrichelte Biegelinien, Bemaßung, Biegetabelle) in eine temporäre
     /// Datei. Die Kontur kommt exakt aus sheet.export_dxf (Optionen exactCurves und etchText gelten weiter).
     func exportFlatDrawingDXF(of body: Int, options: SheetDXFOptions = SheetDXFOptions()) throws -> URL {
+        // N5 (Build 41): Flachmuster nur einmal rechnen und einmal prüfen (vorher zweimal, Prüfung auf dem Main Actor)
         let flat = try flatPattern(of: body)
+        try sheetCheckBeforeExport(flat, what: "DXF")
         var contourOptions = options
         contourOptions.bendLines = false
         contourOptions.bendNotes = false
         contourOptions.singleLayer = false
-        let source = try exportFlatPatternDXF(of: body, options: contourOptions)
+        let source = try exportFlatPatternDXF(of: body, options: contourOptions, flat: flat, checked: true)
         let data = try Data(contentsOf: source)
         try? FileManager.default.removeItem(at: source)
         let plan = FlatDrawingPlan(flat)

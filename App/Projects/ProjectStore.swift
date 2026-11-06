@@ -102,19 +102,25 @@ final class ProjectStore: ObservableObject {
         try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
         let backupID = UUID()
         let folder = parent.appending(path: backupID.uuidString, directoryHint: .isDirectory)
+        // N7 (Build 41): erst in einen versteckten Arbeitsordner kopieren, dann umbenennen – ein Abbruch hinterlässt
+        // höchstens „.backup-…“, das removeIncompleteCopies beim nächsten Start entfernt
+        let staging = parent.appending(path: "\(Self.backupStagingPrefix)\(backupID.uuidString)", directoryHint: .isDirectory)
         do {
-            try FileManager.default.copyItem(at: project.folder, to: folder)
+            try FileManager.default.copyItem(at: project.folder, to: staging)
             let info = ProjectBackupInfo(id: backupID, originalProjectID: id,
                                          name: project.name, created: .now)
-            try JSONEncoder().encode(info).write(to: folder.appending(path: "backup.json"), options: .atomic)
+            try JSONEncoder().encode(info).write(to: staging.appending(path: "backup.json"), options: .atomic)
+            try FileManager.default.moveItem(at: staging, to: folder)
             reloadBackups()
             return ProjectBackup(id: info.id, originalProjectID: id, name: info.name,
                                  created: info.created, folder: folder)
         } catch {
-            try? FileManager.default.removeItem(at: folder)
+            try? FileManager.default.removeItem(at: staging)
             throw error
         }
     }
+
+    private static let backupStagingPrefix = ".backup-"
 
     /// Stellt die Sicherung als neues Projekt her; das vorhandene Projekt bleibt unberührt.
     @discardableResult
@@ -218,6 +224,19 @@ final class ProjectStore: ObservableObject {
             let prefix = name.hasPrefix(".duplicate-") ? ".duplicate-" : ".restore-"
             guard name.hasPrefix(prefix), UUID(uuidString: String(name.dropFirst(prefix.count))) != nil else { continue }
             try? manager.removeItem(at: folder)
+        }
+        // N7 (Build 41): abgebrochene Sicherungen – Arbeitsordner „.backup-<id>“ und (ältere Versionen) Sicherungs-
+        // ordner ohne backup.json, die reloadBackups nie zeigt
+        let parents = (try? manager.contentsOfDirectory(at: Self.backupRoot, includingPropertiesForKeys: nil)) ?? []
+        for parent in parents where UUID(uuidString: parent.lastPathComponent) != nil {
+            for folder in (try? manager.contentsOfDirectory(at: parent, includingPropertiesForKeys: nil)) ?? [] {
+                let name = folder.lastPathComponent
+                let staging = name.hasPrefix(Self.backupStagingPrefix)
+                    && UUID(uuidString: String(name.dropFirst(Self.backupStagingPrefix.count))) != nil
+                let unfinished = UUID(uuidString: name) != nil
+                    && !manager.fileExists(atPath: folder.appending(path: "backup.json").path(percentEncoded: false))
+                if staging || unfinished { try? manager.removeItem(at: folder) }
+            }
         }
     }
 

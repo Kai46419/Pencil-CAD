@@ -169,8 +169,11 @@ extension ModelStore {
         }
         features = list
         featureRecorder.cache = [:]
+        featureRecorder.timelineCache = [:]
         HangGuard.backupFiles(in: folder)
         guard let run = runFeatures(&list, from: 0, sketches: sketches, values: variableValues), !run.bodies.isEmpty else {
+            // Build 41: ohne Nachbau sind keine Körper geladen – das nächste Speichern hätte model.step gelöscht
+            markLoadFailure("Verlauf ließ sich im sicheren Modus nicht nachbauen")
             message = "Sicherer Modus: Der Verlauf ließ sich nicht nachbauen. Deine Dateien sind unverändert und "
                 + "zusätzlich als „sicherung-…“ im Projektordner gesichert."
             return

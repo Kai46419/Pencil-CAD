@@ -239,6 +239,46 @@ final class ViewportView: MTKView {
     /// Tippen sonst „STEP importieren“ rückgängig, der importierte Körper verschwand (Kai)
     private var navigationMovedAt: TimeInterval = 0
 
+    /// Build 66: Fingertipps beim Zeichnen einer Linie (Beginn, Ort, was gesperrt würde)
+    private var fingerTapStarts: [ObjectIdentifier: (time: TimeInterval, location: CGPoint,
+                                                     snapshot: SketchController.FingerLockSnapshot?)] = [:]
+    /// Letzter Fingertipp, der gesperrt bzw. entsperrt hat oder hätte (Tippen/Doppeltippen ändern dann nichts sonst)
+    private var fingerLockTapAt: TimeInterval = 0
+    private var lastFingerTapAt: TimeInterval = 0
+
+    /// Build 66 (Kai): Tipp mit dem Finger sperrt gelb (Länge) bzw. grün (Winkel), Doppeltipp hebt die Sperre auf.
+    private func noteFingerTaps(began: Set<UITouch> = [], ended: Set<UITouch> = []) {
+        guard let sketch, sketch.isActive, !sketch.isChoosingPlane, sketch.clickKind == .line else {
+            fingerTapStarts = [:]
+            return
+        }
+        let now = CACurrentMediaTime()
+        for touch in began where touch.type == .direct {
+            fingerTapStarts[ObjectIdentifier(touch)] = (now, touch.location(in: self), sketch.fingerLockSnapshot())
+            if sketch.hasFingerLocks || fingerTapStarts[ObjectIdentifier(touch)]?.snapshot != nil {
+                fingerLockTapAt = now
+            }
+        }
+        for touch in ended where touch.type == .direct {
+            guard let start = fingerTapStarts.removeValue(forKey: ObjectIdentifier(touch)) else { continue }
+            let location = touch.location(in: self)
+            guard now - start.time < 0.3,
+                  hypot(location.x - start.location.x, location.y - start.location.y) < 12 else { continue }
+            let second = now - lastFingerTapAt < 0.45
+            lastFingerTapAt = now
+            if second, sketch.clearFingerLocks() {
+                fingerLockTapAt = now
+                suppressFingerTap = true
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            } else if !second, sketch.latchFingerLocks(start.snapshot) {
+                fingerLockTapAt = now
+                suppressFingerTap = true
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            }
+            refresh()
+        }
+    }
+
     private func updateHeldFingers(began: Set<UITouch> = [], ended: Set<UITouch> = []) {
         guard let sketch else { return }
         // Im Skizzenmodus nehmen Verschieben/Zoomen dem Viewport den Finger nicht weg: lag der Finger vor dem
@@ -291,6 +331,8 @@ final class ViewportView: MTKView {
         let startParameter: Float
         let step: Double
         var lastAppliedValue: Double?
+        /// N3 (Build 41): offener Befehl beim Ansetzen (abgebrochenes Ziehen setzt nur ihn zurück)
+        var command: ObjectIdentifier?
     }
 
     /// Drehen am Ring: Ring wie beim Ansetzen (dreht nicht mit), Winkel des Ansatzpunkts, aufsummierter
@@ -932,6 +974,8 @@ final class ViewportView: MTKView {
             addTextDeformHandles(to: &groups, sketch: sketch, perPoint: perPoint, world: world)
             // Linie beim Zeichnen: Graphit wie die fertigen Linien, offene Enden als kleine Punkte
             let preview = sketch.previewPolylines
+            // Build 43: gleiche Richtung (grün) bzw. gleiche Länge (gelb) wie vorhandene Linien, beides = gestreift
+            let lineHints = sketch.lineMatchHints
             if !preview.isEmpty {
                 var previewEnds: [Point2] = []
                 if sketch.showsPoints {
@@ -944,11 +988,20 @@ final class ViewportView: MTKView {
                     }
                 }
                 // Eingerastet auf gleichen bzw. gespiegelten Winkel einer vorhandenen Linie: grün
-                let previewColor: SIMD3<Float> = sketch.equalLengthPreview != nil ? Self.equalLengthYellow
-                    : (sketch.showsAngleMatch || sketch.parallelPreview != nil ? Self.angleMatchGreen : Self.sketchGraphite)
+                let sameLength = sketch.equalLengthPreview != nil || !lineHints.equal.isEmpty
+                let sameAngle = sketch.showsAngleMatch || sketch.parallelPreview != nil || !lineHints.parallel.isEmpty
+                let previewColor: SIMD3<Float> = sameAngle ? Self.angleMatchGreen
+                    : (sameLength ? Self.equalLengthYellow : Self.sketchGraphite)
+                // Farbig etwas kräftiger, damit Grün und Gelb auf dem Stift-Strich auffallen
+                let previewWidth: Float = sameAngle || sameLength ? 2.6 : Self.sketchLineWidth
                 groups.append(LineGroup(polylines: preview.map { $0.map(world) }, color: previewColor,
-                                        width: Self.sketchLineWidth, dots: previewEnds.map(world),
+                                        width: previewWidth, dots: previewEnds.map(world),
                                         dotRadius: Self.sketchPointRadius))
+                if sameAngle, sameLength {
+                    let stripes = preview.flatMap { dashed($0, dash: 6 * perPoint) }
+                    groups.append(LineGroup(polylines: stripes.map { $0.map(world) }, color: Self.equalLengthYellow,
+                                            width: previewWidth))
+                }
             }
             // Beschneiden per Wischen: Spur des Stifts bzw. Fingers dünn rot (SketchCut.swift)
             let cutTrace = sketch.cutTrace
@@ -991,6 +1044,12 @@ final class ViewportView: MTKView {
                     groups.append(LineGroup(polylines: chosen.map { $0.map(world) }, color: Self.selectionOrange, width: 2.4))
                 }
             }
+            // Build 66: Verlängerung der schrägen Linie bis zur ersten getroffenen Kurve, gestrichelt mit Trefferpunkt
+            if let hit = sketch.click.forwardHit, sketch.click.hover != nil, !sketch.click.points.isEmpty {
+                let dashes = dashed([hit.from, hit.to], dash: 4 * perPoint)
+                groups.append(LineGroup(polylines: dashes.map { $0.map(world) }, color: Self.previewBlue, width: 1.3,
+                                        dots: [world(hit.to)], dotRadius: 3))
+            }
             // Mittellinien gemerkter Punktpaare (Verbindung und Mittelsenkrechte), gestrichelt
             if !sketch.guideLines.isEmpty {
                 let guides = sketch.guideLines.flatMap { guide in
@@ -1013,12 +1072,32 @@ final class ViewportView: MTKView {
             }
             // Gleicher Winkel wie eine vorhandene Linie: diese leuchtet grün
             let matchingParallelLines = sketch.parallelLines + (sketch.parallelPreview.map { [$0] } ?? [])
+                + lineHints.parallel
             if !matchingParallelLines.isEmpty {
                 groups.append(LineGroup(polylines: matchingParallelLines.map { $0.map(world) },
                                         color: Self.angleMatchGreen, width: 4))
             }
+            // Build 43: Linien mit gleicher Länge gelb; ist eine zugleich parallel, gelb gestreift über dem Grün
+            if !lineHints.equal.isEmpty {
+                let parallelSet = lineHints.parallel
+                let both = lineHints.equal.filter { line in parallelSet.contains { $0 == line } }
+                let onlyEqual = lineHints.equal.filter { line in !parallelSet.contains { $0 == line } }
+                if !onlyEqual.isEmpty {
+                    groups.append(LineGroup(polylines: onlyEqual.map { $0.map(world) },
+                                            color: Self.equalLengthYellow, width: 3.5))
+                }
+                let stripes = both.flatMap { dashed($0, dash: 6 * perPoint) }
+                if !stripes.isEmpty {
+                    groups.append(LineGroup(polylines: stripes.map { $0.map(world) },
+                                            color: Self.equalLengthYellow, width: 4))
+                }
+            }
             if let match = sketch.equalLengthPreview {
-                groups.append(LineGroup(polylines: sketch.equalLengthReferenceLines.map { $0.map(world) },
+                // Build 43: zugleich parallele Bezugslinien bleiben grün-gelb gestreift (unten)
+                let plainReferences = sketch.equalLengthReferenceLines.filter { line in
+                    !lineHints.parallel.contains { $0 == line }
+                }
+                groups.append(LineGroup(polylines: plainReferences.map { $0.map(world) },
                                         color: Self.equalLengthYellow, width: 3.5))
                 let dashes = dashed(match.connector, dash: 4 * perPoint)
                 groups.append(LineGroup(polylines: dashes.map { $0.map(world) },
@@ -1049,7 +1128,9 @@ final class ViewportView: MTKView {
             } else {
                 crosshair = nil
             }
-            if let crosshair {
+            // Build 54 (Kai): im SolidCraft-Stil nur mit Fang – nach dem Strich ist es weg und erscheint wieder, sobald
+            // der schwebende Stift auf einen Punkt bzw. eine Abhängigkeit rastet
+            if let crosshair, crosshair.snapped || !sketch.options.isSolidCraft {
                 let hover = crosshair.point
                 // Kai: Größe wie gehabt, Strich so fein wie die rote/grüne Skizzenachse; orange, sobald ein Fangpunkt greift
                 let arm = 15 * perPoint, gap = 3.5 * perPoint
@@ -1179,7 +1260,8 @@ final class ViewportView: MTKView {
             // Kreis mit Tangente obendrauf
             let r = s * 0.6
             return [snapRing(at: p, radius: r), [p + Point2(-s, r), p + Point2(s, r)]]
-        case .horizontal, .vertical, .parallel, .perpendicular, .equalLength, .lineExtension, .angle, .aligned, .grid:
+        case .horizontal, .vertical, .parallel, .perpendicular, .mirroredAngle, .equalLength, .lineExtension, .angle,
+             .aligned, .grid:
             return [snapRing(at: p, radius: s * 0.5)]
         }
     }
@@ -1865,6 +1947,10 @@ final class ViewportView: MTKView {
                 let start = atan2(dimension.reference.y, dimension.reference.x)
                 let u = Point2(cos(start), sin(start))
                 let v = Point2(cos(start + dimension.sweep), sin(start + dimension.sweep))
+                if dimension.id.hasSuffix("-absangle") {
+                    // Build 43: Winkel zur Waagerechten – kurzer gestrichelter waagerechter Bezugsschenkel
+                    lines += dashed([a, a + u * 44 * perPoint], dash: 3 * perPoint)
+                }
                 if abs(abs(dimension.sweep) - .pi / 2) < 0.05 * .pi / 180 {
                     // Rechter Winkel: kleines Quadrat im Scheitel (Kai)
                     let size = 12 * perPoint
@@ -2227,7 +2313,8 @@ final class ViewportView: MTKView {
             let isAngle = sketch.visibleDimensions.first { $0.id == field.dimensionID }?.kind == .angle
             let value = try isAngle ? Formula.evaluate(text, variables: values)
                 : Formula.evaluateLength(text, variables: values)
-            guard value > 0 else {
+            // Build 43: Winkel zur Waagerechten darf 0 bzw. negativ sein (−30° = schräg nach unten)
+            guard value > 0 || field.dimensionID.hasSuffix("-absangle") else {
                 sketch.notice = "Das Maß muss größer als 0 sein."
                 return
             }
@@ -2481,6 +2568,17 @@ final class ViewportView: MTKView {
                 continue
             }
             let distance = point.distance(toSegment: a, b)
+            // N2 (Build 41): der Kantenpfeil sitzt an der Kantenmitte. Antippen an der Kante selbst bzw. neben dem
+            // Fuß (erstes Viertel des Pfeils) geht an die Kantenauswahl weiter (abwählen, Nachbarkante wählen);
+            // nur der Pfeil selbst fängt die Berührung.
+            if handle.kind == .edge {
+                let ab = CGPoint(x: b.x - a.x, y: b.y - a.y)
+                let lengthSquared = ab.x * ab.x + ab.y * ab.y
+                if lengthSquared > 100 {
+                    let t = ((point.x - a.x) * ab.x + (point.y - a.y) * ab.y) / lengthSquared
+                    if t < 0.25 { continue }
+                }
+            }
             if distance <= 30, distance < (best?.distance ?? .infinity) {
                 best = (distance, handle)
             }
@@ -2711,6 +2809,7 @@ final class ViewportView: MTKView {
     // MARK: Berührungen
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        noteFingerTaps(began: touches)
         updateHeldFingers(began: touches)
         // Beschneiden mit dem Finger: kommt ein zweiter Finger dazu (Verschieben, Zoomen, Rückgängig), ist es kein Wisch
         if let touch = sketchTouch, touch.type == .direct, sketch?.tool == .trim, !touches.contains(touch) {
@@ -2732,7 +2831,8 @@ final class ViewportView: MTKView {
            let handle = handleHit(at: touch.location(in: self)),
            let parameter = axisParameter(at: touch.location(in: self), handle: handle) {
             handleDrag = HandleDragState(touch: touch, handle: handle, startParameter: parameter,
-                                         step: dragStep(at: handle.base, for: handle.kind))
+                                         step: dragStep(at: handle.base, for: handle.kind),
+                                         command: workspace?.command.map { ObjectIdentifier($0) })
             gizmoHover = nil
             refresh()
             return
@@ -2899,6 +2999,7 @@ final class ViewportView: MTKView {
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        noteFingerTaps(ended: touches)
         updateHeldFingers(ended: touches)
         if sculptEnded(touches) { return }
         if let touch = calibrationTouch, touches.contains(touch) {
@@ -2954,6 +3055,7 @@ final class ViewportView: MTKView {
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        for touch in touches { fingerTapStarts.removeValue(forKey: ObjectIdentifier(touch)) }
         updateHeldFingers(ended: touches)
         // Pinsel: ein abgebrochener Strich wird wie ein beendeter übernommen (ohne Bewegung ändert er nichts)
         if sculptEnded(touches) { return }
@@ -2975,6 +3077,12 @@ final class ViewportView: MTKView {
         if let drag = handleDrag, touches.contains(drag.touch) {
             handleDrag = nil
             if drag.handle.kind == .offset { sketch?.endOffsetSnap() }
+            // N3 (Build 41): Systemgeste bricht das Ziehen ab → Wert vom Ansetzen wiederherstellen (kein halb
+            // gezogener Radius). Nur, solange derselbe Befehl offen ist (Rundung ↔ Fase kann gewechselt haben).
+            if let applied = drag.lastAppliedValue, applied != drag.handle.value, let workspace,
+               drag.command == workspace.command.map({ ObjectIdentifier($0) }) {
+                workspace.apply(drag.handle.kind, value: drag.handle.value)
+            }
             refresh()
             return
         }
@@ -3038,6 +3146,8 @@ final class ViewportView: MTKView {
                 return
             }
             if suppressFingerTap { return }
+            // Build 66: Fingertipp sperrt bzw. entsperrt gerade die Linie (touchesEnded) – nichts auswählen
+            if CACurrentMediaTime() - fingerLockTapAt < 0.6 { return }
             switch sketch.tool {
             case .project:
                 project(at: location)
@@ -3306,6 +3416,11 @@ final class ViewportView: MTKView {
         }
         guard let sketch, sketch.isActive, !sketch.isChoosingPlane,
               let point = sketchPoint(at: gesture.location(in: self)) else { return }
+        // Build 66 (Kai): Doppeltipp hebt die Finger-Sperre der Linie auf, statt einen Punkt zu merken
+        if sketch.clearFingerLocks() || CACurrentMediaTime() - fingerLockTapAt < 0.6 {
+            refresh()
+            return
+        }
         if !sketch.captureHovered(at: point, tolerance: snapTolerance) {
             sketch.notice = "Kein Punkt zum Merken – auf ein Ende, eine Mitte, ein Zentrum, einen Schnittpunkt oder eine Körperecke doppeltippen."
         }

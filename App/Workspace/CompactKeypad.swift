@@ -93,7 +93,6 @@ struct CompactKeypad: View {
         .padding(10)
         .frame(width: totalWidth + 20)
         .background(PaletteStyle.background)
-        .environment(\.colorScheme, .dark)
         .focusable()
         .focused($hasKeyFocus)
         .focusEffectDisabled()

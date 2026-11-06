@@ -87,6 +87,9 @@ enum SnapTarget: Equatable {
     case vertical
     case parallel(SketchCurveRef)
     case perpendicular(SketchCurveRef)
+    /// Build 44 (Kai): gleicher Winkel zur Waagerechten wie diese Linie, aber gespiegelt (z. B. 60° und 120°,
+    /// Schenkel eines Trapezes) – Bedingung „Gleicher Winkel (gespiegelt)“
+    case mirroredAngle(SketchCurveRef)
     case equalLength(SketchCurveRef)
     /// Auf der Verlängerung einer Linie
     case lineExtension(SketchCurveRef)
@@ -115,7 +118,8 @@ enum SnapTarget: Equatable {
     /// Fang auf einer Leitlinie (Richtung bzw. Ausrichtung): der Achsfang beim Setzen ändert ihn nicht mehr.
     var isGuide: Bool {
         switch self {
-        case .horizontal, .vertical, .parallel, .perpendicular, .equalLength, .lineExtension, .angle, .aligned: true
+        case .horizontal, .vertical, .parallel, .perpendicular, .mirroredAngle, .equalLength, .lineExtension, .angle,
+             .aligned: true
         default: false
         }
     }
@@ -208,7 +212,7 @@ struct SnapLead {
     var rank: Int {
         switch target {
         case .onCurve, .lineExtension: 0
-        case .parallel, .perpendicular: 1
+        case .parallel, .perpendicular, .mirroredAngle: 1
         case .horizontal, .vertical: 2
         case .angle: 3
         default: 4
@@ -224,6 +228,8 @@ struct SnapCandidate {
     var label: String = ""
     /// Weitere gestrichelte Hilfslinien (Ausrichtung an Punkten, Verlängerungen, Winkelstrahl), zusätzlich zu guide.
     var guides: [(Point2, Point2)] = []
+    /// Build 43: Parallel- bzw. Rechtwinkelfang, der zugleich auf die Länge dieser Linie eingerastet ist
+    var alsoEqual: SketchCurveRef? = nil
 
     static func free(_ p: Point2) -> SnapCandidate { SnapCandidate(point: p, target: nil, guide: nil, label: "") }
 
@@ -313,13 +319,15 @@ struct SketchInference {
     // MARK: Stufe 0: vorhandener Punkt
 
     /// Nächster Skizzenpunkt unter dem Stift (Bildschirmabstand < 8 pt + Bonus), bei Gleichstand der bewegliche.
-    func pointHit(_ lp: Point2, metrics: SnapMetrics, kinds: Set<SnapKind>, extra: [Point2]) -> Node? {
+    func pointHit(_ lp: Point2, metrics: SnapMetrics, kinds: Set<SnapKind>, extra: [Point2],
+                  reach: Double? = nil) -> Node? {
+        let pick = reach ?? metrics.pointPick
         var best: (distance: Double, node: Node)?
         let all = nodes + extra.map { Node(point: $0, ref: nil, isCenter: false, movable: true) }
         for node in all {
             if node.isCenter ? !kinds.contains(.center) : !kinds.contains(.endpoint) { continue }
             let d = simd_distance(node.point, lp)
-            guard d < metrics.pointPick else { continue }
+            guard d < pick else { continue }
             if let current = best {
                 let tie = abs(d - current.distance) < 1e-9
                 if tie ? !(node.movable && !current.node.movable) : d >= current.distance { continue }
@@ -378,7 +386,10 @@ struct SketchInference {
                 tracking: SnapTracking = SnapTracking()) -> SnapCandidate {
         // An dicht beieinanderliegenden Enden und Konstruktionslinien zählt der dem Stift nähere
         // Schnittpunkt. Sonst verdrängt der größere Endpunkt-Fangradius den exakt getroffenen Schnitt.
-        let node = pointHit(lp, metrics: metrics, kinds: kinds, extra: extra)
+        // Build 46 (Kai): Ansetzen an Linienanfang bzw. -ende (noch kein voriger Punkt) fängt 1,6-mal so weit,
+        // wie das Weiterzeichnen am Zugende (chainReach) – knapp daneben getippt landet trotzdem auf dem Punkt
+        let node = pointHit(lp, metrics: metrics, kinds: kinds, extra: extra,
+                            reach: prev == nil ? metrics.chainReach : nil)
         let crossing = !midOnly && kinds.contains(.intersection)
             ? nearestCrossing(lp, tolerance: metrics.refine, extra: extra) : nil
         if let crossing {
@@ -458,7 +469,7 @@ struct SketchInference {
 
     /// Nächster Schnittpunkt zweier Kurven nahe lp (höchstens 256 Kurven); ohne Schnittpunkte, auf denen schon
     /// ein Punkt liegt (dort greift Stufe 0).
-    private func nearestCrossing(_ lp: Point2, tolerance tol: Double, extra: [Point2])
+    func nearestCrossing(_ lp: Point2, tolerance tol: Double, extra: [Point2])
         -> (point: Point2, a: SketchCurveRef, b: SketchCurveRef)? {
         var candidates: [Curve] = []
         for curve in curves where curve.shape.distance(to: lp) <= tol {
@@ -592,6 +603,9 @@ struct SketchInference {
             }
             // Parallel bzw. senkrecht zu einer schrägen Linie (achsparallele Richtungen übernimmt H/V)
             if lineTool, kinds.contains(.parallel), length >= tol * 2 {
+                // Build 45 (Kai): Parallel und gespiegelter Winkel rasten wie H/V nach Winkel ein (4° Stift, 6° Finger,
+                // höchstens 2,5 · tol quer), nicht nur 7 pt quer – bei langen Strichen fing es sonst kaum
+                let parallelReach = angular(length, minimum: tol)
                 for curve in curves where !curve.construction {
                     guard case .line(let a, let b) = curve.shape else { continue }
                     let segment = b - a
@@ -604,8 +618,16 @@ struct SketchInference {
                     for (isParallel, base) in [(true, d), (false, Point2(-d.y, d.x))] {
                         let dir = simd_dot(v, base) < 0 ? -base : base
                         let target: SnapTarget = isParallel ? .parallel(curve.ref) : .perpendicular(curve.ref)
-                        result.append(SnapLead(origin: prev, dir: dir, minAlong: tol * 2, reach: tol, weight: 1,
+                        result.append(SnapLead(origin: prev, dir: dir, minAlong: tol * 2, reach: parallelReach, weight: 1,
                                                target: target, label: isParallel ? "//" : "⊥", rounding: .length,
+                                               overshoot: overshoot))
+                    }
+                    // Build 44 (Kai): gleicher Winkel gespiegelt (Trapez-Schenkel), bei 45° fällt er mit ⊥ zusammen
+                    let mirror = Point2(d.x, -d.y)
+                    if abs(d.x * mirror.y - d.y * mirror.x) > 1e-6, abs(simd_dot(d, mirror)) > 1e-6 {
+                        let dir = simd_dot(v, mirror) < 0 ? -mirror : mirror
+                        result.append(SnapLead(origin: prev, dir: dir, minAlong: tol * 2, reach: parallelReach, weight: 1,
+                                               target: .mirroredAngle(curve.ref), label: "∠=", rounding: .length,
                                                overshoot: overshoot))
                     }
                 }

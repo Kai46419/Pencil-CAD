@@ -16,7 +16,7 @@ struct DrawingVertex: Equatable {
     var scale: Double
 }
 
-struct DrawingLength: Identifiable {
+struct DrawingLength: Identifiable, Equatable {
     var id = UUID()
     var from: DrawingVertex
     var to: DrawingVertex
@@ -142,5 +142,99 @@ extension TechnicalDrawing {
             if let shape = lengthShape(length) { result.elements += shape.elements }
         }
         return result
+    }
+}
+
+// MARK: - S3 (Build 41): Maße an Modellpunkte gebunden und je Blatt gespeichert
+
+/// Längenmaß, gebunden an seine Ansicht: Endpunkte und Griff in der Ansichtsebene (Modell-mm, wie
+/// DrawingProjection), nicht in Blattkoordinaten. Eine Verschiebung bzw. ein anderer Maßstab des Blatts ordnet das
+/// Maß neu zu, statt es zu löschen. Gespeichert je Blatt (Körperauswahl) in drawing-dimensions.json im Projektordner.
+struct DrawingModelLength: Codable, Equatable, Identifiable {
+    var id: UUID
+    /// DrawingView.rawValue
+    var view: String
+    var from: [Double]
+    var to: [Double]
+    var handle: [Double]
+    /// DrawingLengthKind.rawValue
+    var kind: String
+}
+
+extension TechnicalDrawing {
+    /// Lage einer Ansicht auf dem Blatt: Blatt = offset + Modell · scale. Abgeleitet aus der ersten Linie der
+    /// Projektion und derselben Linie auf dem Blatt (layout setzt die Linien in gleicher Reihenfolge ab).
+    static func viewPlacement(_ view: DrawingView, layout: DrawingLayout,
+                              projection: DrawingProjection?) -> (scale: Double, offset: Point2)? {
+        guard let placed = layout.views[view], let projection, placed.scale > 0, placed.scale.isFinite else { return nil }
+        for (sheetLine, modelLine) in zip(placed.visible, projection.visible) {
+            if let sheet = sheetLine.first, let model = modelLine.first {
+                return (placed.scale, sheet - model * placed.scale)
+            }
+        }
+        return nil
+    }
+
+    /// Maß vom Blatt an die Ansicht binden (nil = Ansicht nicht auf dem Blatt).
+    static func bind(_ length: DrawingLength, layout: DrawingLayout,
+                     projections: [DrawingView: DrawingProjection]) -> DrawingModelLength? {
+        let view = length.from.view
+        guard let placement = viewPlacement(view, layout: layout, projection: projections[view]) else { return nil }
+        func model(_ p: Point2) -> [Double] {
+            let q = (p - placement.offset) / placement.scale
+            return [q.x, q.y]
+        }
+        return DrawingModelLength(id: length.id, view: view.rawValue, from: model(length.from.point),
+                                  to: model(length.to.point), handle: model(length.handle), kind: length.kind.rawValue)
+    }
+
+    /// Gebundenes Maß auf das (evtl. neu angeordnete) Blatt setzen. nil = Ansicht fehlt oder ein Endpunkt ist kein
+    /// Eckpunkt mehr (Geometrie geändert).
+    static func place(_ bound: DrawingModelLength, layout: DrawingLayout,
+                      projections: [DrawingView: DrawingProjection]) -> DrawingLength? {
+        guard let view = DrawingView(rawValue: bound.view), let kind = DrawingLengthKind(rawValue: bound.kind),
+              bound.from.count == 2, bound.to.count == 2, bound.handle.count == 2,
+              let placement = viewPlacement(view, layout: layout, projection: projections[view]) else { return nil }
+        func sheet(_ v: [Double]) -> Point2 { placement.offset + Point2(v[0], v[1]) * placement.scale }
+        guard let a = snappedVertex(sheet(bound.from), view: view, layout: layout),
+              let b = snappedVertex(sheet(bound.to), view: view, layout: layout) else { return nil }
+        return DrawingLength(id: bound.id, from: a, to: b, kind: kind, handle: sheet(bound.handle))
+    }
+
+    /// Eckpunkt einer sichtbaren Kante der Ansicht an dieser Blattstelle (höchstens 0,5 mm daneben).
+    static func snappedVertex(_ p: Point2, view: DrawingView, layout: DrawingLayout) -> DrawingVertex? {
+        guard let placed = layout.views[view] else { return nil }
+        var best: (distance: Double, point: Point2)?
+        for line in placed.visible {
+            for vertex in line {
+                let d = simd_distance(vertex, p)
+                if d < (best?.distance ?? 0.5) { best = (d, vertex) }
+            }
+        }
+        return best.map { DrawingVertex(point: $0.point, view: view, scale: placed.scale) }
+    }
+}
+
+/// S3: Ablage der gebundenen Maße je Blatt (Schlüssel: Namen der gezeichneten Körper).
+enum DrawingDimensionStore {
+    private struct File: Codable {
+        var sheets: [String: [DrawingModelLength]] = [:]
+    }
+
+    static func url(_ folder: URL?) -> URL? { folder?.appending(path: "drawing-dimensions.json") }
+
+    static func load(folder: URL?, key: String) -> [DrawingModelLength] {
+        guard let url = url(folder), let data = try? Data(contentsOf: url),
+              let file = try? JSONDecoder().decode(File.self, from: data) else { return [] }
+        return file.sheets[key] ?? []
+    }
+
+    static func save(_ lengths: [DrawingModelLength], folder: URL?, key: String) {
+        guard let url = url(folder) else { return }
+        var file = (try? Data(contentsOf: url)).flatMap { try? JSONDecoder().decode(File.self, from: $0) } ?? File()
+        guard file.sheets[key] != (lengths.isEmpty ? nil : lengths) else { return }
+        file.sheets[key] = lengths.isEmpty ? nil : lengths
+        guard let data = try? JSONEncoder().encode(file) else { return }
+        try? data.write(to: url, options: .atomic)
     }
 }

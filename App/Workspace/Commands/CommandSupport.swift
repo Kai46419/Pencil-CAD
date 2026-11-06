@@ -12,6 +12,17 @@ import simd
 // ModelCommandDriver ist @MainActor; MainActor.assumeIsolated in der Erweiterung unten stammt aus der Zeit davor und
 // ist damit nur noch eine Absicherung.
 
+/// Anzahl aus einer Gleitkommazahl (Formel, Feld, gespeicherter Wert). Erst auf endlich und Bereich prüfen, dann
+/// wandeln: `Int(1e20)` bzw. `Int(Double.nan)` bricht das Programm ab (Build 41, C1/N2). Nicht endlich → lower.
+func clampedCount(_ value: Double, min lower: Int = 1, max upper: Int = 10_000) -> Int {
+    let top = upper < lower ? lower : upper
+    guard value.isFinite else { return lower }
+    let rounded = value.rounded()
+    if rounded <= Double(lower) { return lower }
+    if rounded >= Double(top) { return top }
+    return Int(rounded)
+}
+
 /// Modellbefehl, dessen Arbeit auf dem Main Actor läuft.
 @MainActor
 protocol MainCommandDriver: ModelCommandDriver {
@@ -458,7 +469,101 @@ enum FeatureEdit {
         for parameter in feature.parameters {
             cmd.values[parameter.key] = text(for: parameter)
         }
+        if feature.kind == .fillet { loadBlendOptions(feature, into: cmd) }
         return cmd
+    }
+
+    // MARK: Rundungsoptionen (Build 42, C6)
+
+    /// Optionen gibt es nur bei konstanter Rundung (kein Endradius, kein Kantenabschnitt)
+    static func allowsBlendOptions(_ feature: Feature) -> Bool {
+        feature.kind == .fillet && feature.value("end") == nil && feature.value("startPercent") == nil
+    }
+
+    /// Parameter, die das Panel im Abschnitt „Rundungsoptionen“ zeigt statt in der Werteliste
+    static func isBlendOptionParameter(_ key: String, of feature: Feature) -> Bool {
+        feature.kind == .fillet && (key == BlendOptionKeys.setback || key == BlendOptionKeys.rhoPercent)
+    }
+
+    /// Wahlen in choices; Setback- und Rho-Text aus den Parametern, sonst die Vorgaben (1,5 × Radius, 50 %)
+    static func loadBlendOptions(_ feature: Feature, into cmd: ModelCommand) {
+        BlendOptionsForm.storeChoices(BlendOptionsForm.cleaned(feature.blendOptions), in: cmd)
+        let defaults = defaultBlendTexts(feature)
+        if cmd.values[BlendOptionKeys.setback] == nil { cmd.values[BlendOptionKeys.setback] = defaults.setback }
+        if cmd.values[BlendOptionKeys.rhoPercent] == nil { cmd.values[BlendOptionKeys.rhoPercent] = defaults.rhoPercent }
+    }
+
+    /// Vorgabetexte für Setback (Projekteinheit) und Rho (%), wenn das Feature sie noch nicht hat
+    static func defaultBlendTexts(_ feature: Feature) -> (setback: String, rhoPercent: String) {
+        let options = feature.blendOptions
+        let radius = feature.value("radius") ?? 2
+        let setback = options.setback ?? BlendOptions.defaultSetback(radius: radius)
+        let rho = options.rho ?? BlendOptionKeys.defaultRho
+        return (LengthUnit.current.number(setback), CommandFormat.plain(rho * 100))
+    }
+
+    /// Optionen aus den Wahlen (chosen: nur Ecken/Stetigkeit/Profil/Überlauf zählen) und den Texten bzw. den schon
+    /// ausgerechneten Parametern. Ergänzt bzw. entfernt die Parameter „setback“/„rhoPercent“ passend (Formeln
+    /// bleiben). nil = keine Rundung mit Optionen (Fase, variabel, Teil). changed: Optionen anders als gespeichert.
+    @MainActor
+    static func resolveBlendOptions(_ chosen: BlendOptions, setbackText: String?, rhoPercentText: String?,
+                                    feature: Feature, parameters: inout [FeatureParameter],
+                                    variables: [String: Double]) throws -> (options: BlendOptions, changed: Bool)? {
+        guard allowsBlendOptions(feature) else { return nil }
+        let before = BlendOptionsForm.cleaned(feature.blendOptions)
+        var options = BlendOptions.standard
+        options.corner = chosen.corner
+        options.continuity = chosen.continuity
+        options.profile = chosen.profile
+        options.overflow = chosen.overflow
+        options = BlendOptionsForm.cleaned(options)
+        let radius = parameters.first { $0.key == "radius" }?.value ?? feature.value("radius") ?? 2
+        if options.corner == .setback {
+            if let parameter = parameters.first(where: { $0.key == BlendOptionKeys.setback }) {
+                options.setback = parameter.value
+            } else {
+                var parameter = FeatureParameter.length(BlendOptionKeys.setback, "Setback-Abstand",
+                                                        BlendOptions.defaultSetback(radius: radius))
+                let text = (setbackText ?? "").trimmingCharacters(in: .whitespaces)
+                if !text.isEmpty {
+                    parameter.value = try FeatureUnit.length.evaluate(text, variables: variables)
+                    parameter.formula = Formula.isPlainNumber(text) ? nil : text
+                }
+                options.setback = parameter.value
+                parameters.append(parameter)
+            }
+        } else {
+            parameters.removeAll { $0.key == BlendOptionKeys.setback }
+        }
+        if options.profile == .conic {
+            if let parameter = parameters.first(where: { $0.key == BlendOptionKeys.rhoPercent }) {
+                options.rho = parameter.value / 100
+            } else {
+                var parameter = FeatureParameter.percent(BlendOptionKeys.rhoPercent, "Profil Rho",
+                                                         BlendOptionKeys.defaultRho * 100)
+                let text = (rhoPercentText ?? "").trimmingCharacters(in: .whitespaces)
+                if !text.isEmpty {
+                    parameter.value = try FeatureUnit.percent.evaluate(text, variables: variables)
+                    parameter.formula = Formula.isPlainNumber(text) ? nil : text
+                }
+                options.rho = parameter.value / 100
+                parameters.append(parameter)
+            }
+        } else {
+            parameters.removeAll { $0.key == BlendOptionKeys.rhoPercent }
+        }
+        if !options.isStandard {
+            guard options.isValid else {
+                if options.corner == .setback, !((options.setback ?? 0) > 0) {
+                    throw ExpressionError("Der Setback-Abstand muss größer als 0 sein.")
+                }
+                throw ExpressionError("Profil Rho muss zwischen 10 % und 90 % liegen.")
+            }
+            guard BlendOptionsForm.isSupported(options) else {
+                throw ExpressionError(ModelStore.blendOptionsUnsupportedMessage)
+            }
+        }
+        return (options, options != before)
     }
 
     /// Formel bzw. Zahl in der Projekteinheit (wie FeatureEditor)
@@ -467,7 +572,7 @@ enum FeatureEdit {
         switch parameter.unit {
         case .length: return LengthUnit.current.number(parameter.value)
         case .angle, .percent: return CommandFormat.plain(parameter.value)
-        case .count: return String(Int(parameter.value.rounded()))
+        case .count: return String(clampedCount(parameter.value))
         }
     }
 
@@ -492,7 +597,25 @@ enum FeatureEdit {
                 return
             }
         }
-        if changed { model.updateFeature(id, parameters: parameters) }
+        // Build 42 (C6): Rundungsoptionen aus dem Panel
+        let resolved: (options: BlendOptions, changed: Bool)?
+        do {
+            resolved = try resolveBlendOptions(BlendOptionsForm.chosen(cmd),
+                                               setbackText: cmd.values[BlendOptionKeys.setback],
+                                               rhoPercentText: cmd.values[BlendOptionKeys.rhoPercent],
+                                               feature: feature, parameters: &parameters,
+                                               variables: model.variableValues)
+        } catch {
+            model.message = "Rundungsoptionen: \(error.localizedDescription)"
+            return
+        }
+        if let resolved {
+            if changed || resolved.changed {
+                model.updateFeature(id, parameters: parameters, blendOptions: resolved.options)
+            }
+        } else if changed {
+            model.updateFeature(id, parameters: parameters)
+        }
     }
 }
 
@@ -512,10 +635,13 @@ struct FeatureEditRows: View {
                 if feature.parameters.isEmpty {
                     PaletteHint(text: "Dieser Schritt hat keine änderbaren Werte.")
                 }
-                ForEach(feature.parameters) { parameter in
+                ForEach(feature.parameters.filter { !FeatureEdit.isBlendOptionParameter($0.key, of: feature) }) { parameter in
                     FeatureTextRow(title: parameter.title, unit: FeatureEditor.unitLabel(parameter.unit),
                                    text: Binding(get: { cmd.values[parameter.key] ?? "" },
                                                  set: { cmd.values[parameter.key] = $0 }))
+                }
+                if feature.kind == .fillet {
+                    FeatureBlendOptionRows(cmd: cmd, feature: feature)
                 }
                 PaletteHint(text: "Zahl oder Formel mit Variablen, z. B. „breite / 2“. OK rechnet den Verlauf ab hier neu.")
                 if feature.failed, let problem = feature.problem {
@@ -525,6 +651,88 @@ struct FeatureEditRows: View {
                 }
             } else {
                 PaletteHint(text: "Der Schritt ist nicht mehr im Verlauf.")
+            }
+        }
+    }
+}
+
+/// Rundungsoptionen beim Bearbeiten aus dem Verlauf (Build 42, C6): Ecken, Stetigkeit, Profil; Setback und Rho als
+/// Zahl oder Formel. Jede Wahl nur, wenn der Kernel sie kann. OK rechnet den Verlauf ab hier neu.
+private struct FeatureBlendOptionRows: View {
+    @ObservedObject var cmd: ModelCommand
+    let feature: Feature
+
+    /// Für die Freigabe: Wahlen aus dem Befehl mit den gespeicherten bzw. Vorgabewerten
+    private var current: BlendOptions {
+        var options = BlendOptionsForm.chosen(cmd)
+        let radius = feature.value("radius") ?? 2
+        if options.corner == .setback {
+            options.setback = feature.blendOptions.setback ?? BlendOptions.defaultSetback(radius: radius)
+        }
+        if options.profile == .conic { options.rho = feature.blendOptions.rho ?? BlendOptionKeys.defaultRho }
+        return options
+    }
+
+    private func choose(_ change: (inout BlendOptions) -> Void) {
+        guard let next = BlendOptionsForm.variant(of: current, change) else { return }
+        BlendOptionsForm.storeChoices(next, in: cmd)
+    }
+
+    private func enabled(_ change: (inout BlendOptions) -> Void) -> Bool {
+        BlendOptionsForm.variant(of: current, change) != nil
+    }
+
+    private func text(_ key: String) -> Binding<String> {
+        Binding(get: { cmd.values[key] ?? "" }, set: { cmd.values[key] = $0 })
+    }
+
+    var body: some View {
+        let options = current
+        let radius = feature.value("radius") ?? 2
+        let setSetback: (inout BlendOptions) -> Void = {
+            $0.corner = .setback
+            $0.setback = $0.setback ?? BlendOptions.defaultSetback(radius: radius)
+        }
+        let setConic: (inout BlendOptions) -> Void = {
+            $0.continuity = .g2
+            $0.profile = .conic
+            $0.rho = $0.rho ?? BlendOptionKeys.defaultRho
+        }
+        PaletteSection("Rundungsoptionen") {
+            if FeatureEdit.allowsBlendOptions(feature) {
+                CommandSegmentRow(title: "Ecken", options: [
+                    CommandChoice(id: BlendOptions.Corner.rollingBall.rawValue, title: "Rolling Ball"),
+                    CommandChoice(id: BlendOptions.Corner.setback.rawValue, title: "Setback", isEnabled: enabled(setSetback)),
+                ], selected: options.corner.rawValue) { id in
+                    if id == BlendOptions.Corner.setback.rawValue { choose(setSetback) } else { choose { $0.corner = .rollingBall } }
+                }
+                if options.corner == .setback {
+                    FeatureTextRow(title: "Setback-Abstand", unit: LengthUnit.current.symbol, text: text(BlendOptionKeys.setback))
+                    PaletteHint(text: "Empfohlen ≥ Radius.")
+                }
+                CommandSegmentRow(title: "Stetigkeit", options: [
+                    CommandChoice(id: BlendOptions.Continuity.g1.rawValue, title: "G1"),
+                    CommandChoice(id: BlendOptions.Continuity.g2.rawValue, title: "G2",
+                                  isEnabled: enabled { $0.continuity = .g2 }),
+                ], selected: options.continuity.rawValue) { id in
+                    if id == BlendOptions.Continuity.g2.rawValue { choose { $0.continuity = .g2 } }
+                    else { choose { $0.continuity = .g1 } }
+                }
+                if options.continuity == .g2 {
+                    CommandSegmentRow(title: "Profil", options: [
+                        CommandChoice(id: BlendOptions.Profile.circle.rawValue, title: "Kreis"),
+                        CommandChoice(id: BlendOptions.Profile.conic.rawValue, title: "Kegelschnitt",
+                                      isEnabled: enabled(setConic)),
+                    ], selected: options.profile.rawValue) { id in
+                        if id == BlendOptions.Profile.conic.rawValue { choose(setConic) } else { choose { $0.profile = .circle } }
+                    }
+                    if options.profile == .conic {
+                        FeatureTextRow(title: "Profil Rho", unit: "%", text: text(BlendOptionKeys.rhoPercent))
+                        PaletteHint(text: "10 … 90 %: klein = flacher, groß = voller.")
+                    }
+                }
+            } else {
+                PaletteHint(text: ModelStore.blendOptionsConstantOnlyMessage)
             }
         }
     }
@@ -689,7 +897,7 @@ struct CommandCountRow: View {
 
     var body: some View {
         CountRow(title: title, value: Binding(get: {
-            Int(cmd.number(key, default: Double(fallback)).rounded())
+            clampedCount(cmd.number(key, default: Double(fallback)), min: range.lowerBound, max: range.upperBound)
         }, set: { value in
             cmd.putNumber(key, Double(value))
             CommandCache.refreshNow(cmd, workspace)

@@ -11,12 +11,38 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readonly) NSData *vertexData;
 /// UInt32, drei Indizes je Dreieck
 @property (nonatomic, readonly) NSData *indexData;
-/// UInt32 je Dreieck: Nummer der Fläche (ab 1), passend zu planeOfFace:, filletingEdgesOfFace: usw.
+/// UInt32 je Dreieck: Nummer der Fläche (ab 1), passend zu planeOfFace:, edgeNumbersOfFace: usw.
 @property (nonatomic, readonly) NSData *faceIndexData;
 /// Float32-Punktpaare (x, y, z, x, y, z) der sichtbaren Kanten
 @property (nonatomic, readonly) NSData *edgeData;
 /// UInt32 je Punktpaar: Nummer der Kante (ab 1, 0 = unbekannt), passend zu filletingEdges: usw.
 @property (nonatomic, readonly) NSData *edgeIndexData;
+@end
+
+typedef NS_ENUM(NSInteger, PCKBlendCorner)     { PCKBlendCornerRollingBall = 0, PCKBlendCornerSetback = 1 };
+typedef NS_ENUM(NSInteger, PCKBlendContinuity) {
+    PCKBlendContinuityG1 NS_SWIFT_NAME(g1) = 0,
+    PCKBlendContinuityG2 NS_SWIFT_NAME(g2) = 1
+};
+typedef NS_ENUM(NSInteger, PCKBlendProfile)    { PCKBlendProfileCircle = 0, PCKBlendProfileConic = 1 };
+typedef NS_ENUM(NSInteger, PCKBlendOverflow)   { PCKBlendOverflowAutomatic = 0, PCKBlendOverflowKeepEdge = 1 };
+
+/// Rundungsoptionen (Shapr3D „Corners / Continuity / Profile / Overflow“). Standard = Rolling Ball, G1, Kreis, Auto.
+/// Bei Standard delegieren die options-Methoden bitgleich an die alten Methoden; sonst gibt es keinen stillen Rückfall:
+/// entweder das gewünschte Ergebnis oder nil.
+@interface PCKBlendOptions : NSObject <NSCopying>
+@property (nonatomic) PCKBlendCorner corner;
+/// mm ab Eckpunkt entlang jeder Kante; nur bei corner == Setback; > 0 und endlich
+@property (nonatomic) double setback;
+@property (nonatomic) PCKBlendContinuity continuity;
+@property (nonatomic) PCKBlendProfile profile;
+/// 0,1 … 0,9; nur bei profile == Conic (und continuity == G2)
+@property (nonatomic) double rho;
+@property (nonatomic) PCKBlendOverflow overflow;
+@property (nonatomic, readonly) BOOL isStandard;
+/// Werte plausibel (setback > 0 bei Setback, rho 0,1…0,9 bei Kegelschnitt, Kegelschnitt nur mit G2)?
+@property (nonatomic, readonly) BOOL isValid;
++ (instancetype)standardOptions NS_SWIFT_NAME(standard());
 @end
 
 /// Unveränderlicher Volumenkörper (B-Rep). Jede Operation liefert einen neuen Körper.
@@ -283,12 +309,6 @@ NS_ASSUME_NONNULL_BEGIN
 - (NSArray<NSNumber *> *)tangentEdgeNumbersStartingAtEdge:(NSInteger)edge
     NS_SWIFT_NAME(tangentEdges(startingAt:));
 
-/// Rundet bzw. fast alle Kanten einer Fläche (Nummer aus faceIndexData). nil bei Fehler.
-- (nullable PCKShape *)filletingEdgesOfFace:(NSInteger)face radius:(double)radius
-    NS_SWIFT_NAME(filletingEdges(ofFace:radius:));
-- (nullable PCKShape *)chamferingEdgesOfFace:(NSInteger)face distance:(double)distance
-    NS_SWIFT_NAME(chamferingEdges(ofFace:distance:));
-
 /// Rundet bzw. fast einzelne Kanten (Nummern aus edgeIndexData). nil bei Fehler.
 - (nullable PCKShape *)filletingEdges:(NSArray<NSNumber *> *)edges radius:(double)radius
     NS_SWIFT_NAME(filleting(edges:radius:));
@@ -301,6 +321,11 @@ NS_ASSUME_NONNULL_BEGIN
 /// Fase mit zwei Abständen (distance auf der einen, distance2 auf der anderen Nachbarfläche).
 - (nullable PCKShape *)chamferingEdges:(NSArray<NSNumber *> *)edges distance:(double)distance
                              distance2:(double)distance2 NS_SWIFT_NAME(chamfering(edges:distance:distance2:));
+/// Diagnose nach einer gescheiterten Mehrfachauswahl: die Kanten (Nummern aus edgeIndexData), die OCCT schon
+/// beim Hinzufügen ablehnt (je Kante eigener Builder, nur Add, Contour == 0: Naht, tangentialer Übergang,
+/// veraltete Nummer). Kein Filter – das Ergebnis dient nur der Meldung. Ohne Kernel: alle Kanten.
+- (NSArray<NSNumber *> *)unblendableEdges:(NSArray<NSNumber *> *)edges value:(double)value chamfer:(BOOL)chamfer
+    NS_SWIFT_NAME(unblendableEdges(_:value:chamfer:));
 
 /// Unabhängige Kopie (Geometrie kopiert, gleiche Flächen- und Kantennummern) für Rechnungen im Hintergrund,
 /// während der Vordergrund diesen Körper weiter benutzt (vernetzt). nil bei Fehler bzw. abweichender Nummerierung.
@@ -319,6 +344,16 @@ NS_ASSUME_NONNULL_BEGIN
 /// Ein Radius je gewählter Kante, gemeinsam in einem Fillet-Builder gerechnet.
 - (nullable PCKShape *)filletingEdges:(NSArray<NSNumber *> *)edges radii:(NSArray<NSNumber *> *)radii
     NS_SWIFT_NAME(filleting(edges:radii:));
+
+/// Trägt der Kernel diese Optionskombination? Die Oberfläche schaltet Zeilen danach frei. Ohne OCCT nur Standard.
++ (BOOL)supportsBlendOptions:(PCKBlendOptions *)options NS_SWIFT_NAME(supports(blendOptions:));
+/// Rundung mit Optionen (Setback-Ecken, G2, Profil). Standard → wie filletingEdges:radius:. Sonst Ergebnis oder nil,
+/// nie ein stiller Rückfall auf Rolling Ball/G1. Radius = Ansatzlinien wie die G1-Rundung mit diesem Radius.
+- (nullable PCKShape *)filletingEdges:(NSArray<NSNumber *> *)edges radius:(double)radius
+                              options:(PCKBlendOptions *)options NS_SWIFT_NAME(filleting(edges:radius:options:));
+/// Ein Radius je Kante, mit Optionen (siehe filletingEdges:radius:options:).
+- (nullable PCKShape *)filletingEdges:(NSArray<NSNumber *> *)edges radii:(NSArray<NSNumber *> *)radii
+                              options:(PCKBlendOptions *)options NS_SWIFT_NAME(filleting(edges:radii:options:));
 
 /// Sweep entlang Körperkanten (SketchUp „Folge mir“): Profil (Kodierung wie prismWithProfileWires:) entlang der
 /// zusammenhängenden Kanten (Nummern aus edgeIndexData) dieses Körpers ziehen; Ecken werden auf Gehrung
