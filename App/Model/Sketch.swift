@@ -1546,13 +1546,19 @@ final class SketchController: ObservableObject {
 
     /// Stift drücken bzw. doppeltippen beim Schweben: liegt ein Fangpunkt (Ende, Mitte, Zentrum, Schnittpunkt,
     /// Hilfspunkt) unter dem Stift, wird er gemerkt. false = nichts in der Nähe.
-    func captureHovered(at p: Point2, tolerance: Double, onRemembered: (() -> Void)? = nil) -> Bool {
+    /// pairs = false (Schweben, Build 45 Kai): nur Spurpunkt merken, kein Punktpaar mit Mitte und Mittellinie –
+    /// sonst entstand beim Schweben über Anfang und Ende einer Linie ungewollt eine Mittellinie.
+    func captureHovered(at p: Point2, tolerance: Double, pairs: Bool = true, onRemembered: (() -> Void)? = nil) -> Bool {
         // SolidCraft-Klickwerkzeug: derselbe Punkt speist sowohl Objektfangspuren als auch die bisherige
         // Paarfunktion für Abstand, Mittelpunkt und gestrichelte Mittellinie.
         if options.isSolidCraft, clickKind != nil {
             guard let memory = togglePinnedPoint(at: p, tolerance: tolerance) else { return false }
             if memory.added {
-                if captureSnappedPoint(memory.point) { onRemembered?() }
+                if !pairs {
+                    onRemembered?()
+                } else if captureSnappedPoint(memory.point) {
+                    onRemembered?()
+                }
             } else {
                 capturedPoints.removeAll { simd_distance($0, memory.point) < 1e-6 }
             }
@@ -1561,6 +1567,7 @@ final class SketchController: ObservableObject {
             changed()
             return true
         }
+        guard pairs else { return false }
         // Auch Körperecken und Kantenmitten (3D-Leitpunkte): auf einer Körperfläche gibt es anfangs nur diese
         let kinds: Set<SnapKind> = [.endpoint, .midpoint, .center, .intersection, .modelPoint]
         guard withHelperSnap(snapIndex.snap(p, tolerance: tolerance * 1.5, kinds: kinds,

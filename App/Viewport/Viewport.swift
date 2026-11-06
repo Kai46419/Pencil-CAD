@@ -3328,7 +3328,7 @@ final class ViewportView: MTKView {
                   self.sketchTouch == nil, let hover = self.lastHoverLocation,
                   hypot(hover.x - location.x, hover.y - location.y) <= 6,
                   let point = self.sketchPoint(at: hover) else { return }
-            if sketch.captureHovered(at: point, tolerance: self.snapTolerance, onRemembered: {
+            if sketch.captureHovered(at: point, tolerance: self.snapTolerance, pairs: false, onRemembered: {
                 if sketch.pointSnapClick {
                     self.snapClickPlayer?.currentTime = 0
                     self.snapClickPlayer?.play()

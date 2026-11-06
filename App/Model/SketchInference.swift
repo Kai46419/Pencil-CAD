@@ -598,6 +598,9 @@ struct SketchInference {
             }
             // Parallel bzw. senkrecht zu einer schrägen Linie (achsparallele Richtungen übernimmt H/V)
             if lineTool, kinds.contains(.parallel), length >= tol * 2 {
+                // Build 45 (Kai): Parallel und gespiegelter Winkel rasten wie H/V nach Winkel ein (4° Stift, 6° Finger,
+                // höchstens 2,5 · tol quer), nicht nur 7 pt quer – bei langen Strichen fing es sonst kaum
+                let parallelReach = angular(length, minimum: tol)
                 for curve in curves where !curve.construction {
                     guard case .line(let a, let b) = curve.shape else { continue }
                     let segment = b - a
@@ -610,7 +613,7 @@ struct SketchInference {
                     for (isParallel, base) in [(true, d), (false, Point2(-d.y, d.x))] {
                         let dir = simd_dot(v, base) < 0 ? -base : base
                         let target: SnapTarget = isParallel ? .parallel(curve.ref) : .perpendicular(curve.ref)
-                        result.append(SnapLead(origin: prev, dir: dir, minAlong: tol * 2, reach: tol, weight: 1,
+                        result.append(SnapLead(origin: prev, dir: dir, minAlong: tol * 2, reach: parallelReach, weight: 1,
                                                target: target, label: isParallel ? "//" : "⊥", rounding: .length,
                                                overshoot: overshoot))
                     }
@@ -618,7 +621,7 @@ struct SketchInference {
                     let mirror = Point2(d.x, -d.y)
                     if abs(d.x * mirror.y - d.y * mirror.x) > 1e-6, abs(simd_dot(d, mirror)) > 1e-6 {
                         let dir = simd_dot(v, mirror) < 0 ? -mirror : mirror
-                        result.append(SnapLead(origin: prev, dir: dir, minAlong: tol * 2, reach: tol, weight: 1,
+                        result.append(SnapLead(origin: prev, dir: dir, minAlong: tol * 2, reach: parallelReach, weight: 1,
                                                target: .mirroredAngle(curve.ref), label: "∠=", rounding: .length,
                                                overshoot: overshoot))
                     }
