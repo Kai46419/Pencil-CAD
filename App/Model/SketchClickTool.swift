@@ -218,6 +218,62 @@ extension SketchController {
         return best?.candidate ?? .free(raw)
     }
 
+    /// Rastweite der Richtung bei festgehaltener Länge (Grad)
+    static let fingerAngleSnapDegrees = 5.0
+
+    /// Build 53: Länge der laufenden Linie, wenn sie gerade gelb ist (gleich lang wie eine vorhandene Linie).
+    func currentEqualLengthLock() -> (length: Double, ref: SketchCurveRef?)? {
+        guard clickKind == .line, let a = click.points.last?.point, let hover = click.hover else { return nil }
+        let length = simd_distance(a, hover.point)
+        guard length > 1e-9 else { return nil }
+        if case .equalLength(let ref)? = hover.target { return (length, ref) }
+        if let ref = hover.alsoEqual { return (length, ref) }
+        let tolerance = max(1e-6, length * 1e-9)
+        for curve in inference.curves where !curve.construction {
+            guard case .line(let p, let q) = curve.shape else { continue }
+            if abs(simd_distance(p, q) - length) <= tolerance { return (length, curve.ref) }
+        }
+        return nil
+    }
+
+    /// Build 53: Länge fest, der Stift gibt nur die Richtung vor. Die Richtung rastet (± 5°) parallel bzw.
+    /// gespiegelt zu vorhandenen Linien (auch versetzt, davor, dahinter, darüber) und waagerecht/senkrecht ein.
+    func lengthLockedCandidate(_ raw: Point2, from a: Point2, lock: (length: Double, ref: SketchCurveRef?)) -> SnapCandidate {
+        let v = raw - a
+        guard simd_length(v) > 1e-9 else {
+            return SnapCandidate(point: click.pointer ?? a, target: nil, guide: nil, label: "")
+        }
+        let u = simd_normalize(v)
+        var best: (angle: Double, direction: Point2, target: SnapTarget)?
+        func offer(_ d: Point2, _ target: SnapTarget) {
+            // Beide Richtungen der Geraden zählen
+            for dir in [d, -d] {
+                let angle = acos(min(1, max(-1, simd_dot(u, dir)))) * 180 / .pi
+                if angle <= Self.fingerAngleSnapDegrees, angle < (best?.angle ?? .infinity) {
+                    best = (angle, dir, target)
+                }
+            }
+        }
+        if snapEnabled {
+            offer([1, 0], .horizontal)
+            offer([0, 1], .vertical)
+            for curve in inference.curves where !curve.construction {
+                guard case .line(let p, let q) = curve.shape, simd_distance(p, q) > 1e-9 else { continue }
+                let d = simd_normalize(q - p)
+                offer(d, .parallel(curve.ref))
+                if abs(d.x) > 1e-9, abs(d.y) > 1e-9 { offer([d.x, -d.y], .mirroredAngle(curve.ref)) }
+            }
+        }
+        let direction = best?.direction ?? u
+        let end = a + direction * lock.length
+        guard let best else {
+            return SnapCandidate(point: end, target: lock.ref.map { .equalLength($0) }, guide: nil, label: "=")
+        }
+        var result = SnapCandidate(point: end, target: best.target, guide: (a, end), label: "")
+        result.alsoEqual = lock.ref
+        return result
+    }
+
     /// Nächster Punkt auf den Linienzügen innerhalb reach (für „Entfernte Kanten“).
     private static func nearestOnPolylines(_ p: Point2, _ lines: [[Point2]], reach: Double) -> Point2? {
         var best: (distance: Double, point: Point2)?
@@ -522,6 +578,12 @@ extension SketchController {
     private func clickCandidate(_ raw: Point2, tolerance: Double) -> SnapCandidate {
         let metrics = snapMetrics(tolerance)
         let lineTool = clickKind == .line
+        if lineTool, let lock = fingerLengthLock, let anchor = click.points.last?.point {
+            let result = lengthLockedCandidate(raw, from: anchor, lock: lock)
+            click.pointer = result.point
+            click.raw = raw
+            return result
+        }
         let tracking = clickTracking(raw, metrics: metrics, fresh: false)
         var snapped = solidCraftSnap(raw, tolerance: tolerance, prev: click.points.last?.point, lineTool: lineTool,
                                     tracking: tracking)
@@ -683,6 +745,8 @@ extension SketchController {
     }
 
     func clickBegan(at raw: Point2, tolerance: Double) {
+        // Build 53: eine festgehaltene Länge gilt nur für den Strich, in dem der Finger aufgelegt wurde
+        fingerLengthLock = nil
         guard let kind = clickKind else { return }
         hoverCandidate = nil
         let metrics = snapMetrics(tolerance)

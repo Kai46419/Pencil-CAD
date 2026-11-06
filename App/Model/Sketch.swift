@@ -591,9 +591,18 @@ final class SketchController: ObservableObject {
             // Einmal während eines Strichs aufgelegt, bleibt der Strich ein Bogen (auch wenn der Finger
             // inzwischen verrutscht oder abgehoben wurde)
             if arcModifier, dragStart != nil { startArcMidStroke() }
+            // Build 53 (Kai): Finger auf, während die Linie gelb (gleich lang wie eine andere) ist – die Länge bleibt,
+            // der Stift dreht nur noch; ohne Gelb hält der Finger an Punkten fest (fingerPointLock)
+            if arcModifier, !oldValue {
+                fingerLengthLock = options.isSolidCraft ? currentEqualLengthLock() : nil
+            } else if !arcModifier {
+                fingerLengthLock = nil
+            }
             if arcModifier != oldValue { changed() }
         }
     }
+    /// Mit dem Finger festgehaltene Linienlänge (Build 53); ref = gleich lange Linie für die Bedingung
+    var fingerLengthLock: (length: Double, ref: SketchCurveRef?)?
     private var arcLatched = false
     /// Bogen ohne Finger (Werkzeugrad bzw. Knopf „Bogen“): der nächste Strich mit dem Linienwerkzeug wird ein
     /// tangentialer Bogen, danach geht es mit Linien weiter
