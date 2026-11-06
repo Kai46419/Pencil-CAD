@@ -5,10 +5,11 @@ import SwiftUI
 // Ausdrucksfeld, Schalterzeilen und ein breiter Primärknopf. Kai wollte das rechte Fenster schlank (halb so breit
 // wie zuvor 264 pt): Touch-Ziele 36–38 pt, Beschriftungen über den Feldern statt daneben.
 
-/// Maße und Farben der Skizzenpalette (dunkel, Anthrazit wie SolidCraft `Tokens::dark()`).
+/// Maße und Farben der Skizzenpalette. Build 51 (Kai): im hellen Design hell, im dunklen Anthrazit wie SolidCraft
+/// `Tokens::dark()`, bei „Automatisch“ wie das iPad – und alle Fenster so breit wie das Abrunden-Fenster.
 enum PaletteStyle {
-    /// Breite des rechten Fensters (halb so breit wie die frühere Palette mit 264 pt)
-    static let width: CGFloat = 160
+    /// Breite des rechten Fensters (Build 51: wie das schwebende Abrunden-Fenster, vorher 160 pt)
+    static let width: CGFloat = 320
     /// Innenabstand des Fensters
     static let inset: CGFloat = 8
     /// Nutzbare Breite im Fenster
@@ -21,12 +22,14 @@ enum PaletteStyle {
     static let radius: CGFloat = 12
     static let controlRadius: CGFloat = 8
 
-    /// Panel-Grund `panel` #272B34
-    static let background = Color(red: 0x27 / 255, green: 0x2B / 255, blue: 0x34 / 255)
-    /// Kopf und Fuß `panel_header` #2F343E
-    static let header = Color(red: 0x2F / 255, green: 0x34 / 255, blue: 0x3E / 255)
-    /// Eingabefeld `field` #1E2229
-    static let field = Color(red: 0x1E / 255, green: 0x22 / 255, blue: 0x29 / 255)
+    /// Panel-Grund: hell weiß, dunkel `panel` #272B34
+    static let background = Color(SketchTheme.dynamic(light: .systemBackground, dark: SketchTheme.uiRGB(0x27, 0x2B, 0x34)))
+    /// Kopf und Fuß: hell #F2F3F6, dunkel `panel_header` #2F343E
+    static let header = Color(SketchTheme.dynamic(light: SketchTheme.uiRGB(0xF2, 0xF3, 0xF6),
+                                                  dark: SketchTheme.uiRGB(0x2F, 0x34, 0x3E)))
+    /// Eingabefeld: hell #F5F6F8, dunkel `field` #1E2229
+    static let field = Color(SketchTheme.dynamic(light: SketchTheme.uiRGB(0xF5, 0xF6, 0xF8),
+                                                 dark: SketchTheme.uiRGB(0x1E, 0x22, 0x29)))
     /// Trennlinie und Rand
     static let rule = Color.primary.opacity(0.10)
     static let controlBorder = Color.primary.opacity(0.18)
@@ -96,8 +99,6 @@ struct PaletteWindow<Top: View, Header: View, Middle: View, Footer: View>: View 
         }
         .contentShape(RoundedRectangle(cornerRadius: PaletteStyle.radius, style: .continuous))
         .elevationShadow(.floating)
-        // Dunkel (Anthrazit): Text, Systemfarben und die „sc.*-dark“-Bilder passend dazu
-        .environment(\.colorScheme, .dark)
     }
 }
 
