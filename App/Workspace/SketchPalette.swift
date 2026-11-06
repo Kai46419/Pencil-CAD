@@ -357,6 +357,7 @@ private struct PaletteMoreSection: View {
                 CheckRow(title: "Raster", icon: "grid", isOn: $sketch.showsGrid)
                 CheckRow(title: "Bereiche", icon: "square.fill.on.square", isOn: $sketch.showsProfiles)
                 CheckRow(title: "Hilfslinien", icon: "square.dashed", isOn: $sketch.showsConstruction)
+                CheckRow(title: "Schwebepunkte verbinden", icon: "line.diagonal.arrow", isOn: $sketch.pairConstructionLine)
                 CheckRow(title: "Maße als Schloss", icon: "lock", isOn: $sketch.collapsesLockedDimensions)
                 CheckRow(title: "Bestimmtheit", icon: "checkmark.seal", isOn: $sketch.showsDefinition)
                 CheckRow(title: "Linie endet nach Strich", icon: "line.diagonal", isOn: $sketch.lineSingleStroke)

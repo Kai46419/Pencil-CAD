@@ -697,6 +697,10 @@ final class SketchController: ObservableObject {
             inference = SketchInference(entities: entities, construction: construction, modelPoints: modelGuides.points)
         }
     }
+    /// Build 64 (Kai): Zwei per Schweben gemerkte Punkte zusätzlich mit einer Konstruktionslinie verbinden
+    @Published var pairConstructionLine = UserDefaults.standard.object(forKey: "pairConstructionLine") as? Bool ?? false {
+        didSet { UserDefaults.standard.set(pairConstructionLine, forKey: "pairConstructionLine") }
+    }
     /// Shapr3D „Zeigen › Leitpunkte“: Knoten in Stiftnähe anzeigen
     @Published var showsGuidePoints = UserDefaults.standard.object(forKey: "showsGuidePoints") as? Bool ?? true {
         didSet { UserDefaults.standard.set(showsGuidePoints, forKey: "showsGuidePoints") }
@@ -1563,8 +1567,8 @@ final class SketchController: ObservableObject {
 
     /// Stift drücken bzw. doppeltippen beim Schweben: liegt ein Fangpunkt (Ende, Mitte, Zentrum, Schnittpunkt,
     /// Hilfspunkt) unter dem Stift, wird er gemerkt. false = nichts in der Nähe.
-    /// pairs = false (Schweben, Build 45 Kai): nur Spurpunkt merken, kein Punktpaar mit Mitte und Mittellinie –
-    /// sonst entstand beim Schweben über Anfang und Ende einer Linie ungewollt eine Mittellinie.
+    /// pairs = false: nur Spurpunkt merken. Seit Build 64 schwebt der Stift wieder mit pairs = true:
+    /// zwei Punkte ergeben die fangbare Mitte, die Verbindung optional als Konstruktionslinie.
     func captureHovered(at p: Point2, tolerance: Double, pairs: Bool = true, onRemembered: (() -> Void)? = nil) -> Bool {
         // SolidCraft-Klickwerkzeug: derselbe Punkt speist sowohl Objektfangspuren als auch die bisherige
         // Paarfunktion für Abstand, Mittelpunkt und gestrichelte Mittellinie.
@@ -1620,21 +1624,36 @@ final class SketchController: ObservableObject {
         if capturedPoints.count >= 2 {
             let a = capturedPoints[0], b = capturedPoints[1]
             let middle = (a + b) / 2
+            var lineAdded = false
             if simd_distance(a, b) > 1e-6, !marks.contains(where: { simd_distance($0, middle) < 1e-6 }) {
+                // Build 64 (Kai): Mitte als fangbarer Hilfspunkt (Dreieck); die Verbindung der beiden Punkte
+                // wahlweise als echte Konstruktionslinie (fangbar, löschbar) statt der nicht fangbaren Mittellinie.
                 marks.append(middle)
-                // Mittellinie: Verbindung der beiden Punkte und Mittelsenkrechte
-                let half = simd_distance(a, b) * 0.6
-                let across = rightNormal(b - a)
-                guideLines.append((middle, [[a, b], [middle - across * half, middle + across * half]]))
+                if pairConstructionLine { lineAdded = addPairConstructionLine(a, b) }
             }
             capturedPoints = []
             // Wie Messen: Abstand und Lage der beiden Punkte gleich mit anzeigen
             let d = b - a
             let mm = { (value: Double) in value.formatted(.number.precision(.fractionLength(0...3))) }
-            notice = "Abstand \(mm(simd_length(d))) mm (ΔX \(mm(abs(d.x))), ΔY \(mm(abs(d.y)))) – Mitte gesetzt (Dreieck, fangbar), gestrichelt die Mittellinie."
+            notice = "Abstand \(mm(simd_length(d))) mm (ΔX \(mm(abs(d.x))), ΔY \(mm(abs(d.y)))) – Mitte gesetzt (Dreieck, fangbar)" + (lineAdded ? ", Verbindung als Konstruktionslinie." : ".")
         } else {
             notice = "Punkt 1 gemerkt – zweiten Punkt merken (Stift darüber drücken bzw. doppeltippen)."
         }
+        return true
+    }
+
+    /// Build 64: Verbindung zweier gemerkter Punkte als Konstruktionslinie (nicht doppelt anlegen)
+    private func addPairConstructionLine(_ a: Point2, _ b: Point2) -> Bool {
+        let exists = entities.indices.contains { index in
+            guard construction.contains(index), case .line(let p, let q) = entities[index] else { return false }
+            return (simd_distance(p, a) < 1e-6 && simd_distance(q, b) < 1e-6)
+                || (simd_distance(p, b) < 1e-6 && simd_distance(q, a) < 1e-6)
+        }
+        guard !exists else { return false }
+        remember()
+        entities.append(.line(a, b))
+        construction.insert(entities.count - 1)
+        entitiesChanged()
         return true
     }
 
