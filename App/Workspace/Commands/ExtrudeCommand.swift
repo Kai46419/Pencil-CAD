@@ -174,9 +174,9 @@ enum ExtrudeCommand: ModelCommandDriver {
         guard let handle = model.regionHandle else { return "Bereich nicht gefunden." }
 
         var mode = CommandOperation.mode(cmd, default: model.bodies.isEmpty ? .newBody : .union)
+        let entered = cmd.number(Key.distance, default: 10)
+        let side: Int = (entered >= 0) != flip ? 1 : -1
         if cmd.autoOperation {
-            let entered = cmd.number(Key.distance, default: 10)
-            let side: Int = (entered >= 0) != flip ? 1 : -1
             mode = automaticMode(cmd, ws, regions: regions, plane: plane, center: handle.origin, side: side)
             cmd.choices["operation"] = mode.rawValue
         }
@@ -238,6 +238,20 @@ enum ExtrudeCommand: ModelCommandDriver {
         }
         model.message = nil
         model.setRegionValue(value)
+        // Build 50 (Kai): die Automatik wählte „Abziehen“, das Abziehen trifft aber keinen Körper (Viereck unter
+        // einem schon extrudierten Kreis) – dann verbinden bzw. neuer Körper statt der Fehlermeldung
+        if cmd.autoOperation, mode == .cut, !plane.isOnFace, value != 0, !model.hasPreview,
+           model.message?.hasPrefix("Abziehen trifft keinen Körper") == true {
+            let normal: SIMD3<Double> = plane.normal * Double(side)
+            let fallback: ExtrudeMode = touchesBody(model, regions: regions, plane: plane, along: normal,
+                                                    length: max(1, abs(value))) ? .union : .newBody
+            cmd.choices["auto\(side)"] = fallback.rawValue
+            cmd.choices["operation"] = fallback.rawValue
+            mode = fallback
+            model.message = nil
+            model.regionMode = fallback
+            if !model.hasPreview { model.setRegionValue(value) }
+        }
         guard value == 0 || model.hasPreview else {
             return model.message ?? "Bereich lässt sich nicht extrudieren."
         }
@@ -325,12 +339,17 @@ enum ExtrudeCommand: ModelCommandDriver {
                                              along normal: SIMD3<Double>) -> Bool {
         guard model.sketches.indices.contains(regions[0].sketch) else { return false }
         let sketch = model.sketches[regions[0].sketch]
+        // Build 50: Mehrheit der Probepunkte statt eines einzigen – ein Bereich, der nur am Rand unter einem Körper
+        // liegt, wird verbunden und nicht abgezogen
+        var inside = 0
+        var total = 0
         for ref in regions where sketch.regions.indices.contains(ref.region) {
             for probe in ModelStore.interiorProbes(sketch.regions[ref.region]) {
-                if insideMaterial(model, from: plane.world(probe), along: normal) { return true }
+                total += 1
+                if insideMaterial(model, from: plane.world(probe), along: normal) { inside += 1 }
             }
         }
-        return false
+        return total > 0 && inside * 2 > total
     }
 
     /// Liegt der Punkt knapp vor dem Profil im Material? Der erste Treffer entlang der Richtung ist dann eine
