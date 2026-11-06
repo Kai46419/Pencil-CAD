@@ -20,7 +20,10 @@ NS_ASSUME_NONNULL_BEGIN
 @end
 
 typedef NS_ENUM(NSInteger, PCKBlendCorner)     { PCKBlendCornerRollingBall = 0, PCKBlendCornerSetback = 1 };
-typedef NS_ENUM(NSInteger, PCKBlendContinuity) { PCKBlendContinuityG1 = 0, PCKBlendContinuityG2 = 1 };
+typedef NS_ENUM(NSInteger, PCKBlendContinuity) {
+    PCKBlendContinuityG1 NS_SWIFT_NAME(g1) = 0,
+    PCKBlendContinuityG2 NS_SWIFT_NAME(g2) = 1
+};
 typedef NS_ENUM(NSInteger, PCKBlendProfile)    { PCKBlendProfileCircle = 0, PCKBlendProfileConic = 1 };
 typedef NS_ENUM(NSInteger, PCKBlendOverflow)   { PCKBlendOverflowAutomatic = 0, PCKBlendOverflowKeepEdge = 1 };
 
