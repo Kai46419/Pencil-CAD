@@ -30,7 +30,7 @@ final class SketchBuild66Tests: XCTestCase {
     func testEndJustBeforeLineSnapsOntoItInSameDirection() throws {
         let sketch = lineSketch([.line([20, -50], [20, 50])])
         sketch.click.points = [SketchClickPoint(point: [0, 0], target: nil)]
-        sketch.clickHover(at: [19.2, 9.6], tolerance: 1)
+        sketch.clickHover(at: [19.6, 9.8], tolerance: 1)
         let candidate = try XCTUnwrap(sketch.currentCandidate)
         XCTAssertEqual(candidate.point.x, 20, accuracy: 1e-6)
         if case .onCurve(let ref)? = candidate.target { XCTAssertEqual(ref.entity, 0) } else {
