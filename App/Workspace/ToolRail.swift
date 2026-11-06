@@ -443,6 +443,9 @@ struct ToolRail: View {
         .overlay(alignment: .topLeading) {
             sketchFlyout(entries)
         }
+        // Build 59 (Kai): unten Platz für Rückgängig/Wiederholen wie im 3D-Modus (die Skizzenleiste reichte bis
+        // an den unteren Rand und lag über den Knöpfen)
+        .padding(.bottom, bottomReserve)
         .animation(Theme.spring, value: openEntry)
     }
 
