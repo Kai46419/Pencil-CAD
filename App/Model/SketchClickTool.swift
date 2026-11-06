@@ -453,7 +453,7 @@ extension SketchController {
             // Nur die Länge getippt: ein eingerasteter Winkel bleibt samt Leitlinie (die Richtung ändert sich nicht)
             var alongRay = false
             switch candidate.target {
-            case .some(.horizontal), .some(.vertical), .some(.angle), .some(.parallel), .some(.perpendicular):
+            case .some(.horizontal), .some(.vertical), .some(.angle), .some(.parallel), .some(.perpendicular), .some(.mirroredAngle):
                 alongRay = true
             default: break
             }
@@ -551,7 +551,7 @@ extension SketchController {
            snapEnabled, snapKinds.contains(.equalLength), !snapSuspended, !arcModifier,
            lockedValue("Länge") == nil, !hasLockedBox {
             switch result.target {
-            case .some(.parallel), .some(.perpendicular):
+            case .some(.parallel), .some(.perpendicular), .some(.mirroredAngle):
                 if let match = inference.equalLength(from: anchor, toward: result.point, raw: raw,
                                                      tolerance: metrics.refine),
                    case .equalLength(let ref)? = match.target, inference.curve(ref)?.construction == false {
@@ -572,7 +572,7 @@ extension SketchController {
                 let direction = simd_distance(result.point, anchor) > 1e-9 ? result.point : raw
                 result.point = steppedLineEnd(direction, from: anchor)
             case .some(.horizontal), .some(.vertical), .some(.angle),
-                 .some(.parallel), .some(.perpendicular):
+                 .some(.parallel), .some(.perpendicular), .some(.mirroredAngle):
                 result.point = steppedLineEnd(result.point, from: anchor)
             default:
                 break
@@ -1294,7 +1294,11 @@ extension SketchController {
             let l = simd_length(w)
             guard l > 1e-9, l.isFinite else { continue }
             let d = w / l
-            if abs(u.x * d.y - u.y * d.x) < lineMatchAngleTolerance { hints.parallel.append([p, q]) }
+            // Build 44 (Kai): auch gleicher Winkel gespiegelt (z. B. 60° und 120°) wird grün
+            if abs(u.x * d.y - u.y * d.x) < lineMatchAngleTolerance
+                || (abs(d.x) > 1e-9 && abs(d.y) > 1e-9 && abs(u.x * d.y + u.y * d.x) < lineMatchAngleTolerance) {
+                hints.parallel.append([p, q])
+            }
             if abs(l - length) <= lengthTolerance { hints.equal.append([p, q]) }
         }
         return hints

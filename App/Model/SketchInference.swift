@@ -87,6 +87,9 @@ enum SnapTarget: Equatable {
     case vertical
     case parallel(SketchCurveRef)
     case perpendicular(SketchCurveRef)
+    /// Build 44 (Kai): gleicher Winkel zur Waagerechten wie diese Linie, aber gespiegelt (z. B. 60° und 120°,
+    /// Schenkel eines Trapezes) – Bedingung „Gleicher Winkel (gespiegelt)“
+    case mirroredAngle(SketchCurveRef)
     case equalLength(SketchCurveRef)
     /// Auf der Verlängerung einer Linie
     case lineExtension(SketchCurveRef)
@@ -115,7 +118,8 @@ enum SnapTarget: Equatable {
     /// Fang auf einer Leitlinie (Richtung bzw. Ausrichtung): der Achsfang beim Setzen ändert ihn nicht mehr.
     var isGuide: Bool {
         switch self {
-        case .horizontal, .vertical, .parallel, .perpendicular, .equalLength, .lineExtension, .angle, .aligned: true
+        case .horizontal, .vertical, .parallel, .perpendicular, .mirroredAngle, .equalLength, .lineExtension, .angle,
+             .aligned: true
         default: false
         }
     }
@@ -208,7 +212,7 @@ struct SnapLead {
     var rank: Int {
         switch target {
         case .onCurve, .lineExtension: 0
-        case .parallel, .perpendicular: 1
+        case .parallel, .perpendicular, .mirroredAngle: 1
         case .horizontal, .vertical: 2
         case .angle: 3
         default: 4
@@ -608,6 +612,14 @@ struct SketchInference {
                         let target: SnapTarget = isParallel ? .parallel(curve.ref) : .perpendicular(curve.ref)
                         result.append(SnapLead(origin: prev, dir: dir, minAlong: tol * 2, reach: tol, weight: 1,
                                                target: target, label: isParallel ? "//" : "⊥", rounding: .length,
+                                               overshoot: overshoot))
+                    }
+                    // Build 44 (Kai): gleicher Winkel gespiegelt (Trapez-Schenkel), bei 45° fällt er mit ⊥ zusammen
+                    let mirror = Point2(d.x, -d.y)
+                    if abs(d.x * mirror.y - d.y * mirror.x) > 1e-6, abs(simd_dot(d, mirror)) > 1e-6 {
+                        let dir = simd_dot(v, mirror) < 0 ? -mirror : mirror
+                        result.append(SnapLead(origin: prev, dir: dir, minAlong: tol * 2, reach: tol, weight: 1,
+                                               target: .mirroredAngle(curve.ref), label: "∠=", rounding: .length,
                                                overshoot: overshoot))
                     }
                 }

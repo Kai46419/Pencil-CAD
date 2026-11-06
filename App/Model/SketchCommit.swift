@@ -128,6 +128,8 @@ extension SketchController {
             return [.parallel(c, line)]
         case .perpendicular(let c):
             return [.perpendicular(c, line)]
+        case .mirroredAngle(let c):
+            return [.equalAngle(c, line, mirrored: true)]
         case .equalLength(let c):
             return [.equalLength(c, line)]
         case .angle, .aligned:

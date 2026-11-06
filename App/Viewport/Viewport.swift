@@ -1212,7 +1212,8 @@ final class ViewportView: MTKView {
             // Kreis mit Tangente obendrauf
             let r = s * 0.6
             return [snapRing(at: p, radius: r), [p + Point2(-s, r), p + Point2(s, r)]]
-        case .horizontal, .vertical, .parallel, .perpendicular, .equalLength, .lineExtension, .angle, .aligned, .grid:
+        case .horizontal, .vertical, .parallel, .perpendicular, .mirroredAngle, .equalLength, .lineExtension, .angle,
+             .aligned, .grid:
             return [snapRing(at: p, radius: s * 0.5)]
         }
     }

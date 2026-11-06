@@ -110,6 +110,18 @@ final class SketchBuild43Tests: XCTestCase {
         XCTAssertTrue(none.isEmpty)
     }
 
+    /// Build 44 (Kai): Schräge, Waagerechte, Schräge mit demselben Winkel gespiegelt (Trapez) – beide grün
+    func testMirroredAngleCountsAsSameDirection() {
+        let inference = SketchInference(entities: [.line([0, 0], [10, 10]), .line([10, 10], [30, 10])],
+                                        construction: [])
+        let mirrored = SketchController.lineMatches(from: [30, 10], to: [40, 0], curves: inference.curves)
+        XCTAssertEqual(mirrored.parallel.count, 1)
+        XCTAssertEqual(mirrored.parallel.first?.first, [0, 0])
+        // Waagerechte Linien spiegeln sich auf sich selbst: kein zusätzlicher Treffer
+        let flat = SketchController.lineMatches(from: [0, 20], to: [5, 20], curves: inference.curves)
+        XCTAssertEqual(flat.parallel.count, 1)
+    }
+
     func testConstructionLinesGiveNoHints() {
         let inference = SketchInference(entities: [.line([0, 0], [10, 5])], construction: [0])
         XCTAssertTrue(SketchController.lineMatches(from: [30, 0], to: [40, 5], curves: inference.curves).isEmpty)
