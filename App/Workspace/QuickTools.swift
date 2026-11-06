@@ -159,7 +159,10 @@ struct QuickToolsPalette: View {
                     // sonst unbemerkt Körper bzw. die Skizzenliste unter der offenen Skizze zurücknimmt
                     if sketch.canUndo { sketch.undo() }
                 },
-            ]
+            ] + (sketch.selection.isEmpty ? [] : [
+                // Build 56 (Kai): gewählte Striche direkt aus dem Rad löschen
+                Item(id: "Löschen", systemImage: "trash") { sketch.deleteSelection() },
+            ])
         }
         // Mit Auswahl (ohne offenes Panel): die Aktionen zur Auswahl wie im Menü „Auswahl“ (ModelRibbon)
         let hasSelection = model.selection != nil || !model.selectedEdges.isEmpty || !model.selectedBodies.isEmpty
