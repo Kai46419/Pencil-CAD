@@ -59,6 +59,12 @@ enum SketchClickKind: Equatable {
 
 /// Zustand der laufenden Klickfolge (gehört dem SketchController).
 struct SketchClickState {
+    /// Build 66 (Kai): per Fingertipp gesperrte Länge (gelb) bzw. Richtung (grün) des laufenden Linienstücks;
+    /// gilt bis zum Setzen des Endpunkts, Doppeltipp mit dem Finger hebt die Sperre auf
+    var latchedLength: (length: Double, ref: SketchCurveRef?)?
+    var latchedDirection: (direction: Point2, target: SnapTarget)?
+    /// Build 66 (Kai): Verlängerung der schrägen Linie bis zur ersten getroffenen Kurve (gestrichelt)
+    var forwardHit: (from: Point2, to: Point2)?
     struct Press {
         /// Ungefangener Aufsetzpunkt
         var raw: Point2
@@ -587,6 +593,14 @@ extension SketchController {
     private func clickCandidate(_ raw: Point2, tolerance: Double) -> SnapCandidate {
         let metrics = snapMetrics(tolerance)
         let lineTool = clickKind == .line
+        click.forwardHit = nil
+        if lineTool, let anchor = click.points.last?.point,
+           click.latchedLength != nil || click.latchedDirection != nil {
+            let result = latchedCandidate(raw, from: anchor, metrics: metrics)
+            click.pointer = result.point
+            click.raw = raw
+            return result
+        }
         if lineTool, let lock = fingerLengthLock, let anchor = click.points.last?.point {
             let result = lengthLockedCandidate(raw, from: anchor, lock: lock)
             click.pointer = result.point
@@ -681,10 +695,169 @@ extension SketchController {
                 break
             }
         }
+        if clickKind == .line, let anchor = click.points.last?.point, snapEnabled, !snapSuspended,
+           lockedValue("Länge") == nil, !arcModifier, !hasLockedBox {
+            applyForwardHit(&result, from: anchor, metrics: metrics)
+        }
         click.pointer = result.point
         click.raw = raw
         return result
     }
+
+    // MARK: Build 66 – Fingertipp sperrt Länge/Richtung, Verlängerung bis zur nächsten Kurve
+
+    /// Schräge Linie a→Ende: Verlängerung bis zur ersten getroffenen Kurve merken (gestrichelt gezeigt). Liegt das
+    /// Ende kurz davor, rastet es in derselben Richtung genau dort ein (die Richtung bleibt, nur die Länge wächst).
+    func applyForwardHit(_ result: inout SnapCandidate, from a: Point2, metrics: SnapMetrics) {
+        switch result.target {
+        case nil, .some(.grid), .some(.angle), .some(.parallel), .some(.perpendicular), .some(.mirroredAngle),
+             .some(.equalLength):
+            break
+        default:
+            return
+        }
+        let end = result.point
+        let v = end - a
+        let length = simd_length(v)
+        guard length > 1e-9 else { return }
+        let u = v / length
+        // Nur schräge Linien (waagerecht/senkrecht haben eigene Spuren)
+        let skew = sin(1.0 * .pi / 180)
+        guard abs(u.x) > skew, abs(u.y) > skew else { return }
+        let reach = max(length * 50, 1000)
+        let ray = TrimPrimitive.segment(end, end + u * reach)
+        var best: (distance: Double, point: Point2, ref: SketchCurveRef)?
+        for curve in inference.curves {
+            for primitive in curve.shape.primitives {
+                for hit in SketchTrim.intersections(ray, primitive) {
+                    let along = simd_dot(hit - end, u)
+                    guard along > 1e-6, simd_distance(hit, a) > 1e-6 else { continue }
+                    if along < (best?.distance ?? .infinity) { best = (along, hit, curve.ref) }
+                }
+            }
+        }
+        guard let best else { return }
+        if best.distance <= metrics.pointPick, result.alsoEqual == nil {
+            if case .equalLength? = result.target { return }
+            result.point = best.point
+            result.target = .onCurve(best.ref)
+            result.guide = (a, best.point)
+            result.label = "Ext"
+        } else {
+            click.forwardHit = (end, best.point)
+        }
+    }
+
+    /// Fester Fingertipp-Zustand: Länge und/oder Richtung gesperrt, der Stift gibt den Rest vor.
+    private func latchedCandidate(_ raw: Point2, from a: Point2, metrics: SnapMetrics) -> SnapCandidate {
+        let length = click.latchedLength
+        guard let direction = click.latchedDirection else {
+            return lengthLockedCandidate(raw, from: a, lock: length!)
+        }
+        let u = direction.direction
+        var result: SnapCandidate
+        if let length {
+            let end = a + u * length.length
+            result = SnapCandidate(point: end, target: direction.target, guide: (a, end), label: "")
+            result.alsoEqual = length.ref
+            return result
+        }
+        let along = max(simd_dot(raw - a, u), 1e-6)
+        var end = steppedLineEnd(a + u * along, from: a)
+        if simd_dot(end - a, u) <= 1e-9 { end = a + u * along }
+        result = SnapCandidate(point: end, target: direction.target, guide: (a, end), label: "")
+        // Gleiche Länge in derselben Richtung rastet zusätzlich ein (gelb)
+        if snapEnabled, snapKinds.contains(.equalLength),
+           let match = inference.equalLength(from: a, toward: end, raw: raw, tolerance: metrics.refine),
+           case .equalLength(let ref)? = match.target {
+            let w = match.point - a
+            if abs(w.x * u.y - w.y * u.x) < 1e-6, simd_dot(w, u) > 0 {
+                result.point = match.point
+                result.alsoEqual = ref
+                result.guide = (a, match.point)
+            }
+        }
+        if result.alsoEqual == nil { applyForwardHit(&result, from: a, metrics: metrics) }
+        return result
+    }
+
+    /// Richtung der laufenden Linie, wenn sie gerade grün ist (parallel bzw. gespiegelt zu einer vorhandenen Linie).
+    private func currentDirectionLock() -> (direction: Point2, target: SnapTarget)? {
+        guard clickKind == .line, let a = click.points.last?.point, let hover = click.hover else { return nil }
+        let v = hover.point - a
+        guard simd_length(v) > 1e-9 else { return nil }
+        let u = simd_normalize(v)
+        switch hover.target {
+        case .parallel?, .perpendicular?, .mirroredAngle?:
+            return (u, hover.target!)
+        default:
+            break
+        }
+        for curve in inference.curves where !curve.construction {
+            guard case .line(let p, let q) = curve.shape, simd_distance(p, q) > 1e-9 else { continue }
+            let d = simd_normalize(q - p)
+            if abs(u.x * d.y - u.y * d.x) < Self.lineMatchAngleTolerance { return (u, .parallel(curve.ref)) }
+            if abs(d.x) > 1e-9, abs(d.y) > 1e-9, abs(u.x * d.y + u.y * d.x) < Self.lineMatchAngleTolerance {
+                return (u, .mirroredAngle(curve.ref))
+            }
+        }
+        return nil
+    }
+
+    /// Was ein Fingertipp jetzt sperren würde (beim Auflegen des Fingers gemerkt, bevor der Finger den Fang ändert).
+    struct FingerLockSnapshot {
+        var length: (length: Double, ref: SketchCurveRef?)?
+        var direction: (direction: Point2, target: SnapTarget)?
+    }
+
+    func fingerLockSnapshot() -> FingerLockSnapshot? {
+        guard options.isSolidCraft, clickKind == .line, !click.points.isEmpty else { return nil }
+        let snapshot = FingerLockSnapshot(length: currentEqualLengthLock(), direction: currentDirectionLock())
+        return snapshot.length == nil && snapshot.direction == nil ? nil : snapshot
+    }
+
+    /// Fingertipp beim Zeichnen einer Linie: gelb sperrt die Länge, grün die Richtung (beides möglich).
+    /// false = nichts Neues gesperrt.
+    @discardableResult
+    func latchFingerLocks(_ snapshot: FingerLockSnapshot? = nil) -> Bool {
+        guard let snapshot = snapshot ?? fingerLockSnapshot(), clickKind == .line, !click.points.isEmpty else {
+            return false
+        }
+        var latched = false
+        if click.latchedLength == nil, let lock = snapshot.length {
+            click.latchedLength = lock
+            latched = true
+        }
+        if click.latchedDirection == nil, let lock = snapshot.direction {
+            click.latchedDirection = lock
+            latched = true
+        }
+        guard latched else { return false }
+        let parts = [click.latchedLength != nil ? "Länge" : nil, click.latchedDirection != nil ? "Winkel" : nil]
+            .compactMap { $0 }.joined(separator: " und ")
+        notice = "\(parts) gesperrt – Doppeltipp mit dem Finger hebt die Sperre auf."
+        if let raw = click.raw, click.press == nil {
+            click.hover = clickCandidate(raw, tolerance: click.mmPerPoint * 20)
+        }
+        changed()
+        return true
+    }
+
+    /// Doppeltipp mit dem Finger: Sperren aufheben. false = es war nichts gesperrt.
+    @discardableResult
+    func clearFingerLocks() -> Bool {
+        guard click.latchedLength != nil || click.latchedDirection != nil else { return false }
+        click.latchedLength = nil
+        click.latchedDirection = nil
+        notice = "Sperre aufgehoben."
+        if let raw = click.raw, click.press == nil {
+            click.hover = clickCandidate(raw, tolerance: click.mmPerPoint * 20)
+        }
+        changed()
+        return true
+    }
+
+    var hasFingerLocks: Bool { click.latchedLength != nil || click.latchedDirection != nil }
 
     /// Der Endpunkt eines Mittelpunktbogens muss auf Radiuskreis UND Fangkurve liegen.
     /// Ein nur auf die Fangkurve projizierter Punkt trägt sonst eine falsche Abhängigkeit.
@@ -1009,6 +1182,9 @@ extension SketchController {
         }
         guard let index = commitLine(from: last, to: point) else { return }
         placedPointCount += 1
+        click.latchedLength = nil
+        click.latchedDirection = nil
+        click.forwardHit = nil
         if !options.locked.isEmpty { options.locked = [:] }
         if let first = click.chainFirst, simd_distance(first, point.point) < 1e-9 {
             // Zurück am Anfang: geschlossen

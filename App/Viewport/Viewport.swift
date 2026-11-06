@@ -239,6 +239,46 @@ final class ViewportView: MTKView {
     /// Tippen sonst „STEP importieren“ rückgängig, der importierte Körper verschwand (Kai)
     private var navigationMovedAt: TimeInterval = 0
 
+    /// Build 66: Fingertipps beim Zeichnen einer Linie (Beginn, Ort, was gesperrt würde)
+    private var fingerTapStarts: [ObjectIdentifier: (time: TimeInterval, location: CGPoint,
+                                                     snapshot: SketchController.FingerLockSnapshot?)] = [:]
+    /// Letzter Fingertipp, der gesperrt bzw. entsperrt hat oder hätte (Tippen/Doppeltippen ändern dann nichts sonst)
+    private var fingerLockTapAt: TimeInterval = 0
+    private var lastFingerTapAt: TimeInterval = 0
+
+    /// Build 66 (Kai): Tipp mit dem Finger sperrt gelb (Länge) bzw. grün (Winkel), Doppeltipp hebt die Sperre auf.
+    private func noteFingerTaps(began: Set<UITouch> = [], ended: Set<UITouch> = []) {
+        guard let sketch, sketch.isActive, !sketch.isChoosingPlane, sketch.clickKind == .line else {
+            fingerTapStarts = [:]
+            return
+        }
+        let now = CACurrentMediaTime()
+        for touch in began where touch.type == .direct {
+            fingerTapStarts[ObjectIdentifier(touch)] = (now, touch.location(in: self), sketch.fingerLockSnapshot())
+            if sketch.hasFingerLocks || fingerTapStarts[ObjectIdentifier(touch)]?.snapshot != nil {
+                fingerLockTapAt = now
+            }
+        }
+        for touch in ended where touch.type == .direct {
+            guard let start = fingerTapStarts.removeValue(forKey: ObjectIdentifier(touch)) else { continue }
+            let location = touch.location(in: self)
+            guard now - start.time < 0.3,
+                  hypot(location.x - start.location.x, location.y - start.location.y) < 12 else { continue }
+            let second = now - lastFingerTapAt < 0.45
+            lastFingerTapAt = now
+            if second, sketch.clearFingerLocks() {
+                fingerLockTapAt = now
+                suppressFingerTap = true
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            } else if !second, sketch.latchFingerLocks(start.snapshot) {
+                fingerLockTapAt = now
+                suppressFingerTap = true
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            }
+            refresh()
+        }
+    }
+
     private func updateHeldFingers(began: Set<UITouch> = [], ended: Set<UITouch> = []) {
         guard let sketch else { return }
         // Im Skizzenmodus nehmen Verschieben/Zoomen dem Viewport den Finger nicht weg: lag der Finger vor dem
@@ -1003,6 +1043,12 @@ final class ViewportView: MTKView {
                 if !chosen.isEmpty {
                     groups.append(LineGroup(polylines: chosen.map { $0.map(world) }, color: Self.selectionOrange, width: 2.4))
                 }
+            }
+            // Build 66: Verlängerung der schrägen Linie bis zur ersten getroffenen Kurve, gestrichelt mit Trefferpunkt
+            if let hit = sketch.click.forwardHit, sketch.click.hover != nil, !sketch.click.points.isEmpty {
+                let dashes = dashed([hit.from, hit.to], dash: 4 * perPoint)
+                groups.append(LineGroup(polylines: dashes.map { $0.map(world) }, color: Self.previewBlue, width: 1.3,
+                                        dots: [world(hit.to)], dotRadius: 3))
             }
             // Mittellinien gemerkter Punktpaare (Verbindung und Mittelsenkrechte), gestrichelt
             if !sketch.guideLines.isEmpty {
@@ -2763,6 +2809,7 @@ final class ViewportView: MTKView {
     // MARK: Berührungen
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        noteFingerTaps(began: touches)
         updateHeldFingers(began: touches)
         // Beschneiden mit dem Finger: kommt ein zweiter Finger dazu (Verschieben, Zoomen, Rückgängig), ist es kein Wisch
         if let touch = sketchTouch, touch.type == .direct, sketch?.tool == .trim, !touches.contains(touch) {
@@ -2952,6 +2999,7 @@ final class ViewportView: MTKView {
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        noteFingerTaps(ended: touches)
         updateHeldFingers(ended: touches)
         if sculptEnded(touches) { return }
         if let touch = calibrationTouch, touches.contains(touch) {
@@ -3007,6 +3055,7 @@ final class ViewportView: MTKView {
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        for touch in touches { fingerTapStarts.removeValue(forKey: ObjectIdentifier(touch)) }
         updateHeldFingers(ended: touches)
         // Pinsel: ein abgebrochener Strich wird wie ein beendeter übernommen (ohne Bewegung ändert er nichts)
         if sculptEnded(touches) { return }
@@ -3097,6 +3146,8 @@ final class ViewportView: MTKView {
                 return
             }
             if suppressFingerTap { return }
+            // Build 66: Fingertipp sperrt bzw. entsperrt gerade die Linie (touchesEnded) – nichts auswählen
+            if CACurrentMediaTime() - fingerLockTapAt < 0.6 { return }
             switch sketch.tool {
             case .project:
                 project(at: location)
@@ -3365,6 +3416,11 @@ final class ViewportView: MTKView {
         }
         guard let sketch, sketch.isActive, !sketch.isChoosingPlane,
               let point = sketchPoint(at: gesture.location(in: self)) else { return }
+        // Build 66 (Kai): Doppeltipp hebt die Finger-Sperre der Linie auf, statt einen Punkt zu merken
+        if sketch.clearFingerLocks() || CACurrentMediaTime() - fingerLockTapAt < 0.6 {
+            refresh()
+            return
+        }
         if !sketch.captureHovered(at: point, tolerance: snapTolerance) {
             sketch.notice = "Kein Punkt zum Merken – auf ein Ende, eine Mitte, ein Zentrum, einen Schnittpunkt oder eine Körperecke doppeltippen."
         }
