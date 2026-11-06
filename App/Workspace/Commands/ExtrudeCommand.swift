@@ -305,7 +305,9 @@ enum ExtrudeCommand: ModelCommandDriver {
             // Ohne Vorschau prüfen (die Vorschau hätte andere Körper)
             model.dropPreview()
             let normal: SIMD3<Double> = plane.normal * Double(side)
-            if insideMaterial(model, from: center, along: normal) {
+            // Build 47 (Kai): Probepunkte IM Bereich statt seiner Mitte – beim Viereck mit Kreisloch lag die Mitte im
+            // schon extrudierten Zylinder, die Automatik wählte „Abziehen“ und das traf dann keinen Körper
+            if regionInsideMaterial(model, regions: regions, plane: plane, along: normal) {
                 mode = .cut
             } else if touchesBody(model, regions: regions, plane: plane, along: normal,
                                   length: max(1, abs(cmd.number(Key.distance, default: 10)))) {
@@ -316,6 +318,19 @@ enum ExtrudeCommand: ModelCommandDriver {
         }
         cmd.choices[key] = mode.rawValue
         return mode
+    }
+
+    /// Liegt der Bereich selbst (Probepunkte im Bereich, nicht in seinen Löchern) knapp vor dem Profil im Material?
+    private static func regionInsideMaterial(_ model: ModelStore, regions: [RegionRef], plane: SketchPlane,
+                                             along normal: SIMD3<Double>) -> Bool {
+        guard model.sketches.indices.contains(regions[0].sketch) else { return false }
+        let sketch = model.sketches[regions[0].sketch]
+        for ref in regions where sketch.regions.indices.contains(ref.region) {
+            for probe in ModelStore.interiorProbes(sketch.regions[ref.region]) {
+                if insideMaterial(model, from: plane.world(probe), along: normal) { return true }
+            }
+        }
+        return false
     }
 
     /// Liegt der Punkt knapp vor dem Profil im Material? Der erste Treffer entlang der Richtung ist dann eine

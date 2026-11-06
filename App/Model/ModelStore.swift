@@ -1103,7 +1103,7 @@ final class ModelStore: ObservableObject {
 
     /// Einige Punkte sicher im Inneren eines Bereichs (außerhalb seiner Löcher): Schwerpunkt und zur Mitte
     /// gerückte Eckpunkte.
-    private static func interiorProbes(_ region: SketchRegion) -> [Point2] {
+    static func interiorProbes(_ region: SketchRegion) -> [Point2] {
         let polygon = region.polygon
         guard polygon.count >= 3 else { return [] }
         let center = polygon.reduce(Point2.zero, +) / Double(polygon.count)
