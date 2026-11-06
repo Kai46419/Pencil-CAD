@@ -335,6 +335,13 @@ extension ModelStore {
             applyBlendResult(known.result, request: request)
             return
         }
+        // Build 49 (Kai: „wenn ich so weit runter abrunde … sehr am Ruckeln“): Über einem schon gescheiterten Radius
+        // scheitert auch jeder größere – nicht neu rechnen (jeder Fehlversuch dauerte Sekunden und ließ die Vorschau
+        // springen), sondern sofort den größten gelungenen Radius darunter zeigen.
+        if let limited = knownBlendLimit(key: key, shape: shape, request: request) {
+            applyBlendResult(limited, request: request)
+            return
+        }
         // Läuft schon dieselbe Rechnung: übernehmen statt noch einmal
         if let current = blendJobs.current, current.key == key, current.source === shape {
             if blendJobs.overdue {
@@ -356,6 +363,32 @@ extension ModelStore {
             return
         }
         startBlendJob(request)
+    }
+
+    /// Build 49: Ergebnis aus dem Gedächtnis, wenn der verlangte Radius über einem schon gescheiterten liegt –
+    /// der größte gelungene Radius darunter (Vorschau bleibt stehen) bzw. der Fehlschlag. nil = rechnen.
+    /// Nur konstante Standard-Rundung ohne Zusammenfassen (dort gilt „größer scheitert auch“ verlässlich).
+    private func knownBlendLimit(key: BlendJobKey, shape: PCKShape, request: BlendJobRequest) -> BlendJobResult? {
+        guard key.operation == .fillet, key.end == nil, key.partialRange == nil, key.options == nil,
+              request.mergeFeature == nil else { return nil }
+        let entries = blendJobs.memo.filter { entry in
+            entry.source === shape && entry.key.edges == key.edges && entry.key.operation == key.operation
+                && entry.key.end == nil && entry.key.partialRange == nil && entry.key.options == nil
+                && entry.key.featureIDs == key.featureIDs
+        }
+        let failures = entries.filter { entry in
+            let r = entry.result
+            return r.shape == nil && !r.timedOut && !r.crashed && !r.mergeFailed && !r.optionsFailed
+        }
+        guard let limit = failures.map({ $0.key.value }).filter({ $0 <= key.value }).min() else { return nil }
+        let best = entries.filter { $0.result.shape != nil && !$0.result.merged && $0.key.value < limit }
+            .max { $0.key.value < $1.key.value }
+        if let best {
+            var result = best.result
+            result.amount = best.key.value
+            return result
+        }
+        return BlendJobResult(shape: nil, amount: key.value)
     }
 
     private func startBlendJob(_ request: BlendJobRequest) {
@@ -587,8 +620,10 @@ extension ModelStore {
             message = "Mit „\(previousName)“ zu einer Rundung zusammengefasst – die Ecke läuft sauber ineinander."
             return
         }
+        // Build 49: über der gefundenen Grenze bleibt die Vorschau beim größten gelungenen Radius stehen
         message = result.amount < input.value - 1e-9
-            ? "\(operation.rawValue): größter möglicher Wert hier \(result.amount.formatted()) mm." : nil
+            ? "\(operation.rawValue): \(input.value.formatted()) mm geht hier nicht – gezeigt und übernommen wird "
+                + "\(result.amount.formatted()) mm." : nil
         noteBlend(operation, value: result.amount, second: input.second, end: input.end,
                   partialRange: input.partialRange, edges: request.blendEdges,
                   options: operation == .fillet ? input.options : nil)
