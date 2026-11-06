@@ -90,7 +90,7 @@ enum ToolCategory: String {
     case view = "Ansicht"
     // Skizzenmodus nach SolidCraft (Create / Modify / Pattern / Constrain / Reference / Inspect)
     case sketchPattern = "Muster"
-    case constrain = "Bedingen"
+    case constrain = "Bedingungen"
     case reference = "Referenz"
 
     /// Symbolfarbe (inaktiv) und Füllung (aktiv)
@@ -792,22 +792,8 @@ struct ToolRail: View {
                       isActive: sketch.isGeneratingShape, action: {
                 sketch.startShapeGenerator()
             }),
-            // BEDINGEN: Bemaßung und Trennen in einer Zeile, dann das Raster der Bedingungen
-            RailEntry(id: "sketch.dimension", title: ConstraintKind.dimension.rawValue, subtitle: "Element antippen",
-                      systemImage: ConstraintKind.dimension.systemImage, category: .constrain, isEnabled: planeReady,
-                      action: {
-                // Maße erscheinen zur Auswahl im Viewport (Maßfeld mit Schloss)
-                if sketch.pendingAction != nil { sketch.cancelPending() }
-                sketch.tool = .select
-                sketch.notice = ConstraintKind.dimension.selectionHint
-            }),
-            RailEntry(id: "sketch.detach", title: "Trennen", subtitle: detachPending ? "Aktiv" : nil,
-                      systemImage: "link.badge.plus", category: .constrain, isActive: detachPending,
-                      isEnabled: planeReady, action: {
-                sketch.start(.detach)
-            }),
-            RailEntry(id: "sketch.constraints", title: "Bedingungen", systemImage: "sc.c_hv", category: .constrain,
-                      isEnabled: planeReady, grid: constraintCells),
+            // Build 63 (Kai): Bemaßung, Trennen und die Bedingungen stehen rechts im Fenster „Bedingungen“
+            // (SketchConstraintWindow.swift)
             // REFERENZ
             toolEntry(.project, category: .reference),
             // PRÜFEN

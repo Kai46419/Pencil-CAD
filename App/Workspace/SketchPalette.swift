@@ -14,9 +14,11 @@ struct SketchPalette: View {
     @ObservedObject var sketch: SketchController
     @Binding var panel: SidePanel?
     let screenshot: () -> Void
+    @AppStorage(SketchConstraintWindowState.openKey) private var constraintsOpen = true
 
     var body: some View {
-        PaletteWindow {
+        // Das Fenster „Bedingungen“ steht darunter: aufgeklappt bleibt dem Mittelteil weniger Höhe
+        PaletteWindow(maxContentHeight: constraintsOpen ? 330 : 620) {
             PaletteViewControls(workspace: workspace, sketch: sketch, panel: $panel, screenshot: screenshot)
         } header: {
             PaletteHeader(workspace: workspace, model: model, sketch: sketch)
@@ -338,8 +340,7 @@ private struct PaletteToggles: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            CheckRow(title: "Bedingungen", isOn: $sketch.showsConstraintBadges)
-            CheckRow(title: "Bemaßungen", isOn: $sketch.showsDimensions)
+            // Bedingungen und Bemaßungen anzeigen: im Fenster „Bedingungen“ (Build 63)
             CheckRow(title: "Punkte", isOn: $sketch.showsPoints)
         }
     }

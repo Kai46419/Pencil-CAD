@@ -138,8 +138,12 @@ private struct WorkspaceContent: View {
                         // die Eigenschaften von Werkzeug bzw. Auswahl (SketchPalette) oder des offenen Modellbefehls
                         // (FeaturePanel); unten bleibt Platz für Hinweise und Rückgängig. Ohne beides die Säule RightRail.
                         if sketch.isActive {
-                            SketchPalette(workspace: workspace, model: model, sketch: sketch, panel: $panel,
-                                          screenshot: takeScreenshot)
+                            VStack(spacing: 10) {
+                                SketchPalette(workspace: workspace, model: model, sketch: sketch, panel: $panel,
+                                              screenshot: takeScreenshot)
+                                // Build 63 (Kai): Bedingungen als eigenes Fenster unter dem Fenster mit dem „U“
+                                SketchConstraintWindow(sketch: sketch)
+                            }
                                 .padding(.bottom, 84)
                                 .transition(.opacity.combined(with: .move(edge: .trailing)))
                         } else if let command = workspace.command {
