@@ -469,7 +469,7 @@ struct SketchInference {
 
     /// Nächster Schnittpunkt zweier Kurven nahe lp (höchstens 256 Kurven); ohne Schnittpunkte, auf denen schon
     /// ein Punkt liegt (dort greift Stufe 0).
-    private func nearestCrossing(_ lp: Point2, tolerance tol: Double, extra: [Point2])
+    func nearestCrossing(_ lp: Point2, tolerance tol: Double, extra: [Point2])
         -> (point: Point2, a: SketchCurveRef, b: SketchCurveRef)? {
         var candidates: [Curve] = []
         for curve in curves where curve.shape.distance(to: lp) <= tol {

@@ -168,6 +168,11 @@ extension SketchController {
         click.mmPerPoint = metrics.mmPerPoint
         // Fang aus (Hauptschalter „Fang“ – wirkte hier bisher nicht, Kai) bzw. unterdrückt: Stift fest drücken
         // oder (SolidCraft-Modus) einen Finger auflegen
+        // Build 52 (Kai): im SolidCraft-Stil hält ein aufgelegter Finger den Stift an Punkten fest – Linienenden,
+        // Zentren, Schnitte und Körperecken fangen dann dreimal so weit, alle anderen Fänge ruhen
+        if arcModifier, options.isSolidCraft, snapEnabled {
+            return fingerPointLock(raw, metrics: metrics)
+        }
         if !snapEnabled || snapSuspended || arcModifier { return .free(raw) }
         let extra = click.points.map(\.point) + splinePoints + marks
         updateWokenCenter(raw, metrics: metrics, extra: extra)
@@ -184,6 +189,33 @@ extension SketchController {
             return SnapCandidate(point: edge, target: .modelVertex(edge), guide: nil, label: "Kante")
         }
         return found
+    }
+
+    /// Fangweite des Punktfangs mit aufgelegtem Finger (Vielfaches von pointPick, ca. 30 pt)
+    static let fingerLockFactor = 3.0
+
+    /// Finger aufgelegt (Build 52): nächster Punkt (Ende, Zentrum, Schnitt, Körperecke, Punkte des Zugs) in
+    /// großer Weite; ohne Punkt in der Nähe bleibt der Stift frei.
+    func fingerPointLock(_ raw: Point2, metrics: SnapMetrics) -> SnapCandidate {
+        let extra = click.points.map(\.point) + splinePoints + marks
+        let reach = metrics.pointPick * Self.fingerLockFactor
+        var best: (distance: Double, candidate: SnapCandidate)?
+        func offer(_ point: Point2, _ candidate: @autoclosure () -> SnapCandidate) {
+            let d = simd_distance(point, raw)
+            guard d < reach, d < (best?.distance ?? .infinity) else { return }
+            best = (d, candidate())
+        }
+        if let node = inference.pointHit(raw, metrics: metrics, kinds: [.endpoint, .center], extra: extra, reach: reach) {
+            offer(node.point, SnapCandidate(point: node.point, target: .point(node.ref), guide: nil, label: ""))
+        }
+        if let crossing = inference.nearestCrossing(raw, tolerance: reach, extra: extra) {
+            offer(crossing.point, SnapCandidate(point: crossing.point, target: .crossing(crossing.a, crossing.b),
+                                                guide: nil, label: "X"))
+        }
+        for q in inference.modelPoints {
+            offer(q, SnapCandidate(point: q, target: .modelVertex(q), guide: nil, label: "Pt"))
+        }
+        return best?.candidate ?? .free(raw)
     }
 
     /// Nächster Punkt auf den Linienzügen innerhalb reach (für „Entfernte Kanten“).
