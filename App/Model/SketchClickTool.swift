@@ -697,7 +697,7 @@ extension SketchController {
         }
         if clickKind == .line, let anchor = click.points.last?.point, snapEnabled, !snapSuspended,
            lockedValue("Länge") == nil, !arcModifier, !hasLockedBox {
-            applyForwardHit(&result, from: anchor, metrics: metrics)
+            applyForwardHit(&result, from: anchor, raw: raw, metrics: metrics)
         }
         click.pointer = result.point
         click.raw = raw
@@ -708,7 +708,7 @@ extension SketchController {
 
     /// Schräge Linie a→Ende: Verlängerung bis zur ersten getroffenen Kurve merken (gestrichelt gezeigt). Liegt das
     /// Ende kurz davor, rastet es in derselben Richtung genau dort ein (die Richtung bleibt, nur die Länge wächst).
-    func applyForwardHit(_ result: inout SnapCandidate, from a: Point2, metrics: SnapMetrics) {
+    func applyForwardHit(_ result: inout SnapCandidate, from a: Point2, raw: Point2, metrics: SnapMetrics) {
         switch result.target {
         case nil, .some(.grid), .some(.angle), .some(.parallel), .some(.perpendicular), .some(.mirroredAngle),
              .some(.equalLength):
@@ -737,7 +737,9 @@ extension SketchController {
             }
         }
         guard let best else { return }
-        if best.distance <= metrics.pointPick, result.alsoEqual == nil {
+        // Abstand vom Stift (nicht vom auf mm gerasterten Ende) bis zum Treffer, längs der Linie
+        let penGap = simd_dot(best.point - raw, u)
+        if penGap <= metrics.pointPick, simd_dot(raw - a, u) > 0, result.alsoEqual == nil {
             if case .equalLength? = result.target { return }
             result.point = best.point
             result.target = .onCurve(best.ref)
@@ -777,7 +779,7 @@ extension SketchController {
                 result.guide = (a, match.point)
             }
         }
-        if result.alsoEqual == nil { applyForwardHit(&result, from: a, metrics: metrics) }
+        if result.alsoEqual == nil { applyForwardHit(&result, from: a, raw: raw, metrics: metrics) }
         return result
     }
 
