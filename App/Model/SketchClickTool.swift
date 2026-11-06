@@ -183,6 +183,12 @@ extension SketchController {
                                                    woken: wokenCenter, fineStep: step, gridOn: gridOn,
                                                    tracking: tracking),
                                    raw: raw, tolerance: metrics.pointPick, kinds: snapKinds)
+        // Build 54 (Kai): auf einer Linie entlanggleitend rasten Anfang und Ende schon aus 2,5-facher Punktweite ein
+        if case .onCurve? = found.target,
+           let node = inference.pointHit(raw, metrics: metrics, kinds: [.endpoint], extra: [],
+                                         reach: metrics.pointPick * Self.endpointOnCurveFactor) {
+            return SnapCandidate(point: node.point, target: .point(node.ref), guide: nil, label: "")
+        }
         // „Entfernte Kanten“: ohne anderen Fang auf eine projizierte Körperkante (wirkte bisher nur im klassischen Stil)
         if found.target == nil || found.target == .grid, snapKinds.contains(.distantEdge),
            let edge = Self.nearestOnPolylines(raw, modelGuides.curves, reach: metrics.onCurve) {
@@ -190,6 +196,9 @@ extension SketchController {
         }
         return found
     }
+
+    /// Fangweite der Linienenden, solange der Stift auf der Linie gleitet (Vielfaches von pointPick)
+    static let endpointOnCurveFactor = 2.5
 
     /// Fangweite des Punktfangs mit aufgelegtem Finger (Vielfaches von pointPick, ca. 30 pt)
     static let fingerLockFactor = 3.0

@@ -1082,7 +1082,9 @@ final class ViewportView: MTKView {
             } else {
                 crosshair = nil
             }
-            if let crosshair {
+            // Build 54 (Kai): im SolidCraft-Stil nur mit Fang – nach dem Strich ist es weg und erscheint wieder, sobald
+            // der schwebende Stift auf einen Punkt bzw. eine Abhängigkeit rastet
+            if let crosshair, crosshair.snapped || !sketch.options.isSolidCraft {
                 let hover = crosshair.point
                 // Kai: Größe wie gehabt, Strich so fein wie die rote/grüne Skizzenachse; orange, sobald ein Fangpunkt greift
                 let arm = 15 * perPoint, gap = 3.5 * perPoint
