@@ -354,7 +354,6 @@ private struct PaletteMoreSection: View {
         PaletteSection("Mehr", expanded: false) {
             VStack(alignment: .leading, spacing: 0) {
                 CheckRow(title: "Raster", icon: "grid", isOn: $sketch.showsGrid)
-                CheckRow(title: "Raster 1-2-5", icon: "square.grid.3x3", isOn: $options.gridAuto)
                 CheckRow(title: "Bereiche", icon: "square.fill.on.square", isOn: $sketch.showsProfiles)
                 CheckRow(title: "Hilfslinien", icon: "square.dashed", isOn: $sketch.showsConstruction)
                 CheckRow(title: "Maße als Schloss", icon: "lock", isOn: $sketch.collapsesLockedDimensions)

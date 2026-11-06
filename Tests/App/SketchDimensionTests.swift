@@ -324,6 +324,7 @@ final class SketchDimensionTests: XCTestCase {
         sketch.viewHalfHeight = 10
 
         let raw = Point2(1.37, 2.26)
+        sketch.options.gridAuto = true
         let automatic = sketch.solidCraftSnap(raw, tolerance: 0.5, prev: nil, lineTool: false)
         sketch.chooseGridStep(1)
         let fixed = sketch.solidCraftSnap(raw, tolerance: 0.5, prev: nil, lineTool: false)
@@ -337,8 +338,9 @@ final class SketchDimensionTests: XCTestCase {
         let reopened = Workspace(project: project).sketch
         XCTAssertEqual(reopened.gridStep, 1)
         XCTAssertFalse(reopened.options.gridAuto)
+        // Build 58 (Kai): keine Automatik mehr – auch ein gemerkter Automatik-Stand öffnet fest
         reopened.options.gridAuto = true
-        XCTAssertTrue(Workspace(project: project).sketch.options.gridAuto)
+        XCTAssertFalse(Workspace(project: project).sketch.options.gridAuto)
     }
 
     func testLegacyGridSettingOpensAsFixedChoice() throws {

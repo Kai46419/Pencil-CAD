@@ -368,8 +368,8 @@ final class SketchController: ObservableObject {
     /// roundAngle = freie Richtung (ohne Leitlinie): Winkel zur Waagerechten in ganzen Grad.
     func steppedLineEnd(_ directionPoint: Point2, from start: Point2, roundAngle: Bool = false) -> Point2 {
         guard snapEnabled, !snapSuspended else { return directionPoint }
-        let explicit = !options.gridAuto && snapKinds.contains(.grid) && gridStep.isFinite && gridStep > 0
-        let step = explicit ? gridStep : 1
+        // Build 58 (Kai): die gewählte Weite („U“) ist immer die Zeichnungseinheit, auch ohne Rasterfang
+        let step = gridStep.isFinite && gridStep > 0 ? gridStep : 1
         var delta = directionPoint - start
         let length = simd_length(delta)
         guard length.isFinite, length > 1e-9 else { return directionPoint }
