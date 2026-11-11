@@ -20,6 +20,18 @@ esac
 
 bash scripts/generate-project.sh
 
+# Anmeldung: Standard ist der in Xcode angemeldete Account (so getestet). Mit TESTFLIGHT_MIT_API_KEY=1
+# in signing.env nimmt xcodebuild stattdessen den API-Schlüssel (siehe scripts/asc-auth.sh); für das
+# automatische Signieren braucht der Schlüssel dann mindestens die Rolle App-Manager.
+auth=()
+. scripts/asc-auth.sh
+if asc_load 2>/dev/null && [ "${TESTFLIGHT_MIT_API_KEY:-0}" = 1 ]; then
+  auth=(-authenticationKeyPath "$ASC_KEY_PATH" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID")
+  echo "Anmeldung: API-Schlüssel $ASC_KEY_ID"
+else
+  echo "Anmeldung: Xcode-Account"
+fi
+
 team="$(sed -n 's/.*DEVELOPMENT_TEAM = \([A-Z0-9]*\);/\1/p' PencilCAD.xcodeproj/project.pbxproj | head -n1)"
 [ -n "$team" ] || { echo 'FEHLER: kein Team im Projekt. In Xcode ein Team wählen oder PENCILCAD_TEAM in signing.env setzen.'; exit 2; }
 
@@ -49,6 +61,7 @@ xcodebuild archive \
   -archivePath "$archive" \
   -derivedDataPath "$out/DerivedData" \
   -allowProvisioningUpdates \
+  ${auth[@]+"${auth[@]}"} \
   CURRENT_PROJECT_VERSION="$version" \
   | tee "$out/archive.log" | grep -E '^(error|warning: .*sign|\*\* )' || true
 [ -d "$archive" ] || { echo "FEHLER: Archiv fehlt, siehe $out/archive.log"; exit 1; }
@@ -77,12 +90,14 @@ xcodebuild -exportArchive \
   -exportOptionsPlist "$out/ExportOptions.plist" \
   -exportPath "$out/export-$version" \
   -allowProvisioningUpdates \
-  2>&1 | tee "$out/export.log" | grep -vE '^\s*$' | tail -n 25
+  ${auth[@]+"${auth[@]}"} \
+  2>&1 | tee "$out/export.log" | grep -vE '^\s*$|not yet complete|Checking completion status' | tail -n 25
 status="${PIPESTATUS[0]}"
 [ "$status" -eq 0 ] || { echo "FEHLER beim Export/Upload, siehe $out/export.log"; exit "$status"; }
 
 if [ "$destination" = upload ]; then
   echo "Hochgeladen: Build $version. In App Store Connect > TestFlight erscheint er nach der Verarbeitung (meist 5–30 Min.)."
+  echo "Status prüfen: bash scripts/testflight-status.sh"
 else
   echo "Exportiert: $out/export-$version/PencilCAD.ipa (nicht hochgeladen)."
 fi
