@@ -24,6 +24,9 @@ struct DrawingSheet: View {
     @State private var manualAngles: [DrawingAngle] = []
     @State private var angleTool = false
     @State private var manualLengths: [DrawingLength] = []
+    /// S3 (Build 41): Längenmaße an die Ansichten gebunden (Modell-mm) und je Blatt gespeichert
+    @State private var boundLengths: [DrawingModelLength] = []
+    @State private var dimensionKey = ""
     @State private var lengthTool = false
     @State private var lengthKind = DrawingLengthKind.aligned
     @State private var firstVertex: DrawingVertex?
@@ -386,6 +389,9 @@ struct DrawingSheet: View {
     @MainActor
     private func deleteSelectedDimension() {
         manualAngles.removeAll { $0.id == selectedAngle }
+        // S3: auch aus den gespeicherten Maßen nehmen (sonst blieben sie als „gerade nicht sichtbar“ erhalten)
+        boundLengths.removeAll { $0.id == selectedLength }
+        DrawingDimensionStore.save(boundLengths, folder: model.folder, key: dimensionKey)
         manualLengths.removeAll { $0.id == selectedLength }
         selectedAngle = nil
         selectedLength = nil
@@ -409,7 +415,32 @@ struct DrawingSheet: View {
     @MainActor
     private func refreshShareFile() {
         guard let layout else { return }
+        storeLengths(layout)
         shareURL = writeShareFile(layout)
+    }
+
+    /// S3: Schlüssel des Blatts (Namen der gezeichneten Körper)
+    @MainActor
+    private func dimensionKey(for indices: [Int]) -> String {
+        indices.filter { model.bodies.indices.contains($0) }.map { model.bodies[$0].name }.joined(separator: "\u{1F}")
+    }
+
+    /// S3: Längenmaße an die Ansichten binden und speichern. Maße, die gerade nicht auf dem Blatt stehen (Ansicht
+    /// ausgeblendet, Geometrie geändert), bleiben gespeichert und erscheinen wieder, sobald ihre Punkte da sind.
+    @MainActor
+    private func storeLengths(_ layout: DrawingLayout) {
+        var updated: [DrawingModelLength] = []
+        for length in manualLengths {
+            if let bound = TechnicalDrawing.bind(length, layout: layout, projections: cache) {
+                updated.append(bound)
+            } else if let old = boundLengths.first(where: { $0.id == length.id }) {
+                updated.append(old)
+            }
+        }
+        updated += boundLengths.filter { old in !manualLengths.contains { $0.id == old.id } }
+        guard updated != boundLengths else { return }
+        boundLengths = updated
+        DrawingDimensionStore.save(updated, folder: model.folder, key: dimensionKey)
     }
 
     /// Ansichten (falls nötig) berechnen, Blatt anordnen, Vorschau und Teilen-Datei erzeugen.
@@ -423,6 +454,14 @@ struct DrawingSheet: View {
         if indices != cachedBodies {
             cache = [:]
             cachedBodies = indices
+        }
+        // S3: gespeicherte Maße dieses Blatts laden (andere Körperauswahl = anderes Blatt)
+        let key = dimensionKey(for: indices)
+        if key != dimensionKey {
+            dimensionKey = key
+            boundLengths = DrawingDimensionStore.load(folder: model.folder, key: key)
+            manualLengths = []
+            selectedLength = nil
         }
         let shapes = indices.map { model.bodies[$0].shape }
         var views: [DrawingView] = [.front, .top, options.method.sideView]
@@ -440,9 +479,11 @@ struct DrawingSheet: View {
             for view in missing {
                 let projection: DrawingProjection
                 if inBackground {
-                    projection = await Task.detached(priority: .userInitiated) {
-                        TechnicalDrawing.project(copies, view: view)
-                    }.value
+                    // B8 (Build 41): HLR auf dem großen Stapel (KernelThread, 32 MB) statt Task.detached (512 KB)
+                    let job = UncheckedBox(copies)
+                    projection = await KernelThread.value("PencilCAD.drawing") {
+                        TechnicalDrawing.project(job.value, view: view)
+                    }
                 } else {
                     projection = TechnicalDrawing.project(shapes, view: view)
                 }
@@ -467,10 +508,9 @@ struct DrawingSheet: View {
             !TechnicalDrawing.containsEdge(result, angle.a0, angle.a1)
                 || !TechnicalDrawing.containsEdge(result, angle.b0, angle.b1)
         }
-        manualLengths.removeAll { length in
-            !TechnicalDrawing.containsVertex(length.from, in: result)
-                || !TechnicalDrawing.containsVertex(length.to, in: result)
-        }
+        // S3 (Build 41): Längenmaße aus den gebundenen Modellpunkten neu zuordnen (vorher: jede Verschiebung bzw.
+        // jeder andere Maßstab des Blatts löschte alle Maße)
+        manualLengths = boundLengths.compactMap { TechnicalDrawing.place($0, layout: result, projections: cache) }
         if let id = selectedAngle, !manualAngles.contains(where: { $0.id == id }) { selectedAngle = nil }
         if let id = selectedLength, !manualLengths.contains(where: { $0.id == id }) { selectedLength = nil }
         pickedEdge = nil
@@ -502,5 +542,18 @@ struct DrawingSheet: View {
                                           : TechnicalDrawing.dxfData(layout))
         exportType = pdf ? .pdf : .dxfFile
         isExporting = true
+    }
+}
+
+extension KernelThread {
+    /// B8 (Build 41): OCCT-Arbeit auf dem großen Stapel ausführen und das Ergebnis abwarten, ohne den Aufrufer
+    /// (Main Actor) zu blockieren. Ohne Zeitlimit: die Arbeit läuft an eigenen Kopien des Aufrufers.
+    static func value<Value>(_ name: String, _ work: @escaping @Sendable () -> Value) async -> Value {
+        let box = await withCheckedContinuation { (continuation: CheckedContinuation<UncheckedBox<Value>, Never>) in
+            start(name) {
+                continuation.resume(returning: UncheckedBox(work()))
+            }
+        }
+        return box.value
     }
 }

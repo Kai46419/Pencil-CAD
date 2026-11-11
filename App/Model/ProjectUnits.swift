@@ -180,12 +180,18 @@ struct GridSettings: Codable {
 
 extension Formula {
     /// Länge aus einem Zahlenfeld: Zahlen ohne Einheit zählen in der Projekteinheit („2“ im Zollprojekt = 2 in),
-    /// Einheiten im Ausdruck gelten wie angegeben („5 mm“). Variablen (in mm gespeichert) werden umgerechnet.
+    /// Einheiten im Ausdruck gelten wie angegeben („5 mm“). Längenvariablen (in mm gespeichert) werden umgerechnet.
     /// Ergebnis in mm.
+    /// Build 41: Variablen ohne Längenbezug (Formula.unitlessVariableNames, z. B. „n = 4“) bleiben unverändert – wie
+    /// eine Zahl ohne Einheit im Feld. Variablen sind nicht typisiert; die Einordnung folgt den Einheiten im Ausdruck
+    /// (siehe Formula.unitlessNames). Im mm-Projekt (scale 1) ändert sich nichts.
     static func evaluateLength(_ text: String, variables: [String: Double] = [:]) throws -> Double {
         let scale = LengthUnit.current.millimeters
         guard scale != 1 else { return try evaluate(text, variables: variables) }
-        let value = try evaluate(text, variables: variables.mapValues { $0 / scale }, lengthScale: scale) * scale
+        let unitless = Formula.unitlessVariableNames
+        var scaled: [String: Double] = [:]
+        for (name, value) in variables { scaled[name] = unitless.contains(name) ? value : value / scale }
+        let value = try evaluate(text, variables: scaled, lengthScale: scale) * scale
         guard value.isFinite else { throw ExpressionError("Länge ist zu groß.") }
         return value
     }

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <exception>
 #include <utility>
@@ -47,6 +48,12 @@
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepFilletAPI_MakeChamfer.hxx>
 #include <BRepFilletAPI_MakeFillet.hxx>
+// Rundungsoptionen (Build 42): Setback-Füllfläche, G2-Profil-Sweep
+#include <BRepFill_Filling.hxx>
+#include <BRepTools_ReShape.hxx>
+#include <GeomAPI_ProjectPointOnCurve.hxx>
+#include <GeomAPI_ProjectPointOnSurf.hxx>
+#include <Geom_BezierCurve.hxx>
 #include <BRepGProp_Face.hxx>
 #include <BRepLib_ToolTriangulatedShape.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
@@ -119,14 +126,18 @@
 #include <Interface_Static.hxx>
 #include <STEPControl_Reader.hxx>
 #include <STEPControl_Writer.hxx>
+#include <chrono>
 #include <mutex>
 // STEP-Lesen/-Schreiben nutzt globale Zustände von OCCT (Interface_Static, Steuerung der Schnittstelle) und ist nicht
 // threadsicher. Der Vordergrund (Speichern, Import, Verlauf) und die Warteschlange des Blechmoduls (SheetWorker; nach
 // einem Zeitlimit läuft deren Rechnung weiter) dürfen deshalb nie gleichzeitig STEP lesen oder schreiben.
-static std::recursive_mutex &pckSTEPMutex() {
-    static std::recursive_mutex mutex;
+// B11: zeitlich begrenzte Sperre – hängt eine STEP-Rechnung im Hintergrund, darf save() nicht unbegrenzt warten.
+// Nach kPCKSTEPLockSeconds ohne Sperre liefert die Funktion nil bzw. NO (Speichern meldet dann einen Fehler).
+static std::recursive_timed_mutex &pckSTEPMutex() {
+    static std::recursive_timed_mutex mutex;
     return mutex;
 }
+static const int kPCKSTEPLockSeconds = 30;
 #else
 #define PCK_HAS_STEP 0
 #endif
@@ -295,6 +306,14 @@ std::vector<simd_double3> circlePoints(simd_double3 base, simd_double3 axis, dou
 
 } // namespace
 
+/// Brauchbare Richtung bzw. Achse (B9): alle Komponenten endlich und Länge > 1e-9. Der frühere Test
+/// `simd_length(d) == 0` ließ NaN durch (NaN == 0 ist falsch) – gp_Dir wirft dann bzw. rechnet mit NaN weiter.
+static bool validDir(simd_double3 d) {
+    if (!std::isfinite(d.x) || !std::isfinite(d.y) || !std::isfinite(d.z)) return false;
+    const double length = simd_length(d);
+    return std::isfinite(length) && length > 1e-9;
+}
+
 @implementation PCKMesh
 
 - (instancetype)initWithBuffers:(const MeshBuffers &)buffers {
@@ -308,6 +327,49 @@ std::vector<simd_double3> circlePoints(simd_double3 base, simd_double3 axis, dou
                                         length:buffers.edgeNumbers.size() * sizeof(uint32_t)];
     }
     return self;
+}
+
+@end
+
+@implementation PCKBlendOptions
+
++ (instancetype)standardOptions { return [[PCKBlendOptions alloc] init]; }
+
+- (instancetype)init {
+    if ((self = [super init])) {
+        _corner = PCKBlendCornerRollingBall;
+        _setback = 0;
+        _continuity = PCKBlendContinuityG1;
+        _profile = PCKBlendProfileCircle;
+        _rho = 0.5;
+        _overflow = PCKBlendOverflowAutomatic;
+    }
+    return self;
+}
+
+- (id)copyWithZone:(NSZone *)zone {
+    PCKBlendOptions *copy = [[PCKBlendOptions allocWithZone:zone] init];
+    copy.corner = _corner;
+    copy.setback = _setback;
+    copy.continuity = _continuity;
+    copy.profile = _profile;
+    copy.rho = _rho;
+    copy.overflow = _overflow;
+    return copy;
+}
+
+- (BOOL)isStandard {
+    return _corner == PCKBlendCornerRollingBall && _continuity == PCKBlendContinuityG1
+        && _profile == PCKBlendProfileCircle && _overflow == PCKBlendOverflowAutomatic;
+}
+
+- (BOOL)isValid {
+    if (_corner == PCKBlendCornerSetback && !(std::isfinite(_setback) && _setback > 0)) return NO;
+    if (_profile == PCKBlendProfileConic) {
+        if (_continuity != PCKBlendContinuityG2) return NO;
+        if (!(std::isfinite(_rho) && _rho >= 0.1 && _rho <= 0.9)) return NO;
+    }
+    return YES;
 }
 
 @end
@@ -351,7 +413,7 @@ std::vector<simd_double3> circlePoints(simd_double3 base, simd_double3 axis, dou
 
 + (nullable PCKShape *)cylinderWithBase:(simd_double3)base axis:(simd_double3)axis
                                  radius:(double)radius height:(double)height {
-    if (radius <= 0 || height <= 0 || simd_length(axis) == 0) return nil;
+    if (radius <= 0 || height <= 0 || !validDir(axis)) return nil;
     try {
         BRepPrimAPI_MakeCylinder maker(gp_Ax2(gp_Pnt(base.x, base.y, base.z), gp_Dir(axis.x, axis.y, axis.z)),
                                        radius, height);
@@ -368,6 +430,10 @@ static gp_Pnt toPnt(simd_double3 p) {
 static gp_Dir toDir(simd_double3 d) {
     return gp_Dir(d.x, d.y, d.z);
 }
+
+// Weiter unten definiert (Prüfung der Ergebnisse, B3–B7)
+static TopoDS_Shape validSolid(const TopoDS_Shape &shape);
+static TopoDS_Shape checkedResult(const TopoDS_Shape &shape);
 
 /// Geschlossene Einzelkurve (Ellipse, geschlossener Spline) als zwei Hälften: die erste kommt sofort in den
 /// Draht, die zweite zurück. Ohne Naht mitten auf der Seitenfläche lassen sich die Kanten extrudierter
@@ -396,7 +462,7 @@ static bool addHalves(BRepBuilderAPI_MakeWire &wire, const Handle(Geom_Curve) &c
 + (nullable PCKShape *)coneWithBase:(simd_double3)base axis:(simd_double3)axis
                        bottomRadius:(double)bottomRadius topRadius:(double)topRadius height:(double)height {
     if (bottomRadius < 0 || topRadius < 0 || bottomRadius + topRadius <= 0 || height <= 0 ||
-        simd_length(axis) == 0) return nil;
+        !validDir(axis)) return nil;
     try {
         BRepPrimAPI_MakeCone maker(gp_Ax2(toPnt(base), toDir(axis)), bottomRadius, topRadius, height);
         return [[PCKShape alloc] initWithShape:maker.Shape()];
@@ -408,7 +474,7 @@ static bool addHalves(BRepBuilderAPI_MakeWire &wire, const Handle(Geom_Curve) &c
 + (nullable PCKShape *)ellipsePrismWithCenter:(simd_double3)center normal:(simd_double3)normal
                                         xAxis:(simd_double3)xAxis radiusX:(double)radiusX
                                       radiusY:(double)radiusY direction:(simd_double3)direction {
-    if (radiusX <= 0 || radiusY <= 0 || simd_length(direction) == 0 || simd_length(normal) == 0) return nil;
+    if (radiusX <= 0 || radiusY <= 0 || !validDir(direction) || !validDir(normal)) return nil;
     try {
         // gp_Elips verlangt Hauptradius >= Nebenradius; sonst Hauptachse um 90° drehen.
         simd_double3 major = xAxis;
@@ -436,7 +502,7 @@ static bool addHalves(BRepBuilderAPI_MakeWire &wire, const Handle(Geom_Curve) &c
 
 + (nullable PCKShape *)prismWithPointsXYZ:(NSArray<NSNumber *> *)xyz direction:(simd_double3)direction {
     const std::vector<simd_double3> points = toPoints(xyz);
-    if (points.size() < 3 || simd_length(direction) == 0) return nil;
+    if (points.size() < 3 || !validDir(direction)) return nil;
     try {
         BRepBuilderAPI_MakePolygon polygon;
         for (const auto &p : points) {
@@ -599,7 +665,7 @@ static TopoDS_Face faceFromWires(NSArray<NSArray<NSNumber *> *> *wires) {
 }
 
 + (nullable PCKShape *)prismWithProfileWires:(NSArray<NSArray<NSNumber *> *> *)wires direction:(simd_double3)direction {
-    if (simd_length(direction) == 0) return nil;
+    if (!validDir(direction)) return nil;
     try {
         const TopoDS_Face face = faceFromWires(wires);
         if (face.IsNull()) return nil;
@@ -613,7 +679,7 @@ static TopoDS_Face faceFromWires(NSArray<NSArray<NSNumber *> *> *wires) {
 
 + (nullable PCKShape *)draftPrismWithProfileWires:(NSArray<NSArray<NSNumber *> *> *)wires
                                         direction:(simd_double3)direction angle:(double)degrees {
-    if (simd_length(direction) == 0) return nil;
+    if (!validDir(direction)) return nil;
     try {
         const TopoDS_Face face = faceFromWires(wires);
         if (face.IsNull()) return nil;
@@ -638,7 +704,9 @@ static TopoDS_Face faceFromWires(NSArray<NSArray<NSNumber *> *> *wires) {
         }
         draft.Build();
         if (!draft.IsDone()) return nil;
-        return [[PCKShape alloc] initWithShape:draft.Shape()];
+        // B7: Verjüngung kann einen ungültigen Körper liefern (überschnittene Seitenflächen)
+        const TopoDS_Shape checked = checkedResult(draft.Shape());
+        return checked.IsNull() ? nil : [[PCKShape alloc] initWithShape:checked];
     } catch (...) {
         return nil;
     }
@@ -656,7 +724,7 @@ static TopoDS_Face faceFromWires(NSArray<NSArray<NSNumber *> *> *wires) {
 
 + (nullable PCKShape *)torusWithCenter:(simd_double3)center axis:(simd_double3)axis
                            majorRadius:(double)majorRadius minorRadius:(double)minorRadius {
-    if (majorRadius <= 0 || minorRadius <= 0 || minorRadius >= majorRadius || simd_length(axis) == 0) return nil;
+    if (majorRadius <= 0 || minorRadius <= 0 || minorRadius >= majorRadius || !validDir(axis)) return nil;
     try {
         BRepPrimAPI_MakeTorus torus(gp_Ax2(toPnt(center), toDir(axis)), majorRadius, minorRadius);
         return [[PCKShape alloc] initWithShape:torus.Shape()];
@@ -667,16 +735,44 @@ static TopoDS_Face faceFromWires(NSArray<NSArray<NSNumber *> *> *wires) {
 
 + (nullable PCKShape *)revolveProfileWires:(NSArray<NSArray<NSNumber *> *> *)wires axisOrigin:(simd_double3)origin
                              axisDirection:(simd_double3)direction angle:(double)radians {
-    if (simd_length(direction) == 0 || radians == 0) return nil;
+    if (!validDir(direction) || radians == 0) return nil;
     try {
         const TopoDS_Face face = faceFromWires(wires);
         if (face.IsNull()) return nil;
         const double angle = std::min(std::abs(radians), 2 * M_PI);
         gp_Dir axis = toDir(direction);
         if (radians < 0) axis.Reverse();
+        // B6: Schneidet die Drehachse das Profil (Profilpunkte auf beiden Seiten der Achse), durchdringt sich der
+        // Drehkörper selbst. Vorab prüfen statt einen ungültigen Körper zu liefern; Punkte auf der Achse zählen nicht.
+        BRepAdaptor_Surface profilePlane(face);
+        if (profilePlane.GetType() == GeomAbs_Plane) {
+            const gp_Dir planeNormal = profilePlane.Plane().Axis().Direction();
+            const gp_Vec axisVector(axis);
+            const gp_Pnt axisPoint = toPnt(origin);
+            Bnd_Box bounds;
+            BRepBndLib::Add(face, bounds);
+            const double size = bounds.IsVoid() ? 1.0 : std::sqrt(bounds.SquareExtent());
+            const double tolerance = std::max(1e-6, size * 1e-7);
+            bool left = false, right = false;
+            for (TopExp_Explorer it(face, TopAbs_EDGE); it.More() && !(left && right); it.Next()) {
+                const TopoDS_Edge edge = TopoDS::Edge(it.Current());
+                if (BRep_Tool::Degenerated(edge)) continue;
+                BRepAdaptor_Curve curve(edge);
+                const double first = curve.FirstParameter(), last = curve.LastParameter();
+                if (!std::isfinite(first) || !std::isfinite(last)) continue;
+                for (int k = 0; k <= 16; ++k) {
+                    const gp_Pnt p = curve.Value(first + (last - first) * k / 16.0);
+                    const double side = axisVector.Crossed(gp_Vec(axisPoint, p)).Dot(gp_Vec(planeNormal));
+                    if (side > tolerance) left = true;
+                    else if (side < -tolerance) right = true;
+                }
+            }
+            if (left && right) return nil;
+        }
         BRepPrimAPI_MakeRevol revol(face, gp_Ax1(toPnt(origin), axis), angle, Standard_True);
         if (!revol.IsDone()) return nil;
-        return [[PCKShape alloc] initWithShape:revol.Shape()];
+        const TopoDS_Shape checked = checkedResult(revol.Shape());
+        return checked.IsNull() ? nil : [[PCKShape alloc] initWithShape:checked];
     } catch (...) {
         return nil;
     }
@@ -690,7 +786,9 @@ static TopoDS_Face faceFromWires(NSArray<NSArray<NSNumber *> *> *wires) {
         BRepOffsetAPI_MakePipe pipe(spine, face);
         pipe.Build();
         if (!pipe.IsDone()) return nil;
-        return [[PCKShape alloc] initWithShape:pipe.Shape()];
+        // B7: Sweep entlang eines zu engen Pfads durchdringt sich selbst
+        const TopoDS_Shape checked = checkedResult(pipe.Shape());
+        return checked.IsNull() ? nil : [[PCKShape alloc] initWithShape:checked];
     } catch (...) {
         return nil;
     }
@@ -708,7 +806,9 @@ static TopoDS_Face faceFromWires(NSArray<NSArray<NSNumber *> *> *wires) {
         loft.CheckCompatibility(Standard_True);
         loft.Build();
         if (!loft.IsDone()) return nil;
-        return [[PCKShape alloc] initWithShape:loft.Shape()];
+        // B7: verdrehte Querschnitte ergeben sonst einen ungültigen Loft
+        const TopoDS_Shape checked = checkedResult(loft.Shape());
+        return checked.IsNull() ? nil : [[PCKShape alloc] initWithShape:checked];
     } catch (...) {
         return nil;
     }
@@ -754,7 +854,8 @@ static TopoDS_Wire shiftedWire(const TopoDS_Wire &wire, simd_double3 vector) {
         loft.CheckCompatibility(Standard_True);
         loft.Build();
         if (!loft.IsDone()) return nil;
-        return [[PCKShape alloc] initWithShape:loft.Shape()];
+        const TopoDS_Shape checked = checkedResult(loft.Shape());
+        return checked.IsNull() ? nil : [[PCKShape alloc] initWithShape:checked];
     } catch (...) {
         return nil;
     }
@@ -792,7 +893,8 @@ static TopoDS_Wire shiftedWire(const TopoDS_Wire &wire, simd_double3 vector) {
         // Rückfall: nur die erste Führung (korrigiertes Frenet-Dreibein)
         if (result.IsNull()) result = sweep(false);
         if (result.IsNull()) return nil;
-        return [[PCKShape alloc] initWithShape:result];
+        const TopoDS_Shape checked = checkedResult(result);
+        return checked.IsNull() ? nil : [[PCKShape alloc] initWithShape:checked];
     } catch (...) {
         return nil;
     }
@@ -967,7 +1069,7 @@ static TopoDS_Face bandBetween(const TopoDS_Wire &a, const TopoDS_Wire &b) {
                                      planeOrigin:(simd_double3)origin planeNormal:(simd_double3)normal
                                        thickness:(double)thickness side:(NSInteger)side
                                        direction:(simd_double3)direction {
-    if (wires.count == 0 || thickness <= 0 || simd_length(direction) == 0 || simd_length(normal) == 0) return nil;
+    if (wires.count == 0 || thickness <= 0 || !validDir(direction) || !validDir(normal)) return nil;
     try {
         const gp_Vec vector(direction.x, direction.y, direction.z);
         const double t = thickness;
@@ -1077,7 +1179,7 @@ static TopoDS_Shape placedOnAxis(const TopoDS_Shape &shape, simd_double3 base, s
 + (nullable PCKShape *)springWithBase:(simd_double3)base axis:(simd_double3)axis radius:(double)radius
                                 pitch:(double)pitch height:(double)height leftHanded:(BOOL)leftHanded
                          wireDiameter:(double)wireDiameter {
-    if (radius <= 0 || pitch <= 0 || height <= 0 || wireDiameter <= 0 || simd_length(axis) == 0) return nil;
+    if (radius <= 0 || pitch <= 0 || height <= 0 || wireDiameter <= 0 || !validDir(axis)) return nil;
     if (wireDiameter >= 2 * radius || height / pitch > 400) return nil;
     try {
         const TopoDS_Wire spine = helixWire(radius, pitch, height, leftHanded);
@@ -1099,7 +1201,7 @@ static TopoDS_Shape placedOnAxis(const TopoDS_Shape &shape, simd_double3 base, s
 + (nullable PCKShape *)helixSweepWithBase:(simd_double3)base axis:(simd_double3)axis radius:(double)radius
                                     pitch:(double)pitch height:(double)height leftHanded:(BOOL)leftHanded
                                 profileRZ:(NSArray<NSNumber *> *)profileRZ {
-    if (radius <= 0 || pitch <= 0 || height <= 0 || profileRZ.count < 6 || simd_length(axis) == 0) return nil;
+    if (radius <= 0 || pitch <= 0 || height <= 0 || profileRZ.count < 6 || !validDir(axis)) return nil;
     if (height / pitch > 400) return nil;
     try {
         const TopoDS_Wire spine = helixWire(radius, pitch, height, leftHanded);
@@ -1210,6 +1312,37 @@ static TopoDS_Shape validSolid(const TopoDS_Shape &shape) {
     }
 }
 
+/// Wie validSolid, aber für Verbünde mehrerer Solids: validSolid prüft den Verbund als Ganzes und nur das
+/// Gesamtvolumen; hier muss zusätzlich jedes einzelne Solid Volumen haben (kein entartetes Teilstück).
+static TopoDS_Shape validShape(const TopoDS_Shape &shape) {
+    const TopoDS_Shape candidate = validSolid(shape);
+    if (candidate.IsNull()) return TopoDS_Shape();
+    try {
+        for (TopExp_Explorer it(candidate, TopAbs_SOLID); it.More(); it.Next()) {
+            GProp_GProps props;
+            BRepGProp::VolumeProperties(it.Current(), props);
+            if (!std::isfinite(props.Mass()) || std::fabs(props.Mass()) < 1e-9) return TopoDS_Shape();
+        }
+        return candidate;
+    } catch (...) {
+        return TopoDS_Shape();
+    }
+}
+
+/// Ergebnis einer Modellieroperation prüfen (B3–B7: Boolesche Operationen, Schale, Verjüngung, Sweep, Loft,
+/// Formschräge). Enthält es Solids, muss es gültig sein (validShape, je Solid); sonst leer. Ohne Solid
+/// (Flächen-/Schalenkörper, vollständig abgezogener Körper, leere Schnittmenge) bleibt es wie bisher unverändert –
+/// Aufrufer prüfen dort selbst (z. B. Volumen der Schnittmenge).
+static TopoDS_Shape checkedResult(const TopoDS_Shape &shape) {
+    if (shape.IsNull()) return TopoDS_Shape();
+    try {
+        if (!TopExp_Explorer(shape, TopAbs_SOLID).More()) return shape;
+    } catch (...) {
+        return TopoDS_Shape();
+    }
+    return validShape(shape);
+}
+
 /// Schraubenlinie für Gewinde um die Z-Achse: beginnt bei z = zStart im Winkel 0 (auf +X) und steigt um height.
 /// radius gilt bei z = 0; taper ≠ 0 legt sie auf eine Kegelfläche (Radius ändert sich um taper je mm).
 /// Zylindrisch wird sie je Umdrehung als eigene Kante gebaut (eine Gerade auf der abgewickelten Zylinderfläche,
@@ -1273,7 +1406,7 @@ static TopoDS_Wire threadSpine(double radius, double lead, double zStart, double
                                  lead:(double)lead starts:(NSInteger)starts taper:(double)taper
                            leftHanded:(BOOL)leftHanded profileRZ:(NSArray<NSNumber *> *)profileRZ
                            coreRadius:(double)coreRadius {
-    if (length <= 0 || lead <= 0 || profileRZ.count < 6 || simd_length(axis) == 0) return nil;
+    if (length <= 0 || lead <= 0 || profileRZ.count < 6 || !validDir(axis)) return nil;
     if (starts < 1 || starts > 8) return nil;
     // Eine Umdrehung Vorlauf und Nachlauf, damit die Enden nach dem Abschneiden voll ausgebildet sind
     const double zStart = -lead;
@@ -1389,7 +1522,9 @@ static TopoDS_Wire threadSpine(double radius, double lead, double zStart, double
     try {
         BRepAlgoAPI_Cut op(_shape, tool->_shape);
         if (!op.IsDone()) return nil;
-        return [[PCKShape alloc] initWithShape:unified(op.Shape())];
+        // B3: nicht nur IsDone – ein Ergebnis mit Solids muss gültig sein (checkedResult)
+        const TopoDS_Shape checked = checkedResult(unified(op.Shape()));
+        return checked.IsNull() ? nil : [[PCKShape alloc] initWithShape:checked];
     } catch (...) {
         return nil;
     }
@@ -1427,9 +1562,12 @@ static TopoDS_Shape cutWithTools(const TopoDS_Shape &body, const TopTools_ListOf
         }
         if (tools.IsEmpty()) return nil;
         const TopoDS_Shape first = cutWithTools(_shape, tools, fuzzy);
-        if (!first.IsNull() && (tools.Extent() == 1 || BRepCheck_Analyzer(first).IsValid())) {
-            return [[PCKShape alloc] initWithShape:unified(first)];
-        }
+        // B4: auch bei nur einem Werkzeug das Ergebnis prüfen (validShape, je Solid); ein ungültiges first
+        // wird nie mehr zurückgegeben. Mehrere Werkzeuge: ein nicht schon gültiges first geht wie bisher erst in den
+        // Rückfall Werkzeug für Werkzeug (keine Reparatur vorab, die dort fehlende Gänge verdecken könnte).
+        const bool firstUsable = !first.IsNull() && (tools.Extent() == 1 || BRepCheck_Analyzer(first).IsValid());
+        const TopoDS_Shape firstChecked = firstUsable ? validShape(unified(first)) : TopoDS_Shape();
+        if (!firstChecked.IsNull()) return [[PCKShape alloc] initWithShape:firstChecked];
         // Rückfall: Werkzeug für Werkzeug, jeweils erst mit, dann ohne Fuzzy-Wert. Verbünde (die Gänge) zuerst:
         // nach dem Kernloch abgezogen bleiben kegelige Gänge sonst stillschweigend stehen (getestet, NPT)
         TopTools_ListOfShape ordered;
@@ -1452,12 +1590,20 @@ static TopoDS_Shape cutWithTools(const TopoDS_Shape &body, const TopTools_ListOf
                 current = next;
             }
         }
-        if (done) return [[PCKShape alloc] initWithShape:unified(current)];
-        if (!first.IsNull()) return [[PCKShape alloc] initWithShape:unified(first)];
+        if (done) {
+            const TopoDS_Shape stepwise = validShape(unified(current));
+            if (!stepwise.IsNull()) return [[PCKShape alloc] initWithShape:stepwise];
+        }
+        // Früher kam hier das ungeprüfte first zurück (B4); jetzt nur noch, wenn es sich reparieren lässt
+        if (!first.IsNull() && !firstUsable) {
+            const TopoDS_Shape repaired = validShape(unified(first));
+            if (!repaired.IsNull()) return [[PCKShape alloc] initWithShape:repaired];
+        }
         // Letzter Versuch ohne Fuzzy-Wert in einem Schritt
         if (fuzzy > 0) {
             const TopoDS_Shape plain = cutWithTools(_shape, tools, 0);
-            if (!plain.IsNull()) return [[PCKShape alloc] initWithShape:unified(plain)];
+            const TopoDS_Shape plainChecked = plain.IsNull() ? TopoDS_Shape() : validShape(unified(plain));
+            if (!plainChecked.IsNull()) return [[PCKShape alloc] initWithShape:plainChecked];
         }
         return nil;
     } catch (...) {
@@ -1469,7 +1615,9 @@ static TopoDS_Shape cutWithTools(const TopoDS_Shape &body, const TopTools_ListOf
     try {
         BRepAlgoAPI_Fuse op(_shape, other->_shape);
         if (!op.IsDone()) return nil;
-        return [[PCKShape alloc] initWithShape:unified(op.Shape())];
+        // B3: Ergebnis mit Solids prüfen
+        const TopoDS_Shape checked = checkedResult(unified(op.Shape()));
+        return checked.IsNull() ? nil : [[PCKShape alloc] initWithShape:checked];
     } catch (...) {
         return nil;
     }
@@ -1479,7 +1627,9 @@ static TopoDS_Shape cutWithTools(const TopoDS_Shape &body, const TopTools_ListOf
     try {
         BRepAlgoAPI_Common op(_shape, other->_shape);
         if (!op.IsDone()) return nil;
-        return [[PCKShape alloc] initWithShape:unified(op.Shape())];
+        // B3: Ergebnis mit Solids prüfen; eine leere Schnittmenge bleibt leer (Aufrufer prüfen das Volumen)
+        const TopoDS_Shape checked = checkedResult(unified(op.Shape()));
+        return checked.IsNull() ? nil : [[PCKShape alloc] initWithShape:checked];
     } catch (...) {
         return nil;
     }
@@ -1633,13 +1783,21 @@ static TopoDS_Shape applyFaceExtrusionTools(const TopoDS_Shape &body, const TopT
         }
         offset.MakeOffsetShape();
         if (offset.IsDone() && !offset.Shape().IsNull()) {
-            TopoDS_Shape solid;
+            // B10: alle Solids übernehmen (früher nur das erste – bei mehreren Teilkörpern ging der Rest verloren)
+            BRep_Builder builder;
+            TopoDS_Compound compound;
+            builder.MakeCompound(compound);
+            int count = 0;
+            TopoDS_Shape single;
             for (TopExp_Explorer it(offset.Shape(), TopAbs_SOLID); it.More(); it.Next()) {
-                solid = it.Current();
-                break;
+                single = it.Current();
+                builder.Add(compound, single);
+                ++count;
             }
-            if (!solid.IsNull() && BRepCheck_Analyzer(solid).IsValid()) {
-                return [[PCKShape alloc] initWithShape:unified(solid)];
+            const TopoDS_Shape solids = count == 1 ? single : count > 1 ? TopoDS_Shape(compound) : TopoDS_Shape();
+            if (!solids.IsNull() && BRepCheck_Analyzer(solids).IsValid()) {
+                const TopoDS_Shape checked = validShape(solids);
+                if (!checked.IsNull()) return [[PCKShape alloc] initWithShape:unified(checked)];
             }
         }
     } catch (...) {
@@ -1650,7 +1808,7 @@ static TopoDS_Shape applyFaceExtrusionTools(const TopoDS_Shape &body, const TopT
 
 - (nullable PCKShape *)replacingFaces:(NSArray<NSNumber *> *)indices planeOrigin:(simd_double3)origin
                           planeNormal:(simd_double3)normalIn {
-    if (indices.count == 0 || simd_length(normalIn) == 0) return nil;
+    if (indices.count == 0 || !validDir(normalIn)) return nil;
     try {
         Bnd_Box box;
         BRepBndLib::Add(_shape, box);
@@ -1767,7 +1925,9 @@ static TopoDS_Shape applyFaceExtrusionTools(const TopoDS_Shape &body, const TopT
         maker.MakeThickSolidByJoin(_shape, removed, -thickness, 1e-3);
         maker.Build();
         if (!maker.IsDone()) return nil;
-        return [[PCKShape alloc] initWithShape:maker.Shape()];
+        // B5: Schale prüfen (zu große Wandstärke ergibt sonst einen ungültigen Körper)
+        const TopoDS_Shape checked = validShape(maker.Shape());
+        return checked.IsNull() ? nil : [[PCKShape alloc] initWithShape:checked];
     } catch (...) {
         return nil;
     }
@@ -1777,30 +1937,44 @@ static TopoDS_Shape applyFaceExtrusionTools(const TopoDS_Shape &body, const TopT
     if (thickness <= 0) return nil;
     try {
         if (indices.count == 0) {
-            // Keine offene Fläche: Hohlkörper (Innenhaut um die Wandstärke versetzt, Kammer geschlossen)
-            BRepOffset_MakeOffset offset;
-            offset.Initialize(_shape, -thickness, 1e-6, BRepOffset_Skin, Standard_False, Standard_False,
-                              GeomAbs_Intersection, Standard_False);
-            offset.MakeOffsetShape();
-            if (!offset.IsDone() || offset.Shape().IsNull()) return nil;
-            TopoDS_Shape inner;
-            for (TopExp_Explorer it(offset.Shape(), TopAbs_SHELL); it.More(); it.Next()) {
-                inner = it.Current();
-                break;
-            }
-            TopoDS_Shape outer;
-            for (TopExp_Explorer it(_shape, TopAbs_SHELL); it.More(); it.Next()) {
-                outer = it.Current();
-                break;
-            }
-            if (inner.IsNull() || outer.IsNull()) return nil;
+            // Keine offene Fläche: Hohlkörper (Innenhaut um die Wandstärke versetzt, Kammer geschlossen).
+            // B5: je Solid eine eigene Innenhaut (früher nur die erste Schale des ganzen Körpers – bei mehreren
+            // Solids passten äußere und innere Schale nicht zusammen), danach Prüfung je Solid.
             BRep_Builder builder;
-            TopoDS_Solid hollow;
-            builder.MakeSolid(hollow);
-            builder.Add(hollow, outer);
-            builder.Add(hollow, inner.Reversed());
-            if (!BRepCheck_Analyzer(hollow).IsValid()) return nil;
-            return [[PCKShape alloc] initWithShape:hollow];
+            TopoDS_Compound compound;
+            builder.MakeCompound(compound);
+            int count = 0;
+            TopoDS_Shape single;
+            for (TopExp_Explorer solids(_shape, TopAbs_SOLID); solids.More(); solids.Next()) {
+                const TopoDS_Shape solid = solids.Current();
+                BRepOffset_MakeOffset offset;
+                offset.Initialize(solid, -thickness, 1e-6, BRepOffset_Skin, Standard_False, Standard_False,
+                                  GeomAbs_Intersection, Standard_False);
+                offset.MakeOffsetShape();
+                if (!offset.IsDone() || offset.Shape().IsNull()) return nil;
+                TopoDS_Shape inner;
+                for (TopExp_Explorer it(offset.Shape(), TopAbs_SHELL); it.More(); it.Next()) {
+                    inner = it.Current();
+                    break;
+                }
+                TopoDS_Shape outer;
+                for (TopExp_Explorer it(solid, TopAbs_SHELL); it.More(); it.Next()) {
+                    outer = it.Current();
+                    break;
+                }
+                if (inner.IsNull() || outer.IsNull()) return nil;
+                TopoDS_Solid hollow;
+                builder.MakeSolid(hollow);
+                builder.Add(hollow, outer);
+                builder.Add(hollow, inner.Reversed());
+                if (!BRepCheck_Analyzer(hollow).IsValid()) return nil;
+                builder.Add(compound, hollow);
+                single = hollow;
+                ++count;
+            }
+            if (count == 0) return nil;
+            const TopoDS_Shape checked = validShape(count == 1 ? single : TopoDS_Shape(compound));
+            return checked.IsNull() ? nil : [[PCKShape alloc] initWithShape:checked];
         }
         TopTools_ListOfShape removed;
         for (NSNumber *number in indices) {
@@ -1811,7 +1985,9 @@ static TopoDS_Shape applyFaceExtrusionTools(const TopoDS_Shape &body, const TopT
         maker.MakeThickSolidByJoin(_shape, removed, -thickness, 1e-3);
         maker.Build();
         if (!maker.IsDone()) return nil;
-        return [[PCKShape alloc] initWithShape:maker.Shape()];
+        // B5: Schale prüfen
+        const TopoDS_Shape checked = validShape(maker.Shape());
+        return checked.IsNull() ? nil : [[PCKShape alloc] initWithShape:checked];
     } catch (...) {
         return nil;
     }
@@ -1896,14 +2072,14 @@ static TopoDS_Shape offsetClosedSolid(const TopoDS_Shape &solid, double distance
 }
 
 - (nullable PCKShape *)rotatedAroundOrigin:(simd_double3)origin axis:(simd_double3)axis angle:(double)radians {
-    if (simd_length(axis) == 0) return nil;
+    if (!validDir(axis)) return nil;
     gp_Trsf transform;
     transform.SetRotation(gp_Ax1(toPnt(origin), toDir(axis)), radians);
     return [self transformedBy:transform];
 }
 
 - (nullable PCKShape *)mirroredAtPlaneOrigin:(simd_double3)origin normal:(simd_double3)normal {
-    if (simd_length(normal) == 0) return nil;
+    if (!validDir(normal)) return nil;
     gp_Trsf transform;
     transform.SetMirror(gp_Ax2(toPnt(origin), toDir(normal)));
     return [self transformedBy:transform];
@@ -2030,7 +2206,7 @@ static TopoDS_Shape offsetClosedSolid(const TopoDS_Shape &solid, double distance
 }
 
 - (nullable NSArray<PCKShape *> *)splitAtPlaneOrigin:(simd_double3)origin normal:(simd_double3)normal {
-    if (simd_length(normal) == 0) return nil;
+    if (!validDir(normal)) return nil;
     try {
         const gp_Pln plane(toPnt(origin), toDir(normal));
         const TopoDS_Face face = BRepBuilderAPI_MakeFace(plane, -1e5, 1e5, -1e5, 1e5).Face();
@@ -2260,8 +2436,8 @@ static bool pointOnEdge(const gp_Pnt &p, const TopoDS_Edge &edge, double toleran
 
 /// Die Kanten von shape, die aus den gegebenen (alten) Kanten hervorgegangen sind: zusammengefasst
 /// (alte Mitte liegt auf der neuen Kante), gekürzt oder geteilt (neue Kante liegt ganz auf der alten).
-static std::vector<TopoDS_Edge> matchEdges(const std::vector<TopoDS_Edge> &old, const TopoDS_Shape &shape) {
-    const double tolerance = 1e-4;
+static std::vector<TopoDS_Edge> matchEdges(const std::vector<TopoDS_Edge> &old, const TopoDS_Shape &shape,
+                                           double tolerance = 1e-4) {
     TopTools_IndexedMapOfShape edges;
     TopExp::MapShapes(shape, TopAbs_EDGE, edges);
     std::vector<gp_Pnt> oldMids;
@@ -2284,6 +2460,41 @@ static std::vector<TopoDS_Edge> matchEdges(const std::vector<TopoDS_Edge> &old, 
     return result;
 }
 
+/// Endprüfung (Schwacher Bugfix 1/2): Liegt eine der gewählten (ursprünglichen) Kanten unverändert bzw. als
+/// Teilstück noch im Ergebnis, wurde sie nicht bearbeitet – das Ergebnis ist eine stille Teilrundung bzw.
+/// Teilfase. Die Toleranz bleibt deutlich unter dem Wert, damit die neuen Randkanten einer kleinen Rundung
+/// (Abstand ≈ Wert von der alten Kante) nicht als „übrig“ zählen.
+static bool selectedEdgesRemain(const std::vector<TopoDS_Edge> &selected, const TopoDS_Shape &result, double value) {
+    if (result.IsNull()) return true;
+    const double tolerance = std::min(1e-4, std::max(1e-7, value * 0.25));
+    try {
+        for (const auto &edge : selected) {
+            if (!matchEdges({edge}, result, tolerance).empty()) return true;
+        }
+        return false;
+    } catch (...) {
+        return true;
+    }
+}
+
+/// Jede gewählte Kante muss im zusammengefassten Körper (unified) einen Treffer haben; sonst leer
+/// (Schwacher Bugfix 1: über unified entfernte Kanten fielen still aus der Auswahl).
+static std::vector<TopoDS_Edge> matchEveryEdge(const std::vector<TopoDS_Edge> &selected, const TopoDS_Shape &merged) {
+    std::vector<TopoDS_Edge> result;
+    for (const auto &edge : selected) {
+        const std::vector<TopoDS_Edge> hits = matchEdges({edge}, merged);
+        if (hits.empty()) return {};
+        for (const auto &hit : hits) {
+            bool known = false;
+            for (const auto &other : result) {
+                if (other.IsSame(hit)) { known = true; break; }
+            }
+            if (!known) result.push_back(hit);
+        }
+    }
+    return result;
+}
+
 /// Ein Durchgang Abrunden bzw. Fasen; leere Form bei Fehler.
 static TopoDS_Shape blendOnce(const TopoDS_Shape &shape, const std::vector<TopoDS_Edge> &edges, double value,
                               bool chamfer) {
@@ -2296,7 +2507,12 @@ static TopoDS_Shape blendOnce(const TopoDS_Shape &shape, const std::vector<TopoD
                 if (maker.Contour(edge) == 0) return TopoDS_Shape();
             }
             maker.Build();
-            if (maker.IsDone()) return validSolid(maker.Shape());
+            if (!maker.IsDone()) return TopoDS_Shape();
+            // Fasen kennen kein NbFaultyContours: eine gültige Form, in der eine gewählte Kante noch
+            // unverändert liegt, ist eine stille Teilfase (Schwacher Bugfix 2)
+            const TopoDS_Shape checked = validSolid(maker.Shape());
+            if (checked.IsNull() || selectedEdgesRemain(edges, checked, value)) return TopoDS_Shape();
+            return checked;
         } else {
             BRepFilletAPI_MakeFillet maker(shape);
             for (const auto &edge : edges) maker.Add(value, edge);
@@ -2318,27 +2534,30 @@ static TopoDS_Shape blendOnce(const TopoDS_Shape &shape, const std::vector<TopoD
 static TopoDS_Shape blendEdges(const TopoDS_Shape &shape, const std::vector<TopoDS_Edge> &edges, double value,
                                bool chamfer) {
     if (edges.empty() || !std::isfinite(value) || value <= 0) return TopoDS_Shape();
+    // Alle drei Pfade enden mit derselben Endprüfung gegen die URSPRÜNGLICH gewählten Kanten (edges), nicht gegen
+    // die im zusammengefassten Körper wiedergefundenen: keine gewählte Kante darf unverändert übrig bleiben.
     TopoDS_Shape result = blendOnce(shape, edges, value, chamfer);
-    if (!result.IsNull()) return result;
+    if (!result.IsNull() && !selectedEdgesRemain(edges, result, value)) return result;
     try {
         const TopoDS_Shape merged = unified(shape);
-        const std::vector<TopoDS_Edge> mergedEdges = matchEdges(edges, merged);
+        // Jede gewählte Kante braucht einen Treffer im zusammengefassten Körper
+        const std::vector<TopoDS_Edge> mergedEdges = matchEveryEdge(edges, merged);
         if (mergedEdges.empty()) return TopoDS_Shape();
         result = blendOnce(merged, mergedEdges, value, chamfer);
-        if (!result.IsNull() || edges.size() < 2) return result;
+        if (!result.IsNull() && !selectedEdgesRemain(edges, result, value)) return result;
+        if (edges.size() < 2) return TopoDS_Shape();
         TopoDS_Shape current = merged;
         for (const auto &edge : edges) {
             const std::vector<TopoDS_Edge> step = matchEdges({edge}, current);
-            // Leer: schon von einer vorigen Rundung erfasst (tangentiale Kette)
+            // Leer: schon von einer vorigen Rundung erfasst (tangentiale Kette); die Endprüfung unten
+            // stellt sicher, dass sie wirklich bearbeitet wurde
             if (step.empty()) continue;
             current = blendOnce(current, step, value, chamfer);
             if (current.IsNull()) return TopoDS_Shape();
         }
         // Der sequenzielle Rückfall ist nur vollständig, wenn keine ursprünglich gewählte
-        // Kante unverrundet übrig bleibt. Eine bloß gekürzte Nachbarkante zählt nicht.
-        for (const auto &edge : mergedEdges) {
-            if (!matchEdges({edge}, current).empty()) return TopoDS_Shape();
-        }
+        // Kante unbearbeitet übrig bleibt. Eine bloß gekürzte Nachbarkante zählt nicht.
+        if (selectedEdgesRemain(edges, current, value)) return TopoDS_Shape();
         return current;
     } catch (...) {
         return TopoDS_Shape();
@@ -2350,7 +2569,8 @@ static TopoDS_Shape blendEdges(const TopoDS_Shape &shape, const std::vector<Topo
 /// Quader, solange noch ein geschlossener Restkörper übrig bleibt. Nur für sechs ebene Flächen und eine
 /// durchgehende rechtwinklige Außenkante; bei anderen Formen bleibt der normale Fillet-Kernel zuständig.
 static TopoDS_Shape extendedBoxFillet(const TopoDS_Shape &shape, const TopoDS_Edge &edge, double radius) {
-    if (radius <= 0 || radius > 1e6) return TopoDS_Shape();
+    // N7: NaN besteht `radius <= 0 || radius > 1e6` (beide Vergleiche falsch) – ausdrücklich prüfen
+    if (!std::isfinite(radius) || radius <= 0 || radius > 1e6) return TopoDS_Shape();
     try {
         int solids = 0, faces = 0;
         for (TopExp_Explorer it(shape, TopAbs_SOLID); it.More(); it.Next()) ++solids;
@@ -2545,12 +2765,6 @@ static TopTools_IndexedMapOfShape realEdgesOfFace(const TopTools_IndexedMapOfSha
     }
 }
 
-static std::vector<TopoDS_Edge> edgeVector(const TopTools_IndexedMapOfShape &map) {
-    std::vector<TopoDS_Edge> result;
-    for (int i = 1; i <= map.Extent(); ++i) result.push_back(TopoDS::Edge(map(i)));
-    return result;
-}
-
 /// Bei bestimmten gültigen OCCT-Rundungen bleibt eine beschnittene Fläche ohne Triangulation (Projekt 27:
 /// obere Fläche vorhanden, aber im Viewport durchsichtig). STEP-Neuaufbau normalisiert ihre 2D-Kurven.
 /// Nur im seltenen Fehlerfall verwenden; die normalen Rundungen behalten ihre ursprüngliche Topologie.
@@ -2607,17 +2821,8 @@ static std::vector<TopoDS_Edge> edgeVector(const TopTools_IndexedMapOfShape &map
     return nil;
 }
 
-- (nullable PCKShape *)filletingEdgesOfFace:(NSInteger)face radius:(double)radius {
-    const std::vector<TopoDS_Edge> edges = edgeVector(realEdgesOfFace(_faces, face));
-    TopoDS_Shape result = blendEdges(_shape, edges, radius, false);
-    if (result.IsNull() && edges.size() == 1) result = extendedBoxFillet(_shape, edges.front(), radius);
-    return result.IsNull() ? nil : [[[PCKShape alloc] initWithShape:result] meshCompleteFillet];
-}
-
-- (nullable PCKShape *)chamferingEdgesOfFace:(NSInteger)face distance:(double)distance {
-    const TopoDS_Shape result = blendEdges(_shape, edgeVector(realEdgesOfFace(_faces, face)), distance, true);
-    return result.IsNull() ? nil : [[PCKShape alloc] initWithShape:result];
-}
+// N5: filletingEdgesOfFace:/chamferingEdgesOfFace: entfernt (Build 41) – ohne Aufrufer in App/ und Tests/ und
+// am isolierten Worker (IsolatedBlend) vorbei. Flächenweise Auswahl läuft über edgeNumbersOfFace: + filletingEdges:.
 
 /// Kanten aus Nummern (ab 1); eine veraltete Nummer macht die gesamte Auswahl ungültig.
 static std::vector<TopoDS_Edge> edgesFromNumbers(const TopTools_IndexedMapOfShape &edges, NSArray<NSNumber *> *numbers) {
@@ -2635,6 +2840,728 @@ static std::vector<TopoDS_Edge> edgesFromNumbers(const TopTools_IndexedMapOfShap
     TopoDS_Shape result = blendEdges(_shape, edges, radius, false);
     if (result.IsNull() && edges.size() == 1) result = extendedBoxFillet(_shape, edges.front(), radius);
     return result.IsNull() ? nil : [[[PCKShape alloc] initWithShape:result] meshCompleteFillet];
+}
+
+// MARK: Rundungsoptionen (Build 42) – Setback-Ecken (G1) und G2-Profil-Sweep
+// Portiert aus dem Python-Prototyp (OCCT 8.0.1, setback-g2/skripte: setback.py, g2lib.py, g2.py, robust.py).
+// Reiner C++-Block (kein Objective-C) zwischen BEGIN/END, damit er auf dem Rechner ohne Xcode gegen dieselben
+// OCCT-8.0.1-Bibliotheken übersetzt und geprüft werden kann.
+// BEGIN PCK_BLEND_OPTIONS_CORE
+namespace pckblend {
+
+/// Zeitbudget je Aufruf (Vertrag 1a Punkt 9: Ziel < 4 s, hartes Limit 8 s im Worker). Zwischen den Schritten
+/// geprüft; ein überschrittenes Budget liefert nil statt eines Ergebnisses, das der Worker ohnehin verwirft.
+struct Budget {
+    std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+    double seconds = 6.0;
+    bool exceeded() const {
+        return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count() > seconds;
+    }
+};
+
+/// Größte Normalenabweichung an Übergangskanten (Grad). Strenger als BRepCheck_Analyzer: der Prototyp hat
+/// „gültige“ Ergebnisse mit 77°-Knick gefunden.
+static const double kMaxBoundaryAngle = 2.0;
+/// Obergrenze für Toleranzen nach dem Nähen (ShapeFix_ShapeTolerance::LimitTolerance). Exakte Sweeps (G2) bleiben
+/// weit darunter; Füllflächen brauchen etwa 6e-4 · s (gemessen 0,0005 bei s = 3 bis 0,04 bei s = 75).
+static const double kMaxTolerance = 1e-3;
+static const double kSewingTolerance = 1e-4;
+
+static double volumeOf(const TopoDS_Shape &shape) {
+    GProp_GProps props;
+    BRepGProp::VolumeProperties(shape, props);
+    return props.Mass();
+}
+
+static bool containsSame(const std::vector<TopoDS_Shape> &list, const TopoDS_Shape &shape) {
+    for (const auto &item : list) {
+        if (item.IsSame(shape)) return true;
+    }
+    return false;
+}
+
+static gp_Pnt pointAt(const TopoDS_Edge &edge, double t) {
+    BRepAdaptor_Curve curve(edge);
+    return curve.Value(curve.FirstParameter() + t * (curve.LastParameter() - curve.FirstParameter()));
+}
+
+/// Einheitsnormale der Fläche am nächstgelegenen Flächenpunkt (Orientierung der Fläche berücksichtigt).
+static bool normalAt(const TopoDS_Face &face, const gp_Pnt &point, gp_Vec &normal) {
+    const Handle(Geom_Surface) surface = BRep_Tool::Surface(face);
+    if (surface.IsNull()) return false;
+    GeomAPI_ProjectPointOnSurf projection(point, surface);
+    if (!projection.IsDone() || projection.NbPoints() < 1) return false;
+    double u = 0, v = 0;
+    projection.LowerDistanceParameters(u, v);
+    gp_Pnt onSurface;
+    BRepGProp_Face(face).Normal(u, v, onSurface, normal);
+    if (normal.Magnitude() < 1e-12) return false;
+    normal.Normalize();
+    return true;
+}
+
+struct Boundary {
+    TopoDS_Edge edge;
+    TopoDS_Face support;
+};
+
+/// Randwinkel-Test: größter Winkel zwischen den Normalen von face und Nachbarfläche entlang der Übergänge.
+static double maxBoundaryAngle(const TopoDS_Face &face, const std::vector<Boundary> &bounds, int samples = 9) {
+    double worst = 0;
+    for (const auto &bound : bounds) {
+        for (int k = 0; k < samples; ++k) {
+            const gp_Pnt p = pointAt(bound.edge, (k + 0.5) / samples);
+            gp_Vec a, b;
+            if (!normalAt(face, p, a) || !normalAt(bound.support, p, b)) return 180.0;
+            const double cosine = std::min(1.0, std::abs(a.Dot(b)));
+            worst = std::max(worst, std::acos(cosine) * 180.0 / M_PI);
+        }
+    }
+    return worst;
+}
+
+/// Flächen nähen → eine geschlossene Schale → Solid → ShapeFix (wie sew_solid im Prototyp). Leer bei freien
+/// oder mehrfachen Kanten bzw. mehr als einer Schale.
+static TopoDS_Shape sewSolid(const std::vector<TopoDS_Shape> &faces) {
+    BRepBuilderAPI_Sewing sewing(kSewingTolerance);
+    for (const auto &face : faces) sewing.Add(face);
+    sewing.Perform();
+    if (sewing.NbFreeEdges() != 0 || sewing.NbMultipleEdges() != 0) return TopoDS_Shape();
+    const TopoDS_Shape sewed = sewing.SewedShape();
+    if (sewed.IsNull()) return TopoDS_Shape();
+    TopoDS_Shell shell;
+    int shells = 0;
+    for (TopExp_Explorer it(sewed, TopAbs_SHELL); it.More(); it.Next()) {
+        shell = TopoDS::Shell(it.Current());
+        ++shells;
+    }
+    if (shells != 1 || !BRep_Tool::IsClosed(shell)) return TopoDS_Shape();
+    BRepBuilderAPI_MakeSolid makeSolid(shell);
+    if (!makeSolid.IsDone()) return TopoDS_Shape();
+    ShapeFix_Solid fixSolid(makeSolid.Solid());
+    fixSolid.Perform();
+    TopoDS_Shape result = fixSolid.Solid();
+    if (result.IsNull()) return TopoDS_Shape();
+    ShapeFix_Shape fix(result);
+    fix.Perform();
+    result = fix.Shape();
+    if (result.IsNull()) return TopoDS_Shape();
+    if (volumeOf(result) < 0) result.Reverse();
+    return result;
+}
+
+/// Gemeinsame Endbehandlung: validSolid, Toleranzen begrenzen (STEP, HLR), erneut prüfen.
+static TopoDS_Shape finished(const TopoDS_Shape &shape, double maxTolerance) {
+    TopoDS_Shape result = validSolid(shape);
+    if (result.IsNull()) return TopoDS_Shape();
+    ShapeFix_ShapeTolerance limiter;
+    limiter.LimitTolerance(result, 1e-7, maxTolerance);
+    if (!BRepCheck_Analyzer(result).IsValid()) return TopoDS_Shape();
+    int solids = 0;
+    for (TopExp_Explorer it(result, TopAbs_SOLID); it.More(); it.Next()) ++solids;
+    if (solids != 1) return TopoDS_Shape();
+    return result;
+}
+
+/// Rolling-Ball-Rundung mit einem Radius je Kante (Gerüst für beide Verfahren).
+static bool addEdges(BRepFilletAPI_MakeFillet &maker, const std::vector<TopoDS_Edge> &edges,
+                     const std::vector<double> &radii) {
+    for (size_t k = 0; k < edges.size(); ++k) {
+        const int contour = maker.Contour(edges[k]);
+        if (contour > 0) maker.SetRadius(radii[k], contour, edges[k]);
+        else maker.Add(radii[k], edges[k]);
+        if (maker.Contour(edges[k]) == 0) return false;
+    }
+    maker.Build();
+    return maker.IsDone() && maker.NbFaultyContours() == 0 && !maker.Shape().IsNull();
+}
+
+static double edgeLength(const TopoDS_Edge &edge) {
+    GProp_GProps props;
+    BRepGProp::LinearProperties(edge, props);
+    return props.Mass();
+}
+
+// MARK: Setback-Ecke (G1)
+
+struct Corner {
+    gp_Pnt vertex;
+    gp_Vec dirs[3];     // Einheitsrichtungen der drei Kanten vom Eckpunkt weg, rechtshändig
+    size_t edges[3];    // Indizes in der Auswahl
+    double rho = 0;     // Radius der gerundeten Innenkanten des Werkzeugwürfels
+    TopoDS_Shape tool;
+    std::vector<TopoDS_Shape> removed;
+};
+
+/// Setback-Ecken: Rolling-Ball-Rundung, an jeder Ecke mit drei gewählten Kanten einen Würfel [V − B, V + s]
+/// (lokale Kantenachsen) mit gerundeten Innenkanten abziehen, die Lücke (12 Ränder: 3 × Gerade–Bogen–Gerade auf
+/// den Ebenen, 3 Querschnitte der Rundungszylinder) mit BRepFill_Filling G1 schließen, nähen. Ecken mit
+/// weniger als drei gewählten Kanten bleiben Rolling Ball; gibt es gar keine Setback-Ecke, ist die Option hier
+/// wirkungslos → leer (kein stiller Rückfall). Leer bei jeder nicht abgedeckten Topologie.
+static TopoDS_Shape setbackBlend(const TopoDS_Shape &shape, const std::vector<TopoDS_Edge> &edges,
+                                 const std::vector<double> &radii, double setback, const Budget &budget) {
+    if (!std::isfinite(setback) || setback <= 0 || edges.empty() || edges.size() != radii.size())
+        return TopoDS_Shape();
+    try {
+        TopTools_IndexedDataMapOfShapeListOfShape vertexEdges;
+        TopExp::MapShapesAndAncestors(shape, TopAbs_VERTEX, TopAbs_EDGE, vertexEdges);
+        std::vector<Corner> corners;
+        std::vector<int> ends(edges.size(), 0);
+        for (int iv = 1; iv <= vertexEdges.Extent(); ++iv) {
+            const TopoDS_Vertex vertex = TopoDS::Vertex(vertexEdges.FindKey(iv));
+            std::vector<TopoDS_Shape> incident;
+            for (TopTools_ListOfShape::Iterator it(vertexEdges(iv)); it.More(); it.Next()) {
+                if (BRep_Tool::Degenerated(TopoDS::Edge(it.Value())) || containsSame(incident, it.Value())) continue;
+                incident.push_back(it.Value());
+            }
+            std::vector<size_t> selected;
+            for (size_t k = 0; k < edges.size(); ++k) {
+                if (containsSame(incident, edges[k])) selected.push_back(k);
+            }
+            if (selected.size() < 3) continue;
+            // Nur konvexe 3-Kanten-Ecken (Würfel-Ansatz); 4 und mehr Kanten sind nicht abgedeckt
+            if (selected.size() != 3 || incident.size() != 3) return TopoDS_Shape();
+            Corner corner;
+            corner.vertex = BRep_Tool::Pnt(vertex);
+            for (int i = 0; i < 3; ++i) {
+                const TopoDS_Edge &edge = edges[selected[size_t(i)]];
+                if (BRepAdaptor_Curve(edge).GetType() != GeomAbs_Line || BRep_Tool::IsClosed(edge)) return TopoDS_Shape();
+                TopoDS_Vertex first, last;
+                TopExp::Vertices(edge, first, last);
+                if (first.IsNull() || last.IsNull()) return TopoDS_Shape();
+                const TopoDS_Vertex other = first.IsSame(vertex) ? last : first;
+                gp_Vec direction(corner.vertex, BRep_Tool::Pnt(other));
+                if (direction.Magnitude() < 1e-9) return TopoDS_Shape();
+                corner.dirs[i] = direction.Normalized();
+                corner.edges[i] = selected[size_t(i)];
+                ends[selected[size_t(i)]] += 1;
+            }
+            for (int i = 0; i < 3; ++i) {
+                for (int j = i + 1; j < 3; ++j) {
+                    if (std::abs(corner.dirs[i].Dot(corner.dirs[j])) > 1e-6) return TopoDS_Shape();
+                }
+            }
+            if (corner.dirs[0].Crossed(corner.dirs[1]).Dot(corner.dirs[2]) < 0) {
+                std::swap(corner.dirs[0], corner.dirs[1]);
+                std::swap(corner.edges[0], corner.edges[1]);
+            }
+            corners.push_back(corner);
+        }
+        if (corners.empty()) return TopoDS_Shape();
+        // Setback kürzer als jede beteiligte Kante (zwei Setback-Enden: zusammen kürzer)
+        for (size_t k = 0; k < edges.size(); ++k) {
+            if (ends[k] > 0 && ends[k] * setback >= edgeLength(edges[k]) - 1e-6) return TopoDS_Shape();
+        }
+        for (auto &corner : corners) {
+            double shortest = 1e100, largest = 0;
+            for (int i = 0; i < 3; ++i) {
+                shortest = std::min(shortest, edgeLength(edges[corner.edges[i]]));
+                largest = std::max(largest, radii[corner.edges[i]]);
+            }
+            // Konvex: nur der Oktant der drei Kantenrichtungen liegt im Körper
+            const double eps = std::min(0.05 * shortest, 0.25 * setback);
+            for (int code = 0; code < 8; ++code) {
+                const double sx = (code & 1) ? -1 : 1, sy = (code & 2) ? -1 : 1, sz = (code & 4) ? -1 : 1;
+                const gp_Vec offset = corner.dirs[0] * sx + corner.dirs[1] * sy + corner.dirs[2] * sz;
+                BRepClass3d_SolidClassifier classifier(shape, corner.vertex.Translated(offset * eps), 1e-7);
+                const TopAbs_State expected = code == 0 ? TopAbs_IN : TopAbs_OUT;
+                if (classifier.State() != expected) return TopoDS_Shape();
+            }
+            // Die Schnittebenen müssen die Rundungszylinder treffen, nicht das Kugel-Eckstück
+            const double gap = setback - largest;
+            if (gap <= std::max(0.02 * setback, 1e-3)) return TopoDS_Shape();
+            // Halbe Lücke: kleinste Randwinkel über alle Maßstäbe (gemessen 0,5 · gap gegen 0,7 und 0,85 · gap)
+            corner.rho = 0.5 * gap;
+        }
+
+        BRepFilletAPI_MakeFillet maker(shape);
+        if (!addEdges(maker, edges, radii)) return TopoDS_Shape();
+        TopoDS_Shape rolled = validSolid(maker.Shape());
+        if (rolled.IsNull() || budget.exceeded()) return TopoDS_Shape();
+        // Frische Kopie: das Nähen verändert sonst Toleranzen gemeinsamer Kanten (Prototyp: nicht-deterministische
+        // Folgefehler)
+        BRepBuilderAPI_Copy copier(rolled);
+        rolled = copier.Shape();
+        const double rolledVolume = volumeOf(rolled);
+        if (!std::isfinite(rolledVolume) || rolledVolume <= 0) return TopoDS_Shape();
+
+        TopTools_ListOfShape arguments, tools;
+        arguments.Append(rolled);
+        for (auto &corner : corners) {
+            const double margin = std::max(1.0, 0.5 * setback);
+            const gp_Vec diagonal = corner.dirs[0] + corner.dirs[1] + corner.dirs[2];
+            const gp_Pnt origin = corner.vertex.Translated(diagonal * -margin);
+            BRepPrimAPI_MakeBox box(gp_Ax2(origin, gp_Dir(corner.dirs[2]), gp_Dir(corner.dirs[0])),
+                                    margin + setback, margin + setback, margin + setback);
+            const TopoDS_Shape cube = box.Shape();
+            const gp_Pnt inner = corner.vertex.Translated(diagonal * setback);
+            BRepFilletAPI_MakeFillet rounding(cube);
+            int count = 0;
+            TopTools_IndexedMapOfShape cubeEdges;
+            TopExp::MapShapes(cube, TopAbs_EDGE, cubeEdges);
+            for (int i = 1; i <= cubeEdges.Extent(); ++i) {
+                const TopoDS_Edge edge = TopoDS::Edge(cubeEdges(i));
+                TopoDS_Vertex first, last;
+                TopExp::Vertices(edge, first, last);
+                if (BRep_Tool::Pnt(first).Distance(inner) < 1e-7 || BRep_Tool::Pnt(last).Distance(inner) < 1e-7) {
+                    rounding.Add(corner.rho, edge);
+                    ++count;
+                }
+            }
+            if (count != 3) return TopoDS_Shape();
+            rounding.Build();
+            if (!rounding.IsDone() || rounding.Shape().IsNull()) return TopoDS_Shape();
+            corner.tool = rounding.Shape();
+            tools.Append(corner.tool);
+        }
+        BRepAlgoAPI_Cut cut;
+        cut.SetArguments(arguments);
+        cut.SetTools(tools);
+        cut.Build();
+        if (!cut.IsDone() || cut.HasErrors() || cut.Shape().IsNull() || budget.exceeded()) return TopoDS_Shape();
+        const TopoDS_Shape cutShape = cut.Shape();
+        TopTools_IndexedMapOfShape cutFaces;
+        TopExp::MapShapes(cutShape, TopAbs_FACE, cutFaces);
+
+        // Werkzeugflächen im Ergebnis (Verlauf der Booleschen Operation) = Flächen, die die Füllfläche ersetzt
+        std::vector<TopoDS_Shape> removedAll;
+        for (auto &corner : corners) {
+            TopTools_IndexedMapOfShape toolFaces;
+            TopExp::MapShapes(corner.tool, TopAbs_FACE, toolFaces);
+            for (int i = 1; i <= toolFaces.Extent(); ++i) {
+                const TopoDS_Shape &toolFace = toolFaces(i);
+                const TopTools_ListOfShape &modified = cut.Modified(toolFace);
+                if (!modified.IsEmpty()) {
+                    for (TopTools_ListOfShape::Iterator it(modified); it.More(); it.Next()) {
+                        if (cutFaces.Contains(it.Value()) && !containsSame(corner.removed, it.Value()))
+                            corner.removed.push_back(it.Value());
+                    }
+                } else if (!cut.IsDeleted(toolFace) && cutFaces.Contains(toolFace)
+                           && !containsSame(corner.removed, toolFace)) {
+                    corner.removed.push_back(toolFace);
+                }
+            }
+            if (corner.removed.empty()) return TopoDS_Shape();
+            // Alle entfernten Flächen liegen im Eckwürfel [0, s]³ (sonst hat das Werkzeug anderes getroffen)
+            for (const auto &face : corner.removed) {
+                GProp_GProps props;
+                BRepGProp::SurfaceProperties(face, props);
+                const gp_Vec offset(corner.vertex, props.CentreOfMass());
+                for (int i = 0; i < 3; ++i) {
+                    const double along = offset.Dot(corner.dirs[i]);
+                    if (along < -1e-6 || along > setback + 1e-6) return TopoDS_Shape();
+                }
+            }
+            removedAll.insert(removedAll.end(), corner.removed.begin(), corner.removed.end());
+        }
+
+        TopTools_IndexedDataMapOfShapeListOfShape edgeFaces;
+        TopExp::MapShapesAndAncestors(cutShape, TopAbs_EDGE, TopAbs_FACE, edgeFaces);
+        std::vector<TopoDS_Shape> result;
+        for (int i = 1; i <= cutFaces.Extent(); ++i) {
+            if (!containsSame(removedAll, cutFaces(i))) result.push_back(cutFaces(i));
+        }
+        for (auto &corner : corners) {
+            std::vector<Boundary> bounds;
+            std::vector<TopoDS_Shape> seen;
+            for (const auto &face : corner.removed) {
+                for (TopExp_Explorer it(face, TopAbs_EDGE); it.More(); it.Next()) {
+                    const TopoDS_Edge edge = TopoDS::Edge(it.Current());
+                    if (BRep_Tool::Degenerated(edge) || containsSame(seen, edge)) continue;
+                    seen.push_back(edge);
+                    if (!edgeFaces.Contains(edge)) continue;
+                    for (TopTools_ListOfShape::Iterator nb(edgeFaces.FindFromKey(edge)); nb.More(); nb.Next()) {
+                        if (containsSame(removedAll, nb.Value())) continue;
+                        bounds.push_back({edge, TopoDS::Face(nb.Value())});
+                        break;
+                    }
+                }
+            }
+            if (bounds.size() != 12) return TopoDS_Shape();
+            for (const auto &bound : bounds) {
+                const GeomAbs_SurfaceType type = BRepAdaptor_Surface(bound.support, Standard_False).GetType();
+                if (type != GeomAbs_Plane && type != GeomAbs_Cylinder) return TopoDS_Shape();
+            }
+            // Füllfläche G1 an allen 12 Rändern. Erst die schnellen OCCT-Standardwerte (Grad ≤ 8, 9 Segmente),
+            // bei zu großem Randwinkel feiner (großes s/r, kleine Teile: gemessen 2,6° → 0,8° mit 10/20)
+            static const int kFillingSteps[][2] = {{8, 9}, {10, 20}, {12, 30}};
+            TopoDS_Face patch;
+            for (const auto &step : kFillingSteps) {
+                if (budget.exceeded()) return TopoDS_Shape();
+                BRepFill_Filling filling(3, 15, 2, Standard_False, 1e-5, 1e-4, 1e-2, 0.1, step[0], step[1]);
+                for (const auto &bound : bounds) filling.Add(bound.edge, bound.support, GeomAbs_G1, Standard_True);
+                filling.Build();
+                if (!filling.IsDone()) continue;
+                const TopoDS_Face candidate = filling.Face();
+                if (candidate.IsNull() || maxBoundaryAngle(candidate, bounds) > kMaxBoundaryAngle) continue;
+                patch = candidate;
+                break;
+            }
+            if (patch.IsNull()) return TopoDS_Shape();
+            result.push_back(patch);
+        }
+        const TopoDS_Shape solid = finished(sewSolid(result), std::max(kMaxTolerance, 2e-3 * setback));
+        if (solid.IsNull() || budget.exceeded()) return TopoDS_Shape();
+        // Volumenplausibilität: ±2 % gegenüber Rolling Ball und höchstens s³ je Ecke Unterschied
+        const double difference = std::abs(volumeOf(solid) - rolledVolume);
+        if (!std::isfinite(difference) || difference > 0.02 * rolledVolume
+            || difference > double(corners.size()) * setback * setback * setback) return TopoDS_Shape();
+        return solid;
+    } catch (const Standard_Failure &) {
+        return TopoDS_Shape();
+    } catch (...) {
+        return TopoDS_Shape();
+    }
+}
+
+// MARK: G2-Rundung (Profil-Sweep)
+
+/// G2-Profil zwischen den Enden eines Querschnitts (Kreisbogen der G1-Rundung): tangential an beiden Enden,
+/// Krümmung 0 an beiden Enden (je drei Pole auf der Tangente). rho < 0: Bezier Grad 4, P0, P0 + 0,3·(C − P0),
+/// C, P1 + 0,3·(C − P1), P1 wie im Prototyp. rho in [0,1; 0,9]: Grad 5 mit Schulterpunkt
+/// M = Q + rho·(C − Q) (Q = Sehnenmitte), Pole nie über C hinaus. C = Schnitt der Endtangenten.
+/// triangle = Fläche des Dreiecks P0, C, P1 (Keil-Querschnitt), centroid = sein Schwerpunkt.
+static bool g2Profile(const TopoDS_Edge &section, double rho, TopoDS_Edge &profile, double &triangle,
+                      gp_Pnt &centroid, gp_Vec &planeNormal) {
+    const TopoDS_Edge edge = TopoDS::Edge(section.Oriented(TopAbs_FORWARD));
+    BRepAdaptor_Curve curve(edge);
+    gp_Pnt p0, p1;
+    gp_Vec t0, t1;
+    curve.D1(curve.FirstParameter(), p0, t0);
+    curve.D1(curve.LastParameter(), p1, t1);
+    if (t0.Magnitude() < 1e-12 || t1.Magnitude() < 1e-12) return false;
+    t0.Normalize();
+    t1.Reverse();
+    t1.Normalize();
+    // Kleinste Quadrate: p0 + a·t0 ≈ p1 + b·t1
+    const gp_Vec w(p0, p1);
+    const double aa = t0.Dot(t0), ab = t0.Dot(t1), bb = t1.Dot(t1), dw = t0.Dot(w), ew = t1.Dot(w);
+    const double den = aa * bb - ab * ab;
+    if (std::abs(den) < 1e-12) return false;
+    const double along0 = (dw * bb - ab * ew) / den, along1 = (ab * dw - aa * ew) / den;
+    if (!(along0 > 0) || !(along1 > 0)) return false;
+    const gp_Pnt a = p0.Translated(t0 * along0), b = p1.Translated(t1 * along1);
+    if (a.Distance(b) > 1e-6 * std::max(1.0, along0)) return false;
+    const gp_Pnt corner((a.XYZ() + b.XYZ()) * 0.5);
+    const gp_Vec u0(p0, corner), u1(p1, corner);
+    std::vector<gp_Pnt> poles;
+    if (rho < 0) {
+        poles = {p0, p0.Translated(u0 * 0.3), corner, p1.Translated(u1 * 0.3), p1};
+    } else {
+        // Schulter (t = 0,5) des Grad-5-Polygons: M = Q + (5·f1 + 10·f2)/16 · (C − Q)
+        const double f2 = std::min(1.0, 1.28 * rho);
+        const double f1 = f2 < 1.0 ? 0.5 * f2 : (16.0 * rho - 10.0) / 5.0;
+        if (!(f1 > 0) || f1 > f2) return false;
+        poles = {p0, p0.Translated(u0 * f1), p0.Translated(u0 * f2), p1.Translated(u1 * f2), p1.Translated(u1 * f1), p1};
+    }
+    TColgp_Array1OfPnt array(1, int(poles.size()));
+    for (size_t i = 0; i < poles.size(); ++i) array.SetValue(int(i) + 1, poles[i]);
+    const Handle(Geom_BezierCurve) bezier = new Geom_BezierCurve(array);
+    TopoDS_Vertex first, last;
+    TopExp::Vertices(edge, first, last);
+    if (first.IsNull() || last.IsNull()) return false;
+    BRepBuilderAPI_MakeEdge make(bezier, first, last);
+    if (!make.IsDone()) return false;
+    profile = make.Edge();
+    const gp_Vec cross = u0.Crossed(u1);
+    triangle = 0.5 * cross.Magnitude();
+    if (triangle < 1e-12) return false;
+    planeNormal = cross.Normalized();
+    centroid = gp_Pnt((p0.XYZ() + p1.XYZ() + corner.XYZ()) / 3.0);
+    return true;
+}
+
+/// Kanten einer Rundungsfläche: Tangentenkanten (zu Nachbarflächen tangential), Endkanten, Naht.
+struct FilletFaceEdges {
+    std::vector<Boundary> tangent, ends;
+    TopoDS_Edge seam;
+};
+
+static bool classifyFilletFace(const TopoDS_Face &face, const TopTools_IndexedDataMapOfShapeListOfShape &edgeFaces,
+                               FilletFaceEdges &out) {
+    std::vector<TopoDS_Shape> seen;
+    for (TopExp_Explorer it(face, TopAbs_EDGE); it.More(); it.Next()) {
+        const TopoDS_Edge edge = TopoDS::Edge(it.Current());
+        if (containsSame(seen, edge)) continue;
+        seen.push_back(edge);
+        if (BRep_Tool::Degenerated(edge)) continue;
+        if (BRep_Tool::IsClosed(edge, face)) {
+            if (!out.seam.IsNull()) return false;
+            out.seam = edge;
+            continue;
+        }
+        if (!edgeFaces.Contains(edge)) return false;
+        std::vector<TopoDS_Face> neighbors;
+        for (TopTools_ListOfShape::Iterator nb(edgeFaces.FindFromKey(edge)); nb.More(); nb.Next()) {
+            if (!nb.Value().IsSame(face)) neighbors.push_back(TopoDS::Face(nb.Value()));
+        }
+        if (neighbors.size() != 1) return false;
+        const gp_Pnt mid = pointAt(edge, 0.5);
+        gp_Vec a, b;
+        if (!normalAt(face, mid, a) || !normalAt(neighbors.front(), mid, b)) return false;
+        if (std::abs(a.Dot(b)) > 0.9995) out.tangent.push_back({edge, neighbors.front()});
+        else out.ends.push_back({edge, neighbors.front()});
+    }
+    return out.tangent.size() == 2;
+}
+
+enum class G2Kind { Line, Circle };
+
+/// G2-Rundung: G1-Rundung als Gerüst (gleiche Ansatzlinien wie mit Radius r), jede Rundungsfläche durch einen
+/// exakten Sweep des G2-Profils ersetzt: gerade Kante zwischen zwei Ebenen → Extrusion (Endkanten auf den
+/// ebenen Endflächen per BRepTools_ReShape getauscht), geschlossene Kreiskante Ebene/koaxialer Zylinder → Rotation
+/// des Nahtquerschnitts um 360°. Jede gewählte Kante muss isoliert sein (kein Eckpunkt mit einer anderen gewählten
+/// Kante, keine tangentiale Fortsetzung). Alles andere → leer.
+static TopoDS_Shape g2Blend(const TopoDS_Shape &shape, const std::vector<TopoDS_Edge> &edges,
+                            const std::vector<double> &radii, double rho, const Budget &budget) {
+    if (edges.empty() || edges.size() != radii.size()) return TopoDS_Shape();
+    if (rho >= 0 && !(rho >= 0.1 && rho <= 0.9)) return TopoDS_Shape();
+    try {
+        TopTools_IndexedDataMapOfShapeListOfShape vertexEdges, sourceEdgeFaces;
+        TopExp::MapShapesAndAncestors(shape, TopAbs_VERTEX, TopAbs_EDGE, vertexEdges);
+        TopExp::MapShapesAndAncestors(shape, TopAbs_EDGE, TopAbs_FACE, sourceEdgeFaces);
+        std::vector<TopoDS_Shape> selected(edges.begin(), edges.end());
+        std::vector<G2Kind> kinds;
+        for (const auto &edge : edges) {
+            if (BRep_Tool::Degenerated(edge) || !sourceEdgeFaces.Contains(edge)) return TopoDS_Shape();
+            TopoDS_Vertex first, last;
+            TopExp::Vertices(edge, first, last);
+            for (const TopoDS_Vertex &vertex : {first, last}) {
+                if (vertex.IsNull() || !vertexEdges.Contains(vertex)) return TopoDS_Shape();
+                for (TopTools_ListOfShape::Iterator it(vertexEdges.FindFromKey(vertex)); it.More(); it.Next()) {
+                    if (!it.Value().IsSame(edge) && containsSame(selected, it.Value())) return TopoDS_Shape();
+                }
+            }
+            std::vector<TopoDS_Face> faces;
+            for (TopTools_ListOfShape::Iterator it(sourceEdgeFaces.FindFromKey(edge)); it.More(); it.Next()) {
+                bool known = false;
+                for (const auto &face : faces) known = known || face.IsSame(it.Value());
+                if (!known) faces.push_back(TopoDS::Face(it.Value()));
+            }
+            if (faces.size() != 2) return TopoDS_Shape();
+            const GeomAbs_SurfaceType t0 = BRepAdaptor_Surface(faces[0], Standard_False).GetType();
+            const GeomAbs_SurfaceType t1 = BRepAdaptor_Surface(faces[1], Standard_False).GetType();
+            BRepAdaptor_Curve curve(edge);
+            if (curve.GetType() == GeomAbs_Line && t0 == GeomAbs_Plane && t1 == GeomAbs_Plane) {
+                kinds.push_back(G2Kind::Line);
+            } else if (curve.GetType() == GeomAbs_Circle && BRep_Tool::IsClosed(edge)
+                       && ((t0 == GeomAbs_Plane && t1 == GeomAbs_Cylinder) || (t0 == GeomAbs_Cylinder && t1 == GeomAbs_Plane))) {
+                const TopoDS_Face &cylinder = t0 == GeomAbs_Cylinder ? faces[0] : faces[1];
+                const gp_Ax1 cylinderAxis = BRepAdaptor_Surface(cylinder, Standard_False).Cylinder().Axis();
+                if (!cylinderAxis.IsCoaxial(curve.Circle().Axis(), 1e-6, 1e-6)) return TopoDS_Shape();
+                kinds.push_back(G2Kind::Circle);
+            } else {
+                return TopoDS_Shape();
+            }
+        }
+
+        BRepFilletAPI_MakeFillet maker(shape);
+        if (!addEdges(maker, edges, radii) || maker.NbContours() != int(edges.size())) return TopoDS_Shape();
+        const TopoDS_Shape rolled = maker.Shape();
+        TopTools_IndexedMapOfShape rolledFaces;
+        TopExp::MapShapes(rolled, TopAbs_FACE, rolledFaces);
+        std::vector<TopoDS_Face> filletFaces;
+        for (const auto &edge : edges) {
+            const int contour = maker.Contour(edge);
+            if (contour < 1 || maker.NbEdges(contour) != 1) return TopoDS_Shape();
+            // NewFaces(i) ist bei mehreren Konturen unzuverlässig (Prototyp: leer für Kontur 2) → Generated
+            std::vector<TopoDS_Shape> generated;
+            for (TopTools_ListOfShape::Iterator it(maker.Generated(edge)); it.More(); it.Next()) {
+                if (it.Value().ShapeType() == TopAbs_FACE && rolledFaces.Contains(it.Value())
+                    && !containsSame(generated, it.Value())) generated.push_back(it.Value());
+            }
+            if (generated.size() != 1) return TopoDS_Shape();
+            filletFaces.push_back(TopoDS::Face(generated.front()));
+        }
+        const double sourceVolume = volumeOf(shape), rolledVolume = volumeOf(rolled);
+        if (budget.exceeded()) return TopoDS_Shape();
+
+        BRepBuilderAPI_Copy copier(rolled);
+        const TopoDS_Shape copy = copier.Shape();
+        for (auto &face : filletFaces) {
+            const TopTools_ListOfShape &copied = copier.Modified(face);
+            if (copied.Extent() != 1) return TopoDS_Shape();
+            face = TopoDS::Face(copied.First());
+        }
+        TopTools_IndexedDataMapOfShapeListOfShape edgeFaces;
+        TopExp::MapShapesAndAncestors(copy, TopAbs_EDGE, TopAbs_FACE, edgeFaces);
+        const Handle(BRepTools_ReShape) reshape = new BRepTools_ReShape();
+        std::vector<TopoDS_Shape> sweeps;
+        double wedge = 0;
+        for (size_t k = 0; k < filletFaces.size(); ++k) {
+            const TopoDS_Face &face = filletFaces[k];
+            const GeomAbs_SurfaceType type = BRepAdaptor_Surface(face, Standard_False).GetType();
+            FilletFaceEdges parts;
+            if (!classifyFilletFace(face, edgeFaces, parts)) return TopoDS_Shape();
+            TopoDS_Shape sweep;
+            if (kinds[k] == G2Kind::Line) {
+                if (type != GeomAbs_Cylinder || parts.ends.size() != 2 || !parts.seam.IsNull()) return TopoDS_Shape();
+                TopoDS_Edge profiles[2];
+                double triangle = 0;
+                gp_Pnt centroid;
+                gp_Vec normal;
+                for (int i = 0; i < 2; ++i) {
+                    if (BRepAdaptor_Surface(parts.ends[size_t(i)].support, Standard_False).GetType() != GeomAbs_Plane)
+                        return TopoDS_Shape();
+                    double area = 0;
+                    gp_Pnt c;
+                    gp_Vec n;
+                    if (!g2Profile(parts.ends[size_t(i)].edge, rho, profiles[i], area, c, n)) return TopoDS_Shape();
+                    if (i == 0) { triangle = area; centroid = c; normal = n; }
+                }
+                BRepAdaptor_Curve a(profiles[0]), b(profiles[1]);
+                const gp_Pnt a0 = a.Value(a.FirstParameter()), a1 = a.Value(a.LastParameter());
+                const gp_Pnt b0 = b.Value(b.FirstParameter()), b1 = b.Value(b.LastParameter());
+                const gp_Vec shift = a0.Distance(b0) + a1.Distance(b1) <= a0.Distance(b1) + a1.Distance(b0)
+                    ? gp_Vec(a0, b0) : gp_Vec(a0, b1);
+                if (shift.Magnitude() < 1e-6) return TopoDS_Shape();
+                // Das verschobene Profil A muss auf Profil B liegen (parallele Endflächen)
+                double first = 0, last = 0;
+                const Handle(Geom_Curve) other = BRep_Tool::Curve(profiles[1], first, last);
+                if (other.IsNull()) return TopoDS_Shape();
+                for (int i = 0; i <= 6; ++i) {
+                    const gp_Pnt q = a.Value(a.FirstParameter() + (a.LastParameter() - a.FirstParameter()) * i / 6.0)
+                        .Translated(shift);
+                    GeomAPI_ProjectPointOnCurve projection(q, other, first, last);
+                    if (projection.NbPoints() < 1 || projection.LowerDistance() > 1e-5) return TopoDS_Shape();
+                }
+                for (int i = 0; i < 2; ++i) {
+                    reshape->Replace(TopoDS::Edge(parts.ends[size_t(i)].edge.Oriented(TopAbs_FORWARD)), profiles[i]);
+                }
+                BRepPrimAPI_MakePrism prism(profiles[0], shift);
+                if (!prism.IsDone()) return TopoDS_Shape();
+                sweep = prism.Shape();
+                wedge += triangle * std::abs(shift.Dot(normal));
+                (void)centroid;
+            } else {
+                if (type != GeomAbs_Torus || parts.seam.IsNull() || !parts.ends.empty()) return TopoDS_Shape();
+                TopoDS_Edge profile;
+                double triangle = 0;
+                gp_Pnt centroid;
+                gp_Vec normal;
+                if (!g2Profile(parts.seam, rho, profile, triangle, centroid, normal)) return TopoDS_Shape();
+                const gp_Ax1 axis = BRepAdaptor_Surface(face, Standard_False).Torus().Axis();
+                BRepPrimAPI_MakeRevol revol(profile, axis, 2 * M_PI);
+                if (!revol.IsDone()) return TopoDS_Shape();
+                sweep = revol.Shape();
+                // Pappus: Keilring = Dreiecksfläche · Weg ihres Schwerpunkts
+                const double distance = gp_Vec(axis.Location(), centroid).Crossed(gp_Vec(axis.Direction())).Magnitude();
+                wedge += triangle * 2 * M_PI * distance;
+            }
+            if (sweep.IsNull() || sweep.ShapeType() != TopAbs_FACE) return TopoDS_Shape();
+            if (maxBoundaryAngle(TopoDS::Face(sweep), parts.tangent) > kMaxBoundaryAngle) return TopoDS_Shape();
+            sweeps.push_back(sweep);
+        }
+        const TopoDS_Shape reshaped = reshape->Apply(copy);
+        if (reshaped.IsNull()) return TopoDS_Shape();
+        std::vector<TopoDS_Shape> removed;
+        for (const auto &face : filletFaces) removed.push_back(reshape->Value(face));
+        TopTools_IndexedMapOfShape faces;
+        TopExp::MapShapes(reshaped, TopAbs_FACE, faces);
+        std::vector<TopoDS_Shape> result;
+        for (int i = 1; i <= faces.Extent(); ++i) {
+            if (!containsSame(removed, faces(i))) result.push_back(faces(i));
+        }
+        if (result.size() + filletFaces.size() != size_t(faces.Extent())) return TopoDS_Shape();
+        result.insert(result.end(), sweeps.begin(), sweeps.end());
+        const TopoDS_Shape solid = finished(sewSolid(result), kMaxTolerance);
+        if (solid.IsNull() || budget.exceeded()) return TopoDS_Shape();
+        // Volumenplausibilität: gleiche Richtung wie die Kreisrundung, höchstens der Keil (r²/2·L bei 90°),
+        // aber messbar anders als die Kreisrundung
+        const double circle = sourceVolume - rolledVolume, smooth = sourceVolume - volumeOf(solid);
+        if (!std::isfinite(circle) || !std::isfinite(smooth) || circle == 0 || smooth * circle <= 0) return TopoDS_Shape();
+        if (std::abs(smooth) > wedge * 1.02 + 1e-6) return TopoDS_Shape();
+        if (std::abs(smooth - circle) < 1e-9 * std::abs(sourceVolume)) return TopoDS_Shape();
+        return solid;
+    } catch (const Standard_Failure &) {
+        return TopoDS_Shape();
+    } catch (...) {
+        return TopoDS_Shape();
+    }
+}
+
+} // namespace pckblend
+// END PCK_BLEND_OPTIONS_CORE
+
+/// Welche Optionskombinationen der Kernel rechnet (H-A2). Standard immer; Setback nur mit G1/Kreis; G2 (Kreis-G2-
+/// oder Kegelschnitt-Profil mit Rho) nur mit Rolling-Ball-Ecken; Overflow „Kante behalten“ nie.
+static bool pckBlendOptionsSupported(PCKBlendOptions *options) {
+    if (options == nil || !options.isValid) return false;
+    if (options.isStandard) return true;
+    if (options.overflow != PCKBlendOverflowAutomatic) return false;
+    if (options.corner == PCKBlendCornerSetback) {
+        return options.continuity == PCKBlendContinuityG1 && options.profile == PCKBlendProfileCircle;
+    }
+    return options.continuity == PCKBlendContinuityG2;
+}
+
+/// Nicht-Standard-Rundung: Ergebnis oder nil (Vertrag 1a). Endprüfungen: validSolid, Toleranzgrenze, Randwinkel und
+/// Volumen (im C++-Teil), dann keine Originalkante übrig, vollständiges Netz (meshCompleteFillet) und
+/// isValidBlendPreview gegen den Ausgangskörper.
+static PCKShape *pckBlendWithOptions(PCKShape *source, NSArray<NSNumber *> *numbers,
+                                     const std::vector<double> &requested, PCKBlendOptions *options) {
+    if (!pckBlendOptionsSupported(options) || options.isStandard) return nil;
+    if (numbers.count == 0 || numbers.count != requested.size()) return nil;
+    const std::vector<TopoDS_Edge> all = edgesFromNumbers(source->_edges, numbers);
+    if (all.size() != requested.size()) return nil;
+    // Doppelt genannte Kanten zusammenfassen; widersprüchliche Radien sind ungültig
+    std::vector<TopoDS_Edge> edges;
+    std::vector<double> radii;
+    for (size_t k = 0; k < all.size(); ++k) {
+        const double radius = requested[k];
+        if (!std::isfinite(radius) || radius <= 0 || radius > 1e6) return nil;
+        bool known = false;
+        for (size_t i = 0; i < edges.size(); ++i) {
+            if (!edges[i].IsSame(all[k])) continue;
+            if (radii[i] != radius) return nil;
+            known = true;
+        }
+        if (!known) {
+            edges.push_back(all[k]);
+            radii.push_back(radius);
+        }
+    }
+    try {
+        const pckblend::Budget budget;
+        TopoDS_Shape result;
+        if (options.corner == PCKBlendCornerSetback) {
+            result = pckblend::setbackBlend(source->_shape, edges, radii, options.setback, budget);
+        } else {
+            const double rho = options.profile == PCKBlendProfileConic ? options.rho : -1.0;
+            result = pckblend::g2Blend(source->_shape, edges, radii, rho, budget);
+        }
+        if (result.IsNull()) return nil;
+        const double smallest = *std::min_element(radii.begin(), radii.end());
+        if (selectedEdgesRemain(edges, result, smallest)) return nil;
+        PCKShape *candidate = [[[PCKShape alloc] initWithShape:result] meshCompleteFillet];
+        if (candidate == nil || ![candidate isValidBlendPreviewFromShape:source]) return nil;
+        return candidate;
+    } catch (const Standard_Failure &) {
+        return nil;
+    } catch (...) {
+        return nil;
+    }
+}
+
++ (BOOL)supportsBlendOptions:(PCKBlendOptions *)options {
+    return pckBlendOptionsSupported(options) ? YES : NO;
+}
+
+- (nullable PCKShape *)filletingEdges:(NSArray<NSNumber *> *)numbers radius:(double)radius
+                              options:(PCKBlendOptions *)options {
+    if (!options.isValid) return nil;
+    if (options.isStandard) return [self filletingEdges:numbers radius:radius];
+    return pckBlendWithOptions(self, numbers, std::vector<double>(numbers.count, radius), options);
+}
+
+- (nullable PCKShape *)filletingEdges:(NSArray<NSNumber *> *)numbers radii:(NSArray<NSNumber *> *)radii
+                              options:(PCKBlendOptions *)options {
+    if (!options.isValid) return nil;
+    if (options.isStandard) return [self filletingEdges:numbers radii:radii];
+    if (numbers.count != radii.count) return nil;
+    std::vector<double> values;
+    for (NSNumber *radius in radii) values.push_back(radius.doubleValue);
+    return pckBlendWithOptions(self, numbers, values, options);
 }
 
 - (nullable PCKShape *)filletingEdges:(NSArray<NSNumber *> *)numbers radii:(NSArray<NSNumber *> *)radii {
@@ -2710,7 +3637,8 @@ static std::vector<TopoDS_Edge> edgesFromNumbers(const TopTools_IndexedMapOfShap
 
 - (nullable PCKShape *)chamferingEdges:(NSArray<NSNumber *> *)numbers distance:(double)distance {
     const TopoDS_Shape result = blendEdges(_shape, edgesFromNumbers(_edges, numbers), distance, true);
-    return result.IsNull() ? nil : [[PCKShape alloc] initWithShape:result];
+    // N6: wie bei Rundungen eine fehlende Triangulation reparieren statt den Körper abzulehnen
+    return result.IsNull() ? nil : [[[PCKShape alloc] initWithShape:result] meshCompleteFillet];
 }
 
 - (nullable PCKShape *)chamferingEdges:(NSArray<NSNumber *> *)numbers distance:(double)distance
@@ -2735,10 +3663,43 @@ static std::vector<TopoDS_Edge> edgesFromNumbers(const TopTools_IndexedMapOfShap
         chamfer.Build();
         if (!chamfer.IsDone() || chamfer.Shape().IsNull()) return nil;
         const TopoDS_Shape checked = validSolid(chamfer.Shape());
-        return checked.IsNull() ? nil : [[PCKShape alloc] initWithShape:checked];
+        // Schwacher Bugfix 2: keine gewählte Kante darf unverändert im Ergebnis liegen (kein NbFaultyContours)
+        if (checked.IsNull() || selectedEdgesRemain(edges, checked, std::min(distance, distance2))) return nil;
+        return [[[PCKShape alloc] initWithShape:checked] meshCompleteFillet];
     } catch (...) {
         return nil;
     }
+}
+
+- (NSArray<NSNumber *> *)unblendableEdges:(NSArray<NSNumber *> *)numbers value:(double)value chamfer:(BOOL)chamfer {
+    // Diagnose, kein Filter: je Kante ein eigener Builder, nur Add (kein Build – das ist der teure, absturzgefährdete
+    // Teil). Contour == 0 heißt: OCCT nimmt die Kante gar nicht an (Naht, tangentialer Übergang, freie Kante).
+    NSMutableArray<NSNumber *> *bad = [NSMutableArray array];
+    const double amount = std::isfinite(value) && value > 0 ? value : 1.0;
+    for (NSNumber *number in numbers) {
+        const NSInteger index = number.integerValue;
+        if (index < 1 || index > _edges.Extent()) {
+            [bad addObject:number];
+            continue;
+        }
+        bool usable = false;
+        try {
+            const TopoDS_Edge edge = TopoDS::Edge(_edges(int(index)));
+            if (chamfer) {
+                BRepFilletAPI_MakeChamfer maker(_shape);
+                maker.Add(amount, edge);
+                usable = maker.Contour(edge) != 0;
+            } else {
+                BRepFilletAPI_MakeFillet maker(_shape);
+                maker.Add(amount, edge);
+                usable = maker.Contour(edge) != 0;
+            }
+        } catch (...) {
+            usable = false;
+        }
+        if (!usable) [bad addObject:number];
+    }
+    return bad;
 }
 
 /// Ein Durchgang variable Rundung; leere Form bei Fehler.
@@ -2820,17 +3781,23 @@ static TopoDS_Shape variableFilletOnce(const TopoDS_Shape &shape, const std::vec
     if (std::abs(radius - endRadius) < 1e-9) return [self filletingEdges:numbers radius:radius];
     const std::vector<TopoDS_Edge> edges = edgesFromNumbers(_edges, numbers);
     if (edges.empty()) return nil;
+    const double smaller = std::min(radius, endRadius);
     TopoDS_Shape result = variableFilletOnce(_shape, edges, radius, endRadius);
+    if (!result.IsNull() && selectedEdgesRemain(edges, result, smaller)) result = TopoDS_Shape();
     if (result.IsNull()) {
-        // Wie blendEdges: zerteilte Flächen und Kanten erst zusammenfassen
+        // Wie blendEdges: zerteilte Flächen und Kanten erst zusammenfassen. Jede gewählte Kante braucht einen
+        // Treffer, und die Endprüfung läuft gegen die ursprünglich gewählten Kanten (Schwacher Bugfix 1)
         try {
             const TopoDS_Shape merged = unified(_shape);
-            const std::vector<TopoDS_Edge> mergedEdges = matchEdges(edges, merged);
+            const std::vector<TopoDS_Edge> mergedEdges = matchEveryEdge(edges, merged);
             if (!mergedEdges.empty()) result = variableFilletOnce(merged, mergedEdges, radius, endRadius);
+            if (!result.IsNull() && selectedEdgesRemain(edges, result, smaller)) result = TopoDS_Shape();
         } catch (...) {
+            result = TopoDS_Shape();
         }
     }
-    return result.IsNull() ? nil : [[PCKShape alloc] initWithShape:result];
+    // N6: fehlende Triangulation wie bei der konstanten Rundung reparieren
+    return result.IsNull() ? nil : [[[PCKShape alloc] initWithShape:result] meshCompleteFillet];
 }
 
 - (nullable PCKShape *)sweepProfileWires:(NSArray<NSArray<NSNumber *> *> *)wires alongEdges:(NSArray<NSNumber *> *)numbers {
@@ -2886,7 +3853,8 @@ static TopoDS_Shape variableFilletOnce(const TopoDS_Shape &shape, const std::vec
             BRepOffsetAPI_MakePipe pipe(spine, face);
             pipe.Build();
             if (!pipe.IsDone()) return nil;
-            return [[PCKShape alloc] initWithShape:pipe.Shape()];
+            const TopoDS_Shape checkedPipe = checkedResult(pipe.Shape());
+            return checkedPipe.IsNull() ? nil : [[PCKShape alloc] initWithShape:checkedPipe];
         }
         for (NSUInteger k = 1; k < wires.count; ++k) {
             const TopoDS_Wire hole = wireFromCode(toVector(wires[k]));
@@ -2897,7 +3865,9 @@ static TopoDS_Shape variableFilletOnce(const TopoDS_Shape &shape, const std::vec
             if (!cut.IsDone()) return nil;
             result = cut.Shape();
         }
-        return [[PCKShape alloc] initWithShape:result];
+        // B7: Sweep entlang Körperkanten (Gehrung, Löcher abgezogen) prüfen
+        const TopoDS_Shape checked = checkedResult(result);
+        return checked.IsNull() ? nil : [[PCKShape alloc] initWithShape:checked];
     } catch (...) {
         return nil;
     }
@@ -2905,7 +3875,7 @@ static TopoDS_Shape variableFilletOnce(const TopoDS_Shape &shape, const std::vec
 
 - (nullable PCKShape *)draftingFaces:(NSArray<NSNumber *> *)faces pull:(simd_double3)pull
                        neutralOrigin:(simd_double3)neutralOrigin angle:(double)degrees {
-    if (faces.count == 0 || simd_length(pull) == 0 || std::abs(degrees) < 1e-9 || std::abs(degrees) >= 89) return nil;
+    if (faces.count == 0 || !validDir(pull) || std::abs(degrees) < 1e-9 || std::abs(degrees) >= 89) return nil;
     try {
         const gp_Dir direction = toDir(pull);
         const gp_Pln neutral(toPnt(neutralOrigin), direction);
@@ -2917,7 +3887,9 @@ static TopoDS_Shape variableFilletOnce(const TopoDS_Shape &shape, const std::vec
         }
         draft.Build();
         if (!draft.IsDone() || draft.Shape().IsNull()) return nil;
-        return [[PCKShape alloc] initWithShape:draft.Shape()];
+        // B7: Formschräge prüfen (geneigte Flächen können sich mit Nachbarn überschneiden)
+        const TopoDS_Shape checked = checkedResult(draft.Shape());
+        return checked.IsNull() ? nil : [[PCKShape alloc] initWithShape:checked];
     } catch (...) {
         return nil;
     }
@@ -3453,7 +4425,8 @@ static bool isSoftMeshEdge(const TopTools_ListOfShape &faces) {
 
 + (nullable NSArray<PCKShape *> *)shapesFromSTEPFile:(NSString *)path {
 #if PCK_HAS_STEP
-    std::lock_guard<std::recursive_mutex> stepLock(pckSTEPMutex());
+    std::unique_lock<std::recursive_timed_mutex> stepLock(pckSTEPMutex(), std::defer_lock);
+    if (!stepLock.try_lock_for(std::chrono::seconds(kPCKSTEPLockSeconds))) return nil;
     try {
         STEPControl_Reader reader;
         if (reader.ReadFile(path.fileSystemRepresentation) != IFSelect_RetDone) return nil;
@@ -3478,7 +4451,8 @@ static bool isSoftMeshEdge(const TopTools_ListOfShape &faces) {
 
 + (nullable NSArray<PCKShape *> *)bodyShapesFromSTEPFile:(NSString *)path {
 #if PCK_HAS_STEP
-    std::lock_guard<std::recursive_mutex> stepLock(pckSTEPMutex());
+    std::unique_lock<std::recursive_timed_mutex> stepLock(pckSTEPMutex(), std::defer_lock);
+    if (!stepLock.try_lock_for(std::chrono::seconds(kPCKSTEPLockSeconds))) return nil;
     try {
         STEPControl_Reader reader;
         if (reader.ReadFile(path.fileSystemRepresentation) != IFSelect_RetDone) return nil;
@@ -3499,7 +4473,8 @@ static bool isSoftMeshEdge(const TopTools_ListOfShape &faces) {
 
 + (BOOL)writeShapes:(NSArray<PCKShape *> *)shapes toSTEPFile:(NSString *)path {
 #if PCK_HAS_STEP
-    std::lock_guard<std::recursive_mutex> stepLock(pckSTEPMutex());
+    std::unique_lock<std::recursive_timed_mutex> stepLock(pckSTEPMutex(), std::defer_lock);
+    if (!stepLock.try_lock_for(std::chrono::seconds(kPCKSTEPLockSeconds))) return NO;
     try {
         STEPControl_Writer writer;
         Interface_Static::SetCVal("write.step.unit", "MM");
@@ -3609,14 +4584,14 @@ static bool isSoftMeshEdge(const TopTools_ListOfShape &faces) {
 
 + (nullable PCKShape *)cylinderWithBase:(simd_double3)base axis:(simd_double3)axis
                                  radius:(double)radius height:(double)height {
-    if (radius <= 0 || height <= 0 || simd_length(axis) == 0) return nil;
+    if (radius <= 0 || height <= 0 || !validDir(axis)) return nil;
     const std::vector<simd_double3> circle = circlePoints(base, axis, radius, 64);
     return [[PCKShape alloc] initWithFallback:fallbackPrism(circle, simd_normalize(axis) * height, true)];
 }
 
 + (nullable PCKShape *)prismWithPointsXYZ:(NSArray<NSNumber *> *)xyz direction:(simd_double3)direction {
     const std::vector<simd_double3> points = toPoints(xyz);
-    if (points.size() < 3 || simd_length(direction) == 0) return nil;
+    if (points.size() < 3 || !validDir(direction)) return nil;
     return [[PCKShape alloc] initWithFallback:fallbackPrism(points, direction, false)];
 }
 
@@ -3816,7 +4791,7 @@ static bool isSoftMeshEdge(const TopTools_ListOfShape &faces) {
 + (nullable PCKShape *)ellipsePrismWithCenter:(simd_double3)center normal:(simd_double3)normal
                                         xAxis:(simd_double3)xAxis radiusX:(double)radiusX
                                       radiusY:(double)radiusY direction:(simd_double3)direction {
-    if (radiusX <= 0 || radiusY <= 0 || simd_length(direction) == 0 || simd_length(normal) == 0) return nil;
+    if (radiusX <= 0 || radiusY <= 0 || !validDir(direction) || !validDir(normal)) return nil;
     const simd_double3 x = simd_normalize(xAxis);
     const simd_double3 y = simd_cross(simd_normalize(normal), x);
     std::vector<simd_double3> points;
@@ -3925,16 +4900,27 @@ static bool isSoftMeshEdge(const TopTools_ListOfShape &faces) {
     return nil;
 }
 
-- (nullable PCKShape *)filletingEdgesOfFace:(NSInteger)face radius:(double)radius {
-    return nil;
-}
-
-- (nullable PCKShape *)chamferingEdgesOfFace:(NSInteger)face distance:(double)distance {
-    return nil;
-}
-
 - (nullable PCKShape *)filletingEdges:(NSArray<NSNumber *> *)edges radius:(double)radius {
     return nil;
+}
+
++ (BOOL)supportsBlendOptions:(PCKBlendOptions *)options {
+    return options.isValid && options.isStandard;
+}
+
+- (nullable PCKShape *)filletingEdges:(NSArray<NSNumber *> *)edges radius:(double)radius
+                              options:(PCKBlendOptions *)options {
+    return nil;
+}
+
+- (nullable PCKShape *)filletingEdges:(NSArray<NSNumber *> *)edges radii:(NSArray<NSNumber *> *)radii
+                              options:(PCKBlendOptions *)options {
+    return nil;
+}
+
+- (NSArray<NSNumber *> *)unblendableEdges:(NSArray<NSNumber *> *)edges value:(double)value chamfer:(BOOL)chamfer {
+    // Ohne Kernel ist keine Kante abrundbar
+    return edges;
 }
 
 - (nullable PCKShape *)chamferingEdges:(NSArray<NSNumber *> *)edges distance:(double)distance {

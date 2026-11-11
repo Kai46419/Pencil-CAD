@@ -80,7 +80,6 @@ struct StandardPartPalette: View {
             .clipShape(RoundedRectangle(cornerRadius: PaletteStyle.radius, style: .continuous))
             .overlay { RoundedRectangle(cornerRadius: PaletteStyle.radius).strokeBorder(PaletteStyle.controlBorder) }
             .elevationShadow(.floating)
-            .environment(\.colorScheme, .dark)
         }
     }
 
@@ -146,7 +145,6 @@ struct BodySurfacePalette: View {
             }
             .contentShape(RoundedRectangle(cornerRadius: PaletteStyle.radius, style: .continuous))
             .elevationShadow(.floating)
-            .environment(\.colorScheme, .dark)
             .onAppear { syncGloss(item.finish) }
             .onChange(of: item.finish) { syncGloss(model.bodies.indices.contains(first) ? model.bodies[first].finish : nil) }
         }

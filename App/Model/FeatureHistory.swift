@@ -74,7 +74,8 @@ enum FeatureUnit: String, Codable {
             return try Formula.evaluate(text, variables: variables)
         case .count:
             let value = try Formula.evaluate(text, variables: variables)
-            return value.rounded()
+            // Anzahl begrenzen (1…10 000), bevor irgendwo Int(...) daraus wird (C1: Int(1e20) stürzte ab)
+            return Double(clampedCount(value))
         }
     }
 }
@@ -180,6 +181,12 @@ struct FeatureData: Codable {
     /// Optionaler Eingabemodus für eine konstante Rundung zwischen ebenen Flächen.
     /// Der Radius bleibt als Kernel-Parameter gespeichert; chordWidth ist das bearbeitbare Nutzereingabemaß.
     var chordFactor: Double?
+    /// Build 42: Rundungsoptionen (BlendOptions-Rohwerte); nil = Standard (Rolling Ball, G1, Kreis, Automatisch).
+    /// Werte dazu als Parameter „setback“ (mm) und „rhoPercent“ (%). Fehlen in älteren Ständen und bei Standard.
+    var blendCorner: String?
+    var blendContinuity: String?
+    var blendProfile: String?
+    var blendOverflow: String?
     var faces: [FaceSignature]?
     /// Ziel-Körper (Index)
     var target: Int?
@@ -260,6 +267,65 @@ struct Feature: Codable, Identifiable {
     var usesFormulas: Bool { parameters.contains { $0.formula != nil } }
 }
 
+// MARK: Rundungsoptionen (Build 42)
+
+extension Feature {
+    /// Rundungsoptionen dieses Features (Standard, wenn keine gespeichert sind; Fase: immer Standard).
+    /// Unbekannte Rohwerte (neuere App) zählen als nicht standard und ungültig: kein stiller Rückfall beim Nachbau.
+    var blendOptions: BlendOptions {
+        guard kind == .fillet else { return .standard }
+        // Unbekannter Rohwert: absichtlich ungültig (Setback ohne gültigen Abstand) → Nachbau meldet einen Fehler
+        let unknown = BlendOptions(corner: .setback, setback: Double.nan)
+        var options = BlendOptions.standard
+        if let raw = data.blendCorner {
+            guard let corner = BlendOptions.Corner(rawValue: raw) else { return unknown }
+            options.corner = corner
+        }
+        if let raw = data.blendContinuity {
+            guard let continuity = BlendOptions.Continuity(rawValue: raw) else { return unknown }
+            options.continuity = continuity
+        }
+        if let raw = data.blendProfile {
+            guard let profile = BlendOptions.Profile(rawValue: raw) else { return unknown }
+            options.profile = profile
+        }
+        if let raw = data.blendOverflow {
+            guard let overflow = BlendOptions.Overflow(rawValue: raw) else { return unknown }
+            options.overflow = overflow
+        }
+        if options.corner == .setback { options.setback = value("setback") }
+        if options.profile == .conic { options.rho = value("rhoPercent").map { $0 / 100 } }
+        return options
+    }
+
+    /// Optionen setzen (normalisiert). Standard entfernt alle Optionsfelder und die Parameter „setback“/„rhoPercent“ –
+    /// ein Standard-Feature schreibt keine neuen Schlüssel. Eine unveränderte Formel am Parameter bleibt stehen.
+    mutating func applyBlendOptions(_ options: BlendOptions) {
+        let normalized = kind == .fillet ? options.normalized : nil
+        data.blendCorner = normalized.flatMap { $0.corner == .rollingBall ? nil : $0.corner.rawValue }
+        data.blendContinuity = normalized.flatMap { $0.continuity == .g1 ? nil : $0.continuity.rawValue }
+        data.blendProfile = normalized.flatMap { $0.profile == .circle ? nil : $0.profile.rawValue }
+        data.blendOverflow = normalized.flatMap { $0.overflow == .automatic ? nil : $0.overflow.rawValue }
+        setOptionParameter("setback", "Setback-Abstand", unit: .length, normalized?.setback)
+        setOptionParameter("rhoPercent", "Profil Rho", unit: .percent, normalized?.rho.map { $0 * 100 })
+    }
+
+    private mutating func setOptionParameter(_ key: String, _ title: String, unit: FeatureUnit, _ value: Double?) {
+        guard let value else {
+            parameters.removeAll { $0.key == key }
+            return
+        }
+        if let index = parameters.firstIndex(where: { $0.key == key }) {
+            if abs(parameters[index].value - value) > 1e-9 || !value.isFinite {
+                parameters[index].value = value
+                parameters[index].formula = nil
+            }
+        } else {
+            parameters.append(FeatureParameter(key: key, title: title, value: value, unit: unit))
+        }
+    }
+}
+
 struct FeatureError: LocalizedError {
     let message: String
     init(_ message: String) { self.message = message }
@@ -284,6 +350,10 @@ final class FeatureRecorder {
     var replacement: [Feature]?
     /// Körper nach jedem Feature (nur im Speicher; beschleunigt den Nachbau)
     var cache: [UUID: [SceneBody]] = [:]
+    /// N6 (Build 41): Stände gelungener Schritte NACH einem Fehler, nur für die Zeitleiste (bodies(afterFeatures:)).
+    /// Bewusst getrennt von `cache`: ein teilweise ungültiger Stand wird keine Basis für Nachbau, Rundung oder
+    /// Vorzustand. Wird geleert, sobald sich die Feature-Liste ändert (ModelStore.features didSet).
+    var timelineCache: [UUID: [SceneBody]] = [:]
     /// Entbehrlicher Zwischenstand vor dem letzten Fillet. Die Feature-ID verhindert Nutzung nach Verlaufsänderungen.
     var preBlendShape: (featureID: UUID, body: Int, shape: PCKShape)?
     var preBlendCacheID: UUID?
@@ -298,6 +368,18 @@ final class FeatureRecorder {
     var blendPlacement: BlendPlacement?
     /// Gemerkte Suche nach einer angrenzenden vorigen Rundung (ineinanderlaufende Rundungen, BlendBeforeCuts.swift)
     var blendMerge: BlendMergeMemo?
+}
+
+/// Was nach einem fehlgeschlagenen Schritt im Nachbau gesperrt bleibt (Build 41, schwache Bugfixe 1 und 2).
+struct ReplayFailureState {
+    /// Körper, deren Stand nach dem Fehler nicht stimmt
+    var bodies = Set<Int>()
+    /// Ab diesem Index sind Körpernummern unsicher (ein neuer Körper fehlt); nil = keine
+    var from: Int?
+    /// Wirkung unbekannt: alles Folgende gesperrt bis zum nächsten vollständigen Stand
+    var global = false
+    /// Name des ersten fehlgeschlagenen Schritts; nil = kein Fehler
+    var blocking: String?
 }
 
 /// Inhalt von features.json.
@@ -415,10 +497,10 @@ extension ModelStore {
     /// edges = tatsächlich verrundete Kanten (nil = die gewählten).
     func noteBlend(_ operation: EdgeOperation, value: Double, second: Double? = nil, end: Double? = nil,
                    partialRange: ClosedRange<Double>? = nil,
-                   edges: [EdgeRef]? = nil) {
+                   edges: [EdgeRef]? = nil, options: BlendOptions? = nil) {
         guard let body = selectedEdges.first?.body else { return }
         var feature = Self.blendFeature(operation, value: value, second: second, end: end,
-                                        partialRange: partialRange)
+                                        partialRange: partialRange, options: options)
         feature.data.target = body
         let used = edges ?? selectedEdges
         featureRecorder.preview = PendingFeature(feature: feature, edges: used.filter { $0.body == body })
@@ -437,12 +519,21 @@ extension ModelStore {
             return
         }
         guard var ordered = featureRecorder.orderedPreview else { return }
+        // Schwacher Bugfix 4 (Build 41, HANDOFF-A H1): Eine mit einer früheren bzw. der letzten Rundung
+        // zusammengefasste Rundung (BlendBeforeCuts.blendMerge vergibt eine neue UUID) ERSETZT features[index] – die
+        // Anzahl bleibt gleich. Sie ist kein neues Feature und bleibt im Radiusmodus; sonst würde chordWidth = alter
+        // Radius × Faktor der neuen Kanten gesetzt und beim Bearbeiten der Radius des früheren Kantensatzes verändert.
+        guard ordered.features.count > features.count else { return }
         let oldIDs = Set(features.map(\.id))
         let newIndices = ordered.features.indices.filter {
             !oldIDs.contains(ordered.features[$0].id) && ordered.features[$0].kind == .fillet
         }
         guard newIndices.count == 1 else { return }
         let index = newIndices[0]
+        // Wie im ersten Zweig: variable Rundung und Teilrundung kennen keine Sehnenbreite
+        guard ordered.features[index].value("end") == nil, ordered.features[index].value("startPercent") == nil else {
+            return
+        }
         let actualWidth = (ordered.features[index].value("radius") ?? width / factor) * factor
         ordered.features[index].data.chordFactor = factor
         ordered.features[index].parameters.append(.length("chordWidth", "Sehnenbreite", actualWidth))
@@ -450,8 +541,10 @@ extension ModelStore {
     }
 
     /// Feature „Abrunden“ bzw. „Fase“ mit seinen Werten (ohne Kanten und Ziel).
+    /// Build 42: options nur bei Abrunden (Standard bzw. nil = keine neuen Schlüssel).
     static func blendFeature(_ operation: EdgeOperation, value: Double, second: Double? = nil,
-                             end: Double? = nil, partialRange: ClosedRange<Double>? = nil) -> Feature {
+                             end: Double? = nil, partialRange: ClosedRange<Double>? = nil,
+                             options: BlendOptions? = nil) -> Feature {
         var feature: Feature
         if operation == .fillet {
             feature = Feature(name: partialRange != nil ? "Teilweise abrunden"
@@ -462,6 +555,7 @@ extension ModelStore {
                 feature.parameters.append(.percent("startPercent", "Start", partialRange.lowerBound * 100))
                 feature.parameters.append(.percent("stopPercent", "Ende", partialRange.upperBound * 100))
             }
+            if let options { feature.applyBlendOptions(options) }
         } else {
             feature = Feature(name: "Fase", kind: .chamfer)
             feature.parameters.append(.length("distance", "Abstand", value))
@@ -788,6 +882,8 @@ extension ModelStore {
         featureRecorder.orderedPreview = nil
         featureRecorder.blendPlacement = nil
         featureRecorder.blendMerge = nil
+        // Der Stand nach dem letzten Feature darf als Startpunkt dienen; ob davor ein Schritt fehlgeschlagen ist,
+        // leitet runFeatures aus den Fehlermarken der Liste ab (Build 41) – der Zwischenspeicher allein kennt es nicht.
         if let last = features.last { featureRecorder.cache[last.id] = bodies }
     }
 
@@ -797,9 +893,11 @@ extension ModelStore {
         guard count >= 0, count <= features.count else { return nil }
         if count == 0 { return [] }
         let id = features[count - 1].id
-        if let cached = featureRecorder.cache[id] { return cached }
+        if let cached = featureRecorder.cache[id] ?? featureRecorder.timelineCache[id] { return cached }
         var replay = features
-        guard let run = runFeatures(&replay, from: 0, until: count,
+        // N6 (Build 41): ab dem nächsten gemerkten Zwischenstand davor rechnen (runFeatures sucht ihn rückwärts),
+        // nicht jedes Mal ab Schritt 0; Stände nach einem Fehler landen in timelineCache
+        guard let run = runFeatures(&replay, from: count, until: count,
                                     sketches: sketches, values: variableValues),
               !replay[count - 1].failed else { return nil }
         return run.bodies
@@ -835,6 +933,36 @@ extension ModelStore {
         guard let index = features.firstIndex(where: { $0.id == id }) else { return }
         var list = features
         list[index].parameters = parameters
+        replayFeatures(from: index, features: list, sketches: nil, name: "„\(list[index].name)“ ändern")
+    }
+
+    /// Build 42: Werte UND Rundungsoptionen eines Abrunden-Features ändern und ab dort nachbauen. Die Optionen werden
+    /// normalisiert (Standard entfernt alle Optionsfelder und die Parameter „setback“/„rhoPercent“). Ungültige
+    /// Optionen bzw. Optionen an einer variablen/teilweisen Rundung: Meldung, nichts geändert. Fase: wie
+    /// updateFeature(_:parameters:).
+    func updateFeature(_ id: UUID, parameters: [FeatureParameter], blendOptions: BlendOptions) {
+        guard let current = features.first(where: { $0.id == id }) else { return }
+        guard current.kind == .fillet else {
+            updateFeature(id, parameters: parameters)
+            return
+        }
+        guard blendOptions.isValid else {
+            message = Self.blendOptionsInvalidMessage
+            return
+        }
+        var edited = current
+        edited.parameters = parameters
+        edited.applyBlendOptions(blendOptions)
+        if blendOptions.normalized != nil,
+           edited.value("end") != nil || edited.value("startPercent") != nil {
+            message = Self.blendOptionsConstantOnlyMessage
+            return
+        }
+        commitPreview()
+        guard let index = features.firstIndex(where: { $0.id == id }) else { return }
+        var list = features
+        list[index].parameters = edited.parameters
+        list[index].data = edited.data
         replayFeatures(from: index, features: list, sketches: nil, name: "„\(list[index].name)“ ändern")
     }
 
@@ -892,12 +1020,54 @@ extension ModelStore {
             for body in result {
                 if let id = body.sketchID { newCounts[id, default: 0] += 1 }
             }
-            let uniqueOld = Dictionary(uniqueKeysWithValues: bodies.compactMap { body -> (UUID, SceneBody)? in
-                guard let id = body.sketchID, oldCounts[id] == 1, newCounts[id] == 1 else { return nil }
-                return (id, body)
+            let uniqueOld = Dictionary(uniqueKeysWithValues: bodies.indices.compactMap { index -> (UUID, Int)? in
+                guard let id = bodies[index].sketchID, oldCounts[id] == 1, newCounts[id] == 1 else { return nil }
+                return (id, index)
             })
+            // C5 (Build 41): SceneBody hat keine eigene ID. Zusätzlich zuordnen über (1) dieselbe Form (unverändert
+            // durchgereichter Körper, eindeutig), (2) die eindeutige Skizzen-ID wie bisher und (3) einen eindeutigen, selbst vergebenen Namen auf beiden Seiten
+            // (STL, Grundkörper, Boolesche Ergebnisse). Standardnamen „Körper N“ zählen nicht: sie folgen der Position.
+            var used = Set<Int>()
+            var match = [Int?](repeating: nil, count: result.count)
+            var oldByShape: [ObjectIdentifier: Int] = [:]
+            var shapeCounts: [ObjectIdentifier: Int] = [:]
+            for (index, body) in bodies.enumerated() {
+                let key = ObjectIdentifier(body.shape)
+                shapeCounts[key, default: 0] += 1
+                oldByShape[key] = index
+            }
+            var newShapeCounts: [ObjectIdentifier: Int] = [:]
+            for body in result { newShapeCounts[ObjectIdentifier(body.shape), default: 0] += 1 }
             for index in result.indices {
-                guard let id = result[index].sketchID, let old = uniqueOld[id] else { continue }
+                let key = ObjectIdentifier(result[index].shape)
+                if shapeCounts[key] == 1, newShapeCounts[key] == 1, let old = oldByShape[key], !used.contains(old) {
+                    match[index] = old
+                    used.insert(old)
+                }
+            }
+            for index in result.indices where match[index] == nil {
+                if let id = result[index].sketchID, let old = uniqueOld[id], !used.contains(old) {
+                    match[index] = old
+                    used.insert(old)
+                }
+            }
+            func isDefaultName(_ name: String) -> Bool {
+                name.hasPrefix("Körper ") && Int(name.dropFirst("Körper ".count)) != nil
+            }
+            var oldNames: [String: Int] = [:]
+            for body in bodies where !isDefaultName(body.name) { oldNames[body.name, default: 0] += 1 }
+            var newNames: [String: Int] = [:]
+            for body in result where !isDefaultName(body.name) { newNames[body.name, default: 0] += 1 }
+            for index in result.indices where match[index] == nil {
+                let name = result[index].name
+                guard oldNames[name] == 1, newNames[name] == 1,
+                      let old = bodies.indices.first(where: { bodies[$0].name == name }), !used.contains(old) else { continue }
+                match[index] = old
+                used.insert(old)
+            }
+            for index in result.indices {
+                guard let matched = match[index] else { continue }
+                let old = bodies[matched]
                 result[index].name = old.name
                 result[index].color = old.color
                 result[index].isHidden = old.isHidden
@@ -937,12 +1107,19 @@ extension ModelStore {
         let recorder = featureRecorder
         var state: [SceneBody] = []
         var begin = 0
+        // Nur nachweislich körperzahlstabile Änderungen isolieren. Bei unbekannter Wirkung
+        // bleiben alle Folgeschritte gesperrt, bis ein vollständiger Stand sie ersetzt.
+        var failure = ReplayFailureState()
         var k = min(start, list.count) - 1
         while k >= 0 {
             let feature = list[k]
             if !feature.failed, let cached = recorder.cache[feature.id] {
                 state = cached
                 begin = k + 1
+                // Build 41 (schwacher Bugfix 1): Fehler vor dem Zwischenstand weiter berücksichtigen. Nach Undo bzw.
+                // Öffnen liegt der letzte Stand ohne Fehlerzustand im Speicher; ein neuer Schritt rechnete dann auf
+                // dem nicht gerundeten Körper statt gesperrt zu sein.
+                failure = Self.failureState(before: begin, in: list)
                 break
             }
             if feature.kind == .snapshot, !feature.isSuppressed, feature.data.snapshot?.full == true {
@@ -954,11 +1131,6 @@ extension ModelStore {
             k -= 1
         }
         var failures: [String] = []
-        // Nur nachweislich körperzahlstabile Änderungen isolieren. Bei unbekannter Wirkung
-        // bleiben alle Folgeschritte gesperrt, bis ein vollständiger Stand sie ersetzt.
-        var failedBodies = Set<Int>()
-        var globalFailure = false
-        var blockingFailure: String?
         var blockedCount = 0
         var fixedStand: String?
         var index = begin
@@ -967,19 +1139,14 @@ extension ModelStore {
             if list[index].isSuppressed {
                 list[index].failed = false
                 list[index].problem = nil
-            } else if let blockingFailure,
-                      !Self.canReplay(list[index], afterFailureIn: failedBodies,
-                                      globalFailure: globalFailure) {
+            } else if let blockingFailure = failure.blocking,
+                      !Self.canReplay(list[index], after: failure, bodyCount: state.count) {
                 list[index].failed = true
                 list[index].problem = "Nicht berechnet: vorausgehender Schritt „\(blockingFailure)“ fehlgeschlagen."
                 blockedCount += 1
                 // Auch ein übersprungener Schritt kann weitere Körper abhängig machen.
                 // Deren späterer Stand darf nicht als unabhängig gelten.
-                if let affected = Self.stableBodyReferences(of: list[index]) {
-                    failedBodies.formUnion(affected)
-                } else {
-                    globalFailure = true
-                }
+                Self.noteFailure(of: list[index], bodyCount: state.count, in: &failure)
             } else {
                 do {
                     // Hänger-Marke (HangGuard.swift): bleibt sie nach einem Einfrieren liegen, öffnet das Projekt sicher
@@ -988,9 +1155,7 @@ extension ModelStore {
                     list[index].failed = false
                     list[index].problem = nil
                     if list[index].kind == .snapshot, list[index].data.snapshot?.full == true {
-                        failedBodies.removeAll()
-                        globalFailure = false
-                        blockingFailure = nil
+                        failure = ReplayFailureState()
                     }
                     if index > start, fixedStand == nil, list[index].kind == .snapshot {
                         fixedStand = list[index].name
@@ -999,20 +1164,23 @@ extension ModelStore {
                     list[index].failed = true
                     list[index].problem = error.localizedDescription
                     failures.append(list[index].name)
-                    blockingFailure = blockingFailure ?? list[index].name
-                    if let affected = Self.stableBodyReferences(of: list[index]) {
-                        failedBodies.formUnion(affected)
-                    } else {
-                        globalFailure = true
-                    }
+                    failure.blocking = failure.blocking ?? list[index].name
+                    Self.noteFailure(of: list[index], bodyCount: state.count, in: &failure)
                 }
             }
             if let collect {
                 collect(list[index].id, state)
-            } else if blockingFailure == nil {
+            } else if failure.blocking == nil {
                 recorder.cache[list[index].id] = state
+                recorder.timelineCache.removeValue(forKey: list[index].id)
             } else {
                 recorder.cache.removeValue(forKey: list[index].id)
+                // N6: gelungene Schritte nach einem Fehler nur für die Zeitleiste merken (Ziehen ohne vollen Nachbau)
+                if list[index].failed {
+                    recorder.timelineCache.removeValue(forKey: list[index].id)
+                } else {
+                    recorder.timelineCache[list[index].id] = state
+                }
             }
             index += 1
         }
@@ -1022,6 +1190,8 @@ extension ModelStore {
             let names = failures.prefix(3).map { "„\($0)“" }.joined(separator: ", ")
             let more = failures.count > 3 ? " und \(failures.count - 3) weitere" : ""
             note = "Nachbau: \(names)\(more) fehlgeschlagen; \(blockedCount) weitere aktive Schritte aus Sicherheitsgründen nicht berechnet (rot in der Zeitleiste)."
+        } else if blockedCount > 0, let blocking = failure.blocking {
+            note = "Nachbau: \(blockedCount) Schritte nicht berechnet, weil „\(blocking)“ fehlgeschlagen ist (rot in der Zeitleiste)."
         } else if let fixedStand {
             note = "Ab „\(fixedStand)“ gilt ein fester Stand (direkte Änderung); davor geänderte Körper werden dort "
                 + "nicht weitergeführt."
@@ -1054,13 +1224,73 @@ extension ModelStore {
         }
     }
 
-    private static func canReplay(_ feature: Feature, afterFailureIn failedBodies: Set<Int>,
-                                  globalFailure: Bool) -> Bool {
+    /// Schritte, die nur neue Körper anhängen bzw. genau einen bekannten Zielkörper vereinigen (Build 41, schwacher
+    /// Bugfix 2): Extrudieren/Drehen aus Skizze als neuer Körper oder mit Vereinigen in `target`.
+    /// Ein Fehler trifft dort nur den Zielkörper und die neuen Körper (alle Nummern ab der bisherigen Anzahl), nicht
+    /// das ganze Modell. Der Nachbau rechnet mit dem gespeicherten Abstand bzw. Winkel, liest also keine anderen
+    /// Körper. Abziehen und Schnittmenge wirken auf alle Körper: weiter global (nil). Ein fehlgeschlagener Grundkörper
+    /// bleibt bewusst global (testFullSnapshotResumesAfterEarlierFailure erwartet die Sperre bis zum festen Stand).
+    private static func appendingBodyReferences(of feature: Feature) -> Set<Int>? {
+        switch feature.kind {
+        case .extrude, .revolve:
+            switch ExtrudeMode(rawValue: feature.data.mode ?? "") ?? .newBody {
+            case .newBody:
+                return []
+            case .union:
+                guard let target = feature.data.target, target >= 0 else { return nil }
+                return [target]
+            case .cut, .intersect:
+                return nil
+            }
+        default:
+            return nil
+        }
+    }
+
+    /// Fehlgeschlagenen bzw. gesperrten Schritt in den Fehlerzustand aufnehmen. bodyCount = Körper vor dem Schritt.
+    private static func noteFailure(of feature: Feature, bodyCount: Int, in failure: inout ReplayFailureState) {
+        if let affected = stableBodyReferences(of: feature) {
+            failure.bodies.formUnion(affected)
+        } else if let affected = appendingBodyReferences(of: feature) {
+            failure.bodies.formUnion(affected)
+            failure.from = min(failure.from ?? bodyCount, bodyCount)
+        } else {
+            failure.global = true
+        }
+    }
+
+    /// Fehlerzustand aus den Fehlermarken vor `begin` (seit dem letzten vollständigen Stand), wenn der Zwischenstand
+    /// ohne gemerkten Zustand im Speicher liegt (Undo, Öffnen, neu aufgezeichneter Schritt). Die Körperzahl vor einem
+    /// früheren Schritt ist hier unbekannt: neue Körper gelten dann ab Nummer 0 als unsicher (vorsichtig).
+    private static func failureState(before begin: Int, in list: [Feature]) -> ReplayFailureState {
+        var failure = ReplayFailureState()
+        for feature in list.prefix(begin) where !feature.isSuppressed {
+            if feature.failed {
+                failure.blocking = failure.blocking ?? feature.name
+                noteFailure(of: feature, bodyCount: 0, in: &failure)
+            } else if feature.kind == .snapshot, feature.data.snapshot?.full == true {
+                failure = ReplayFailureState()
+            }
+        }
+        return failure
+    }
+
+    private static func canReplay(_ feature: Feature, after failure: ReplayFailureState, bodyCount: Int) -> Bool {
         if feature.kind == .snapshot, feature.data.snapshot?.full == true { return true }
-        guard !globalFailure else { return false }
+        guard !failure.global else { return false }
         if feature.kind == .primitive { return true }
-        guard let referenced = stableBodyReferences(of: feature) else { return false }
-        return referenced.isDisjoint(with: failedBodies)
+        let referenced: Set<Int>
+        if let stable = stableBodyReferences(of: feature) {
+            referenced = stable
+        } else if let appending = appendingBodyReferences(of: feature) {
+            // Vereinigen braucht seinen Zielkörper unter der gespeicherten Nummer
+            guard appending.allSatisfy({ $0 < bodyCount }) else { return false }
+            referenced = appending
+        } else {
+            return false
+        }
+        if let from = failure.from, referenced.contains(where: { $0 >= from }) { return false }
+        return referenced.isDisjoint(with: failure.bodies)
     }
 
     /// Ein Feature auf die Körper anwenden (Formeln vorher neu ausrechnen).
@@ -1349,6 +1579,17 @@ extension ModelStore {
         let shape = state[body].shape
         let numbers = try matchEdges(signatures, in: shape).map { NSNumber(value: $0) }
         let result: PCKShape?
+        // Build 42: Rundungsoptionen (nil = Standard → bitgleich wie bisher)
+        let options = feature.kind == .fillet ? feature.blendOptions.normalized : nil
+        if let options {
+            guard options.isValid else { throw FeatureError(Self.blendOptionsInvalidMessage) }
+            guard feature.value("end") == nil, feature.value("startPercent") == nil else {
+                throw FeatureError(Self.blendOptionsConstantOnlyMessage)
+            }
+            guard PCKShape.supports(blendOptions: options.kernel) else {
+                throw FeatureError(Self.blendOptionsUnsupportedMessage)
+            }
+        }
         if feature.kind == .fillet {
             let radius = feature.value("radius") ?? 0
             guard radius > 0 else { throw FeatureError("Radius muss größer als 0 sein.") }
@@ -1361,7 +1602,7 @@ extension ModelStore {
                     return value
                 }
                 result = IsolatedBlend.run(shape: shape, edges: numbers, mode: 5,
-                                           value: radius, radii: radii)
+                                           value: radius, radii: radii, options: options)
             } else if let start = feature.value("startPercent"), let stop = feature.value("stopPercent") {
                 guard numbers.count == 1, start >= 0, stop <= 100, stop - start >= 5 else {
                     throw FeatureError("Teilabrundung: eine Kante und mindestens 5 % Abschnitt nötig.")
@@ -1372,7 +1613,7 @@ extension ModelStore {
                 result = IsolatedBlend.run(shape: shape, edges: numbers, mode: 3, value: radius,
                                            second: max(0.01, end))
             } else {
-                result = IsolatedBlend.run(shape: shape, edges: numbers, mode: 0, value: radius)
+                result = IsolatedBlend.run(shape: shape, edges: numbers, mode: 0, value: radius, options: options)
             }
         } else {
             let distance = feature.value("distance") ?? 0
@@ -1384,7 +1625,11 @@ extension ModelStore {
                 result = IsolatedBlend.run(shape: shape, edges: numbers, mode: 1, value: distance)
             }
         }
-        guard let result else { throw FeatureError("\(feature.name) an diesen Kanten nicht möglich.") }
+        guard let result else {
+            // Build 42: „Abrunden (Setback) an diesen Kanten nicht möglich.“ – sagt, welche Option scheiterte
+            let label = options.map { " (\($0.shortLabel))" } ?? ""
+            throw FeatureError("\(feature.name)\(label) an diesen Kanten nicht möglich.")
+        }
         var bodies = state
         bodies[body] = bodies[body].with(result)
         return bodies
@@ -1463,8 +1708,7 @@ extension ModelStore {
     private static func replayMove(_ feature: Feature, _ state: [SceneBody]) throws -> [SceneBody] {
         let offset = SIMD3<Double>(feature.value("x") ?? 0, feature.value("y") ?? 0, feature.value("z") ?? 0)
         let copies = feature.data.copies == true
-        let wanted = Int((feature.value("count") ?? 1).rounded())
-        let count = copies ? max(1, min(wanted, 200)) : 1
+        let count = copies ? clampedCount(feature.value("count") ?? 1, min: 1, max: 200) : 1
         let step: SIMD3<Double> = feature.data.divides == true ? offset / Double(count) : offset
         var result = state
         for index in feature.data.bodies ?? [] where state.indices.contains(index) {
@@ -1530,7 +1774,8 @@ extension ModelStore {
 
     private static func replayPattern(_ feature: Feature, _ state: [SceneBody]) throws -> [SceneBody] {
         let indices = (feature.data.bodies ?? []).filter { state.indices.contains($0) }
-        let count = Int((feature.value("count") ?? 1).rounded())
+        // Erst klemmen, dann wandeln; 0 bzw. negative Werte werden zu 1 und scheitern unten an „mindestens 2“
+        let count = clampedCount(feature.value("count") ?? 1, min: 1, max: 10_000)
         var result = state
         if feature.data.mode == "kreis" {
             guard count >= 2, count <= 1000, let origin = feature.data.origin, let rawAxis = feature.data.axis,
@@ -1554,7 +1799,8 @@ extension ModelStore {
             }
             return result
         }
-        let rows = max(1, Int((feature.value("count2") ?? 1).rounded()))
+        let rows = clampedCount(feature.value("count2") ?? 1, min: 1, max: 10_000)
+        // count und rows ≤ 10 000: das Produkt (≤ 10⁸) läuft nicht über
         guard count >= 1, count * rows >= 2, count * rows <= 10000, let rawAxis = feature.data.axis,
               simd_length(rawAxis) > 1e-12 else { throw FeatureError("Anzahl mindestens 2.") }
         let d = simd_normalize(rawAxis)
@@ -1771,11 +2017,16 @@ extension ModelStore {
         var list: [Feature] = []
         var preBlendCache: PreBlendCache?
         var stale = true
-        if let url = featuresURL, let data = try? Data(contentsOf: url),
-           let file = try? JSONDecoder().decode(FeatureFile.self, from: data) {
-            list = file.features
-            stale = file.bodyCount != bodies.count || modelIsNewer(than: url)
-            preBlendCache = file.preBlendCache
+        if let url = featuresURL, FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) {
+            if let data = try? Data(contentsOf: url),
+               let file = try? JSONDecoder().decode(FeatureFile.self, from: data) {
+                list = file.features
+                stale = file.bodyCount != bodies.count || modelIsNewer(than: url)
+                preBlendCache = file.preBlendCache
+            } else {
+                // Build 41 (N1/C3): defekte features.json nicht still durch einen neuen Verlauf ersetzen
+                markLoadFailure("features.json ist nicht lesbar", file: url)
+            }
         }
         if stale, !bodies.isEmpty {
             var feature = Feature(name: list.isEmpty ? "Ausgangsstand" : "Stand beim Öffnen", kind: .snapshot)
@@ -1801,7 +2052,8 @@ extension ModelStore {
             recorder.preBlendCacheID = info.id
         }
         if let last = list.last { recorder.cache[last.id] = bodies }
-        removeUnusedSnapshotFiles()
+        // Nach einem Ladefehler nichts löschen: die festen Stände gehören zum (nicht geladenen) gespeicherten Verlauf
+        if !loadFailed { removeUnusedSnapshotFiles() }
     }
 
     /// model.step wurde nach features.json geschrieben (z. B. von einer älteren Version ohne Verlauf).
@@ -1828,8 +2080,25 @@ extension ModelStore {
         }
     }
 
-    /// Mit save(): features.json und noch nicht geschriebene feste Stände (features/<id>.step).
+    /// Nur features.json bzw. neue feste Stände schreiben (z. B. Umbenennen in der Zeitleiste). Fehler als Meldung;
+    /// nach einem Ladefehler wird nichts überschrieben (Build 41).
     func saveFeatures() {
+        guard !loadFailed else {
+            message = Self.loadFailedSaveMessage
+            return
+        }
+        // C4/N3: geschlossenes, neu geöffnetes oder gelöschtes Projekt nicht anfassen
+        guard canWriteProject else { return }
+        do {
+            try writeFeatures()
+        } catch {
+            message = "Verlauf konnte nicht gespeichert werden: \(error.localizedDescription)"
+        }
+    }
+
+    /// Mit save(): features.json (atomar) und noch nicht geschriebene feste Stände (features/<id>.step).
+    /// Wirft, wenn ein fester Stand oder features.json nicht geschrieben werden konnte (Build 41, schwacher Bugfix 6).
+    func writeFeatures() throws {
         guard PCKShape.stepAvailable, let url = featuresURL else { return }
         if let directory = folder?.appending(path: "features") {
             let manager = FileManager.default
@@ -1838,8 +2107,12 @@ extension ModelStore {
                       let file = snapshotURL(feature.id) else { continue }
                 let path = file.path(percentEncoded: false)
                 guard !manager.fileExists(atPath: path) else { continue }
-                try? manager.createDirectory(at: directory, withIntermediateDirectories: true)
-                _ = PCKShape.writeSTEP(stored.map(\.shape), path: path)
+                try manager.createDirectory(at: directory, withIntermediateDirectories: true)
+                guard PCKShape.writeSTEP(stored.map(\.shape), path: path) else {
+                    // Halb geschriebene Datei entfernen, sonst gälte sie beim nächsten Speichern als vorhanden
+                    try? manager.removeItem(at: file)
+                    throw CocoaError(.fileWriteUnknown)
+                }
             }
         }
         var preBlendCache: PreBlendCache?
@@ -1870,9 +2143,8 @@ extension ModelStore {
             }
         }
         let file = FeatureFile(features: features, bodyCount: bodies.count, preBlendCache: preBlendCache)
-        if let data = try? JSONEncoder().encode(file) {
-            try? data.write(to: url)
-        }
+        let data = try JSONEncoder().encode(file)
+        try data.write(to: url, options: .atomic)
     }
 }
 

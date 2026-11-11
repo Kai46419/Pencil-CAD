@@ -11,6 +11,8 @@ import simd
 struct SketchClickPoint {
     var point: Point2
     var target: SnapTarget?
+    /// Build 43: zusätzlich gleich lang wie diese Linie (Parallel- bzw. Rechtwinkelfang mit gleicher Länge)
+    var alsoEqual: SketchCurveRef? = nil
 }
 
 /// Werkzeugart der Klickfolge.
@@ -57,6 +59,12 @@ enum SketchClickKind: Equatable {
 
 /// Zustand der laufenden Klickfolge (gehört dem SketchController).
 struct SketchClickState {
+    /// Build 66 (Kai): per Fingertipp gesperrte Länge (gelb) bzw. Richtung (grün) des laufenden Linienstücks;
+    /// gilt bis zum Setzen des Endpunkts, Doppeltipp mit dem Finger hebt die Sperre auf
+    var latchedLength: (length: Double, ref: SketchCurveRef?)?
+    var latchedDirection: (direction: Point2, target: SnapTarget)?
+    /// Build 66 (Kai): Verlängerung der schrägen Linie bis zur ersten getroffenen Kurve (gestrichelt)
+    var forwardHit: (from: Point2, to: Point2)?
     struct Press {
         /// Ungefangener Aufsetzpunkt
         var raw: Point2
@@ -109,6 +117,11 @@ struct SketchClickState {
     /// Ausdrücklich gemerkte Spurpunkte (Stift 0,5 s schweben lassen, Stift drücken, Finger-Doppeltipp; nochmal
     /// entmerkt): liefern Objektfangspuren (SketchInference.trackLeads), die neuesten zuletzt
     var pinned: [Point2] = []
+    /// Build 43 (Linie endet nach dem Strich): Ende der zuletzt gezeichneten Linie. Hier wieder ansetzen bzw. es
+    /// antippen zeichnet weiter (auch knapp daneben oder bei ausgeschaltetem Fang)
+    var lastLineEnd: SketchPointRef?
+    /// Build 43: Anfang der Kontur über das Weiterzeichnen hinweg (zurück am Anfang = geschlossen, wie im Linienzug)
+    var contourFirst: Point2?
 
     var isEmpty: Bool { points.isEmpty && picks.isEmpty }
 }
@@ -161,6 +174,11 @@ extension SketchController {
         click.mmPerPoint = metrics.mmPerPoint
         // Fang aus (Hauptschalter „Fang“ – wirkte hier bisher nicht, Kai) bzw. unterdrückt: Stift fest drücken
         // oder (SolidCraft-Modus) einen Finger auflegen
+        // Build 52 (Kai): im SolidCraft-Stil hält ein aufgelegter Finger den Stift an Punkten fest – Linienenden,
+        // Zentren, Schnitte und Körperecken fangen dann dreimal so weit, alle anderen Fänge ruhen
+        if arcModifier, options.isSolidCraft, snapEnabled {
+            return fingerPointLock(raw, metrics: metrics)
+        }
         if !snapEnabled || snapSuspended || arcModifier { return .free(raw) }
         let extra = click.points.map(\.point) + splinePoints + marks
         updateWokenCenter(raw, metrics: metrics, extra: extra)
@@ -171,12 +189,104 @@ extension SketchController {
                                                    woken: wokenCenter, fineStep: step, gridOn: gridOn,
                                                    tracking: tracking),
                                    raw: raw, tolerance: metrics.pointPick, kinds: snapKinds)
+        // Build 54 (Kai): auf einer Linie entlanggleitend rasten Anfang und Ende schon aus 2,5-facher Punktweite ein
+        if case .onCurve? = found.target,
+           let node = inference.pointHit(raw, metrics: metrics, kinds: [.endpoint], extra: [],
+                                         reach: metrics.pointPick * Self.endpointOnCurveFactor) {
+            return SnapCandidate(point: node.point, target: .point(node.ref), guide: nil, label: "")
+        }
         // „Entfernte Kanten“: ohne anderen Fang auf eine projizierte Körperkante (wirkte bisher nur im klassischen Stil)
         if found.target == nil || found.target == .grid, snapKinds.contains(.distantEdge),
            let edge = Self.nearestOnPolylines(raw, modelGuides.curves, reach: metrics.onCurve) {
             return SnapCandidate(point: edge, target: .modelVertex(edge), guide: nil, label: "Kante")
         }
         return found
+    }
+
+    /// Fangweite der Linienenden, solange der Stift auf der Linie gleitet (Vielfaches von pointPick)
+    static let endpointOnCurveFactor = 2.5
+
+    /// Fangweite des Punktfangs mit aufgelegtem Finger (Vielfaches von pointPick, ca. 30 pt)
+    static let fingerLockFactor = 3.0
+
+    /// Finger aufgelegt (Build 52): nächster Punkt (Ende, Zentrum, Schnitt, Körperecke, Punkte des Zugs) in
+    /// großer Weite; ohne Punkt in der Nähe bleibt der Stift frei.
+    func fingerPointLock(_ raw: Point2, metrics: SnapMetrics) -> SnapCandidate {
+        let extra = click.points.map(\.point) + splinePoints + marks
+        let reach = metrics.pointPick * Self.fingerLockFactor
+        var best: (distance: Double, candidate: SnapCandidate)?
+        func offer(_ point: Point2, _ candidate: @autoclosure () -> SnapCandidate) {
+            let d = simd_distance(point, raw)
+            guard d < reach, d < (best?.distance ?? .infinity) else { return }
+            best = (d, candidate())
+        }
+        if let node = inference.pointHit(raw, metrics: metrics, kinds: [.endpoint, .center], extra: extra, reach: reach) {
+            offer(node.point, SnapCandidate(point: node.point, target: .point(node.ref), guide: nil, label: ""))
+        }
+        if let crossing = inference.nearestCrossing(raw, tolerance: reach, extra: extra) {
+            offer(crossing.point, SnapCandidate(point: crossing.point, target: .crossing(crossing.a, crossing.b),
+                                                guide: nil, label: "X"))
+        }
+        for q in inference.modelPoints {
+            offer(q, SnapCandidate(point: q, target: .modelVertex(q), guide: nil, label: "Pt"))
+        }
+        return best?.candidate ?? .free(raw)
+    }
+
+    /// Rastweite der Richtung bei festgehaltener Länge (Grad)
+    static let fingerAngleSnapDegrees = 5.0
+
+    /// Build 53: Länge der laufenden Linie, wenn sie gerade gelb ist (gleich lang wie eine vorhandene Linie).
+    func currentEqualLengthLock() -> (length: Double, ref: SketchCurveRef?)? {
+        guard clickKind == .line, let a = click.points.last?.point, let hover = click.hover else { return nil }
+        let length = simd_distance(a, hover.point)
+        guard length > 1e-9 else { return nil }
+        if case .equalLength(let ref)? = hover.target { return (length, ref) }
+        if let ref = hover.alsoEqual { return (length, ref) }
+        let tolerance = max(1e-6, length * 1e-9)
+        for curve in inference.curves where !curve.construction {
+            guard case .line(let p, let q) = curve.shape else { continue }
+            if abs(simd_distance(p, q) - length) <= tolerance { return (length, curve.ref) }
+        }
+        return nil
+    }
+
+    /// Build 53: Länge fest, der Stift gibt nur die Richtung vor. Die Richtung rastet (± 5°) parallel bzw.
+    /// gespiegelt zu vorhandenen Linien (auch versetzt, davor, dahinter, darüber) und waagerecht/senkrecht ein.
+    func lengthLockedCandidate(_ raw: Point2, from a: Point2, lock: (length: Double, ref: SketchCurveRef?)) -> SnapCandidate {
+        let v = raw - a
+        guard simd_length(v) > 1e-9 else {
+            return SnapCandidate(point: click.pointer ?? a, target: nil, guide: nil, label: "")
+        }
+        let u = simd_normalize(v)
+        var best: (angle: Double, direction: Point2, target: SnapTarget)?
+        func offer(_ d: Point2, _ target: SnapTarget) {
+            // Beide Richtungen der Geraden zählen
+            for dir in [d, -d] {
+                let angle = acos(min(1, max(-1, simd_dot(u, dir)))) * 180 / .pi
+                if angle <= Self.fingerAngleSnapDegrees, angle < (best?.angle ?? .infinity) {
+                    best = (angle, dir, target)
+                }
+            }
+        }
+        if snapEnabled {
+            offer([1, 0], .horizontal)
+            offer([0, 1], .vertical)
+            for curve in inference.curves where !curve.construction {
+                guard case .line(let p, let q) = curve.shape, simd_distance(p, q) > 1e-9 else { continue }
+                let d = simd_normalize(q - p)
+                offer(d, .parallel(curve.ref))
+                if abs(d.x) > 1e-9, abs(d.y) > 1e-9 { offer([d.x, -d.y], .mirroredAngle(curve.ref)) }
+            }
+        }
+        let direction = best?.direction ?? u
+        let end = a + direction * lock.length
+        guard let best else {
+            return SnapCandidate(point: end, target: lock.ref.map { .equalLength($0) }, guide: nil, label: "=")
+        }
+        var result = SnapCandidate(point: end, target: best.target, guide: (a, end), label: "")
+        result.alsoEqual = lock.ref
+        return result
     }
 
     /// Nächster Punkt auf den Linienzügen innerhalb reach (für „Entfernte Kanten“).
@@ -446,7 +556,7 @@ extension SketchController {
             // Nur die Länge getippt: ein eingerasteter Winkel bleibt samt Leitlinie (die Richtung ändert sich nicht)
             var alongRay = false
             switch candidate.target {
-            case .some(.horizontal), .some(.vertical), .some(.angle), .some(.parallel), .some(.perpendicular):
+            case .some(.horizontal), .some(.vertical), .some(.angle), .some(.parallel), .some(.perpendicular), .some(.mirroredAngle):
                 alongRay = true
             default: break
             }
@@ -483,6 +593,20 @@ extension SketchController {
     private func clickCandidate(_ raw: Point2, tolerance: Double) -> SnapCandidate {
         let metrics = snapMetrics(tolerance)
         let lineTool = clickKind == .line
+        click.forwardHit = nil
+        if lineTool, let anchor = click.points.last?.point,
+           click.latchedLength != nil || click.latchedDirection != nil {
+            let result = latchedCandidate(raw, from: anchor, metrics: metrics)
+            click.pointer = result.point
+            click.raw = raw
+            return result
+        }
+        if lineTool, let lock = fingerLengthLock, let anchor = click.points.last?.point {
+            let result = lengthLockedCandidate(raw, from: anchor, lock: lock)
+            click.pointer = result.point
+            click.raw = raw
+            return result
+        }
         let tracking = clickTracking(raw, metrics: metrics, fresh: false)
         var snapped = solidCraftSnap(raw, tolerance: tolerance, prev: click.points.last?.point, lineTool: lineTool,
                                     tracking: tracking)
@@ -538,22 +662,204 @@ extension SketchController {
                                              tolerance: metrics.refine) {
             result = match
         }
+        // Build 43 (Kai, Parallelogramm): Parallel bzw. rechtwinklig UND gleich lang – bisher schloss der Parallelfang
+        // den Längenfang aus, die Gegenseite wurde nie gelb. Die Richtung bleibt, die Länge rastet ein.
         if clickKind == .line, let anchor = click.points.last?.point,
-           lockedValue("Länge") == nil, !arcModifier {
+           snapEnabled, snapKinds.contains(.equalLength), !snapSuspended, !arcModifier,
+           lockedValue("Länge") == nil, !hasLockedBox {
+            switch result.target {
+            case .some(.parallel), .some(.perpendicular), .some(.mirroredAngle):
+                if let match = inference.equalLength(from: anchor, toward: result.point, raw: raw,
+                                                     tolerance: metrics.refine),
+                   case .equalLength(let ref)? = match.target, inference.curve(ref)?.construction == false {
+                    result.point = match.point
+                    result.alsoEqual = ref
+                    if result.guide != nil { result.guide = (anchor, match.point) }
+                }
+            default:
+                break
+            }
+        }
+        if clickKind == .line, let anchor = click.points.last?.point,
+           lockedValue("Länge") == nil, !arcModifier, result.alsoEqual == nil {
             switch result.target {
             case nil, .some(.grid):
-                result.point = steppedLineEnd(raw, from: anchor)
+                // Build 41: gerasterten Punkt (XY-Raster) als Richtung nehmen, nicht den rohen Stiftpunkt –
+                // außer er fällt auf den Startpunkt (sonst Länge 0 statt mindestens eines Schritts)
+                let direction = simd_distance(result.point, anchor) > 1e-9 ? result.point : raw
+                result.point = steppedLineEnd(direction, from: anchor, roundAngle: true)
             case .some(.horizontal), .some(.vertical), .some(.angle),
-                 .some(.parallel), .some(.perpendicular):
+                 .some(.parallel), .some(.perpendicular), .some(.mirroredAngle):
                 result.point = steppedLineEnd(result.point, from: anchor)
             default:
                 break
             }
         }
+        if clickKind == .line, let anchor = click.points.last?.point, snapEnabled, !snapSuspended,
+           lockedValue("Länge") == nil, !arcModifier, !hasLockedBox {
+            applyForwardHit(&result, from: anchor, raw: raw, metrics: metrics)
+        }
         click.pointer = result.point
         click.raw = raw
         return result
     }
+
+    // MARK: Build 66 – Fingertipp sperrt Länge/Richtung, Verlängerung bis zur nächsten Kurve
+
+    /// Schräge Linie a→Ende: Verlängerung bis zur ersten getroffenen Kurve merken (gestrichelt gezeigt). Liegt das
+    /// Ende kurz davor, rastet es in derselben Richtung genau dort ein (die Richtung bleibt, nur die Länge wächst).
+    func applyForwardHit(_ result: inout SnapCandidate, from a: Point2, raw: Point2, metrics: SnapMetrics) {
+        switch result.target {
+        case nil, .some(.grid), .some(.angle), .some(.parallel), .some(.perpendicular), .some(.mirroredAngle),
+             .some(.equalLength):
+            break
+        default:
+            return
+        }
+        let end = result.point
+        let v = end - a
+        let length = simd_length(v)
+        guard length > 1e-9 else { return }
+        let u = v / length
+        // Nur schräge Linien (waagerecht/senkrecht haben eigene Spuren)
+        let skew = sin(1.0 * .pi / 180)
+        guard abs(u.x) > skew, abs(u.y) > skew else { return }
+        let reach = max(length * 50, 1000)
+        let ray = TrimPrimitive.segment(end, end + u * reach)
+        var best: (distance: Double, point: Point2, ref: SketchCurveRef)?
+        for curve in inference.curves {
+            for primitive in curve.shape.primitives {
+                for hit in SketchTrim.intersections(ray, primitive) {
+                    let along = simd_dot(hit - end, u)
+                    guard along > 1e-6, simd_distance(hit, a) > 1e-6 else { continue }
+                    if along < (best?.distance ?? .infinity) { best = (along, hit, curve.ref) }
+                }
+            }
+        }
+        guard let best else { return }
+        // Abstand vom Stift (nicht vom auf mm gerasterten Ende) bis zum Treffer, längs der Linie
+        let penGap = simd_dot(best.point - raw, u)
+        if abs(penGap) <= metrics.pointPick, simd_dot(raw - a, u) > 0, result.alsoEqual == nil {
+            if case .equalLength? = result.target { return }
+            result.point = best.point
+            result.target = .onCurve(best.ref)
+            result.guide = (a, best.point)
+            result.label = "Ext"
+        } else {
+            click.forwardHit = (end, best.point)
+        }
+    }
+
+    /// Fester Fingertipp-Zustand: Länge und/oder Richtung gesperrt, der Stift gibt den Rest vor.
+    private func latchedCandidate(_ raw: Point2, from a: Point2, metrics: SnapMetrics) -> SnapCandidate {
+        let length = click.latchedLength
+        guard let direction = click.latchedDirection else {
+            return lengthLockedCandidate(raw, from: a, lock: length!)
+        }
+        let u = direction.direction
+        var result: SnapCandidate
+        if let length {
+            let end = a + u * length.length
+            result = SnapCandidate(point: end, target: direction.target, guide: (a, end), label: "")
+            result.alsoEqual = length.ref
+            return result
+        }
+        let along = max(simd_dot(raw - a, u), 1e-6)
+        var end = steppedLineEnd(a + u * along, from: a)
+        if simd_dot(end - a, u) <= 1e-9 { end = a + u * along }
+        result = SnapCandidate(point: end, target: direction.target, guide: (a, end), label: "")
+        // Gleiche Länge in derselben Richtung rastet zusätzlich ein (gelb)
+        if snapEnabled, snapKinds.contains(.equalLength),
+           let match = inference.equalLength(from: a, toward: end, raw: raw, tolerance: metrics.refine),
+           case .equalLength(let ref)? = match.target {
+            let w = match.point - a
+            if abs(w.x * u.y - w.y * u.x) < 1e-6, simd_dot(w, u) > 0 {
+                result.point = match.point
+                result.alsoEqual = ref
+                result.guide = (a, match.point)
+            }
+        }
+        if result.alsoEqual == nil { applyForwardHit(&result, from: a, raw: raw, metrics: metrics) }
+        return result
+    }
+
+    /// Richtung der laufenden Linie, wenn sie gerade grün ist (parallel bzw. gespiegelt zu einer vorhandenen Linie).
+    private func currentDirectionLock() -> (direction: Point2, target: SnapTarget)? {
+        guard clickKind == .line, let a = click.points.last?.point, let hover = click.hover else { return nil }
+        let v = hover.point - a
+        guard simd_length(v) > 1e-9 else { return nil }
+        let u = simd_normalize(v)
+        switch hover.target {
+        case .parallel?, .perpendicular?, .mirroredAngle?:
+            return (u, hover.target!)
+        default:
+            break
+        }
+        for curve in inference.curves where !curve.construction {
+            guard case .line(let p, let q) = curve.shape, simd_distance(p, q) > 1e-9 else { continue }
+            let d = simd_normalize(q - p)
+            if abs(u.x * d.y - u.y * d.x) < Self.lineMatchAngleTolerance { return (u, .parallel(curve.ref)) }
+            if abs(d.x) > 1e-9, abs(d.y) > 1e-9, abs(u.x * d.y + u.y * d.x) < Self.lineMatchAngleTolerance {
+                return (u, .mirroredAngle(curve.ref))
+            }
+        }
+        return nil
+    }
+
+    /// Was ein Fingertipp jetzt sperren würde (beim Auflegen des Fingers gemerkt, bevor der Finger den Fang ändert).
+    struct FingerLockSnapshot {
+        var length: (length: Double, ref: SketchCurveRef?)?
+        var direction: (direction: Point2, target: SnapTarget)?
+    }
+
+    func fingerLockSnapshot() -> FingerLockSnapshot? {
+        guard options.isSolidCraft, clickKind == .line, !click.points.isEmpty else { return nil }
+        let snapshot = FingerLockSnapshot(length: currentEqualLengthLock(), direction: currentDirectionLock())
+        return snapshot.length == nil && snapshot.direction == nil ? nil : snapshot
+    }
+
+    /// Fingertipp beim Zeichnen einer Linie: gelb sperrt die Länge, grün die Richtung (beides möglich).
+    /// false = nichts Neues gesperrt.
+    @discardableResult
+    func latchFingerLocks(_ snapshot: FingerLockSnapshot? = nil) -> Bool {
+        guard let snapshot = snapshot ?? fingerLockSnapshot(), clickKind == .line, !click.points.isEmpty else {
+            return false
+        }
+        var latched = false
+        if click.latchedLength == nil, let lock = snapshot.length {
+            click.latchedLength = lock
+            latched = true
+        }
+        if click.latchedDirection == nil, let lock = snapshot.direction {
+            click.latchedDirection = lock
+            latched = true
+        }
+        guard latched else { return false }
+        let parts = [click.latchedLength != nil ? "Länge" : nil, click.latchedDirection != nil ? "Winkel" : nil]
+            .compactMap { $0 }.joined(separator: " und ")
+        notice = "\(parts) gesperrt – Doppeltipp mit dem Finger hebt die Sperre auf."
+        if let raw = click.raw, click.press == nil {
+            click.hover = clickCandidate(raw, tolerance: click.mmPerPoint * 20)
+        }
+        changed()
+        return true
+    }
+
+    /// Doppeltipp mit dem Finger: Sperren aufheben. false = es war nichts gesperrt.
+    @discardableResult
+    func clearFingerLocks() -> Bool {
+        guard click.latchedLength != nil || click.latchedDirection != nil else { return false }
+        click.latchedLength = nil
+        click.latchedDirection = nil
+        notice = "Sperre aufgehoben."
+        if let raw = click.raw, click.press == nil {
+            click.hover = clickCandidate(raw, tolerance: click.mmPerPoint * 20)
+        }
+        changed()
+        return true
+    }
+
+    var hasFingerLocks: Bool { click.latchedLength != nil || click.latchedDirection != nil }
 
     /// Der Endpunkt eines Mittelpunktbogens muss auf Radiuskreis UND Fangkurve liegen.
     /// Ein nur auf die Fangkurve projizierter Punkt trägt sonst eine falsche Abhängigkeit.
@@ -623,6 +929,8 @@ extension SketchController {
     }
 
     func clickBegan(at raw: Point2, tolerance: Double) {
+        // Build 53: eine festgehaltene Länge gilt nur für den Strich, in dem der Finger aufgelegt wurde
+        fingerLengthLock = nil
         guard let kind = clickKind else { return }
         hoverCandidate = nil
         let metrics = snapMetrics(tolerance)
@@ -645,7 +953,7 @@ extension SketchController {
         if secondTap {
             // Erst beim Abheben klar: Tippen (Doppeltipp) oder Ziehen
         } else if click.points.isEmpty, kind.pressPlacesFirstPoint {
-            clickPlace(candidate)
+            clickPlace(lineContinuation(raw: raw, fresh: fresh, metrics: metrics) ?? candidate)
             placedFirst = !click.points.isEmpty
         } else if kind == .line, let last = click.points.last, simd_distance(last.point, fresh.point) > metrics.tapSlop {
             // Knapp neben dem Zugende aufgesetzt (ohne anderen Punktfang, z. B. auf dem letzten Stück selbst):
@@ -738,7 +1046,7 @@ extension SketchController {
         activeCandidate = nil
         if press.secondTap, dragged, click.points.isEmpty, kind.pressPlacesFirstPoint {
             // Doppeltippen und gleich ziehen: wie Aufsetzen–Ziehen–Abheben von A nach B
-            clickPlace(press.fresh)
+            clickPlace(lineContinuation(raw: press.raw, fresh: press.fresh, metrics: metrics) ?? press.fresh)
             if !click.points.isEmpty {
                 candidate = clickCandidate(raw, tolerance: tolerance)
                 clickPlace(candidate)
@@ -756,12 +1064,29 @@ extension SketchController {
             clickPlace(candidate)
         }
         // Merken fürs Doppeltippen; „begonnen“ = vorher lief nichts, jetzt eine Form bzw. ein Linienzug
-        click.lastTap = dragged ? nil
+        // Build 43: Ein Tipp, der einen Einzelstrich abschließt, ist kein erstes Tippen eines Doppeltipps – sonst ginge
+        // schnelles erneutes Antippen des Linienendes (Weiterzeichnen) verloren
+        let endedStroke = kind == .line && lineSingleStroke && !press.startedEmpty && click.points.isEmpty
+        click.lastTap = dragged || endedStroke ? nil
             : SketchClickState.Tap(time: now, raw: raw, startedShape: press.startedEmpty && !click.points.isEmpty)
         click.hover = nil
         // Nach dem Abheben nur noch die gemerkten Fangpunkte zeigen (die in Stiftnähe folgen beim Schweben)
         clickTrackedPoints = click.tracked
         changed()
+    }
+
+    /// Build 43: Ansetzen am Ende der zuletzt gezeichneten Linie (bzw. knapp daneben, ohne anderen Punktfang)
+    /// setzt den neuen Strich genau dort an – mit dem Linienende als Fang, damit Ecke und Winkel zum vorigen
+    /// Strich stimmen. nil = nicht in der Nähe bzw. Linienzug-Modus.
+    private func lineContinuation(raw: Point2, fresh: SnapCandidate, metrics: SnapMetrics) -> SnapCandidate? {
+        guard clickKind == .line, lineSingleStroke, let ref = click.lastLineEnd,
+              entities.indices.contains(ref.entity), ref.index <= 1,
+              case .line(let a, let b) = entities[ref.entity] else { return nil }
+        let end = ref.index == 1 ? b : a
+        guard simd_distance(end, raw) <= metrics.chainReach else { return nil }
+        // Ein anderer Punktfang (z. B. ein näherer Endpunkt) gewinnt
+        if fresh.target?.isPointSnap == true, simd_distance(fresh.point, end) > 1e-9 { return nil }
+        return SnapCandidate(point: end, target: .point(ref), guide: nil, label: "")
     }
 
     /// Neuer Linienzug ab dem Fang beim Aufsetzen.
@@ -800,7 +1125,7 @@ extension SketchController {
 
     private func clickPlace(_ candidate: SnapCandidate) {
         guard let kind = clickKind else { return }
-        let point = SketchClickPoint(point: candidate.point, target: candidate.target)
+        let point = SketchClickPoint(point: candidate.point, target: candidate.target, alsoEqual: candidate.alsoEqual)
         defer { if options.midpointOnly { options.midpointOnly = false } }
         // Gesetzte Punkte bleiben für die Ausrichtung gemerkt (auch frühere Ecken des Linienzugs)
         rememberTracked(inference.trackKind(candidate.target, at: candidate.point) ?? .endpoint, candidate.point)
@@ -839,7 +1164,13 @@ extension SketchController {
     private func placeLinePoint(_ point: SketchClickPoint) {
         guard let last = click.points.last else {
             click.points = [point]
-            click.chainFirst = point.point
+            if lineSingleStroke, case .point(let ref?)? = point.target, ref == click.lastLineEnd,
+               let first = click.contourFirst {
+                // Weitergezeichnet: die Kontur beginnt weiter beim ersten Strich
+                click.chainFirst = first
+            } else {
+                click.chainFirst = point.point
+            }
             placedPointCount += 1
             return
         }
@@ -853,12 +1184,24 @@ extension SketchController {
         }
         guard let index = commitLine(from: last, to: point) else { return }
         placedPointCount += 1
+        click.latchedLength = nil
+        click.latchedDirection = nil
+        click.forwardHit = nil
         if !options.locked.isEmpty { options.locked = [:] }
         if let first = click.chainFirst, simd_distance(first, point.point) < 1e-9 {
             // Zurück am Anfang: geschlossen
             click.points = []
             click.chainFirst = nil
             tool = .select
+            return
+        }
+        if lineSingleStroke {
+            // Build 43 (Kai): Der Strich endet hier. Länge und Winkel stehen als änderbare Maße an der Linie
+            // (editableIndex); weiter geht es erst, wenn das Linienende wieder angetippt bzw. dort angesetzt wird.
+            click.contourFirst = click.chainFirst
+            click.points = []
+            click.chainFirst = nil
+            click.lastLineEnd = SketchPointRef(entity: index, index: 1)
             return
         }
         click.points = [SketchClickPoint(point: point.point, target: .point(SketchPointRef(entity: index, index: 1)))]
@@ -1031,7 +1374,8 @@ extension SketchController {
     }
 
     var polygonSideCount: Int {
-        let locked = lockedValue("Seiten").map { Int($0.rounded()) }
+        // Seitenzahl erst klemmen, dann wandeln (1e20 bzw. NaN stürzte ab)
+        let locked = lockedValue("Seiten").map { clampedCount($0, min: 3, max: 200) }
         return max(locked ?? polygonSides, 3)
     }
 
@@ -1135,6 +1479,9 @@ extension SketchController {
         guard let kind = clickKind else { return nil }
         let n = click.points.count
         switch kind {
+        case .line where lineSingleStroke:
+            return n == 0 ? "Linie: von A nach B ziehen oder A und B antippen · Maße an der Linie antippen zum Ändern · Linienende antippen bzw. dort ansetzen zeichnet weiter"
+                : "Linie: Ende antippen (Länge/Winkel eintippbar) – der Strich endet dort"
         case .line:
             return n == 0 ? "Linie: Punkte antippen (auch doppeltippen) – oder von A nach B ziehen"
                 : "Linie: nächsten Punkt antippen (Länge/Winkel eintippbar) · doppeltippen, letzten Punkt erneut antippen oder „Fertig“ beendet · Anfang antippen schließt"
@@ -1184,5 +1531,59 @@ extension SketchController {
         case .point:
             return "Punkt: antippen"
         }
+    }
+}
+
+// MARK: - Build 43: Farbhinweise beim Zeichnen einer Linie (Kai)
+
+// „Wenn ich denselben Winkel habe wie die erste Linie, soll mein Strich grün werden. Wenn ich die Länge von irgendeiner
+// dieser bis jetzt gezeichneten Konstruktionen habe, wird die Linie gelb, und auch die dazugehörige Linie.“
+// Geprüft wird die gezeigte Vorschau selbst (nach allen Fängen): genau gleiche Richtung wie eine vorhandene Linie
+// (parallel, gleicher Winkel zur Waagerechten) = grün, genau gleiche Länge = gelb – jeweils mit allen passenden
+// Linien. Beides zugleich: grün-gelb gestreift. Die Fänge Parallel und Gleiche Länge machen die Werte genau.
+extension SketchController {
+    struct LineMatchHints {
+        /// Vorhandene Linien mit derselben Richtung (grün)
+        var parallel: [[Point2]] = []
+        /// Vorhandene Linien mit derselben Länge (gelb)
+        var equal: [[Point2]] = []
+
+        var isEmpty: Bool { parallel.isEmpty && equal.isEmpty }
+    }
+
+    /// Richtungsgleichheit: Kreuzprodukt der Einheitsvektoren (≈ Winkel im Bogenmaß; 1e-7 ≈ 0,000006°)
+    static let lineMatchAngleTolerance = 1e-7
+
+    /// Hinweise für das Gummiband der Linie; leer ohne laufenden Strich bzw. bei anderen Werkzeugen.
+    var lineMatchHints: LineMatchHints {
+        guard clickKind == .line, let a = click.points.last?.point, let b = click.hover?.point else {
+            return LineMatchHints()
+        }
+        return Self.lineMatches(from: a, to: b, curves: inference.curves)
+    }
+
+    /// Passende Linien zu a→b unter den (nicht konstruktiven) geraden Kurven der Skizze.
+    static func lineMatches(from a: Point2, to b: Point2, curves: [SketchInference.Curve]) -> LineMatchHints {
+        let v = b - a
+        let length = simd_length(v)
+        guard length > 1e-9, length.isFinite else { return LineMatchHints() }
+        let u = v / length
+        let lengthTolerance = max(1e-6, length * 1e-9)
+        var hints = LineMatchHints()
+        var seen = Set<SketchCurveRef>()
+        for curve in curves where !curve.construction {
+            guard case .line(let p, let q) = curve.shape, seen.insert(curve.ref).inserted else { continue }
+            let w = q - p
+            let l = simd_length(w)
+            guard l > 1e-9, l.isFinite else { continue }
+            let d = w / l
+            // Build 44 (Kai): auch gleicher Winkel gespiegelt (z. B. 60° und 120°) wird grün
+            if abs(u.x * d.y - u.y * d.x) < lineMatchAngleTolerance
+                || (abs(d.x) > 1e-9 && abs(d.y) > 1e-9 && abs(u.x * d.y + u.y * d.x) < lineMatchAngleTolerance) {
+                hints.parallel.append([p, q])
+            }
+            if abs(l - length) <= lengthTolerance { hints.equal.append([p, q]) }
+        }
+        return hints
     }
 }

@@ -172,6 +172,10 @@ enum MeshFileReader {
 
     /// 3MF: ZIP mit dem Modell (XML). Jedes Bauteil (build/item) wird ein Objekt; Bauteile aus Komponenten
     /// (auch in eigenen Dateien wie bei Bambu Studio und PrusaSlicer) werden mit ihren Lagen zusammengesetzt.
+    /// C6 (Build 41): Obergrenzen beim Auffalten der 3MF-Komponenten (Instanzen bzw. Dreiecke aller Instanzen).
+    static let maxThreeMFInstances = 10_000
+    static let maxThreeMFTriangles = 200_000
+
     static func threeMF(_ data: Data, name: String) throws -> [ImportedMeshObject] {
         let bytes = [UInt8](data)
         guard let entries = Zip.entries(bytes) else {
@@ -202,12 +206,24 @@ enum MeshFileReader {
             throw MeshImportError(text: "In der 3MF-Datei fehlt das 3D-Modell (3D/3dmodel.model).")
         }
         let scale = root.unitScale
+        // C6 (Build 41): Komponenten werden aufgefaltet – verschachtelte Verweise vervielfachen sich exponentiell.
+        // Grenzen für die ganze Datei, geprüft bevor Dreiecke angehängt werden.
+        var instances = 0
+        var flattenedTriangles = 0
 
         /// Dreiecke eines Objekts samt Komponenten in Weltlage anhängen.
         func collect(_ id: String, path: String, transform: simd_double4x4, depth: Int,
                      into soup: inout [SIMD3<Double>], color: inout SIMD3<Float>?) throws {
             guard depth < 16, let file = model(path), let object = file.objects[id] else {
                 throw MeshImportError(text: "Die 3MF-Datei enthält eine fehlende oder zu tief verschachtelte Komponente.")
+            }
+            instances += 1
+            flattenedTriangles += object.triangles.count / 3
+            guard instances <= MeshFileReader.maxThreeMFInstances else {
+                throw MeshImportError(text: "Die 3MF-Datei enthält mehr als \(MeshFileReader.maxThreeMFInstances) Bauteil-Instanzen.")
+            }
+            guard flattenedTriangles <= MeshFileReader.maxThreeMFTriangles else {
+                throw MeshImportError(text: "Die 3MF-Datei ergibt aufgefaltet mehr als \(MeshFileReader.maxThreeMFTriangles) Dreiecke.")
             }
             if color == nil { color = file.color(of: object) }
             let mirrored = simd_determinant(transform) < 0

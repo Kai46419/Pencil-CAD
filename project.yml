@@ -22,9 +22,9 @@ targets:
         # Werden von scripts/generate-project.sh gesetzt (signing.env oder Zertifikat im Schlüsselbund)
         PRODUCT_BUNDLE_IDENTIFIER: ${PENCILCAD_BUNDLE_ID}
         DEVELOPMENT_TEAM: ${PENCILCAD_TEAM}
-        MARKETING_VERSION: "0.1.0"
-        # Build-Nummer = Anzahl der Commits (setzt scripts/generate-project.sh)
-        CURRENT_PROJECT_VERSION: "${PENCILCAD_BUILD}"
+        MARKETING_VERSION: "0.1.1"
+        # CFBundleVersion (setzt scripts/generate-project.sh; die Nummer „Build N“ steht in App/BuildInfo.txt)
+        CURRENT_PROJECT_VERSION: "${PENCILCAD_BUNDLE_VERSION}"
         TARGETED_DEVICE_FAMILY: "2"
         SWIFT_VERSION: "5.9"
         "ARCHS[sdk=iphonesimulator*]": arm64
@@ -35,6 +35,9 @@ targets:
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: PencilCAD
+        # Export-Compliance: nur Standard-Verschlüsselung des Systems (HTTPS) – TestFlight fragt dann nicht nach
+        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.productivity
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
         INFOPLIST_KEY_UIRequiresFullScreen: NO
@@ -61,8 +64,8 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: ${PENCILCAD_BUNDLE_ID}.BlendWorker
         DEVELOPMENT_TEAM: ${PENCILCAD_TEAM}
         SWIFT_VERSION: "5.9"
-        MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "${PENCILCAD_BUILD}"
+        MARKETING_VERSION: "0.1.1"
+        CURRENT_PROJECT_VERSION: "${PENCILCAD_BUNDLE_VERSION}"
         TARGETED_DEVICE_FAMILY: "2"
         SWIFT_OBJC_BRIDGING_HEADER: App/Kernel/PencilCAD-Bridging-Header.h
         CLANG_CXX_LANGUAGE_STANDARD: c++17

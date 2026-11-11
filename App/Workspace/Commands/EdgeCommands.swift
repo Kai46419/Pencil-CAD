@@ -34,8 +34,16 @@ enum EdgeBlendCommand {
             cmd.flags["partial"] = false
             cmd.putNumber("startPercent", 20)
             cmd.putNumber("stopPercent", 80)
-            cmd.choices["continuity"] = "g1"
             cmd.choices["measurement"] = "radius"
+            // Build 42 (C1): Rundungsoptionen – Standard, Setback 1,5 × Radius (folgt dem Radius bis zur Handeingabe),
+            // Rho 0,5. Zuletzt im Modell verwendete Optionen bleiben (wie der zuletzt verwendete Radius) – das Modell
+            // setzt edgeBlendOptions bei jeder Auswahländerung zurück, maßgeblich ist deshalb der Befehlszustand.
+            let radius = cmd.number("radius", default: 2)
+            BlendOptionsForm.setDefaults(cmd, radius: radius)
+            let last = model.edgeBlendOptions
+            if current != nil, !last.isStandard, BlendOptionsForm.isSupported(last) {
+                BlendOptionsForm.adopt(last, into: cmd, radius: radius)
+            }
         } else {
             cmd.choices["selectionScope"] = "edge"
             cmd.choices["type"] = "equal"
@@ -205,8 +213,16 @@ enum EdgeBlendCommand {
         CommandSync.edges(sameBody, model)
         if model.edgeOperation != operation { model.edgeOperation = operation }
         guard cmd.previewEnabled else {
+            if operation == .fillet { BlendOptionsForm.followRadius(cmd, radius: cmd.number("radius", default: 2)) }
             model.dropPreview()
             return nil
+        }
+        // Schwacher Bugfix 5 (Build 41, HANDOFF-A H2): Der Maß-Schalter ist bei variabler Rundung und Teilrundung
+        // ausgeblendet – ein stehengebliebenes „chord“ darf „Anfang“/„Radius“ dann nicht mit chordWidth/Faktor
+        // überschreiben.
+        if operation == .fillet, cmd.isOn("variable", default: false) || cmd.isOn("partial", default: false),
+           cmd.choice("measurement", default: "radius") == "chord" {
+            cmd.choices["measurement"] = "radius"
         }
         let value: Double
         if operation == .fillet && cmd.choice("measurement", default: "radius") == "chord" {
@@ -244,7 +260,20 @@ enum EdgeBlendCommand {
             }
             let end: Double? = !partial && cmd.isOn("variable", default: false)
                 ? cmd.number("end", default: value * 2) : nil
+            // Build 42 (C2): Rundungsoptionen nur bei konstanter Rundung; Variabel/Teilweise rechnen mit Standard.
+            // Setback folgt dem Radius, bis er von Hand eingegeben wurde. Kein stiller Rückfall: was der Kernel
+            // nicht kann, rechnet hier nicht.
+            BlendOptionsForm.followRadius(cmd, radius: value)
+            let options = BlendOptionsForm.effectiveOptions(cmd)
+            if let problem = Self.optionsProblem(options) {
+                // Review B42: eine noch laufende Rundung mit den vorigen (z. B. Standard-)Optionen darf danach nicht
+                // als Vorschau erscheinen (finished setzte den Fehler zurück, „Fertig“ übernähme sie still)
+                model.cancelBlendJobs()
+                model.dropPreview()
+                return problem
+            }
             // Nur setzen: gerechnet wird einmal mit setEdgeValue (vorher zweimal)
+            if model.edgeBlendOptions != options { model.setEdgeBlendOptions(options, update: false) }
             if model.edgeEndValue != end { model.setEdgeEndValue(end, update: false) }
             model.setEdgeValue(value)
         } else {
@@ -265,6 +294,8 @@ enum EdgeBlendCommand {
                 first = other
             }
             if model.edgeSecondValue != second { model.setEdgeSecondValue(second, update: false) }
+            // Fasen kennen keine Rundungsoptionen (Vertrag 1a Regel 7)
+            if !model.edgeBlendOptions.isStandard { model.setEdgeBlendOptions(.standard, update: false) }
             model.setEdgeValue(first)
         }
         if sameBody.count < edges.count, model.hasPreview {
@@ -275,39 +306,154 @@ enum EdgeBlendCommand {
         return model.hasPreview ? nil : (model.message ?? "\(operation.rawValue) an diesen Kanten nicht möglich.")
     }
 
+    /// Ungültige bzw. vom Kernel nicht unterstützte Rundungsoptionen (nil = in Ordnung)
+    static func optionsProblem(_ options: BlendOptions) -> String? {
+        guard !options.isStandard else { return nil }
+        guard options.isValid else {
+            if options.corner == .setback, (options.setback ?? 0) <= 0 || !(options.setback ?? 0).isFinite {
+                return "Der Setback-Abstand muss größer als 0 sein."
+            }
+            return "Rho muss zwischen 0,1 und 0,9 liegen."
+        }
+        return BlendOptionsForm.isSupported(options) ? nil : ModelStore.blendOptionsUnsupportedMessage
+    }
+
     static func finish(_ operation: EdgeOperation, _ cmd: ModelCommand, _ ws: Workspace) {
         if !ws.model.hasPreview {
             cmd.previewEnabled = true
             _ = refresh(operation, cmd, ws)
         }
         if operation == .fillet && cmd.choice("measurement", default: "radius") == "chord",
+           !cmd.isOn("variable", default: false), !cmd.isOn("partial", default: false),
            let factor = cachedChordFactor(CommandPicks.edges(cmd, "edges", model: ws.model), cmd, model: ws.model) {
             ws.model.noteBlendChord(width: cmd.number("chordWidth", default: 0), factor: factor)
         }
         LegacyFinish.commit(ws)
     }
 
+    /// Fase, die aus dem Rundungspfeil entstand (Pfeil nach innen): ihr Pfeil zählt nach innen negativ, nach außen
+    /// über 0 wird wieder eine Rundung.
+    static let arrowFromFilletKey = "arrowFromFillet"
+
     static func arrows(_ operation: EdgeOperation, _ cmd: ModelCommand, _ ws: Workspace) -> [DragHandle] {
-        guard !ws.model.selectedEdges.isEmpty, let handle = ws.model.edgeHandle else { return [] }
-        // Wie bisher: kleiner Pfeil an der Kantenmitte, aus dem Material heraus
+        // N4 (Build 41): Pfeil an den Kanten des Befehls (wie refresh: Kanten des ersten Körpers, letzte gewählte),
+        // nicht an model.selectedEdges/edgeHandle einer älteren Auswahl bzw. eines anderen Körpers
+        // Nur Kanten gewählt: direkt aus dem Befehl (billig, je Bild). Flächen (Modus „Fläche“) würden je Bild den
+        // Kernel nach ihren Kanten fragen – dafür gilt die von refresh synchronisierte Auswahl (CommandSync.edges).
+        let picks = cmd.items("edges")
+        let pickedEdges = picks.compactMap { pick -> EdgeRef? in
+            if case .edge(let edge) = pick { return edge }
+            return nil
+        }
+        let edges = pickedEdges.count == picks.count ? pickedEdges : ws.model.selectedEdges
+        guard let body = edges.first?.body, ws.model.bodies.indices.contains(body),
+              let last = edges.last(where: { $0.body == body }) else { return [] }
+        let handle: (origin: SIMD3<Double>, direction: SIMD3<Double>)
+        if ws.model.selectedEdges.last == last, let current = ws.model.edgeHandle {
+            handle = current
+        } else if let values = ws.model.bodies[body].shape.handle(ofEdge: last.edge)?.map(\.doubleValue),
+                  values.count == 6 {
+            handle = (SIMD3(values[0], values[1], values[2]), SIMD3(values[3], values[4], values[5]))
+        } else {
+            return []
+        }
+        let amount = cmd.number(valueKey(operation), default: ws.model.edgeValue)
+        let signed = operation == .chamfer && cmd.isOn(arrowFromFilletKey, default: false)
+        // Wie bisher: kleiner Pfeil an der Kantenmitte, aus dem Material heraus (Fase aus dem Rundungspfeil: nach innen)
         return [DragHandle(kind: .edge, axisOrigin: SIMD3<Float>(handle.origin),
                            direction: -simd_normalize(SIMD3<Float>(handle.direction)),
-                           value: cmd.number(valueKey(operation), default: ws.model.edgeValue),
+                           value: signed ? -amount : amount,
                            color: Workspace.handleBlue, scale: 0.7)]
+    }
+
+    /// Shapr3D (Hilfe „Fillet and chamfer“): ein Pfeil für beides – nach außen Rundung, nach innen Fase. Wechselt
+    /// den offenen Befehl und nimmt Kanten und Auswahlart mit. Nur ohne variablen Radius, Teilrundung bzw. Fasenart
+    /// „Zwei“/„Winkel“ und nicht beim Bearbeiten aus dem Verlauf. false = kein Wechsel (Wert bleibt bei 0).
+    private static func switchOperation(from operation: EdgeOperation, value: Double, _ cmd: ModelCommand,
+                                        _ ws: Workspace) -> Bool {
+        guard ws.command === cmd, cmd.editing == nil, value > 0,
+              !cmd.isOn("variable", default: false), !cmd.isOn("partial", default: false),
+              cmd.option("type", default: "equal") == "equal" else { return false }
+        let picks = cmd.items("edges")
+        guard !picks.isEmpty, picks.allSatisfy({ pick in
+            if case .edge = pick { return true }
+            return false
+        }) else { return false }
+        let scope = cmd.choice("selectionScope", default: "edge")
+        let target: EdgeOperation = operation == .fillet ? .chamfer : .fillet
+        let targetID: ModelCommandID = target == .fillet ? .fillet : .chamfer
+        ws.start(targetID, with: nil, distance: value)
+        guard let next = ws.command, next.id == targetID else { return true }
+        if scope == "edge" || scope == "tangent" || scope == "contour" { next.choices["selectionScope"] = scope }
+        CommandPicks.setItems(picks, next, "edges")
+        next.putNumber(valueKey(target), value)
+        next.flags[arrowFromFilletKey] = target == .chamfer
+        // Build 42: Rundungsoptionen gehen mit (die Fase rechnet ohne sie, zurück zur Rundung gelten sie wieder)
+        BlendOptionsForm.carry(from: cmd, to: next)
+        ws.refreshCommandPreview()
+        return true
     }
 
     static func drag(_ operation: EdgeOperation, _ kind: HandleKind, _ value: Double, _ cmd: ModelCommand,
                      _ ws: Workspace) {
         guard kind == .edge else { return }
+        // Pfeil nach innen = Fase, nach außen = Rundung (statt negative Werte mit max(0, value) zu verwerfen)
+        let signed = operation == .chamfer && cmd.isOn(arrowFromFilletKey, default: false)
+        if operation == .fillet, value < 0, switchOperation(from: .fillet, value: -value, cmd, ws) { return }
+        if signed, value > 0, switchOperation(from: .chamfer, value: value, cmd, ws) { return }
+        let amount = signed ? max(0, -value) : max(0, value)
         let key = valueKey(operation)
-        let displayed = CommandFormat.plain(max(0, value))
+        let displayed = CommandFormat.plain(amount)
         guard cmd.values[key] != displayed else { return }
         cmd.values[key] = displayed
         if operation == .fillet && cmd.choice("measurement", default: "radius") == "chord",
            let factor = cachedChordFactor(CommandPicks.edges(cmd, "edges", model: ws.model), cmd, model: ws.model) {
-            cmd.putNumber("chordWidth", max(0, value) * factor)
+            cmd.putNumber("chordWidth", amount * factor)
         }
         _ = refresh(operation, cmd, ws)
+    }
+}
+
+/// Schieber neben dem Ziffernfeld (Shapr3D „slider“): logarithmisch von 0,1 mm bis max(50 mm, 2 × Wert),
+/// unter 10 mm in 0,1-mm-Schritten, bis 50 mm in 0,5 mm, darüber ganze mm. Die Obergrenze bleibt während des
+/// Ziehens fest (sonst wüchse sie mit dem Wert mit).
+private struct BlendValueSlider: View {
+    @ObservedObject var cmd: ModelCommand
+    let key: String
+    let fallback: Double
+    let workspace: Workspace
+    let label: String
+
+    @State private var frozenUpper: Double?
+
+    private static let lower = 0.1
+
+    private var upper: Double {
+        frozenUpper ?? max(50, 2 * cmd.number(key, default: fallback))
+    }
+
+    private static func rounded(_ value: Double) -> Double {
+        if value < 10 { return (value * 10).rounded() / 10 }
+        if value < 50 { return (value * 2).rounded() / 2 }
+        return value.rounded()
+    }
+
+    var body: some View {
+        let upper = self.upper
+        let span = log(upper / Self.lower)
+        Slider(value: Binding(get: {
+            let current = min(max(cmd.number(key, default: fallback), Self.lower), upper)
+            return span > 0 ? log(current / Self.lower) / span : 0
+        }, set: { position in
+            let value = Self.rounded(Self.lower * exp(span * position))
+            guard abs(value - cmd.number(key, default: fallback)) > 1e-9 else { return }
+            cmd.putNumber(key, value)
+            CommandCache.refreshNow(cmd, workspace)
+        }), in: 0...1, onEditingChanged: { editing in
+            frozenUpper = editing ? upper : nil
+        })
+        .accessibilityLabel(label)
+        .accessibilityValue(LengthUnit.current.format(cmd.number(key, default: fallback)))
     }
 }
 
@@ -322,6 +468,14 @@ enum FilletDriver: MainCommandDriver {
     static let title = "Abrunden"
     static let icon = "sc.fillet"
     static let featureKinds: [FeatureKind] = [.fillet]
+
+    /// Erklärkapsel (ⓘ im Panelkopf), Build 42 (C5)
+    static var explanation: String? {
+        "Kanten wählen, am Pfeil ziehen oder Radius eintippen. Zahnrad: Ecken – Rolling Ball (Standard, eine Kugel "
+            + "rollt über alle Kanten) oder Setback (die Ecke wird weich verblendet, die Rundungen enden im "
+            + "Setback-Abstand vor der Ecke). Stetigkeit – G1 tangential, G2 krümmungsstetig (weicher Lichtverlauf). "
+            + "Profil – Kreis oder Kegelschnitt mit Rho: klein = flacher, groß = voller."
+    }
 
     @MainActor static func build(_ ws: Workspace) -> ModelCommand {
         EdgeBlendCommand.build(.fillet, id: id, ws)
@@ -416,11 +570,12 @@ private struct FilletRows: View {
     @ObservedObject var cmd: ModelCommand
     let workspace: Workspace
     @ObservedObject var model: ModelStore
-    @AppStorage("PencilCAD.filletFloatingWindow") private var floatingWindow = true
+    @AppStorage(FilletWindowLayout.storageKey) private var floatingWindow = true
 
     private var isVariable: Bool { cmd.isOn("variable", default: false) }
     private var isPartial: Bool { cmd.isOn("partial", default: false) }
     private var usesChord: Bool { cmd.choice("measurement", default: "radius") == "chord" }
+    private var hasStandardOptions: Bool { BlendOptionsForm.effectiveOptions(cmd).isStandard }
 
     private func step(_ direction: Double) {
         let key = usesChord ? "chordWidth" : "radius"
@@ -462,6 +617,11 @@ private struct FilletRows: View {
                 }
             }
             if !isVariable && !isPartial {
+                // Schieber zusätzlich zum Ziffernfeld (Shapr3D)
+                BlendValueSlider(cmd: cmd, key: usesChord ? "chordWidth" : "radius", fallback: 2, workspace: workspace,
+                                 label: usesChord ? "Sehnenbreite" : "Radius")
+            }
+            if !isVariable && !isPartial {
                 PrimaryWideButton(title: model.isBlendMaximumComputing ? "Radius wird geprüft …" : "Maximal gültigen Radius finden",
                                   systemImage: "arrow.up.to.line", isPrimary: false) {
                     model.searchLargestFillet { value in
@@ -469,7 +629,14 @@ private struct FilletRows: View {
                         CommandCache.refreshNow(cmd, workspace)
                     }
                 }
-                .disabled(usesChord || model.selectedEdges.count != 1 || model.isBlendComputing || model.isBlendMaximumComputing)
+                // C8 (Build 42): die Suche prüft nur Rolling Ball/G1 – bei anderen Optionen wäre der Wert falsch
+                .disabled(usesChord || !hasStandardOptions || model.effectiveBlendOptions != nil || model.selectedEdges.count != 1 || model.isBlendComputing
+                          || model.isBlendMaximumComputing)
+                if !hasStandardOptions {
+                    Text("Maximalradius nur mit Rolling Ball und G1.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
             CommandSegmentRow(title: "Typ", options: [CommandChoice(id: "constant", title: "Konstant"),
                                                       CommandChoice(id: "variable", title: "Variabel"),
@@ -487,10 +654,11 @@ private struct FilletRows: View {
                 }
                 CommandCache.refreshNow(cmd, workspace)
             }
-            // G2 braucht eine Kernel-Funktion, die es noch nicht gibt (SolidCraft: Krümmungsstetig)
-            CommandSegmentRow(title: "Stetigkeit", options: [CommandChoice(id: "g1", title: "G1"),
-                                                             CommandChoice(id: "g2", title: "G2", isEnabled: false)],
-                              selected: "g1") { _ in }
+            // Build 42 (C3): Ecken/Stetigkeit/Profil im Blatt am Zahnrad bzw. hier über die Zusammenfassung; jede Wahl
+            // ist nur frei, wenn der Kernel sie kann (PCKShape.supports(blendOptions:)) – statt der festen G2-Sperre
+            BlendOptionsSummaryRow(cmd: cmd, workspace: workspace, model: model)
+            // C4: Fehlschlag mit Optionen → ausdrücklich zurück auf Rolling Ball bzw. G1 (kein stiller Rückfall)
+            BlendOptionsFixRow(cmd: cmd, workspace: workspace)
             if isVariable {
                 PaletteSection("Variabler Radius") {
                     CommandNumberRow(title: "Ende", cmd: cmd, key: "end", fallback: 4, workspace: workspace) { max(0.01, $0) }
@@ -513,8 +681,8 @@ private struct FilletRows: View {
             PaletteSection("Optionen") {
                 CommandPreviewRow(cmd: cmd, workspace: workspace)
             }
-            if floatingWindow {
-                Text("G2, alternative Eckübergänge und Y-Blend erfordern zusätzliche Kernel-Geometrie.")
+            if floatingWindow && !BlendOptionsForm.kernelHasOptions {
+                Text("Setback, G2 und Kegelschnitt kann der Geometriekernel in diesem Build noch nicht.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -552,6 +720,8 @@ private struct ChamferRows: View {
                 }
             }
             CommandNumberRow(title: "Abstand", cmd: cmd, key: "distance", fallback: 1, workspace: workspace) { max(0, $0) }
+            // Schieber zusätzlich zum Ziffernfeld (Shapr3D)
+            BlendValueSlider(cmd: cmd, key: "distance", fallback: 1, workspace: workspace, label: "Abstand")
             if type == "two" {
                 CommandNumberRow(title: "Abstand 2", cmd: cmd, key: "distance2", fallback: 1, workspace: workspace) {
                     max(0.01, $0)

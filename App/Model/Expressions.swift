@@ -74,7 +74,42 @@ enum Formula {
             return result
         }
         for variable in variables { _ = value(of: variable.name) }
+        unitlessVariableNames = unitlessNames(variables)
         return values
+    }
+
+    /// Build 41 (schwacher Bugfix 3): Variablen ohne Längenbezug. Variablen sind nicht typisiert (nur Name und
+    /// Ausdruck, Werte als Double); als Länge gilt eine Variable, deren Ausdruck eine Längeneinheit (mm, cm, m, in, ft,
+    /// " bzw. ') oder eine Längenvariable enthält. Die übrigen („n = 4“, „faktor = 1,5“) sind reine Zahlen:
+    /// evaluateLength teilt sie nicht durch die Projekteinheit (im Zollprojekt war „abstand * n“ sonst um 25,4 falsch).
+    /// Gesetzt von resolve (ModelStore.variableValues ruft es vor jeder Auswertung auf).
+    private(set) static var unitlessVariableNames: Set<String> = []
+
+    static func unitlessNames(_ variables: [ProjectVariable]) -> Set<String> {
+        let byName = Dictionary(variables.map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first })
+        var known: [String: Bool] = [:]
+        var visiting = Set<String>()
+        func isLength(_ name: String) -> Bool {
+            if let cached = known[name] { return cached }
+            guard let variable = byName[name], !visiting.contains(name),
+                  let tokens = try? tokenize(variable.expression) else { return false }
+            visiting.insert(name)
+            defer { visiting.remove(name) }
+            let result = tokens.contains { token in
+                switch token.kind {
+                case .symbol(let symbol):
+                    return symbol == "\"" || symbol == "'"
+                case .name(let other):
+                    if byName[other] != nil { return other != name && isLength(other) }
+                    return ["mm", "cm", "m", "in", "ft"].contains(other)
+                default:
+                    return false
+                }
+            }
+            known[name] = result
+            return result
+        }
+        return Set(variables.map(\.name).filter { !isLength($0) })
     }
 
     // MARK: Zerlegen
@@ -113,8 +148,13 @@ enum Formula {
                     let d = characters[j]
                     if d.isNumber {
                         literal.append(d)
-                    } else if (d == "." || d == ","), !seenSeparator, j + 1 < characters.count, characters[j + 1].isNumber {
+                    } else if (d == "." || d == ","), j + 1 < characters.count, characters[j + 1].isNumber {
                         // Komma zwischen Ziffern ist ein Dezimalkomma; Argumente trennt „;“ oder „, “
+                        guard !seenSeparator else {
+                            // Build 41: „1,5,3“ war still 1,5 · 0,3 (unsichtbares Mal) – jetzt ein Fehler
+                            throw ExpressionError("Zahl „\(String(characters[i...j]))…“ hat zwei Dezimalzeichen; "
+                                + "Werte mit „;“ trennen.")
+                        }
                         seenSeparator = true
                         literal.append(".")
                     } else {
@@ -132,6 +172,15 @@ enum Formula {
                     if exponentEnd > digitStart {
                         literal += String(characters[j..<exponentEnd])
                         j = exponentEnd
+                    } else {
+                        // Build 41: „2e“ bzw. „2e+“ ohne Ziffern war still 2·e (5,44). Folgt dem e ein weiterer
+                        // Buchstabe, ist es ein Name („2eps“ = 2·eps) und bleibt erlaubt.
+                        let signed = digitStart > j + 1
+                        let next = j + 1 < characters.count ? characters[j + 1] : " "
+                        if signed || !(next.isLetter || next.isNumber || next == "_") {
+                            throw ExpressionError("Zahl „\(String(characters[i..<digitStart]))“: Exponent fehlt "
+                                + "(für das Produkt mit e „*e“ schreiben).")
+                        }
                     }
                 }
                 guard let value = Double(literal), value.isFinite else { throw ExpressionError("Zahl „\(literal)“ ungültig.") }

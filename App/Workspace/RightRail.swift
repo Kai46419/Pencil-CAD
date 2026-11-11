@@ -108,8 +108,6 @@ struct SnapMenu: View {
                     }
                 }
                 .disabled(!sketch.snapEnabled)
-                Toggle("Automatisch (1-2-5)", isOn: Binding(
-                    get: { sketch.options.gridAuto }, set: { sketch.options.gridAuto = $0 }))
                 Picker("Raster", selection: fixedGridSelection(sketch)) {
                     ForEach(gridSteps, id: \.self) { step in
                         Text(LengthUnit.current.gridNumber(step)).tag(step)
@@ -442,11 +440,6 @@ struct PaletteViewControls: View {
     /// Rastermaß zweizeilig („50“ über „mm“); in der Skizze mit Rasterweite 1-2-5 nach Zoom
     private var gridMenu: some View {
         Menu {
-            if sketch.isActive {
-                Toggle("Automatisch (1-2-5)", systemImage: "square.grid.3x3",
-                       isOn: Binding(get: { sketch.options.gridAuto }, set: { sketch.options.gridAuto = $0 }))
-                Divider()
-            }
             Picker("Raster", selection: fixedGridSelection(sketch)) {
                 ForEach(Self.gridSteps, id: \.self) { step in
                     Text(LengthUnit.current.gridLabel(step)).tag(step)

@@ -11,8 +11,8 @@ extension Workspace {
         sketch.gridStep = unit.gridSteps.contains(where: { abs($0 - savedStep) < 1e-9 })
             ? savedStep : unit.nearestGridStep(to: savedStep)
         // Alte grid.json-Dateien enthalten nur die Rasterweite: diese als feste Auswahl behandeln.
-        sketch.options.gridAuto = GridSettings.storedAutomatic(in: project.folder)
-            ?? (GridSettings.stored(in: project.folder) == nil)
+        // Build 58 (Kai): keine Automatik mehr, auch nicht aus älteren grid.json-Dateien
+        sketch.options.gridAuto = false
         sketch.gridStorageFolder = project.folder
         let activeSketch = sketch
         let folder = project.folder

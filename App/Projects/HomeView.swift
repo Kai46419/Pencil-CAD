@@ -19,8 +19,8 @@ struct HomeView: View {
     @State private var isBulkDeleteShown = false
     @State private var showsBackups = false
     @State private var backupMessage: String?
-    /// Schalter „Helles Design“ (AppTheme); aus = Anthrazit nach SolidCraft
-    @AppStorage(AppTheme.lightKey) private var lightAppearance = false
+    /// Design (AppTheme): beobachtet, damit das Symbol im Knopf „Design“ mitwechselt
+    @AppStorage(AppTheme.modeKey) private var appearanceMode = ""
 
     private let columns = [GridItem(.adaptive(minimum: 220, maximum: 280), spacing: 24)]
 
@@ -96,19 +96,18 @@ struct HomeView: View {
         }
     }
 
-    /// „Version 0.1.0 · Build 47 · 6447eb0 · 23.10.2026 20:47“: Build und Stand schreibt
-    /// scripts/generate-project.sh (Build-Nummer = Anzahl der Commits, Stand in BuildInfo.txt)
+    /// „Version 0.1.1 (12) · Build 67 · 6447eb0 · 23.10.2026 20:47“: in Klammern die CFBundleVersion
+    /// (Upload-Nummer in TestFlight); „Build N“ samt Stand schreibt scripts/generate-project.sh in BuildInfo.txt
     private static let versionText: String = {
         let info = Bundle.main.infoDictionary
         let version = info?["CFBundleShortVersionString"] as? String ?? "?"
-        let build = info?["CFBundleVersion"] as? String ?? "?"
-        var text = "Version \(version) · Build \(build)"
+        let bundleVersion = info?["CFBundleVersion"] as? String ?? "?"
         if let url = Bundle.main.url(forResource: "BuildInfo", withExtension: "txt"),
            let stand = try? String(contentsOf: url, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines),
-           !stand.isEmpty {
-            text += " · \(stand)"
+           stand.hasPrefix("Build ") {
+            return "Version \(version) (\(bundleVersion)) · \(stand)"
         }
-        return text
+        return "Version \(version) · Build \(bundleVersion)"
     }()
 
     private var header: some View {
@@ -183,11 +182,10 @@ struct HomeView: View {
         .buttonStyle(.bordered)
         .fixedSize(horizontal: true, vertical: false)
         // Helles bzw. dunkles Design (Anthrazit nach SolidCraft) für die ganze App
-        Button {
-            lightAppearance.toggle()
+        Menu {
+            AppearanceToggle()
         } label: {
-            Label(lightAppearance ? "Dunkles Design" : "Helles Design",
-                  systemImage: lightAppearance ? "moon" : "sun.max")
+            Label("Design", systemImage: AppTheme.mode.systemImage)
                 .padding(.horizontal, 6)
         }
         .buttonStyle(.bordered)

@@ -155,9 +155,14 @@ struct QuickToolsPalette: View {
                     sketch.snapEnabled.toggle()
                 },
                 Item(id: "Rückgängig", systemImage: "arrow.uturn.backward") {
-                    if sketch.canUndo { sketch.undo() } else { model.undo() }
+                    // C2 (Build 41): im Skizzenmodus nur Skizzenschritte – kein Rückfall auf das Modell-Undo, das
+                    // sonst unbemerkt Körper bzw. die Skizzenliste unter der offenen Skizze zurücknimmt
+                    if sketch.canUndo { sketch.undo() }
                 },
-            ]
+            ] + (sketch.selection.isEmpty ? [] : [
+                // Build 56 (Kai): gewählte Striche direkt aus dem Rad löschen
+                Item(id: "Löschen", systemImage: "trash") { sketch.deleteSelection() },
+            ])
         }
         // Mit Auswahl (ohne offenes Panel): die Aktionen zur Auswahl wie im Menü „Auswahl“ (ModelRibbon)
         let hasSelection = model.selection != nil || !model.selectedEdges.isEmpty || !model.selectedBodies.isEmpty
