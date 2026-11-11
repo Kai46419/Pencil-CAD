@@ -20,6 +20,11 @@ if ! bash scripts/vendor-release.sh fetch; then
   fi
 fi
 
+# „Build N“ liest generate-project.sh aus den letzten Commit-Titeln – bei flachem Klon etwas Verlauf nachholen
+if [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = true ]; then
+  git fetch --quiet --deepen=200 || true
+fi
+
 # CFBundleVersion = laufende Xcode-Cloud-Nummer (steigt mit jedem Build, wie TestFlight es verlangt).
 # Die Nummer „Build N“ aus dem Commit-Titel steht weiter im Startbildschirm (App/BuildInfo.txt).
 export PENCILCAD_BUNDLE_VERSION="${CI_BUILD_NUMBER:-1}"
