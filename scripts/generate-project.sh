@@ -45,9 +45,13 @@ if [[ -e .git ]]; then
   titled="$(git log -200 --format=%s 2>/dev/null | grep -m1 -oE '^Build [0-9]+' | grep -oE '[0-9]+' || true)"
   export PENCILCAD_BUILD="${titled:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}"
   build_info="$(git log -1 --format='%h · %cd' --date=format:'%d.%m.%Y %H:%M' 2>/dev/null || true)"
-  printf '%s\n' "${build_info:-unbekannter Stand}" > App/BuildInfo.txt
+  build_info="Build $PENCILCAD_BUILD · ${build_info:-unbekannter Stand}"
+  printf '%s\n' "$build_info" > App/BuildInfo.txt
 fi
-echo "Version: Build $PENCILCAD_BUILD (${build_info:-ohne Git})"
+# CFBundleVersion: lokal dieselbe Nummer; TestFlight-Uploads setzen eine eigene, streng steigende
+# (scripts/testflight.sh: N.S, Xcode Cloud: laufende CI-Nummer über PENCILCAD_BUNDLE_VERSION)
+export PENCILCAD_BUNDLE_VERSION="${PENCILCAD_BUNDLE_VERSION:-$PENCILCAD_BUILD}"
+echo "Version: ${build_info:-Build $PENCILCAD_BUILD, ohne Git} (CFBundleVersion $PENCILCAD_BUNDLE_VERSION)"
 
 if [ -d Vendor/OCCT.xcframework ]; then
   # Blechmodul (SheetKit): nur einbinden, wenn das xcframework gebaut ist – nie automatisch bauen

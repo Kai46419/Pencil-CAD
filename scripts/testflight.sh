@@ -50,6 +50,9 @@ if [ -f "$counter" ]; then
   fi
 fi
 version="$n.$s"
+# Sobald Xcode Cloud Builds hochlädt, zählt dort die laufende CI-Nummer. Ein Upload von hier muss dann
+# größer sein als die letzte CI-Nummer derselben Version: TESTFLIGHT_BUILD=<Nummer> bash scripts/testflight.sh
+version="${TESTFLIGHT_BUILD:-$version}"
 archive="$out/PencilCAD-$version.xcarchive"
 echo "Archiv: Build $version, Team $team"
 
