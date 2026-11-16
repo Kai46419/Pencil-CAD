@@ -35,6 +35,8 @@ private struct WorkspaceContent: View {
     @State private var exportName: String?
     @State private var isExporting = false
     @State private var isImporting = false
+    /// STL/3MF gelesen, Import-Fenster offen (MeshImportSheet.swift, Build 69)
+    @State private var meshImportFile: MeshImportFile?
     /// Dateiimporter für „Bild aus Dateien“ (Bilder, PDF) statt STEP/STL/3MF/SVG/DXF – ein gemeinsamer Importer,
     /// weil SwiftUI mehrere fileImporter an derselben Ansicht nicht zuverlässig zeigt
     @State private var importsImages = false
@@ -290,8 +292,12 @@ private struct WorkspaceContent: View {
             } else if ["svg", "dxf"].contains(url.pathExtension.lowercased()) {
                 workspace.importVectorFile(url)
             } else if MeshFileReader.extensions.contains(url.pathExtension.lowercased()) {
-                // STL/3MF: Umwandeln läuft im Hintergrund (MeshImport.swift)
-                model.importMesh(from: url) { workspace.send(.fitAll) }
+                // STL/3MF: erst das Import-Fenster (Einheit, Ausrichtung, Detail), Umwandeln läuft im Hintergrund
+                if let file = MeshImportFile(url: url) {
+                    meshImportFile = file
+                } else {
+                    model.message = "Datei konnte nicht gelesen werden."
+                }
             } else {
                 model.importSTEP(from: url)
                 workspace.send(.fitAll)
@@ -304,6 +310,11 @@ private struct WorkspaceContent: View {
         }
         .quickLookPreview($arPreview)
         .sheet(isPresented: $workspace.showsCommandSearch) { CommandSearchSheet(workspace: workspace) }
+        .sheet(item: $meshImportFile) { file in
+            MeshImportSheet(file: file) { options in
+                model.importMesh(file, options: options) { workspace.send(.fitAll) }
+            }
+        }
         .sheet(item: $screenshot) { ScreenshotSheet(screenshot: $0) }
         .sheet(isPresented: $workspace.showsVariables) { VariablesSheet(model: model) }
         .sheet(isPresented: $workspace.showsDrawing) { DrawingSheet(model: model, projectName: projectName) }
