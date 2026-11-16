@@ -970,6 +970,8 @@ final class ViewportView: MTKView {
             }
             // Verschieben, Skalieren, Drehen des gewählten Texts (SketchTextTransform.swift)
             addTextTransformHandles(to: &groups, sketch: sketch, perPoint: perPoint, world: world)
+            // Verschieben, Skalieren, Drehen der ganzen Auswahl (SketchSelectionTransform.swift, Build 68)
+            addSelectionTransformHandles(to: &groups, sketch: sketch, perPoint: perPoint, world: world)
             // Verformungsgriffe am gewählten Text (SketchTextDeformHandles.swift)
             addTextDeformHandles(to: &groups, sketch: sketch, perPoint: perPoint, world: world)
             // Linie beim Zeichnen: Graphit wie die fertigen Linien, offene Enden als kleine Punkte
@@ -1279,6 +1281,17 @@ final class ViewportView: MTKView {
         if !geometry.dwell.isEmpty {
             groups.append(LineGroup(polylines: [geometry.dwell.map(world)], color: Self.snapOrange, width: 1.2))
         }
+    }
+
+    /// Rahmen um die Auswahl im Pfeil-Werkzeug (SketchSelectionTransform.swift): gestrichelt, Verschiebe-Kreuz,
+    /// Skalier-Pfeil rechts oben, Drehgriff oberhalb – wie bei Texten.
+    private func addSelectionTransformHandles(to groups: inout [LineGroup], sketch: SketchController, perPoint: Double,
+                                              world: (Point2) -> SIMD3<Float>) {
+        guard let geometry = sketch.selectionTransformHandleGeometry(unit: perPoint) else { return }
+        let frame = dashed(geometry.frame, dash: 4 * perPoint)
+        groups.append(LineGroup(polylines: frame.map { $0.map(world) }, color: Self.previewBlue, width: 1))
+        groups.append(LineGroup(polylines: geometry.lines.map { $0.map(world) }, color: Self.previewBlue, width: 1.6,
+                                dots: geometry.knobs.map(world), dotRadius: 3.5))
     }
 
     /// Kreis aus 24 Teilstücken (lokal).
@@ -2688,6 +2701,7 @@ final class ViewportView: MTKView {
         guard !sketch.hitsRadiusHandle(at: point, tolerance: snapTolerance) else { return false }
         guard !sketch.hitsTextTransformHandle(at: point, tolerance: snapTolerance) else { return false }
         guard !sketch.hitsTextDeformHandle(at: point, tolerance: snapTolerance) else { return false }
+        guard !sketch.hitsSelectionTransformHandle(at: point, tolerance: snapTolerance) else { return false }
         return sketch.markIndex(at: point, tolerance: snapTolerance, curveHit: false) == nil
     }
 
@@ -2781,6 +2795,7 @@ final class ViewportView: MTKView {
         return sketch.hitsRadiusHandle(at: point, tolerance: snapTolerance)
             || sketch.hitsTextTransformHandle(at: point, tolerance: snapTolerance)
             || sketch.hitsTextDeformHandle(at: point, tolerance: snapTolerance)
+            || sketch.hitsSelectionTransformKnob(at: point, tolerance: snapTolerance)
     }
 
     /// Finger im Werkzeug „Beschneiden“: wischt wie der Stift über die Kurven (Power Trim), Antippen beschneidet ein Stück.

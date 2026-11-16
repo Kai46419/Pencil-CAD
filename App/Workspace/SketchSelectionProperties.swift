@@ -33,6 +33,8 @@ struct SketchSelectionSection: View {
                         PrimaryWideButton(title: "Bogenseite wechseln", systemImage: "arrow.triangle.2.circlepath",
                                           isPrimary: false, action: sketch.flipSelectedArcSide)
                     }
+                    // Build 68: ganze Auswahl verschieben, skalieren, drehen (Felder zu den Griffen am Rahmen)
+                    SketchSelectionTransformFields(sketch: sketch)
                 }
                 SelectionConstraintButtons(sketch: sketch)
                 SelectionActions(sketch: sketch)

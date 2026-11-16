@@ -422,6 +422,8 @@ final class SketchController: ObservableObject {
     var radiusHandleDrag: RadiusHandleDrag?
     /// Verschiebe-, Skalier- bzw. Drehgriff eines Texts, der gerade gezogen wird (SketchTextTransform.swift)
     var textTransformDrag: TextTransformDrag?
+    /// Verschieben, Skalieren bzw. Drehen der ganzen Auswahl (SketchSelectionTransform.swift, Build 68)
+    var selectionTransformDrag: SelectionTransformDrag?
     /// Verformen eines gewählten Texts (SketchTextDeformHandles.swift): aktiver Griffmodus (nil = keine
     /// Verformungsgriffe) und der Griff, der gerade gezogen wird
     @Published var textDeformMode: SketchTextDeformMode? {
@@ -827,6 +829,7 @@ final class SketchController: ObservableObject {
                 if beginRadiusHandleDrag(at: point, tolerance: tolerance) { return }  // Radiusgriff Bogen/Kreis
                 if beginTextTransformDrag(at: point, tolerance: tolerance) { return }  // Textgriffe
                 if beginTextDeformDrag(at: point, tolerance: tolerance) { return }  // Text verformen
+                if beginSelectionTransformDrag(at: point, tolerance: tolerance) { return }  // Auswahlrahmen
             }
             beginSelectDrag(at: point, tolerance: tolerance)
             return
@@ -864,6 +867,7 @@ final class SketchController: ObservableObject {
             if moveTextDeformDrag(to: point, tolerance: tolerance) { return }  // Text verformen
             if moveSplineHandleDrag(to: point, tolerance: tolerance) { return }  // Spline-Tangentengriffe
             if moveRadiusHandleDrag(to: point, tolerance: tolerance) { return }  // Radiusgriff Bogen/Kreis
+            if moveSelectionTransformDrag(to: point, tolerance: tolerance) { return }  // Auswahlrahmen
             moveSelectDrag(to: point, tolerance: tolerance)
             return
         }
@@ -910,6 +914,7 @@ final class SketchController: ObservableObject {
             if endTextDeformDrag(at: point, tolerance: tolerance) { return }  // Text verformen
             if endSplineHandleDrag(at: point, tolerance: tolerance) { return }  // Spline-Tangentengriffe
             if endRadiusHandleDrag(at: point, tolerance: tolerance) { return }  // Radiusgriff Bogen/Kreis
+            if endSelectionTransformDrag(at: point, tolerance: tolerance) { return }  // Auswahlrahmen
             endSelectDrag(at: point, tolerance: tolerance)
             return
         }
@@ -1138,6 +1143,7 @@ final class SketchController: ObservableObject {
         // Radiusgriff: bis dahin Gezogenes bleibt (ein Rückgängig-Schritt)
         radiusHandleDrag = nil
         cancelTextTransformDrag()  // Textgriffe: Gezogenes bleibt
+        cancelSelectionTransformDrag()  // Auswahlrahmen: Gezogenes bleibt
         cancelTextDeformDrag()  // Verformungsgriffe: Gezogenes bleibt
         dragStart = nil
         dragCurrent = nil
@@ -4344,7 +4350,7 @@ final class SketchController: ObservableObject {
 
     /// Aktueller Fang (Strich hat Vorrang vor Schweben).
     var currentSnap: SnapResult? {
-        activeSnap ?? textTransformSnap ?? hoverSnap
+        activeSnap ?? textTransformSnap ?? selectionTransformSnap ?? hoverSnap
     }
 
     private func shapePreview(from start: Point2, to current: Point2) -> SketchEntity? {
@@ -5361,5 +5367,134 @@ extension SketchConstraint {
             constraint.expression = expression
             return constraint
         }
+    }
+}
+
+// MARK: - Auswahl als Ganzes verschieben, drehen, skalieren (SketchSelectionTransform.swift, Build 68)
+
+extension SketchController {
+    /// Elemente und Bedingungen beim Ziehen am Auswahlrahmen ersetzen. begin merkt den Stand für Rückgängig,
+    /// final baut Bereiche und Fang neu auf (Auswahl bleibt, ungültige Punktverweise fallen weg).
+    func setTransformedSelection(_ newEntities: [SketchEntity], constraints newConstraints: [SketchConstraint],
+                                 begin: Bool, final: Bool) {
+        if begin { remember() }
+        entities = newEntities
+        constraints = newConstraints
+        if final {
+            selection = selection.filter { ref in
+                guard entities.indices.contains(ref.entity) else { return false }
+                if case .point(let point) = ref { return point.index < entities[ref.entity].handlePoints.count }
+                return true
+            }
+            entitiesChanged()
+        } else {
+            followTextPaths()
+            changed(publish: false)
+        }
+    }
+
+    /// Maße innerhalb der Gruppe mitskalieren (Abstände, Radien; Winkel bleiben). Eine Formel passt danach
+    /// nicht mehr und wird zum festen Wert.
+    func scaledSelectionConstraints(_ all: [SketchConstraint], moving: Set<Int>, by factor: Double) -> [SketchConstraint] {
+        all.map { constraint -> SketchConstraint in
+            guard constraint.entities.allSatisfy({ moving.contains($0) }) else { return constraint }
+            switch constraint.variant {
+            case .distance, .pointLineDistance, .radius:
+                guard let value = constraint.dimensionValue else { return constraint }
+                var scaled = constraint.withDimensionValue(value * factor)
+                scaled.expression = nil
+                scaled.isSuspended = constraint.isSuspended
+                return scaled
+            default:
+                return constraint
+            }
+        }
+    }
+
+    /// Gruppe um center drehen. Waagerecht/Senkrecht bleiben nur bei Vierteldrehungen (und tauschen bei 90°).
+    /// Ein Rechteck, das schräg wird, ist danach ein geschlossener Linienzug mit drei Senkrecht-Bedingungen;
+    /// bleibt es achsparallel, wandern Ecken- und Kantenverweise zur neuen Lage.
+    func rotatedSelection(_ base: [SketchEntity], constraints all: [SketchConstraint], moving: [Int],
+                          about center: Point2, by angle: Double)
+        -> (entities: [SketchEntity], constraints: [SketchConstraint]) {
+        let movingSet = Set(moving)
+        var result = base
+        var converted: Set<Int> = []
+        /// Rechteck bleibt Rechteck: alte Ecke k → neue Ecke
+        var cornerMap: [Int: [Int]] = [:]
+        let c = cos(angle), s = sin(angle)
+        func turn(_ q: Point2) -> Point2 {
+            let v = q - center
+            return center + Point2(c * v.x - s * v.y, s * v.x + c * v.y)
+        }
+        for index in moving where base.indices.contains(index) {
+            let turned = Self.rotatedEntity(base[index], about: center, by: angle)
+            if case .rectangle = base[index] {
+                if case .polyline = turned {
+                    converted.insert(index)
+                } else if case .rectangle = turned {
+                    let oldCorners = Array(base[index].handlePoints.prefix(4)).map(turn)
+                    let newCorners = Array(turned.handlePoints.prefix(4))
+                    if oldCorners.count == 4, newCorners.count == 4 {
+                        cornerMap[index] = oldCorners.map { p in
+                            newCorners.indices.min { simd_distance(newCorners[$0], p) < simd_distance(newCorners[$1], p) } ?? 0
+                        }
+                    }
+                }
+            }
+            result[index] = turned
+        }
+        let quarter = (angle / (.pi / 2)).rounded()
+        let isQuarter = abs(angle - quarter * .pi / 2) < 1e-9
+        let swaps = isQuarter && Int(quarter) % 2 != 0
+        func point(_ ref: SketchPointRef) -> SketchPointRef? {
+            if converted.contains(ref.entity) { return ref.index < 4 ? ref : nil }
+            if let map = cornerMap[ref.entity], ref.index < 4, map.indices.contains(ref.index) {
+                return SketchPointRef(entity: ref.entity, index: map[ref.index])
+            }
+            return ref
+        }
+        func curve(_ ref: SketchCurveRef) -> SketchCurveRef? {
+            guard let map = cornerMap[ref.entity], map.count == 4 else { return ref }
+            let k = ((ref.index % 4) + 4) % 4
+            let a = map[k], b = map[(k + 1) % 4]
+            return SketchCurveRef(entity: ref.entity, index: b == (a + 1) % 4 ? a : b)
+        }
+        var updated: [SketchConstraint] = []
+        for constraint in all {
+            guard constraint.entities.allSatisfy({ movingSet.contains($0) }) else {
+                updated.append(constraint)
+                continue
+            }
+            var changedConstraint = constraint
+            switch constraint.variant {
+            case .horizontal(let a):
+                guard isQuarter else { continue }
+                if swaps { changedConstraint.variant = .vertical(a) }
+            case .vertical(let a):
+                guard isQuarter else { continue }
+                if swaps { changedConstraint.variant = .horizontal(a) }
+            case .horizontalPoints(let a, let b):
+                guard isQuarter else { continue }
+                if swaps { changedConstraint.variant = .verticalPoints(a, b) }
+            case .verticalPoints(let a, let b):
+                guard isQuarter else { continue }
+                if swaps { changedConstraint.variant = .horizontalPoints(a, b) }
+            default:
+                break
+            }
+            if converted.isEmpty, cornerMap.isEmpty {
+                updated.append(changedConstraint)
+            } else if let remapped = changedConstraint.remappedRefs(point: point, curve: curve) {
+                updated.append(remapped)
+            }
+        }
+        for index in converted.sorted() {
+            for k in 0..<3 {
+                updated.append(SketchConstraint(variant: .perpendicular(SketchCurveRef(entity: index, index: k),
+                                                                        SketchCurveRef(entity: index, index: k + 1))))
+            }
+        }
+        return (result, updated)
     }
 }
