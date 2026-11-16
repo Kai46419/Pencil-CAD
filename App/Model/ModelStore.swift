@@ -3390,21 +3390,42 @@ extension ModelStore {
 
     // MARK: Teilen
 
-    func previewSplit(origin: SIMD3<Double>, normal: SIMD3<Double>) {
+    func previewSplit(origin: SIMD3<Double>, normal: SIMD3<Double>, pins: SplitPinSpec? = nil) {
         guard requireKernel(), let body = selectedBodies.first, bodies.indices.contains(body) else { return }
-        guard let parts = bodies[body].shape.split(planeOrigin: origin, normal: simd_normalize(normal)),
+        guard var parts = bodies[body].shape.split(planeOrigin: origin, normal: simd_normalize(normal)),
               parts.count == 2 else {
             message = "Die Ebene schneidet den Körper nicht."
             dropPreview()
             return
         }
         message = nil
+        // Build 72: Verbindungszapfen (SplitPins.swift)
+        var pinShapes: [PCKShape] = []
+        if let pins, pins.count > 0 {
+            if let drilled = splitPins(parts: parts, source: bodies[body].shape, body: body, origin: origin,
+                                       normal: normal, spec: pins) {
+                parts = drilled.parts
+                pinShapes = drilled.pins
+            } else {
+                message = "Kein Platz für Verbindungszapfen (Durchmesser bzw. Wand kleiner wählen)."
+            }
+        }
         var preview = bodies
         preview[body] = preview[body].with(parts[0])
         var second = bodies[body].with(parts[1])
         second.name += " (Teil 2)"
         second.color = SceneBody.palette[(bodies.count + 1) % SceneBody.palette.count]
         preview.append(second)
+        for (k, pin) in pinShapes.enumerated() {
+            var piece = bodies[body].with(pin)
+            piece.name = "Zapfen \(k + 1)"
+            piece.color = SceneBody.palette[(bodies.count + 2 + k) % SceneBody.palette.count]
+            preview.append(piece)
+        }
+        if !pinShapes.isEmpty {
+            message = pinShapes.count == 1 ? "1 Verbindungszapfen (eigener Körper, separat drucken)"
+                : "\(pinShapes.count) Verbindungszapfen (eigene Körper, separat drucken)"
+        }
         showPreview(preview, name: "Körper teilen")
     }
 

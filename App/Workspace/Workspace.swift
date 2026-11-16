@@ -384,6 +384,8 @@ final class Workspace: ObservableObject {
     @Published private(set) var printBody: Int?
     /// Richtung, die beim Drucken nach oben zeigt (Welt)
     @Published private(set) var printUp: SIMD3<Float> = [0, 0, 1]
+    /// Build 72: zuletzt angetippte ebene Fläche in der Druckprüfung („Fläche aufs Bett“)
+    @Published private(set) var printFace: FaceRef?
     @Published private(set) var printBusy = false
     @Published var printOverhangAngle: Double = 45
     @Published var printMinWall: Double = 0.8
@@ -1218,6 +1220,18 @@ final class Workspace: ObservableObject {
         model.message = "Letzte Höhe wiederholt: \(LengthUnit.current.format(value))"
     }
 
+    /// Build 72: angetippte ebene Fläche nach unten aufs Druckbett legen (z. B. die flache Seite einer STL).
+    func placePrintFaceOnBed() {
+        guard let face = printFace, let plane = model.plane(of: face), face.body == printBody else {
+            model.message = "Erst eine ebene Fläche des Körpers antippen."
+            return
+        }
+        model.orientForPrint(face.body, up: -plane.normal)
+        printUp = [0, 0, 1]
+        printFace = nil
+        runPrintCheck()
+    }
+
     /// Gefundene Ausrichtung übernehmen: Körper drehen und aufs Druckbett (Z = 0) stellen.
     func applyPrintOrientation() {
         guard let body = printBody else { return }
@@ -1400,6 +1414,7 @@ final class Workspace: ObservableObject {
             guard let body = face?.body ?? edge?.body else { return }
             if body != printBody { printUp = [0, 0, 1] }
             printBody = body
+            printFace = face.flatMap { model.plane(of: $0) != nil ? $0 : nil }
             runPrintCheck()
         case .section:
             if let face, model.plane(of: face) != nil { section?.plane = .face(face) }

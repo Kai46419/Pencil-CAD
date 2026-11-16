@@ -126,7 +126,7 @@ enum MeshImporter {
         var result = MeshImportResult()
         let objects: [ImportedMeshObject]
         do {
-            objects = place(try MeshFileReader.read(data, name: name, fileExtension: fileExtension), options: options)
+            objects = try place(MeshFileReader.read(data, name: name, fileExtension: fileExtension), options: options)
         } catch {
             result.error = error.localizedDescription
             return result

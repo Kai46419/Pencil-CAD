@@ -1119,6 +1119,10 @@ struct ParameterCard: View {
                         .buttonStyle(.bordered)
                         .disabled(workspace.printBody == nil || workspace.printBusy)
                         .hoverTip("Beste Ausrichtung", "Probiert die sechs Achsrichtungen und die größten ebenen Flächen als Unterseite: wenig Überhang, viel Auflage, geringe Höhe.")
+                    Button("Fläche aufs Bett", systemImage: "square.bottomhalf.filled", action: workspace.placePrintFaceOnBed)
+                        .buttonStyle(.bordered)
+                        .disabled(workspace.printFace == nil || workspace.printBusy)
+                        .hoverTip("Fläche aufs Bett", "Legt die zuletzt angetippte ebene Fläche nach unten auf das Druckbett (Z = 0).")
                     if workspace.printUp != [0, 0, 1] {
                         Button("Übernehmen", systemImage: "checkmark", action: workspace.applyPrintOrientation)
                             .buttonStyle(.borderedProminent)

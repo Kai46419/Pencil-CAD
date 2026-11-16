@@ -214,7 +214,16 @@ enum SplitBodyDriver: MainCommandDriver {
                 BodyCommandHelpers.cacheCenter(cmd, [body], changed: changed, model)
                 if let center = CommandCache.anchors[ObjectIdentifier(cmd)]?.origin { origin = center }
             }
-            model.previewSplit(origin: origin + plane.normal * offset, normal: plane.normal)
+            var pins: SplitPinSpec?
+            if cmd.flag("pins") {
+                var spec = SplitPinSpec()
+                spec.count = max(1, min(6, Int(cmd.number("pinCount", default: 2).rounded())))
+                spec.diameter = max(1, cmd.number("pinDiameter", default: 5))
+                spec.length = max(2, cmd.number("pinLength", default: 10))
+                spec.clearance = max(0, cmd.number("pinClearance", default: 0.15))
+                pins = spec
+            }
+            model.previewSplit(origin: origin + plane.normal * offset, normal: plane.normal, pins: pins)
         }
         return model.hasPreview ? nil : (model.message ?? "Teilen hier nicht möglich.")
     }
@@ -244,6 +253,15 @@ private struct SplitRows: View {
                                      fallback: "2", workspace: workspace)
                 }
                 CommandNumberRow(title: "Versatz", cmd: cmd, key: "offset", fallback: 0, workspace: workspace)
+                // Build 72: Verbindungszapfen für Druckteile (SplitPins.swift)
+                CommandFlagRow(title: "Verbindungszapfen", icon: "pin", cmd: cmd, key: "pins", workspace: workspace)
+                if cmd.flag("pins") {
+                    CommandNumberRow(title: "Anzahl", cmd: cmd, key: "pinCount", fallback: 2, unit: "",
+                                     workspace: workspace)
+                    CommandNumberRow(title: "Durchmesser", cmd: cmd, key: "pinDiameter", fallback: 5, workspace: workspace)
+                    CommandNumberRow(title: "Länge", cmd: cmd, key: "pinLength", fallback: 10, workspace: workspace)
+                    CommandNumberRow(title: "Spiel", cmd: cmd, key: "pinClearance", fallback: 0.15, workspace: workspace)
+                }
             }
             PaletteSection("Optionen") {
                 CommandPreviewRow(cmd: cmd, workspace: workspace)
