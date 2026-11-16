@@ -15,6 +15,7 @@ struct MeshImportSheet: View {
     @State private var placeOnGround = true
     @State private var center = true
     @State private var keepTogether = false
+    @State private var trueCylinders = true
     /// Höchstzahl Dreiecke in Tausend (Regler)
     @State private var thousands: Double = Double(MeshSolid.maxTriangles) / 1000
 
@@ -81,6 +82,14 @@ struct MeshImportSheet: View {
                 }
 
                 Section {
+                    Toggle("Bohrungen und Zapfen als echte Zylinder", isOn: $trueCylinders)
+                } header: {
+                    Text("Formerkennung")
+                } footer: {
+                    Text("Ganz umlaufende runde Wände werden eine echte Zylinderfläche statt vieler schmaler Dreiecke – dann lassen sie sich antippen, abrunden, fasen und im Durchmesser ändern. Dauert bei großen Netzen etwas länger.")
+                }
+
+                Section {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
                             Text("Höchstens")
@@ -116,6 +125,7 @@ struct MeshImportSheet: View {
                         options.placeOnGround = placeOnGround
                         options.center = center
                         options.keepTogether = keepTogether
+                        options.trueCylinders = trueCylinders
                         options.maxTriangles = Int(thousands.rounded()) * 1000
                         dismiss()
                         onImport(options)

@@ -666,9 +666,25 @@ final class MeshSculpt: ObservableObject {
         }
     }
 
+    /// Build 71: Bohrungen und Zapfen im Netz erkennen und durch echte Zylinder ersetzen (MeshFeatures.swift).
+    /// Danach ist der Körper kein reines Dreiecksnetz mehr: zum Weitermalen neu antippen.
+    func trueCylinders(model: ModelStore) {
+        rebuild(model: model, name: "Zylinder erkennen", { mesh in (mesh, "") }, shapeChange: { shape, mesh in
+            let smoothed = MeshFeatures.trueCylinders(shape, mesh: mesh)
+            let total = smoothed.holes + smoothed.bosses
+            guard total > 0 else { return (shape, "Keine ganz umlaufende Bohrung bzw. kein Zapfen erkannt") }
+            var parts: [String] = []
+            if smoothed.holes > 0 { parts.append(smoothed.holes == 1 ? "1 Bohrung" : "\(smoothed.holes) Bohrungen") }
+            if smoothed.bosses > 0 { parts.append(smoothed.bosses == 1 ? "1 Zapfen" : "\(smoothed.bosses) Zapfen") }
+            return (smoothed.shape, parts.joined(separator: " und ") + " als echte Zylinder")
+        })
+    }
+
     /// Netz des gewählten Körpers im Hintergrund umbauen, umwandeln und als ein Schritt übernehmen.
+    /// shapeChange (Build 71) bearbeitet danach noch den Körper; das Arbeitsnetz passt dann nicht mehr dazu.
     private func rebuild(model: ModelStore, name: String,
-                         _ change: @escaping @Sendable (IndexedMesh) -> (IndexedMesh, String)) {
+                         _ change: @escaping @Sendable (IndexedMesh) -> (IndexedMesh, String),
+                         shapeChange: (@Sendable (PCKShape, IndexedMesh) -> (PCKShape, String))? = nil) {
         guard !isBusy else { return }
         guard let working, isValid(working, model: model) else {
             model.message = "Erst einen Körper antippen."
@@ -686,7 +702,10 @@ final class MeshSculpt: ObservableObject {
             // B8 (Build 41): OCCT auf dem großen Stapel (KernelThread, 32 MB) statt Task.detached (512 KB)
             let box = await KernelThread.value("PencilCAD.sculpt.rebuild") { () -> UncheckedBox<(IndexedMesh, String, PCKShape?)> in
                 let (mesh, note) = change(source)
-                return UncheckedBox((mesh, note, MeshSolid.shape(from: mesh)))
+                guard let solid = MeshSolid.shape(from: mesh) else { return UncheckedBox((mesh, note, nil)) }
+                guard let shapeChange else { return UncheckedBox((mesh, note, solid)) }
+                let (changed, extra) = shapeChange(solid, mesh)
+                return UncheckedBox((mesh, note.isEmpty ? extra : note + " · " + extra, changed))
             }
             self.isBusy = false
             let (mesh, note, shape) = box.value
@@ -701,6 +720,15 @@ final class MeshSculpt: ObservableObject {
             var list = model.bodies
             list[index] = list[index].with(shape)
             model.commit(list, name: name)
+            if shapeChange != nil {
+                // Körper hat jetzt echte Flächen: Arbeitsnetz verwerfen, beim nächsten Antippen neu aufbauen
+                self.working = nil
+                self.base = nil
+                self.body = nil
+                self.triangleCount = 0
+                model.message = note
+                return
+            }
             let updated = SculptMesh(body: index, shape: shape, color: color, indexed: mesh)
             self.working = updated
             self.base = nil
@@ -827,6 +855,8 @@ struct MeshSculptCard: View {
                     Button("Löcher schließen", systemImage: "circle.dashed") { sculpt.closeHoles(model: model) }
                         .hoverTip("Löcher schließen", "Schließt offene Ränder des Netzes mit neuen Dreiecken, damit ein Volumenkörper entsteht.")
                     Button("Reparieren", systemImage: "wrench.and.screwdriver") { sculpt.repairAgain(model: model) }
+                    Button("Zylinder", systemImage: "cylinder") { sculpt.trueCylinders(model: model) }
+                        .hoverTip("Zylinder erkennen", "Ganz umlaufende Bohrungen und Zapfen werden echte Zylinderflächen statt vieler schmaler Dreiecke – danach lassen sie sich antippen, abrunden und fasen.")
                         .hoverTip("Netz reparieren", "Ganze Reparatur noch einmal: Punkte verschweißen, kaputte und doppelte Dreiecke entfernen, Normalen ausrichten, auch große Löcher schließen.")
                     Toggle("Offene Kanten", isOn: $sculpt.showsOpenEdges)
                         .toggleStyle(.button)

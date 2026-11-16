@@ -15,6 +15,8 @@ struct MeshImportResult {
     var parts: [Part] = []
     var report = MeshRepairReport()
     var triangles = 0
+    /// Build 71: durch echte Zylinder ersetzte Bohrungen und Zapfen
+    var cylinders = 0
     var error: String?
 }
 
@@ -33,6 +35,8 @@ struct MeshImportOptions {
     var maxTriangles: Int = MeshSolid.maxTriangles
     /// Getrennte Teile als EIN Körper (sonst je Teil ein Körper, bis maxParts)
     var keepTogether = false
+    /// Build 71: Bohrungen und Zapfen als echte Zylinder (MeshFeatures.swift)
+    var trueCylinders = true
 
     static let standard = MeshImportOptions()
 
@@ -103,6 +107,15 @@ enum MeshImporter {
         return placed
     }
 
+    /// Netz → Körper, auf Wunsch mit echten Zylindern statt Dreiecksringen (Build 71).
+    private static func solid(_ mesh: IndexedMesh, options: MeshImportOptions, result: inout MeshImportResult) -> PCKShape? {
+        guard let shape = MeshSolid.shape(from: mesh) else { return nil }
+        guard options.trueCylinders else { return shape }
+        let smoothed = MeshFeatures.trueCylinders(shape, mesh: mesh)
+        result.cylinders += smoothed.holes + smoothed.bosses
+        return smoothed.shape
+    }
+
     /// Teile mit weniger Dreiecken (Splitter) fallen weg; mehr Teile als maxParts bleiben ein Körper.
     static let minimumPartTriangles = 4
     static let maxParts = 32
@@ -137,18 +150,21 @@ enum MeshImporter {
             let parts = MeshRepair.components(mesh).filter { $0.triangles.count >= minimumPartTriangles }
             if parts.count > 1, parts.count <= maxParts, !options.keepTogether {
                 for (index, part) in parts.enumerated() {
-                    guard let shape = MeshSolid.shape(from: part) else { continue }
+                    guard let shape = solid(part, options: options, result: &result) else { continue }
                     result.parts.append(MeshImportResult.Part(name: "\(object.name) \(index + 1)", color: object.color,
                                                               shape: shape, closed: shape.isClosedSolid))
                 }
             } else if parts.count > 1 {
-                let shapes: [PCKShape] = parts.compactMap { MeshSolid.shape(from: $0) }
+                var shapes: [PCKShape] = []
+                for part in parts {
+                    if let shape = solid(part, options: options, result: &result) { shapes.append(shape) }
+                }
                 if let combined = PCKShape.compound(shapes) {
                     let closed = shapes.allSatisfy { $0.isClosedSolid }
                     result.parts.append(MeshImportResult.Part(name: object.name, color: object.color, shape: combined,
                                                               closed: closed))
                 }
-            } else if let only = parts.first, let shape = MeshSolid.shape(from: only) {
+            } else if let only = parts.first, let shape = solid(only, options: options, result: &result) {
                 result.parts.append(MeshImportResult.Part(name: object.name, color: object.color, shape: shape,
                                                           closed: shape.isClosedSolid))
             }
@@ -219,6 +235,10 @@ extension ModelStore {
                      : "\(kind) importiert: \(count) Körper (\(result.triangles) Dreiecke)")
         let repair = result.report.summary
         if !repair.isEmpty { notes.append(repair) }
+        if result.cylinders > 0 {
+            notes.append(result.cylinders == 1 ? "1 Bohrung bzw. Zapfen als echter Zylinder"
+                         : "\(result.cylinders) Bohrungen bzw. Zapfen als echte Zylinder")
+        }
         let open = result.parts.filter { !$0.closed }.count
         if open > 0 {
             notes.append(open == 1 ? "Netz nicht geschlossen – als Fläche eingefügt (Bohren und Vereinigen gehen erst geschlossen)"
