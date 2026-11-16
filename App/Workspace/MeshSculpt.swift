@@ -296,6 +296,10 @@ final class MeshSculpt: ObservableObject {
     @Published private(set) var triangleCount = 0
     /// Größter sinnvoller Radius (halbe Körpergröße)
     @Published private(set) var maxRadius: Double = 50
+    /// Build 70: offene Kanten (Ränder, an denen nur ein Dreieck hängt) rot im Viewport zeigen
+    @Published var showsOpenEdges = true
+    /// Zwischenspeicher der offenen Kanten (je Körperstand neu)
+    private var openEdgeCache: (key: String, lines: [[SIMD3<Float>]])?
 
     /// Pinselkreis (Weltpunkte) für den Viewport
     private(set) var brushCircle: [SIMD3<Float>] = []
@@ -576,6 +580,54 @@ final class MeshSculpt: ObservableObject {
         model.message = note
     }
 
+    // MARK: Offene Kanten (Build 70)
+
+    /// Randkanten des Arbeitsnetzes als Strecken (Weltpunkte). Leer, wenn das Netz geschlossen ist.
+    func openEdgeLines() -> [[SIMD3<Float>]] {
+        guard let working else { return [] }
+        let key = "\(working.body)-\(ObjectIdentifier(working.shape).hashValue)-\(generation)-\(working.triangleCount)"
+        if let cache = openEdgeCache, cache.key == key { return cache.lines }
+        var count: [SIMD2<UInt32>: Int] = [:]
+        count.reserveCapacity(working.triangles.count * 3 / 2 + 1)
+        for t in working.triangles {
+            for (a, b) in [(t.x, t.y), (t.y, t.z), (t.z, t.x)] {
+                count[SIMD2<UInt32>(min(a, b), max(a, b)), default: 0] += 1
+            }
+        }
+        var lines: [[SIMD3<Float>]] = []
+        for (edge, n) in count where n == 1 {
+            let a = Int(edge.x), b = Int(edge.y)
+            guard working.positions.indices.contains(a), working.positions.indices.contains(b) else { continue }
+            lines.append([working.positions[a], working.positions[b]])
+        }
+        openEdgeCache = (key, lines)
+        return lines
+    }
+
+    /// Anzahl offener Kanten (0 = geschlossenes Netz).
+    var openEdgeCount: Int { openEdgeLines().count }
+
+    /// Ganze Reparatur noch einmal: Punkte verschweißen, kaputte und doppelte Dreiecke entfernen, Normalen
+    /// ausrichten und auch große Löcher (bis 5000 Kanten) schließen.
+    func repairAgain(model: ModelStore) {
+        rebuild(model: model, name: "Netz reparieren") { mesh in
+            var soup: [SIMD3<Double>] = []
+            soup.reserveCapacity(mesh.triangles.count * 3)
+            for t in mesh.triangles {
+                for k in [t.x, t.y, t.z] where Int(k) < mesh.positions.count { soup.append(mesh.positions[Int(k)]) }
+            }
+            let repaired = MeshRepair.repair(soup: soup)
+            var result = repaired.mesh
+            var report = repaired.report
+            let holes = MeshRepair.fillHoles(&result, maxEdges: 5000)
+            report.closedHoles += holes.closed
+            report.openHoles = holes.open
+            _ = MeshRepair.orient(&result)
+            let summary = report.summary
+            return (result, summary.isEmpty ? "Netz repariert – nichts zu tun" : "Netz repariert: " + summary)
+        }
+    }
+
     // MARK: Netz verfeinern, reduzieren, Löcher schließen
 
     /// Dichteres Netz für feine Pinselarbeit: Kanten länger als ein Drittel des Radius werden geteilt.
@@ -703,7 +755,15 @@ extension ViewportView {
     }
 
     func addSculptOverlay(to groups: inout [LineGroup]) {
-        guard let workspace, !workspace.sculpt.brushCircle.isEmpty else { return }
+        guard let workspace else { return }
+        // Build 70: offene Kanten rot (oben auf, damit man sie auch hinter dem Netz findet)
+        if workspace.sculpt.showsOpenEdges {
+            let open = workspace.sculpt.openEdgeLines()
+            if !open.isEmpty {
+                groups.append(LineGroup(polylines: open, color: SIMD3<Float>(0.92, 0.12, 0.12), width: 3, onTop: true))
+            }
+        }
+        guard !workspace.sculpt.brushCircle.isEmpty else { return }
         groups.append(LineGroup(polylines: [workspace.sculpt.brushCircle], color: SIMD3<Float>(0.98, 0.45, 0.05),
                                 width: 2, onTop: true))
     }
@@ -766,6 +826,11 @@ struct MeshSculptCard: View {
                         .fixedSize()
                     Button("Löcher schließen", systemImage: "circle.dashed") { sculpt.closeHoles(model: model) }
                         .hoverTip("Löcher schließen", "Schließt offene Ränder des Netzes mit neuen Dreiecken, damit ein Volumenkörper entsteht.")
+                    Button("Reparieren", systemImage: "wrench.and.screwdriver") { sculpt.repairAgain(model: model) }
+                        .hoverTip("Netz reparieren", "Ganze Reparatur noch einmal: Punkte verschweißen, kaputte und doppelte Dreiecke entfernen, Normalen ausrichten, auch große Löcher schließen.")
+                    Toggle("Offene Kanten", isOn: $sculpt.showsOpenEdges)
+                        .toggleStyle(.button)
+                        .hoverTip("Offene Kanten", "Zeigt Ränder des Netzes rot, an denen nur ein Dreieck hängt – dort ist das Netz nicht geschlossen.")
                 }
                 .buttonStyle(.bordered)
                 .disabled(sculpt.body == nil || sculpt.isBusy)
@@ -781,6 +846,8 @@ struct MeshSculptCard: View {
         guard let index = sculpt.body, model.bodies.indices.contains(index) else {
             return "Körper antippen oder mit dem Stift darauf malen – fester drücken verstärkt."
         }
-        return "\(model.bodies[index].name): \(sculpt.triangleCount) Dreiecke · jeder Strich ist ein Schritt zum Rückgängigmachen"
+        let open = sculpt.openEdgeCount
+        let closedText = open == 0 ? "geschlossen" : "\(open) offene Kanten (rot)"
+        return "\(model.bodies[index].name): \(sculpt.triangleCount) Dreiecke, \(closedText) · jeder Strich ist ein Schritt zum Rückgängigmachen"
     }
 }

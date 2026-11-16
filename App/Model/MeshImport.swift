@@ -223,6 +223,7 @@ extension ModelStore {
         if open > 0 {
             notes.append(open == 1 ? "Netz nicht geschlossen – als Fläche eingefügt (Bohren und Vereinigen gehen erst geschlossen)"
                          : "\(open) Netze nicht geschlossen – als Flächen eingefügt")
+            notes.append("rote offene Kanten und „Reparieren“ unter Ändern › Netz bearbeiten")
         }
         message = notes.joined(separator: " · ")
     }
