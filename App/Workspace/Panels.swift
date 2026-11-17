@@ -471,8 +471,17 @@ struct ParameterCard: View {
             }
         case .project:
             HStack(spacing: 14) {
-                Text("Körperkante oder Fläche antippen")
-                    .foregroundStyle(.secondary)
+                Text("Kontur mit dem Stift nachfahren (blau, ganz herum = grün) oder Kante antippen")
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+                // Build 80: Teilstücke übernehmen bzw. neu anfangen (SketchTrace.swift)
+                Button("Teilstück übernehmen", systemImage: "checkmark") { sketch.applyTracePartial() }
+                    .buttonStyle(.bordered)
+                    .disabled(!sketch.traceHasOpenPart)
+                    .hoverTip("Teilstück übernehmen", "Übernimmt die blau nachgefahrenen Stücke als offene Linien in die Skizze.")
+                Button("Zurücksetzen", systemImage: "arrow.counterclockwise") { sketch.resetTrace() }
+                    .buttonStyle(.bordered)
+                    .disabled(!sketch.hasTraceLoops)
                 // Build 76: Umriss aller sichtbaren Körper (z. B. einer STL) als Skizze (SketchSilhouette.swift)
                 Button("Umriss der Körper", systemImage: "square.dashed") { addBodyOutline() }
                     .buttonStyle(.borderedProminent)

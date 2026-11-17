@@ -972,6 +972,8 @@ final class ViewportView: MTKView {
             addTextTransformHandles(to: &groups, sketch: sketch, perPoint: perPoint, world: world)
             // Verschieben, Skalieren, Drehen der ganzen Auswahl (SketchSelectionTransform.swift, Build 68)
             addSelectionTransformHandles(to: &groups, sketch: sketch, perPoint: perPoint, world: world)
+            // Build 80: Projizieren – Umriss grau, nachgefahren blau, geschlossen grün (SketchTrace.swift)
+            addTraceOverlay(to: &groups, sketch: sketch, world: world)
             // Verformungsgriffe am gewählten Text (SketchTextDeformHandles.swift)
             addTextDeformHandles(to: &groups, sketch: sketch, perPoint: perPoint, world: world)
             // Linie beim Zeichnen: Graphit wie die fertigen Linien, offene Enden als kleine Punkte
@@ -1280,6 +1282,29 @@ final class ViewportView: MTKView {
                                 dots: geometry.knobs.map(world), dotRadius: 3.5))
         if !geometry.dwell.isEmpty {
             groups.append(LineGroup(polylines: [geometry.dwell.map(world)], color: Self.snapOrange, width: 1.2))
+        }
+    }
+
+    /// Projizieren: Umriss der Körper für diese Ebene (einmal je Ebene und Modellstand) und die nachgefahrenen Teile.
+    private func addTraceOverlay(to groups: inout [LineGroup], sketch: SketchController, world: (Point2) -> SIMD3<Float>) {
+        guard sketch.tool == .project, let model else { return }
+        let plane = sketch.plane
+        let key = "\(plane.origin)|\(plane.normal)|\(model.mesh.triangleCount)|\(model.mesh.vertices.count)|\(model.bodies.count)"
+        if sketch.trace.key != key {
+            sketch.setTraceLoops(SketchSilhouette.loops(mesh: model.mesh, plane: plane), key: key)
+        }
+        let traced = sketch.traceGeometry()
+        if !traced.outline.isEmpty {
+            groups.append(LineGroup(polylines: traced.outline.map { $0.map(world) }, color: SIMD3<Float>(0.55, 0.55, 0.58),
+                                    width: 1.2))
+        }
+        if !traced.blue.isEmpty {
+            groups.append(LineGroup(polylines: traced.blue.map { $0.map(world) }, color: SIMD3<Float>(0.10, 0.45, 0.95),
+                                    width: 4))
+        }
+        if !traced.green.isEmpty {
+            groups.append(LineGroup(polylines: traced.green.map { $0.map(world) }, color: SIMD3<Float>(0.12, 0.70, 0.30),
+                                    width: 4))
         }
     }
 
@@ -3062,7 +3087,8 @@ final class ViewportView: MTKView {
         if sketch?.arcActive == true || !heldFingers.isEmpty { suppressFingerTap = true }
         if let point = sketchPoint(for: touch) {
             sketch?.ended(at: point, tolerance: snapTolerance)
-            if sketch?.tool == .project { project(at: touch.location(in: self)) }
+            // Build 80: nach dem Nachfahren einer Kontur keine einzelne Kante projizieren
+            if sketch?.tool == .project, sketch?.traceWasDrag != true { project(at: touch.location(in: self)) }
         } else {
             sketch?.cancelStroke()
         }

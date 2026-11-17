@@ -424,6 +424,8 @@ final class SketchController: ObservableObject {
     var textTransformDrag: TextTransformDrag?
     /// Verschieben, Skalieren bzw. Drehen der ganzen Auswahl (SketchSelectionTransform.swift, Build 68)
     var selectionTransformDrag: SelectionTransformDrag?
+    /// Projizieren › Kontur nachfahren (SketchTrace.swift, Build 80)
+    var trace = TraceState()
     /// Verformen eines gewählten Texts (SketchTextDeformHandles.swift): aktiver Griffmodus (nil = keine
     /// Verformungsgriffe) und der Griff, der gerade gezogen wird
     @Published var textDeformMode: SketchTextDeformMode? {
@@ -820,6 +822,11 @@ final class SketchController: ObservableObject {
         // Der Stift setzt auf: Schwebe-Fadenkreuz aus
         hoverSnap = nil
         hoverNodes = []
+        if tool == .project, hasTraceLoops {
+            // Build 80: Kontur nachfahren
+            traceBegan(at: point, tolerance: tolerance)
+            return
+        }
         if tool == .select {
             // Wartet eine Bedingung, wählt der Stift nur (Griffe ziehen erst danach wieder)
             if pendingAction == nil {
@@ -862,6 +869,10 @@ final class SketchController: ObservableObject {
     }
 
     func moved(to point: Point2, tolerance: Double) {
+        if tool == .project, hasTraceLoops {
+            traceMoved(to: point, tolerance: tolerance)
+            return
+        }
         if tool == .select {
             if moveTextTransformDrag(to: point, tolerance: tolerance) { return }  // Textgriffe
             if moveTextDeformDrag(to: point, tolerance: tolerance) { return }  // Text verformen
@@ -909,6 +920,10 @@ final class SketchController: ObservableObject {
     }
 
     func ended(at point: Point2, tolerance: Double) {
+        if tool == .project, hasTraceLoops {
+            traceEnded(at: point, tolerance: tolerance)
+            return
+        }
         if tool == .select {
             if endTextTransformDrag(at: point, tolerance: tolerance) { return }  // Textgriffe
             if endTextDeformDrag(at: point, tolerance: tolerance) { return }  // Text verformen
