@@ -1274,6 +1274,8 @@ struct RailTile: View {
     var hasVariants = false
     /// Schmale Form (Skizzenleiste): kleine Beschriftung unter der Kachel statt der Kapsel daneben
     var labelBelow = false
+    /// Breite der Beschriftung unter der Kachel (Leiste oben: breiter als die Kachel)
+    var labelWidth: CGFloat?
 
     private var isCustom: Bool { ToolIcon.isCustom(systemImage) }
 
@@ -1294,8 +1296,8 @@ struct RailTile: View {
                     .foregroundStyle(isActive ? category.fill : Color.primary.opacity(0.7))
                     .lineLimit(1)
                     .truncationMode(.tail)
-                    .minimumScaleFactor(0.85)
-                    .frame(width: size + 4)
+                    .minimumScaleFactor(0.8)
+                    .frame(width: labelWidth ?? size + 4)
             }
             .contentShape(Rectangle())
             .animation(Theme.snappy, value: isActive)
@@ -1611,20 +1613,30 @@ enum TopToolbarSetting {
 }
 
 extension ToolRail {
+    /// Passt alles in die Breite, liegt die Leiste kompakt in der Mitte; sonst seitlich wischen.
     var topToolbar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(alignment: .top, spacing: 0) {
-                if sketch.isActive {
-                    sketchTopGroups
-                } else {
-                    modelTopGroups
-                }
+        ViewThatFits(in: .horizontal) {
+            topToolbarRow
+                .floatingSurface(in: RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
+            ScrollView(.horizontal, showsIndicators: false) {
+                topToolbarRow
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
+            .floatingSurface(in: RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
         }
-        .frame(height: 84)
-        .floatingSurface(in: RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
+        .frame(height: 78)
+    }
+
+    private var topToolbarRow: some View {
+        HStack(alignment: .top, spacing: 0) {
+            if sketch.isActive {
+                sketchTopGroups
+            } else {
+                modelTopGroups
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .frame(height: 78)
     }
 
     // MARK: Skizze
@@ -1640,7 +1652,7 @@ extension ToolRail {
                         Image(systemName: "checkmark")
                             .font(.system(size: 17, weight: .bold))
                             .foregroundStyle(.white)
-                            .frame(width: 40, height: 40)
+                            .frame(width: 36, height: 36)
                             .background(ToolCategory.finish.color, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
                         Text("Fertig")
                             .font(.system(size: 9, weight: .semibold))
@@ -1656,17 +1668,17 @@ extension ToolRail {
         }
         .padding(.trailing, 4)
         topDivider
-        topSketchGroup("ERSTELLEN", .create, entries, tiles: 5)
+        topSketchGroup("ERSTELLEN", .create, entries, tiles: 4)
         topDivider
-        topSketchGroup("ÄNDERN", .modify, entries, tiles: 4)
+        topSketchGroup("ÄNDERN", .modify, entries, tiles: 3)
         topDivider
-        topSketchGroup("MUSTER", .sketchPattern, entries, tiles: 3)
+        topSketchGroup("MUSTER", .sketchPattern, entries, tiles: 2)
         topDivider
         topConstraintGroup
         topDivider
         topSketchGroup("REFERENZ", .reference, entries, tiles: 1)
         topDivider
-        topSketchGroup("PRÜFEN", .inspect, entries, tiles: 2)
+        topSketchGroup("PRÜFEN", .inspect, entries, tiles: 1)
     }
 
     private func topSketchGroup(_ title: String, _ category: ToolCategory, _ all: [RailEntry], tiles: Int) -> some View {
@@ -1685,15 +1697,15 @@ extension ToolRail {
     /// Bemaßen und Bedingungen als Symbole direkt in der Leiste (wie Fusion), alle im Menü.
     private var topConstraintGroup: some View {
         let cells = constraintCells
-        return topGroupFrame(title: "BEMASSEN UND BEDINGUNGEN", color: ToolCategory.constrain.color) {
+        return topGroupFrame(title: "BEDINGUNGEN", color: ToolCategory.constrain.color) {
             topDimensionTile
-            ForEach(Array(cells.prefix(6))) { cell in
+            ForEach(Array(cells.prefix(5))) { cell in
                 Button(action: cell.action) {
                     VStack(spacing: 2) {
                         ToolIcon(cell.icon, size: 22)
                             .font(.system(size: 17))
                             .foregroundStyle(cell.isApplicable || cell.isPending ? ToolCategory.constrain.color : Color.primary)
-                            .frame(width: 34, height: 40)
+                            .frame(width: 34, height: 36)
                             .background {
                                 if cell.isPending {
                                     RoundedRectangle(cornerRadius: 9, style: .continuous)
@@ -1740,15 +1752,8 @@ extension ToolRail {
         Button {
             startDimension()
         } label: {
-            VStack(spacing: 2) {
-                RailTile(title: ConstraintKind.dimension.rawValue, systemImage: ConstraintKind.dimension.systemImage,
-                         category: .constrain, size: 40)
-                Text("Bemaßen")
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(Color.primary.opacity(0.7))
-                    .lineLimit(1)
-            }
-            .frame(minWidth: 48)
+            RailTile(title: "Bemaßen", systemImage: ConstraintKind.dimension.systemImage,
+                     category: .constrain, size: 36, labelBelow: true, labelWidth: 54)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Bemaßen")
@@ -1763,16 +1768,9 @@ extension ToolRail {
 
     /// Kachel: Antippen startet (Varianten: zuletzt gewählte), lange drücken zeigt die Varianten.
     @ViewBuilder private func topTile(_ entry: RailEntry) -> some View {
-        let label = VStack(spacing: 2) {
-            RailTile(title: entry.title, systemImage: entry.systemImage, category: entry.category,
-                     isActive: entry.isActive, size: 40, hasVariants: entry.flyout != nil)
-            Text(entry.label ?? entry.title)
-                .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(entry.isActive ? entry.category.fill : Color.primary.opacity(0.7))
-                .lineLimit(1)
-                .frame(maxWidth: 56)
-        }
-        .frame(minWidth: 48)
+        let label = RailTile(title: entry.label ?? entry.title, systemImage: entry.systemImage, category: entry.category,
+                             isActive: entry.isActive, size: 36, hasVariants: entry.flyout != nil,
+                             labelBelow: true, labelWidth: 54)
         if let flyout = entry.flyout {
             Menu {
                 ForEach(flyout) { item in topMenuItem(item) }
@@ -1823,9 +1821,9 @@ extension ToolRail {
     // MARK: 3D
 
     private static let topModelGroups: [(ToolGroup?, String, Int)] = [
-        (.sketch, "SKIZZE", 1), (.create, "ERSTELLEN", 4), (.modify, "ÄNDERN", 4), (.arrange, "ANORDNEN", 3),
-        (.construct, "KONSTRUIEREN", 1), (.inspect, "PRÜFEN UND MESSEN", 3), (nil, "NETZ", 2),
-        (.sheetMetal, "BLECH", 2), (.insert, "EINFÜGEN", 3), (.visualize, "ANSICHT", 1),
+        (.sketch, "SKIZZE", 1), (.create, "ERSTELLEN", 3), (.modify, "ÄNDERN", 3), (.arrange, "ANORDNEN", 2),
+        (.construct, "KONSTR.", 1), (.inspect, "PRÜFEN", 2), (nil, "NETZ", 1),
+        (.sheetMetal, "BLECH", 1), (.insert, "EINFÜGEN", 2), (.visualize, "ANSICHT", 1),
     ]
 
     @ViewBuilder private var modelTopGroups: some View {
@@ -1898,16 +1896,8 @@ extension ToolRail {
             openGroup = nil
             command.run()
         } label: {
-            VStack(spacing: 2) {
-                RailTile(title: command.title, systemImage: command.icon, category: category,
-                         isActive: command.isActive, size: 40)
-                Text(command.title)
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(command.isActive ? category.fill : Color.primary.opacity(0.7))
-                    .lineLimit(1)
-                    .frame(maxWidth: 60)
-            }
-            .frame(minWidth: 48)
+            RailTile(title: command.title, systemImage: command.icon, category: category,
+                     isActive: command.isActive, size: 36, labelBelow: true, labelWidth: 54)
         }
         .buttonStyle(.plain)
         .disabled(!command.isEnabled)
