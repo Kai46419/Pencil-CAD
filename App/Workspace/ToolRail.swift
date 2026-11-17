@@ -213,6 +213,8 @@ struct ToolRail: View {
     @ObservedObject var model: ModelStore
     @ObservedObject var sketch: SketchController
     @Binding var openGroup: ToolGroup?
+    /// Build 84: als Werkzeugleiste oben (Variante A) statt als linke Leiste
+    var onTop = false
     let importSTEP: () -> Void
 
     @State private var openEntry: String?
@@ -238,7 +240,9 @@ struct ToolRail: View {
     private let bottomReserve: CGFloat = 70
 
     var body: some View {
-        if sketch.isActive {
+        if onTop {
+            topToolbar
+        } else if sketch.isActive {
             sketchRail
         } else if showsContext {
             entryRail(contextEntries, tile: 44, header: nil)
@@ -1589,6 +1593,398 @@ private struct Flyout: View {
                 .frame(width: 36, height: 36)
                 .foregroundStyle(item.isActive ? Color.white : category.color)
                 .background(item.isActive ? category.fill : idle, in: shape)
+        }
+    }
+}
+
+// MARK: - Werkzeugleiste oben (Build 84, Kai: Variante A „wie Fusion 360“)
+//
+// Statt der linken Leiste eine Kontextleiste oben unter der Titelleiste. Je Rubrik die wichtigsten Werkzeuge als
+// Kacheln, darunter der Rubrikname mit ▾: das Menü zeigt alle Werkzeuge der Rubrik, Werkzeuge mit Varianten als
+// Untermenü (Linien, Rechtecke, Kreise …). Kacheln mit Varianten: Antippen startet, lange drücken zeigt die Varianten.
+// Skizze: Fertig · Auswählen · ERSTELLEN · ÄNDERN · MUSTER · BEMASSEN UND BEDINGUNGEN · REFERENZ · PRÜFEN.
+// 3D: Skizze · Erstellen · Ändern · Anordnen · Konstruieren · Prüfen und Messen · Netz · Blech · Einfügen · Ansicht.
+
+/// Einstellung: Werkzeugleiste oben (Std. an) statt links
+enum TopToolbarSetting {
+    static let key = "toolbar.top"
+}
+
+extension ToolRail {
+    var topToolbar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(alignment: .top, spacing: 0) {
+                if sketch.isActive {
+                    sketchTopGroups
+                } else {
+                    modelTopGroups
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+        }
+        .frame(height: 84)
+        .floatingSurface(in: RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
+    }
+
+    // MARK: Skizze
+
+    @ViewBuilder private var sketchTopGroups: some View {
+        let entries = sketchEntries
+        let finish = entries.first { $0.id == "sketch.finish" }
+        let select = entries.first { $0.id == "sketch.select" }
+        HStack(alignment: .top, spacing: 2) {
+            if let finish {
+                Button(action: finish.action) {
+                    VStack(spacing: 2) {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 17, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 40, height: 40)
+                            .background(ToolCategory.finish.color, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                        Text("Fertig")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(ToolCategory.finish.color)
+                    }
+                    .frame(minWidth: 48)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Skizze fertig")
+                .hoverTip("Skizze fertig", "Skizze beenden und zurück in die 3D-Ansicht")
+            }
+            if let select { topTile(select) }
+        }
+        .padding(.trailing, 4)
+        topDivider
+        topSketchGroup("ERSTELLEN", .create, entries, tiles: 5)
+        topDivider
+        topSketchGroup("ÄNDERN", .modify, entries, tiles: 4)
+        topDivider
+        topSketchGroup("MUSTER", .sketchPattern, entries, tiles: 3)
+        topDivider
+        topConstraintGroup
+        topDivider
+        topSketchGroup("REFERENZ", .reference, entries, tiles: 1)
+        topDivider
+        topSketchGroup("PRÜFEN", .inspect, entries, tiles: 2)
+    }
+
+    private func topSketchGroup(_ title: String, _ category: ToolCategory, _ all: [RailEntry], tiles: Int) -> some View {
+        let entries = all.filter { $0.category == category && $0.grid == nil }
+        return topGroupFrame(title: title, color: category.color) {
+            ForEach(Array(entries.prefix(tiles))) { entry in
+                topTile(entry)
+            }
+        } menu: {
+            ForEach(entries) { entry in
+                topMenuEntry(entry)
+            }
+        }
+    }
+
+    /// Bemaßen und Bedingungen als Symbole direkt in der Leiste (wie Fusion), alle im Menü.
+    private var topConstraintGroup: some View {
+        let cells = constraintCells
+        return topGroupFrame(title: "BEMASSEN UND BEDINGUNGEN", color: ToolCategory.constrain.color) {
+            topDimensionTile
+            ForEach(Array(cells.prefix(6))) { cell in
+                Button(action: cell.action) {
+                    VStack(spacing: 2) {
+                        ToolIcon(cell.icon, size: 22)
+                            .font(.system(size: 17))
+                            .foregroundStyle(cell.isApplicable || cell.isPending ? ToolCategory.constrain.color : Color.primary)
+                            .frame(width: 34, height: 40)
+                            .background {
+                                if cell.isPending {
+                                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                        .fill(ToolCategory.constrain.color.opacity(0.15))
+                                }
+                            }
+                        Text(cell.title)
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(Color.primary.opacity(0.7))
+                            .lineLimit(1)
+                            .frame(maxWidth: 46)
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(cell.title)
+                .hoverTip(cell.title, cell.detail)
+            }
+        } menu: {
+            Button {
+                startDimension()
+            } label: {
+                ToolLabel(ConstraintKind.dimension.rawValue, icon: ConstraintKind.dimension.systemImage)
+            }
+            Button {
+                sketch.start(.detach)
+            } label: {
+                Label("Trennen", systemImage: "link.badge.plus")
+            }
+            Section("BEDINGUNGEN") {
+                ForEach(cells) { cell in
+                    Button(action: cell.action) {
+                        ToolLabel(cell.title, icon: cell.icon)
+                    }
+                }
+            }
+            Section("ANZEIGE") {
+                Toggle("Bedingungen anzeigen", isOn: $sketch.showsConstraintBadges)
+                Toggle("Bemaßungen anzeigen", isOn: $sketch.showsDimensions)
+            }
+        }
+    }
+
+    private var topDimensionTile: some View {
+        Button {
+            startDimension()
+        } label: {
+            VStack(spacing: 2) {
+                RailTile(title: ConstraintKind.dimension.rawValue, systemImage: ConstraintKind.dimension.systemImage,
+                         category: .constrain, size: 40)
+                Text("Bemaßen")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(Color.primary.opacity(0.7))
+                    .lineLimit(1)
+            }
+            .frame(minWidth: 48)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Bemaßen")
+        .hoverTip("Bemaßen", ConstraintKind.dimension.selectionHint)
+    }
+
+    private func startDimension() {
+        if sketch.pendingAction != nil { sketch.cancelPending() }
+        sketch.tool = .select
+        sketch.notice = ConstraintKind.dimension.selectionHint
+    }
+
+    /// Kachel: Antippen startet (Varianten: zuletzt gewählte), lange drücken zeigt die Varianten.
+    @ViewBuilder private func topTile(_ entry: RailEntry) -> some View {
+        let label = VStack(spacing: 2) {
+            RailTile(title: entry.title, systemImage: entry.systemImage, category: entry.category,
+                     isActive: entry.isActive, size: 40, hasVariants: entry.flyout != nil)
+            Text(entry.label ?? entry.title)
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(entry.isActive ? entry.category.fill : Color.primary.opacity(0.7))
+                .lineLimit(1)
+                .frame(maxWidth: 56)
+        }
+        .frame(minWidth: 48)
+        if let flyout = entry.flyout {
+            Menu {
+                ForEach(flyout) { item in topMenuItem(item) }
+            } label: {
+                label
+            } primaryAction: {
+                if let primary = entry.primary { primary() } else { entry.action() }
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .disabled(!entry.isEnabled)
+            .opacity(entry.isEnabled ? 1 : 0.45)
+            .accessibilityLabel(entry.title)
+            .hoverTip(entry.title, entry.subtitle)
+        } else {
+            Button(action: entry.action) { label }
+                .buttonStyle(.plain)
+                .disabled(!entry.isEnabled)
+                .opacity(entry.isEnabled ? 1 : 0.45)
+                .accessibilityLabel(entry.title)
+                .hoverTip(entry.title, ToolTips.detail(for: entry.title) ?? entry.subtitle)
+        }
+    }
+
+    /// Menüeintrag: mit Varianten als Untermenü (Linien ›, Rechtecke › …).
+    @ViewBuilder private func topMenuEntry(_ entry: RailEntry) -> some View {
+        if let flyout = entry.flyout {
+            Menu {
+                ForEach(flyout) { item in topMenuItem(item) }
+            } label: {
+                ToolLabel(entry.title, icon: entry.systemImage)
+            }
+        } else {
+            Button(action: entry.action) {
+                ToolLabel(entry.title, icon: entry.systemImage)
+            }
+            .disabled(!entry.isEnabled)
+        }
+    }
+
+    private func topMenuItem(_ item: ToolItem) -> some View {
+        Button(action: item.action) {
+            ToolLabel(item.subtitle.map { "\(item.title) · \($0)" } ?? item.title, icon: item.systemImage)
+        }
+        .disabled(!item.isEnabled)
+    }
+
+    // MARK: 3D
+
+    private static let topModelGroups: [(ToolGroup?, String, Int)] = [
+        (.sketch, "SKIZZE", 1), (.create, "ERSTELLEN", 4), (.modify, "ÄNDERN", 4), (.arrange, "ANORDNEN", 3),
+        (.construct, "KONSTRUIEREN", 1), (.inspect, "PRÜFEN UND MESSEN", 3), (nil, "NETZ", 2),
+        (.sheetMetal, "BLECH", 2), (.insert, "EINFÜGEN", 3), (.visualize, "ANSICHT", 1),
+    ]
+
+    @ViewBuilder private var modelTopGroups: some View {
+        if hasSelection, workspace.command == nil {
+            let actions = ModelRibbon.contextCommands(workspace)
+            topGroupFrame(title: "AUSWAHL", color: .accentColor) {
+                ForEach(Array(actions.prefix(3))) { command in
+                    topCommandTile(command, category: .neutral)
+                }
+            } menu: {
+                Section(selectionSummary) {
+                    ForEach(actions) { command in topCommandButton(command) }
+                }
+                Button(role: .destructive) {
+                    model.resetSelection()
+                } label: {
+                    Label("Alle abwählen", systemImage: "xmark.circle")
+                }
+            }
+            topDivider
+        }
+        ForEach(Array(Self.topModelGroups.enumerated()), id: \.offset) { index, item in
+            if index > 0 { topDivider }
+            let commands = item.0.map { ribbonCommands($0) } ?? meshCommands
+            let color = item.0?.category.color ?? ToolCategory.inspect.color
+            let tiles = ModelRibbon.tiles(commands, pins: pins, usage: usage, limit: item.2)
+            topGroupFrame(title: item.1, color: color) {
+                ForEach(tiles) { command in
+                    topCommandTile(command, category: item.0?.category ?? .inspect)
+                }
+            } menu: {
+                topCommandMenu(commands)
+            }
+        }
+    }
+
+    /// Rubrik „Netz“: alles für STL/3MF (Import, Netz bearbeiten, Rundung/Loch, Reparieren, Druckprüfung).
+    private var meshCommands: [RibbonCommand] {
+        let insert = ribbonCommands(.insert)
+        let inspect = ribbonCommands(.inspect)
+        var list: [RibbonCommand] = []
+        if var stl = insert.first(where: { $0.id == "insert.mesh" }) {
+            stl.heading = "DATEI"
+            stl.featured = false
+            list.append(stl)
+        }
+        if var sculpt = insert.first(where: { $0.title == "Netz bearbeiten" }) {
+            sculpt.heading = "NETZ"
+            sculpt.featured = true
+            list.append(sculpt)
+        }
+        let ws = workspace
+        list.append(RibbonCommand(id: "mesh.round", title: "Rundung/Loch", subtitle: "Streifen → echte Fläche",
+                                  icon: "circle.dashed", heading: "NETZ") {
+            ws.startCommand(.meshSculpt)
+            ws.sculpt.mode = .recognize
+        })
+        if var check = inspect.first(where: { $0.title == "Druckprüfung" }) {
+            check.heading = "3D-DRUCK"
+            list.append(check)
+        }
+        return list
+    }
+
+    private func topCommandTile(_ command: RibbonCommand, category: ToolCategory) -> some View {
+        Button {
+            var next = usage
+            next.record(command.id)
+            usageText = next.text
+            openGroup = nil
+            command.run()
+        } label: {
+            VStack(spacing: 2) {
+                RailTile(title: command.title, systemImage: command.icon, category: category,
+                         isActive: command.isActive, size: 40)
+                Text(command.title)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(command.isActive ? category.fill : Color.primary.opacity(0.7))
+                    .lineLimit(1)
+                    .frame(maxWidth: 60)
+            }
+            .frame(minWidth: 48)
+        }
+        .buttonStyle(.plain)
+        .disabled(!command.isEnabled)
+        .opacity(command.isEnabled ? 1 : 0.45)
+        .accessibilityLabel(command.title)
+        .hoverTip(command.shortcut.map { "\(command.title) (\($0))" } ?? command.title,
+                  ToolTips.detail(for: command.title) ?? command.subtitle)
+    }
+
+    /// Alle Befehle der Rubrik, nach Zwischenüberschriften (KANTEN, FLÄCHEN …) als Untermenüs.
+    @ViewBuilder private func topCommandMenu(_ commands: [RibbonCommand]) -> some View {
+        let headings: [String] = commands.reduce(into: [String]()) { list, command in
+            let heading = command.heading ?? ""
+            if !list.contains(heading) { list.append(heading) }
+        }
+        if headings.count <= 1 {
+            ForEach(commands) { command in topCommandButton(command) }
+        } else {
+            ForEach(headings, id: \.self) { heading in
+                let group = commands.filter { ($0.heading ?? "") == heading }
+                if heading.isEmpty {
+                    ForEach(group) { command in topCommandButton(command) }
+                } else {
+                    Menu {
+                        ForEach(group) { command in topCommandButton(command) }
+                    } label: {
+                        Label(String(heading.prefix(1)) + heading.dropFirst().lowercased(), systemImage: "folder")
+                    }
+                }
+            }
+        }
+    }
+
+    private func topCommandButton(_ command: RibbonCommand) -> some View {
+        Button {
+            var next = usage
+            next.record(command.id)
+            usageText = next.text
+            openGroup = nil
+            command.run()
+        } label: {
+            ToolLabel(command.shortcut.map { "\(command.title)  \($0)" } ?? command.title, icon: command.icon)
+        }
+        .disabled(!command.isEnabled)
+    }
+
+    // MARK: Rahmen einer Rubrik
+
+    private var topDivider: some View {
+        Rectangle()
+            .fill(Color.primary.opacity(0.12))
+            .frame(width: 1, height: 52)
+            .padding(.horizontal, 5)
+            .padding(.top, 4)
+    }
+
+    private func topGroupFrame<Tiles: View, Items: View>(title: String, color: Color,
+                                                          @ViewBuilder tiles: () -> Tiles,
+                                                          @ViewBuilder menu: () -> Items) -> some View {
+        VStack(spacing: 1) {
+            HStack(alignment: .top, spacing: 2) { tiles() }
+            Menu {
+                menu()
+            } label: {
+                HStack(spacing: 3) {
+                    Text(title)
+                        .font(.system(size: 9.5, weight: .bold))
+                        .tracking(0.5)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .bold))
+                }
+                .foregroundStyle(color)
+                .padding(.horizontal, 6)
+                .frame(minHeight: 16)
+                .contentShape(Rectangle())
+            }
+            .accessibilityLabel("\(title) – alle Werkzeuge")
         }
     }
 }

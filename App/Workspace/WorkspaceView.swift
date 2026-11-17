@@ -49,6 +49,8 @@ private struct WorkspaceContent: View {
     /// Zeitleiste des Verlaufs: automatisch, ein- oder ausgeblendet (TimelineBar.swift)
     @AppStorage(TimelineVisibility.storageKey) private var timelineVisibility = TimelineVisibility.automatic.rawValue
     @AppStorage(FilletWindowLayout.storageKey) private var filletFloatingWindow = true
+    /// Build 84 (Kai, Variante A): Werkzeuge oben wie Fusion 360; aus = alte linke Leiste
+    @AppStorage(TopToolbarSetting.key) private var toolbarOnTop = true
     /// S5 (Build 41): Fenstermodus nur bei regulärer Breite – Size Class und gemessene Größe des Arbeitsbereichs
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var workspaceSize: CGSize = .zero
@@ -103,12 +105,14 @@ private struct WorkspaceContent: View {
                 .allowsHitTesting(false)
                 .overlay(alignment: .top) { topArea }
                 .overlay(alignment: .topLeading) {
-                    ToolRail(workspace: workspace, model: model, sketch: sketch, openGroup: $openGroup) {
-                        importsImages = false
-                        isImporting = true
+                    if !toolbarOnTop {
+                        ToolRail(workspace: workspace, model: model, sketch: sketch, openGroup: $openGroup) {
+                            importsImages = false
+                            isImporting = true
+                        }
+                        .padding(.leading, 16)
+                        .padding(.top, 76)
                     }
-                    .padding(.leading, 16)
-                    .padding(.top, 76)
                 }
                 // Browser „Ebenen“ wie in Fusion 360: Reiter oben links, das Fenster liegt über der Werkzeugleiste
                 .overlay(alignment: .topLeading) {
@@ -187,7 +191,7 @@ private struct WorkspaceContent: View {
                         }
                     }
                     .padding(.trailing, 16)
-                    .padding(.top, 76)
+                    .padding(.top, toolbarOnTop ? 162 : 76)
                     .animation(Theme.spring, value: sketch.isActive)
                     .animation(Theme.spring, value: workspace.command == nil)
                 }
@@ -368,6 +372,15 @@ private struct WorkspaceContent: View {
     private var topArea: some View {
         VStack(spacing: 10) {
             titleBar
+            if toolbarOnTop {
+                // Build 84: Werkzeugleiste oben (ToolRail.topToolbar) – Skizze bzw. 3D mit Rubriken und Untermenüs
+                ToolRail(workspace: workspace, model: model, sketch: sketch, openGroup: $openGroup, onTop: true) {
+                    importsImages = false
+                    isImporting = true
+                }
+                .padding(.horizontal, 16)
+                .frame(maxWidth: 1180)
+            }
             if let hint = workspace.hint {
                 Text(hint)
                     .font(.footnote.weight(.medium))
@@ -409,6 +422,10 @@ private struct WorkspaceContent: View {
             Menu {
                 ForEach(HelpTopic.allCases) { topic in
                     Button(topic.rawValue, systemImage: topic.systemImage) { workspace.helpTopic = topic }
+                }
+                Divider()
+                Toggle(isOn: $toolbarOnTop) {
+                    Label("Werkzeugleiste oben", systemImage: "menubar.rectangle")
                 }
             } label: {
                 HStack(spacing: 4) {
