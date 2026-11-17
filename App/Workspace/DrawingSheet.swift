@@ -141,20 +141,23 @@ struct DrawingSheet: View {
         }
     }
 
+    // Build 87 (Kai): im schmalen Fenster brach die Schrift Buchstabe für Buchstabe senkrecht um. Jetzt behält jedes
+    // Bedienelement seine Breite, und was nicht mehr in die Zeile passt, rutscht in die nächste (WrapLayout).
     private var optionsBar: some View {
-        HStack(spacing: 16) {
+        WrapLayout(spacing: 16, lineSpacing: 10) {
             if !selectedBodies.isEmpty {
                 Picker("Körper", selection: $options.onlySelection) {
                     Text("Auswahl").tag(true)
                     Text("Alle sichtbaren").tag(false)
                 }
                 .pickerStyle(.segmented)
-                .frame(maxWidth: 260)
+                .frame(width: 240)
             }
             Picker("Projektion", selection: $options.method) {
                 ForEach(ProjectionMethod.allCases) { Text($0.rawValue).tag($0) }
             }
             .pickerStyle(.menu)
+            .fixedSize()
             Toggle("Verdeckte Kanten", isOn: $options.showsHidden)
                 .fixedSize()
             Toggle("Isometrie", isOn: $options.showsIso)
@@ -162,21 +165,24 @@ struct DrawingSheet: View {
             // Ersteller im Schriftfeld („Created by …“), wird für alle Zeichnungen gemerkt
             TextField("Erstellt von", text: $options.author)
                 .textFieldStyle(.roundedBorder)
-                .frame(maxWidth: 170)
+                .frame(width: 170)
                 .onChange(of: options.author) { _, name in DrawingOptions.savedAuthor = name }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .font(.callout)
     }
 
     /// Zweite Zeile: Winkelmaße automatisch bzw. von Hand setzen
     private var angleBar: some View {
-        HStack(spacing: 16) {
+        WrapLayout(spacing: 16, lineSpacing: 10) {
             Toggle("Winkelmaße automatisch", isOn: $options.showsAngles)
                 .fixedSize()
             Toggle(isOn: $angleTool) {
                 Label("Winkelmaß setzen", systemImage: "angle")
+                    .fixedSize()
             }
             .toggleStyle(.button)
+            .fixedSize()
             .onChange(of: angleTool) { _, _ in
                 pickedEdge = nil
                 angleHint = nil
@@ -184,8 +190,10 @@ struct DrawingSheet: View {
             }
             Toggle(isOn: $lengthTool) {
                 Label("Längenmaß setzen", systemImage: "ruler")
+                    .fixedSize()
             }
             .toggleStyle(.button)
+            .fixedSize()
             .onChange(of: lengthTool) { _, _ in
                 firstVertex = nil
                 angleHint = nil
@@ -196,13 +204,15 @@ struct DrawingSheet: View {
                     ForEach(DrawingLengthKind.allCases) { Text($0.rawValue).tag($0) }
                 }
                 .pickerStyle(.menu)
+                .fixedSize()
             }
             Text(angleHint ?? angleToolText)
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-            Spacer(minLength: 0)
+                .fixedSize()
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .font(.callout)
     }
 
@@ -555,5 +565,68 @@ extension KernelThread {
             }
         }
         return box.value
+    }
+}
+
+/// Reiht Bedienelemente nebeneinander und bricht in die nächste Zeile um, wenn der Platz nicht reicht.
+/// Jedes Element bekommt seine ideale Breite (höchstens die Zeilenbreite) – nie wird Text senkrecht gequetscht.
+struct WrapLayout: Layout {
+    var spacing: CGFloat = 12
+    var lineSpacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let rows = arrange(width: proposal.width ?? .infinity, subviews: subviews)
+        let width = rows.map(\.width).max() ?? 0
+        let height = rows.map(\.height).reduce(0, +) + lineSpacing * CGFloat(max(rows.count - 1, 0))
+        return CGSize(width: proposal.width ?? width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for row in arrange(width: bounds.width, subviews: subviews) {
+            var x = bounds.minX
+            for (index, size) in row.items {
+                subviews[index].place(at: CGPoint(x: x, y: y + (row.height - size.height) / 2),
+                                      proposal: ProposedViewSize(size))
+                x += size.width + spacing
+            }
+            y += row.height + lineSpacing
+        }
+    }
+
+    private struct Row {
+        var items: [(Int, CGSize)] = []
+        var width: CGFloat = 0
+        var height: CGFloat = 0
+    }
+
+    private func arrange(width: CGFloat, subviews: Subviews) -> [Row] {
+        var rows: [Row] = []
+        var row = Row()
+        for index in subviews.indices {
+            var size = subviews[index].sizeThatFits(.unspecified)
+            if width.isFinite { size.width = min(size.width, width) }
+            let needed = row.items.isEmpty ? size.width : row.width + spacing + size.width
+            if !row.items.isEmpty, needed > width {
+                rows.append(row)
+                row = Row()
+            }
+            row.width = row.items.isEmpty ? size.width : row.width + spacing + size.width
+            row.height = max(row.height, size.height)
+            row.items.append((index, size))
+        }
+        if !row.items.isEmpty { rows.append(row) }
+        return rows
+    }
+}
+
+extension View {
+    /// Großes Blatt auf dem iPad: ab iOS 18 Seitengröße, davor das übliche Formblatt.
+    @ViewBuilder func largeSheetSizing() -> some View {
+        if #available(iOS 18.0, *) {
+            presentationSizing(.page)
+        } else {
+            self
+        }
     }
 }

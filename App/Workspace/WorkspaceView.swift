@@ -328,7 +328,11 @@ private struct WorkspaceContent: View {
         }
         .sheet(item: $screenshot) { ScreenshotSheet(screenshot: $0) }
         .sheet(isPresented: $workspace.showsVariables) { VariablesSheet(model: model) }
-        .sheet(isPresented: $workspace.showsDrawing) { DrawingSheet(model: model, projectName: projectName) }
+        .sheet(isPresented: $workspace.showsDrawing) {
+            // Build 87: Zeichnung im großen Fenster (iPadOS 18: Seitengröße), damit Blatt und Optionen Platz haben
+            DrawingSheet(model: model, projectName: projectName)
+                .largeSheetSizing()
+        }
         .sheet(isPresented: $workspace.showsProjectPicker) {
             ProjectPickerSheet(current: workspace.project.id) { project in
                 model.insertProject(from: project.folder, name: project.name)
