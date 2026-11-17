@@ -123,6 +123,23 @@ struct ParameterCard: View {
     @ObservedObject var model: ModelStore
     @ObservedObject var sketch: SketchController
 
+    /// Build 76: Umriss aller sichtbaren Körper auf die Skizzenebene (im Hintergrund gerechnet).
+    private func addBodyOutline() {
+        let mesh = model.mesh, plane = sketch.plane
+        model.message = "Umriss wird berechnet …"
+        Task {
+            let loops = await Task.detached(priority: .userInitiated) {
+                SketchSilhouette.loops(mesh: mesh, plane: plane)
+            }.value
+            guard !loops.isEmpty else {
+                model.message = "Kein Umriss gefunden – liegt ein Körper über bzw. unter dieser Ebene?"
+                return
+            }
+            sketch.addProjected(loops)
+            model.message = loops.count == 1 ? "Umriss übernommen (1 Kontur)" : "Umriss übernommen (\(loops.count) Konturen)"
+        }
+    }
+
     var body: some View {
         if workspace.command != nil {
             // Offener Modellbefehl: Werte stehen im Eigenschaften-Panel rechts (FeaturePanel.swift); die Karten
@@ -453,8 +470,15 @@ struct ParameterCard: View {
                     .foregroundStyle(.secondary)
             }
         case .project:
-            Text("Körperkante oder Fläche antippen")
-                .foregroundStyle(.secondary)
+            HStack(spacing: 14) {
+                Text("Körperkante oder Fläche antippen")
+                    .foregroundStyle(.secondary)
+                // Build 76: Umriss aller sichtbaren Körper (z. B. einer STL) als Skizze (SketchSilhouette.swift)
+                Button("Umriss der Körper", systemImage: "square.dashed") { addBodyOutline() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(model.bodies.isEmpty)
+                    .hoverTip("Umriss der Körper", "Projiziert den Umriss aller sichtbaren Körper senkrecht auf diese Skizzenebene – außen und durchgehende Löcher. Runde Löcher werden Kreise.")
+            }
         case .polyline:
             HStack(spacing: 14) {
                 // Bogen ohne Finger: der nächste Strich wird ein tangentialer Bogen
