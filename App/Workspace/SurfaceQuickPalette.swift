@@ -5,6 +5,8 @@ struct StandardPartPalette: View {
     @ObservedObject var workspace: Workspace
     @ObservedObject var model: ModelStore
     let index: Int
+    /// Build 83: Fenster auf den Kopf zuklappen
+    @AppStorage("standardPart.collapsed") private var collapsed = false
 
     private var spec: StandardPartSpec? {
         model.bodies.indices.contains(index) ? model.bodies[index].effectiveStandardPart : nil
@@ -23,9 +25,29 @@ struct StandardPartPalette: View {
                         }
                         Spacer(minLength: 0)
                         BodyTrashButton(model: model)
+                        Button {
+                            withAnimation(Theme.snappy) { collapsed.toggle() }
+                        } label: {
+                            Image(systemName: "chevron.down")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(.secondary)
+                                .rotationEffect(.degrees(collapsed ? -90 : 0))
+                                .frame(width: 32, height: 32)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(collapsed ? "Aufklappen" : "Zuklappen")
                     }
+                    if !collapsed {
                     Divider()
-                    if spec.kind.isScrew {
+                    // Build 83: Normteil setzen und kopieren
+                    placementButtons(spec)
+                    Divider()
+                    if spec.kind == .sleeve {
+                        detail("Innen-Ø", LengthUnit.current.format(spec.sleeveInnerDiameter))
+                        detail("Außen-Ø", LengthUnit.current.format(spec.sleeveOuterDiameter))
+                        detail("Länge", LengthUnit.current.format(spec.length))
+                    } else if spec.kind.isScrew {
                         detail("Größe", spec.metric.name)
                         detail("Länge", LengthUnit.current.format(spec.length))
                         detail("Steigung", LengthUnit.current.format(spec.metric.pitch))
@@ -41,6 +63,8 @@ struct StandardPartPalette: View {
                         }
                         Divider()
                         Button(workspace.placesSelectedScrew ? "Zielfläche antippen …" : "An Fläche platzieren") {
+                            workspace.centersSelectedPart = false
+                            workspace.mountStage = .off
                             workspace.placesSelectedScrew.toggle()
                         }
                         .buttonStyle(.borderedProminent)
@@ -71,6 +95,7 @@ struct StandardPartPalette: View {
                     }
                     .font(.caption)
                     .buttonStyle(.plain)
+                    }
                 }
                 .padding(PaletteStyle.inset)
             }
@@ -81,6 +106,40 @@ struct StandardPartPalette: View {
             .overlay { RoundedRectangle(cornerRadius: PaletteStyle.radius).strokeBorder(PaletteStyle.controlBorder) }
             .elevationShadow(.floating)
         }
+    }
+
+    /// Build 83: In Loch zentrieren (Schraube, Hülse), Auf Schraube setzen (Mutter, Scheibe), Kopie.
+    @ViewBuilder private func placementButtons(_ spec: StandardPartSpec) -> some View {
+        if spec.kind.fitsInHole {
+            Button(workspace.centersSelectedPart ? "Bohrung antippen …" : "In Loch zentrieren", systemImage: "scope") {
+                workspace.mountStage = .off
+                workspace.placesSelectedScrew = false
+                workspace.centersSelectedPart.toggle()
+                if workspace.centersSelectedPart {
+                    model.message = "Kreiskante einer Bohrung oder die Bohrungswand antippen."
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .frame(maxWidth: .infinity)
+            .hoverTip("In Loch zentrieren", "Setzt das Teil genau auf die Achse einer Bohrung, Kopf außen auf der Bohrungskante.")
+        }
+        if spec.kind.mountsOnScrew {
+            Button(workspace.mountStage == .off ? "Auf Schraube setzen" : "Schraube, dann Fläche antippen …",
+                   systemImage: "arrow.down.to.line") {
+                workspace.centersSelectedPart = false
+                workspace.placesSelectedScrew = false
+                workspace.mountStage = workspace.mountStage == .off ? .pickScrew : .off
+                if workspace.mountStage == .pickScrew { model.message = "Erst die Schraube antippen." }
+            }
+            .buttonStyle(.borderedProminent)
+            .frame(maxWidth: .infinity)
+            .hoverTip("Auf Schraube setzen", "Erst die Schraube antippen, dann die Fläche, auf der Mutter bzw. Scheibe aufliegt.")
+        }
+        Button("Kopie", systemImage: "plus.square.on.square") {
+            model.duplicateStandardPart(index)
+        }
+        .buttonStyle(.bordered)
+        .hoverTip("Kopie", "Gleiches Teil noch einmal – danach z. B. in die nächste Bohrung setzen.")
     }
 
     private func detail(_ label: String, _ value: String) -> some View {

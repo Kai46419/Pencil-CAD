@@ -7,19 +7,37 @@ import simd
 enum StandardPartKind: String, CaseIterable, Identifiable, Codable {
     case socketScrew = "Zylinderschraube ISO 4762"
     case hexScrew = "Sechskantschraube ISO 4017"
+    // Build 83 (Kai): weitere Kopfformen und Montagehülse
+    case lowHeadScrew = "Flachkopfschraube DIN 7984"
+    case countersunkScrew = "Senkkopfschraube ISO 10642"
+    case buttonScrew = "Linsenkopfschraube ISO 7380-1"
+    case flangeButtonScrew = "Linsenkopf mit Scheibe ISO 7380-2"
     case nut = "Sechskantmutter ISO 4032"
     case washer = "Scheibe ISO 7089"
+    case sleeve = "Montagehülse"
     case bearing = "Kugellager 6xx"
 
     var id: Self { self }
 
-    var isScrew: Bool { self == .socketScrew || self == .hexScrew }
+    var isScrew: Bool {
+        switch self {
+        case .socketScrew, .hexScrew, .lowHeadScrew, .countersunkScrew, .buttonScrew, .flangeButtonScrew: true
+        default: false
+        }
+    }
+
+    /// Steckt mit der Achse in einer Bohrung (Schrauben, Hülse): „In Loch zentrieren“
+    var fitsInHole: Bool { isScrew || self == .sleeve }
+
+    /// Sitzt auf einer Schraube (Mutter, Scheibe): „Auf Schraube setzen“
+    var mountsOnScrew: Bool { self == .nut || self == .washer }
 
     var systemImage: String {
         switch self {
-        case .socketScrew, .hexScrew: "sc.fastener"
+        case .socketScrew, .hexScrew, .lowHeadScrew, .countersunkScrew, .buttonScrew, .flangeButtonScrew: "sc.fastener"
         case .nut: "hexagon"
         case .washer: "circle.circle"
+        case .sleeve: "cylinder"
         case .bearing: "circle.dotted.circle"
         }
     }
@@ -59,6 +77,25 @@ struct MetricSize {
     let washerInner: Double
     let washerOuter: Double
     let washerThickness: Double
+
+    /// Index in all (M2, M2,5, M3, M4, M5, M6, M8, M10)
+    private var index: Int { Self.all.firstIndex { $0.name == name } ?? 2 }
+
+    // Build 83: Kopfmaße weiterer Normen (Tabellenwerte; M2/M2,5 dort, wo die Norm sie nicht führt, angenähert)
+    /// DIN 7984 (niedriger Zylinderkopf): Kopfhöhe, Schlüsselweite
+    var lowHeadHeight: Double { [1.5, 1.8, 2, 2.8, 3.5, 4, 5, 6][index] }
+    var lowHeadSocket: Double { [1.3, 1.5, 2, 2.5, 3, 4, 5, 7][index] }
+    /// ISO 10642 (Senkkopf, 90°): Kopf-Ø, Kopfhöhe, Schlüsselweite
+    var countersunkDiameter: Double { [4.4, 5.5, 6.72, 8.96, 11.2, 13.44, 17.92, 22.4][index] }
+    var countersunkHeight: Double { [1.2, 1.5, 1.86, 2.48, 3.1, 3.72, 4.96, 6.2][index] }
+    var countersunkSocket: Double { [1.3, 1.5, 2, 2.5, 3, 4, 5, 6][index] }
+    /// ISO 7380-1 (Linsenkopf): Kopf-Ø, Kopfhöhe, Schlüsselweite
+    var buttonDiameter: Double { [3.8, 4.7, 5.7, 7.6, 9.5, 10.5, 14, 17.5][index] }
+    var buttonHeight: Double { [1.1, 1.4, 1.65, 2.2, 2.75, 3.3, 4.4, 5.5][index] }
+    var buttonSocket: Double { [1.3, 1.5, 2, 2.5, 3, 4, 5, 6][index] }
+    /// ISO 7380-2 (Linsenkopf mit Bund): Bund-Ø und Bundhöhe (angenähert)
+    var flangeDiameter: Double { [4.4, 5.4, 6.5, 8.6, 10.6, 12.5, 16.6, 20.8][index] }
+    var flangeHeight: Double { [0.35, 0.4, 0.5, 0.6, 0.7, 0.8, 1, 1.2][index] }
 
     static let all: [MetricSize] = [
         MetricSize(name: "M2", d: 2, pitch: 0.4, headDiameter: 3.8, headHeight: 2, socket: 1.5, socketDepth: 1,
@@ -124,6 +161,47 @@ struct StandardPartSpec: Codable, Hashable {
     var bearing = 4
     /// Kugeln zwischen den Ringen (mit Laufrillen)
     var balls = true
+    /// Build 83: Montagehülse Innen- und Außen-Ø (0 = aus der Größe: d + 0,3 bzw. 1,8 × d)
+    var sleeveInner: Double = 0
+    var sleeveOuter: Double = 0
+
+    var sleeveInnerDiameter: Double { sleeveInner > 0 ? sleeveInner : metric.d + 0.3 }
+    var sleeveOuterDiameter: Double { max(sleeveOuter > 0 ? sleeveOuter : 1.8 * metric.d, sleeveInnerDiameter + 0.4) }
+
+    /// Höhe des Kopfes über der Auflage (Senkkopf: liegt unter der Auflage, oben bündig = 0)
+    var headHeight: Double {
+        let m = metric
+        switch kind {
+        case .socketScrew: return m.headHeight
+        case .hexScrew: return m.hexHeadHeight
+        case .lowHeadScrew: return m.lowHeadHeight
+        case .countersunkScrew: return 0
+        case .buttonScrew: return m.buttonHeight
+        case .flangeButtonScrew: return m.buttonHeight + m.flangeHeight
+        default: return 0
+        }
+    }
+
+    init() {}
+
+    // Ältere Projekte kennen die neuen Felder nicht: alles optional lesen (Build 83)
+    private enum CodingKeys: String, CodingKey {
+        case kind, size, length, realThread, threadGeometryKnown, propertyClass, bearing, balls, sleeveInner, sleeveOuter
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try c.decodeIfPresent(StandardPartKind.self, forKey: .kind) ?? .socketScrew
+        size = try c.decodeIfPresent(Int.self, forKey: .size) ?? 2
+        length = try c.decodeIfPresent(Double.self, forKey: .length) ?? 12
+        realThread = try c.decodeIfPresent(Bool.self, forKey: .realThread) ?? false
+        threadGeometryKnown = try c.decodeIfPresent(Bool.self, forKey: .threadGeometryKnown) ?? true
+        propertyClass = try c.decodeIfPresent(String.self, forKey: .propertyClass) ?? "Nicht festgelegt"
+        bearing = try c.decodeIfPresent(Int.self, forKey: .bearing) ?? 4
+        balls = try c.decodeIfPresent(Bool.self, forKey: .balls) ?? true
+        sleeveInner = try c.decodeIfPresent(Double.self, forKey: .sleeveInner) ?? 0
+        sleeveOuter = try c.decodeIfPresent(Double.self, forKey: .sleeveOuter) ?? 0
+    }
 
     var metric: MetricSize { MetricSize.all[max(0, min(MetricSize.all.count - 1, size))] }
     var bearingSize: BearingSize { BearingSize.all[max(0, min(BearingSize.all.count - 1, bearing))] }
@@ -140,7 +218,7 @@ struct StandardPartSpec: Codable, Hashable {
             case .hexScrew: prefix = "ISO 4017 "
             case .nut: prefix = "ISO 4032 "
             case .washer: prefix = "ISO 7089 "
-            case .bearing: continue
+            default: continue
             }
             guard name.hasPrefix(prefix) else { continue }
             let rest = String(name.dropFirst(prefix.count))
@@ -171,6 +249,12 @@ struct StandardPartSpec: Codable, Hashable {
         case .nut: return "ISO 4032 \(m.name)"
         case .washer: return "ISO 7089 \(m.name)"
         case .bearing: return "Kugellager \(bearingSize.name)"
+        case .lowHeadScrew: return "DIN 7984 \(m.name)×\(length.formatted())"
+        case .countersunkScrew: return "ISO 10642 \(m.name)×\(length.formatted())"
+        case .buttonScrew: return "ISO 7380-1 \(m.name)×\(length.formatted())"
+        case .flangeButtonScrew: return "ISO 7380-2 \(m.name)×\(length.formatted())"
+        case .sleeve:
+            return "Hülse \(sleeveInnerDiameter.formatted())×\(sleeveOuterDiameter.formatted())×\(length.formatted())"
         }
     }
 }
@@ -185,7 +269,7 @@ enum ScrewFaceAnchor: String, CaseIterable, Identifiable {
     func localZ(for spec: StandardPartSpec) -> Double {
         switch self {
         case .headSeat: 0
-        case .headTop: spec.kind == .socketScrew ? spec.metric.headHeight : spec.metric.hexHeadHeight
+        case .headTop: spec.headHeight
         case .tip: -spec.length
         }
     }
@@ -325,6 +409,14 @@ enum PartBuilder {
     static func build(_ spec: StandardPartSpec) -> [(shape: PCKShape, name: String)]? {
         let m = spec.metric
         switch spec.kind {
+        case .lowHeadScrew, .countersunkScrew, .buttonScrew, .flangeButtonScrew:
+            return headScrew(spec)
+        case .sleeve:
+            // Rohr von der Auflage (Z = 0) nach unten in die Bohrung
+            guard spec.length > 0,
+                  let tube = ring(outer: spec.sleeveOuterDiameter / 2, inner: spec.sleeveInnerDiameter / 2,
+                                  z0: -spec.length, height: spec.length) else { return nil }
+            return [(tube, spec.bodyName)]
         case .socketScrew, .hexScrew:
             let length = spec.length
             guard length > 0 else { return nil }
@@ -375,6 +467,68 @@ enum PartBuilder {
         case .bearing:
             return bearing(spec.bearingSize, balls: spec.balls, name: spec.bodyName)
         }
+    }
+
+    /// Build 83: Schrauben mit Innensechskant und flachem, Senk- oder Linsenkopf. Kopfauflage auf Z = 0, Schaft nach
+    /// unten; beim Senkkopf liegt der Kopf unter Z = 0 (Oberseite bündig).
+    private static func headScrew(_ spec: StandardPartSpec) -> [(shape: PCKShape, name: String)]? {
+        let m = spec.metric
+        let length = spec.length
+        guard length > 0 else { return nil }
+        let head: PCKShape?
+        let socket: Double
+        let top: Double
+        switch spec.kind {
+        case .lowHeadScrew:
+            socket = m.lowHeadSocket
+            top = m.lowHeadHeight
+            head = PCKShape.cylinder(base: .zero, axis: up, radius: m.headDiameter / 2, height: top)
+        case .countersunkScrew:
+            socket = m.countersunkSocket
+            top = 0
+            head = PCKShape.cone(base: [0, 0, -m.countersunkHeight], axis: up, bottomRadius: m.d / 2,
+                                 topRadius: m.countersunkDiameter / 2, height: m.countersunkHeight)
+        case .flangeButtonScrew:
+            socket = m.buttonSocket
+            top = m.flangeHeight + m.buttonHeight
+            guard let flange = PCKShape.cylinder(base: .zero, axis: up, radius: m.flangeDiameter / 2, height: m.flangeHeight),
+                  let dome = buttonDome(m, z0: m.flangeHeight) else { return nil }
+            head = flange.fusing(dome)
+        default:
+            socket = m.buttonSocket
+            top = m.buttonHeight
+            head = buttonDome(m, z0: 0)
+        }
+        let depth = max(0.6 * (top > 0 ? top : m.countersunkHeight), 0.5)
+        let shankTop = spec.kind == .countersunkScrew ? -m.countersunkHeight + 0.1 * m.d : 0.3 * max(top, 0.5)
+        let chamfer = min(0.1 * m.d, length / 4)
+        guard let head,
+              let hex = hexPrism(width: socket, z0: top - depth, height: depth + 1),
+              let cut = head.cutting(hex),
+              let shank = PCKShape.cylinder(base: [0, 0, -length + chamfer], axis: up, radius: m.d / 2,
+                                            height: length - chamfer + shankTop),
+              let tip = PCKShape.cone(base: [0, 0, -length], axis: up, bottomRadius: m.d / 2 - chamfer,
+                                      topRadius: m.d / 2, height: chamfer),
+              let rod = shank.fusing(tip),
+              var screw = cut.fusing(rod) else { return nil }
+        if spec.realThread {
+            let threadLength = spec.modeledThreadLength
+            guard let groove = threadGroove(base: [0, 0, -length - m.pitch], axis: up, radius: m.d / 2,
+                                            pitch: m.pitch, length: threadLength + m.pitch, external: true),
+                  let threaded = screw.cutting(groove) else { return nil }
+            screw = threaded
+        }
+        return [(screw, spec.bodyName)]
+    }
+
+    /// Linsenkopf: flacher Kugelabschnitt (Kegelstumpf mit großem Radius unten, rund genug für die Darstellung).
+    private static func buttonDome(_ m: MetricSize, z0: Double) -> PCKShape? {
+        let r = m.buttonDiameter / 2, k = m.buttonHeight
+        // Kugel durch Rand (r, z0) und Scheitel (0, z0 + k): Radius R = (r² + k²) / 2k
+        let big = (r * r + k * k) / (2 * k)
+        guard let sphere = PCKShape.sphere(center: [0, 0, z0 + k - big], radius: big),
+              let slab = PCKShape.cylinder(base: [0, 0, z0], axis: up, radius: r + 0.01, height: k + 0.01) else { return nil }
+        return sphere.intersecting(slab)
     }
 
     /// Kugellager vereinfacht: Innen- und Außenring als Ringkörper, optional Kugeln in Laufrillen.

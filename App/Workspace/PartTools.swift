@@ -305,6 +305,20 @@ struct PartCard: View {
                 }
             }
             HStack(spacing: 12) {
+                // Build 83: Montagehülse – Länge, Innen- und Außen-Ø
+                if parts.standard.kind == .sleeve {
+                    field("Länge", \.standard.length, minimum: 0.5)
+                    NumberField(title: "Innen-Ø", value: parts.standard.sleeveInnerDiameter, unit: "mm", width: 60) { value in
+                        guard value > 0.1 else { return }
+                        parts.standard.sleeveInner = value
+                        workspace.updatePartPreview()
+                    }
+                    NumberField(title: "Außen-Ø", value: parts.standard.sleeveOuterDiameter, unit: "mm", width: 60) { value in
+                        guard value > parts.standard.sleeveInnerDiameter else { return }
+                        parts.standard.sleeveOuter = value
+                        workspace.updatePartPreview()
+                    }
+                }
                 if parts.standard.kind.isScrew {
                     field("Länge", \.standard.length, minimum: 1)
                     Menu("Normlänge") {

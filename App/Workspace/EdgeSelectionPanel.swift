@@ -6,6 +6,8 @@ import SwiftUI
 
 struct EdgeSelectionPanel: View {
     @ObservedObject var model: ModelStore
+    /// Build 83: zuklappbar
+    @AppStorage("edgePanel.collapsed") private var collapsed = false
 
     var body: some View {
         ScrollView {
@@ -22,7 +24,19 @@ struct EdgeSelectionPanel: View {
                     if model.isBlendComputing {
                         ProgressView()
                     }
+                    Button {
+                        withAnimation(Theme.snappy) { collapsed.toggle() }
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.secondary)
+                            .rotationEffect(.degrees(collapsed ? -90 : 0))
+                            .frame(width: 28, height: 28)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
+                if !collapsed {
                 Picker("Operation", selection: $model.edgeOperation) {
                     ForEach(EdgeOperation.allCases) { Text($0.rawValue).tag($0) }
                 }
@@ -41,6 +55,7 @@ struct EdgeSelectionPanel: View {
                     .font(.caption)
                     .foregroundStyle(.primary)
                     .fixedSize(horizontal: false, vertical: true)
+                }
             }
             .padding(PaletteStyle.inset)
         }

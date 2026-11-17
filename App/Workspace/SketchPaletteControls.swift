@@ -53,6 +53,8 @@ struct PaletteWindow<Top: View, Header: View, Middle: View, Footer: View>: View 
 
     /// Höhe des scrollbaren Mittelteils; kurze Inhalte machen das Fenster nicht unnötig hoch
     @State private var contentHeight: CGFloat = 240
+    /// Build 83 (Kai): jedes Eigenschaftenfenster lässt sich auf Kopf und Fuß zuklappen (gemerkt)
+    @AppStorage("paletteWindow.collapsed") private var collapsed = false
 
     private var contentWidth: CGFloat { width - 2 * PaletteStyle.inset }
 
@@ -64,11 +66,28 @@ struct PaletteWindow<Top: View, Header: View, Middle: View, Footer: View>: View 
                     .padding(PaletteStyle.inset)
                 PaletteRule()
             }
-            header
+            HStack(alignment: .top, spacing: 4) {
+                header
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Button {
+                    withAnimation(Theme.snappy) { collapsed.toggle() }
+                } label: {
+                    Image(systemName: "chevron.down")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(collapsed ? -90 : 0))
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(collapsed ? "Fenster aufklappen" : "Fenster zuklappen")
+                .hoverTip(collapsed ? "Aufklappen" : "Zuklappen")
+            }
                 .frame(width: contentWidth, alignment: .leading)
                 .padding(PaletteStyle.inset)
                 .background(PaletteStyle.header)
             PaletteRule()
+            if !collapsed {
             ScrollView(.vertical, showsIndicators: true) {
                 middle
                     .frame(width: contentWidth, alignment: .leading)
@@ -84,6 +103,7 @@ struct PaletteWindow<Top: View, Header: View, Middle: View, Footer: View>: View 
             .frame(maxHeight: min(contentHeight, maxContentHeight))
             .onPreferenceChange(PaletteContentHeightKey.self) { contentHeight = $0 }
             PaletteRule()
+            }
             footer
                 .frame(width: contentWidth)
                 .padding(PaletteStyle.inset)

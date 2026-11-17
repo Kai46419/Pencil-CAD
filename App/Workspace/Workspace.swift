@@ -268,6 +268,15 @@ final class Workspace: ObservableObject {
     @Published var tool: ModelTool = .select
     /// Schraube an eine ebene Zielfläche setzen; der nächste Flächentipp gehört der Platzierung.
     @Published var placesSelectedScrew = false
+    /// Build 83: gewählte Schraube bzw. Hülse – nächster Tipp auf eine Bohrung setzt sie mittig hinein
+    @Published var centersSelectedPart = false
+    /// Build 83: Mutter bzw. Scheibe auf Schraube setzen – erst Schraube, dann Auflagefläche antippen
+    enum MountStage: Equatable {
+        case off
+        case pickScrew
+        case pickFace(screw: Int)
+    }
+    @Published var mountStage: MountStage = .off
     @Published var showsPartSurface = false
     /// Build 81: Oberflächen-Schnellwahl rechts nur nach Antippen von „Oberfläche“ in der rechten Leiste
     @Published var showsSurfacePalette = false
@@ -756,7 +765,7 @@ final class Workspace: ObservableObject {
         let previousFaces = model.selectedFaces
         model.cancelPreview()
         tool = newTool
-        if newTool != .move { placesSelectedScrew = false; showsPartSurface = false }
+        if newTool != .move { placesSelectedScrew = false; showsPartSurface = false; centersSelectedPart = false; mountStage = .off }
         explain(ToolExplainer.explanation(for: newTool))
         if newTool != .move && newTool != .translate { model.moveCopies = false }
         measureLines = []
@@ -1361,6 +1370,34 @@ final class Workspace: ObservableObject {
     /// Tippen im Modellierbereich (nicht im Skizzenmodus).
     func tapped(face tappedFace: FaceRef?, edge: EdgeRef?, region: RegionRef? = nil, point: SIMD3<Float>? = nil) {
         model.message = nil
+        // Build 83: Normteil in eine Bohrung zentrieren bzw. Mutter/Scheibe auf eine Schraube setzen
+        if centersSelectedPart, model.selectedBodies.count == 1, let source = model.selectedBodies.first {
+            if model.centerPartInHole(source, face: tappedFace, edge: edge, point: point.map { SIMD3<Double>($0) }) {
+                centersSelectedPart = false
+            }
+            return
+        }
+        if mountStage != .off, model.selectedBodies.count == 1, let source = model.selectedBodies.first {
+            switch mountStage {
+            case .pickScrew:
+                if let body = edge?.body ?? tappedFace?.body, model.bodies.indices.contains(body),
+                   model.bodies[body].effectiveStandardPart?.kind.isScrew == true, body != source {
+                    mountStage = .pickFace(screw: body)
+                    model.message = "Jetzt die Fläche antippen, auf der das Teil aufliegen soll."
+                } else {
+                    model.message = "Bitte die Schraube antippen."
+                }
+            case .pickFace(let screw):
+                if let face = tappedFace, model.mountPart(source, onScrew: screw, face: face) {
+                    mountStage = .off
+                } else if tappedFace == nil {
+                    model.message = "Bitte eine ebene Fläche antippen."
+                }
+            case .off:
+                break
+            }
+            return
+        }
         // Ein Normteil wird durch einen Tipp als Einheit gewählt. Ein noch offener Befehl darf
         // seine Kanten nicht zuerst als Rundungs- oder Fasenkanten übernehmen.
         let partBody = [edge?.body, tappedFace?.body].compactMap { $0 }.first {

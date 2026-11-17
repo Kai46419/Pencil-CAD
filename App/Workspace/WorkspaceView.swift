@@ -208,6 +208,8 @@ private struct WorkspaceContent: View {
             }
         }
         .hoverTipLayer()
+        // Build 83 (Kai): Oberfläche nur auf Knopfdruck – bei neuer Auswahl wieder zu
+        .onChange(of: model.selectedBody) { _, _ in workspace.showsSurfacePalette = false }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
             updateKeyboardLift(note)
         }
