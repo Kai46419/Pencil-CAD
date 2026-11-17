@@ -569,6 +569,26 @@ final class Workspace: ObservableObject {
         sketchNumber += 1
     }
 
+    /// Build 79 (Kai): neue Skizze auf einer Standardebene, gleich mit dem Umriss der Körper (bodies = nur diese,
+    /// nil = alle sichtbaren) – z. B. aus einer STL (SketchSilhouette.swift).
+    func startOutlineSketch(_ side: BasePlane, bodies: Set<Int>? = nil) {
+        startSketch(on: .base(side))
+        let mesh = model.mesh, plane = sketch.plane
+        model.message = "Umriss wird berechnet …"
+        Task {
+            let loops = await Task.detached(priority: .userInitiated) {
+                SketchSilhouette.loops(mesh: mesh, plane: plane, bodies: bodies)
+            }.value
+            guard self.sketch.isActive else { return }
+            guard !loops.isEmpty else {
+                self.model.message = "Kein Umriss gefunden."
+                return
+            }
+            self.sketch.addProjected(loops)
+            self.model.message = "Skizze mit Umriss (\(loops.count) Konturen) – Linien prüfen, dann z. B. extrudieren"
+        }
+    }
+
     /// 3D-Leitpunkte und entfernte Kanten für die aktuelle Skizzenebene neu berechnen.
     func refreshSketchGuides() {
         sketch.modelGuides = model.sketchGuides(on: sketch.plane)

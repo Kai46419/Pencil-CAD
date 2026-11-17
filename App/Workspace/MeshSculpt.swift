@@ -918,6 +918,8 @@ struct MeshSculptCard: View {
 
     /// Build 78 (Kai): zuletzt gewählte Pinselart, damit „Pinsel“ dorthin zurückschaltet
     @State private var lastBrush: SculptMode = .raise
+    /// Build 79: Ebene für „Skizze aus dem Umriss“
+    @State private var outlineSide: BasePlane = .top
 
     private static let brushModes: [SculptMode] = [.raise, .lower, .smooth, .flatten]
 
@@ -956,6 +958,8 @@ struct MeshSculptCard: View {
                 } else {
                     brushSection
                 }
+                Divider()
+                outlineSection
                 Divider()
                 netSection
                 infoBox(status)
@@ -1047,6 +1051,31 @@ struct MeshSculptCard: View {
             Text("\(Int((sculpt.strength * 100).rounded())) %")
                 .monospacedDigit()
                 .frame(width: 72, alignment: .trailing)
+        }
+    }
+
+    // MARK: Skizze aus Umriss (Build 79)
+
+    private var outlineSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Skizze aus dem Umriss")
+                .font(.subheadline.weight(.semibold))
+            Picker("Ebene", selection: $outlineSide) {
+                Text("Oben").tag(BasePlane.top)
+                Text("Vorne").tag(BasePlane.front)
+                Text("Rechts").tag(BasePlane.right)
+            }
+            .pickerStyle(.segmented)
+            Button {
+                workspace.startOutlineSketch(outlineSide, bodies: sculpt.body.map { [$0] })
+            } label: {
+                Label("Skizze erzeugen", systemImage: "square.dashed")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .tint(Color.primary)
+            .disabled(model.bodies.isEmpty || sculpt.isBusy)
+            .hoverTip("Skizze erzeugen", "Neue Skizze auf dieser Ebene mit dem Umriss des gewählten Körpers (sonst aller sichtbaren Körper) – außen und durchgehende Löcher, runde Löcher als Kreise.")
         }
     }
 
