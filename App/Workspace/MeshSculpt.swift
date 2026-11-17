@@ -12,6 +12,8 @@ enum SculptMode: String, CaseIterable, Identifiable {
     case lower = "Absenken"
     case smooth = "Glätten"
     case flatten = "Abflachen"
+    /// Build 73: Rundung bzw. Bohrung antippen und als echte Fläche nachbauen (MeshRounds.swift)
+    case recognize = "Rundung/Loch"
 
     var id: Self { self }
 }
@@ -224,6 +226,8 @@ struct SculptMesh {
                 let share: Float = min(1, amount * weights[k] * 0.5)
                 positions[index] -= n * (distance * share)
             }
+        case .recognize:
+            break
         }
     }
 
@@ -298,6 +302,9 @@ final class MeshSculpt: ObservableObject {
     @Published private(set) var maxRadius: Double = 50
     /// Build 70: offene Kanten (Ränder, an denen nur ein Dreieck hängt) rot im Viewport zeigen
     @Published var showsOpenEdges = true
+    /// Build 73: angetippte Rundung bzw. Bohrung und gewünschter Radius
+    @Published private(set) var round: MeshRound?
+    @Published var roundRadius: Double = 1
     /// Zwischenspeicher der offenen Kanten (je Körperstand neu)
     private var openEdgeCache: (key: String, lines: [[SIMD3<Float>]])?
 
@@ -391,6 +398,12 @@ final class MeshSculpt: ObservableObject {
     /// Stift setzt auf: true, wenn er auf dem Körper sitzt (dann gehört der Strich dem Pinsel).
     func beginStroke(_ touch: UITouch, origin: SIMD3<Float>, direction: SIMD3<Float>, model: ModelStore) -> Bool {
         guard strokeTouch == nil, !isBusy else { return false }
+        if mode == .recognize {
+            // Build 73: Stift tippt eine Rundung bzw. Bohrung an (kein Pinselstrich)
+            guard let found = model.pick(origin: origin, direction: direction) else { return false }
+            recognize(body: found.face.body, at: SIMD3<Double>(found.point), model: model)
+            return true
+        }
         if let working, !isValid(working, model: model) {
             // Rückgängig o. Ä.: Netz neu vom Körper holen
             self.working = nil
@@ -578,6 +591,73 @@ final class MeshSculpt: ObservableObject {
         savedGeneration = 0
         model.endSculptMesh()
         model.message = note
+    }
+
+    // MARK: Rundung bzw. Bohrung erkennen (Build 73)
+
+    /// Stelle auf einem Körper angetippt: Rundung bzw. Bohrung dort suchen (im Hintergrund).
+    func recognize(body index: Int, at point: SIMD3<Double>, model: ModelStore) {
+        guard !isBusy, model.bodies.indices.contains(index) else { return }
+        let scene = model.bodies[index]
+        guard let mesh = SculptMesh(body: index, shape: scene.shape, color: scene.renderColor, from: model.mesh)?.indexed else {
+            model.message = "Dieser Körper hat kein Netz."
+            return
+        }
+        isBusy = true
+        round = nil
+        model.message = "Rundung bzw. Bohrung wird gesucht …"
+        Task {
+            let found: MeshRound? = await Task.detached(priority: .userInitiated) {
+                MeshRounds.detect(in: mesh, body: index, at: point)
+            }.value
+            self.isBusy = false
+            guard let found else {
+                model.message = "Hier keine Rundung bzw. runde Bohrung erkannt – auf die schmalen Streifen der Rundung tippen."
+                return
+            }
+            self.round = found
+            self.roundRadius = (found.radius * 100).rounded() / 100
+            model.message = found.title + " erkannt – Radius einstellen und „Übernehmen“"
+        }
+    }
+
+    /// Erkannte Form mit roundRadius als echte Fläche in den Körper übernehmen (ein Rückgängig-Schritt).
+    func applyRound(model: ModelStore) {
+        guard !isBusy, let round, model.bodies.indices.contains(round.body) else { return }
+        let index = round.body
+        let expected = model.bodies[index].shape
+        let target = roundRadius
+        isBusy = true
+        model.message = "Wird nachgebaut …"
+        Task {
+            let box = await KernelThread.value("PencilCAD.meshRound") { () -> UncheckedBox<(PCKShape?, String)> in
+                let result = MeshRounds.apply(round, to: expected, radius: target)
+                return UncheckedBox((result.shape, result.note))
+            }
+            self.isBusy = false
+            let (shape, note) = box.value
+            guard model.bodies.indices.contains(index), model.bodies[index].shape === expected else {
+                model.message = "Der Körper wurde inzwischen geändert."
+                return
+            }
+            guard let shape else {
+                model.message = note
+                return
+            }
+            var list = model.bodies
+            list[index] = list[index].with(shape)
+            model.commit(list, name: round.isFillet ? "Rundung nachbauen" : "Bohrung nachbauen")
+            self.round = nil
+            self.working = nil
+            self.base = nil
+            self.body = nil
+            self.triangleCount = 0
+            model.message = note
+        }
+    }
+
+    func clearRound() {
+        round = nil
     }
 
     // MARK: Offene Kanten (Build 70)
@@ -785,6 +865,10 @@ extension ViewportView {
     func addSculptOverlay(to groups: inout [LineGroup]) {
         guard let workspace else { return }
         // Build 70: offene Kanten rot (oben auf, damit man sie auch hinter dem Netz findet)
+        if let round = workspace.sculpt.round {
+            let lines: [[SIMD3<Float>]] = round.outline.map { line in line.map { SIMD3<Float>($0) } }
+            groups.append(LineGroup(polylines: lines, color: SIMD3<Float>(0.1, 0.7, 0.3), width: 3, onTop: true))
+        }
         if workspace.sculpt.showsOpenEdges {
             let open = workspace.sculpt.openEdgeLines()
             if !open.isEmpty {
@@ -824,10 +908,30 @@ struct MeshSculptCard: View {
                         }
                     }
                     .pickerStyle(.segmented)
-                    .frame(width: 340)
+                    .frame(width: 460)
                     .hoverTip("Pinsel", "Anheben und Absenken schieben das Netz entlang der gemittelten Normale, Glätten mittelt mit den Nachbarpunkten, Abflachen zieht zur Ebene unter dem Pinsel.")
                     if sculpt.isBusy {
                         ProgressView()
+                    }
+                }
+                if sculpt.mode == .recognize {
+                    // Build 73: Rundung bzw. Bohrung nachbauen
+                    HStack(spacing: 10) {
+                        Text(sculpt.round?.title ?? "Rundung oder Bohrung antippen")
+                            .font(.callout)
+                        if let round = sculpt.round {
+                            NumberField(title: round.isFillet ? "Radius" : "Durchmesser",
+                                        value: round.isFillet ? sculpt.roundRadius : 2 * sculpt.roundRadius) { value in
+                                guard value > 0 else { return }
+                                sculpt.roundRadius = round.isFillet ? value : value / 2
+                            }
+                            Button("Übernehmen", systemImage: "checkmark") { sculpt.applyRound(model: model) }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(sculpt.isBusy)
+                                .hoverTip("Übernehmen", "Ersetzt die vielen Streifen durch eine echte Rundung bzw. einen echten Zylinder mit diesem Maß.")
+                            Button("Verwerfen", systemImage: "xmark") { sculpt.clearRound() }
+                                .buttonStyle(.bordered)
+                        }
                     }
                 }
                 HStack(spacing: 10) {

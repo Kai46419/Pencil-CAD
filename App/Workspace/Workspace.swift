@@ -1409,7 +1409,14 @@ final class Workspace: ObservableObject {
         case .hole:
             holeTapped(face: face, point: point)
         case .meshSculpt:
-            if let body = face?.body ?? edge?.body { sculpt.choose(body, model: model) }
+            if sculpt.mode == .recognize {
+                // Build 73: Rundung bzw. Bohrung antippen (MeshRounds.swift)
+                if let body = face?.body ?? edge?.body, let point {
+                    sculpt.recognize(body: body, at: SIMD3<Double>(point), model: model)
+                }
+            } else if let body = face?.body ?? edge?.body {
+                sculpt.choose(body, model: model)
+            }
         case .printCheck:
             guard let body = face?.body ?? edge?.body else { return }
             if body != printBody { printUp = [0, 0, 1] }
