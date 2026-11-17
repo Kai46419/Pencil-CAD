@@ -3341,7 +3341,11 @@ final class ViewportView: MTKView {
             let edgeDepth = simd_dot(found.point - ray.origin, ray.direction)
             let faceDepth = simd_dot(faceHit.point - ray.origin, ray.direction)
             if edgeDepth > faceDepth + max(faceDepth * 0.01, 0.5) {
-                return nil
+                // Build 81 (Kai): innenliegende Kante (Kehle) liegt tiefer als die getroffene Fläche davor – sie gilt,
+                // wenn sie eine Kante genau dieser Fläche ist
+                guard found.edge.body == faceHit.face.body, model.bodies.indices.contains(faceHit.face.body),
+                      model.bodies[faceHit.face.body].shape.edgeNumbers(ofFace: faceHit.face.face)
+                          .contains(where: { $0.intValue == found.edge.edge }) else { return nil }
             }
         }
         return found

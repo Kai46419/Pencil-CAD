@@ -269,6 +269,8 @@ final class Workspace: ObservableObject {
     /// Schraube an eine ebene Zielfläche setzen; der nächste Flächentipp gehört der Platzierung.
     @Published var placesSelectedScrew = false
     @Published var showsPartSurface = false
+    /// Build 81: Oberflächen-Schnellwahl rechts nur nach Antippen von „Oberfläche“ in der rechten Leiste
+    @Published var showsSurfacePalette = false
     @Published var screwFaceAnchor: ScrewFaceAnchor = .headSeat
     @Published var screwFaceOffset = 0.0
     /// Offener Modellbefehl nach SolidCraft (Eigenschaften-Panel rechts, FeaturePanel.swift); nil = kein Panel

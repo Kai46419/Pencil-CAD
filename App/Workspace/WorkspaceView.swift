@@ -174,7 +174,12 @@ private struct WorkspaceContent: View {
                                 } else {
                                     StandardPartPalette(workspace: workspace, model: model, index: index)
                                 }
-                            } else if panel == nil, workspace.tool == .select {
+                            } else if panel == nil, workspace.tool == .select, !model.selectedEdges.isEmpty {
+                                // Build 81: gewählte Kante → Abrunden/Fase rechts (EdgeSelectionPanel.swift)
+                                EdgeSelectionPanel(model: model)
+                                    .transition(.opacity.combined(with: .move(edge: .trailing)))
+                            } else if panel == nil, workspace.tool == .select, workspace.showsSurfacePalette {
+                                // Build 81 (Kai): Oberfläche nur noch über den Knopf in der rechten Leiste
                                 BodySurfacePalette(model: model)
                                     .transition(.opacity.combined(with: .move(edge: .trailing)))
                             }

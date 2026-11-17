@@ -153,7 +153,8 @@ struct ParameterCard: View {
             switch workspace.tool {
             case .select:
                 if !model.selectedEdges.isEmpty {
-                    edgeCard
+                    // Build 81: Kantenwerte stehen rechts (EdgeSelectionPanel.swift); edgeCard bleibt als Quelle
+                    EmptyView()
                 } else if !model.selectedRegions.isEmpty {
                     regionCard
                 } else if model.selection != nil, model.faceHandle != nil {

@@ -273,6 +273,14 @@ struct RightRail: View {
                 RailButton(systemImage: "info.circle", label: "Eigenschaften", isActive: panel == .properties) {
                     toggleProperties()
                 }
+                // Build 81: Oberfläche (Aussehen des gewählten Körpers) nur auf Wunsch
+                RailButton(systemImage: "paintpalette", label: "Oberfläche", isActive: workspace.showsSurfacePalette) {
+                    workspace.showsSurfacePalette.toggle()
+                    if workspace.showsSurfacePalette {
+                        panel = nil
+                        if workspace.tool != .select { workspace.activate(.select) }
+                    }
+                }
                 Menu {
                     VisibilityMenuItems(workspace: workspace, model: workspace.model)
                 } label: {
