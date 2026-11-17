@@ -305,6 +305,8 @@ final class MeshSculpt: ObservableObject {
     /// Build 73: angetippte Rundung bzw. Bohrung und gewünschter Radius
     @Published private(set) var round: MeshRound?
     @Published var roundRadius: Double = 1
+    /// Build 74: erster Tipp (Körper, Punkt) – der nächste Tipp auf demselben Körper legt das andere Ende fest
+    private var firstTap: (body: Int, point: SIMD3<Double>)?
     /// Zwischenspeicher der offenen Kanten (je Körperstand neu)
     private var openEdgeCache: (key: String, lines: [[SIMD3<Float>]])?
 
@@ -596,8 +598,11 @@ final class MeshSculpt: ObservableObject {
     // MARK: Rundung bzw. Bohrung erkennen (Build 73)
 
     /// Stelle auf einem Körper angetippt: Rundung bzw. Bohrung dort suchen (im Hintergrund).
+    /// Zweiter Tipp (Build 74): Rundung von der ersten bis zur zweiten angetippten Seite. Klappt das nicht, gilt
+    /// der zweite Tipp als neuer erster.
     func recognize(body index: Int, at point: SIMD3<Double>, model: ModelStore) {
         guard !isBusy, model.bodies.indices.contains(index) else { return }
+        let previous: SIMD3<Double>? = firstTap.flatMap { $0.body == index ? $0.point : nil }
         let scene = model.bodies[index]
         guard let mesh = SculptMesh(body: index, shape: scene.shape, color: scene.renderColor, from: model.mesh)?.indexed else {
             model.message = "Dieser Körper hat kein Netz."
@@ -607,17 +612,25 @@ final class MeshSculpt: ObservableObject {
         round = nil
         model.message = "Rundung bzw. Bohrung wird gesucht …"
         Task {
-            let found: MeshRound? = await Task.detached(priority: .userInitiated) {
-                MeshRounds.detect(in: mesh, body: index, at: point)
+            let result: (MeshRound?, Bool) = await Task.detached(priority: .userInitiated) {
+                if let previous, let ranged = MeshRounds.detect(in: mesh, body: index, at: previous, to: point) {
+                    return (ranged, true)
+                }
+                return (MeshRounds.detect(in: mesh, body: index, at: point), false)
             }.value
             self.isBusy = false
+            let (found, ranged) = result
+            // Nach einem Bereich beginnt der nächste Tipp neu, sonst ist dieser Tipp der Anfang
+            self.firstTap = ranged ? nil : (index, point)
             guard let found else {
-                model.message = "Hier keine Rundung bzw. runde Bohrung erkannt – auf die schmalen Streifen der Rundung tippen."
+                model.message = "Hier allein keine Rundung erkannt – jetzt die LETZTE Seite der Rundung antippen (erste Seite ist gemerkt)."
                 return
             }
             self.round = found
             self.roundRadius = (found.radius * 100).rounded() / 100
-            model.message = found.title + " erkannt – Radius einstellen und „Übernehmen“"
+            model.message = ranged
+                ? found.title + " (von erster bis letzter Seite) – Radius einstellen und „Übernehmen“"
+                : found.title + " erkannt – „Übernehmen“, oder zum Eingrenzen noch die letzte Seite antippen"
         }
     }
 
@@ -648,6 +661,7 @@ final class MeshSculpt: ObservableObject {
             list[index] = list[index].with(shape)
             model.commit(list, name: round.isFillet ? "Rundung nachbauen" : "Bohrung nachbauen")
             self.round = nil
+            self.firstTap = nil
             self.working = nil
             self.base = nil
             self.body = nil
@@ -658,6 +672,7 @@ final class MeshSculpt: ObservableObject {
 
     func clearRound() {
         round = nil
+        firstTap = nil
     }
 
     // MARK: Offene Kanten (Build 70)

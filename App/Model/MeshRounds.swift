@@ -63,7 +63,10 @@ enum MeshRounds {
     // MARK: Erkennen
 
     /// Rundung bzw. Bohrung an der Stelle point (Weltpunkt auf dem Netz). nil, wenn dort keine ist.
-    static func detect(in mesh: IndexedMesh, body: Int, at point: SIMD3<Double>) -> MeshRound? {
+    /// Build 74: mit second (zweiter Tipp) gilt der Bereich von der ersten bis zur letzten angetippten Seite der
+    /// Rundung – auch bei unsauberen Netzen, wo die automatische Suche nicht weiß, wo die Rundung aufhört.
+    static func detect(in mesh: IndexedMesh, body: Int, at point: SIMD3<Double>,
+                       to second: SIMD3<Double>? = nil) -> MeshRound? {
         let positions = mesh.positions, triangles = mesh.triangles
         let count = triangles.count
         guard count >= 4 else { return nil }
@@ -83,19 +86,25 @@ enum MeshRounds {
         let outward: Double = signedVolume >= 0 ? 1 : -1
 
         // Angetipptes Dreieck: Punkt liegt in seiner Ebene, nächster Schwerpunkt
-        var seed = -1
-        var seedDistance: Double = .infinity
-        for i in 0..<count where areas[i] > 0 {
-            let t = triangles[i]
-            let a = positions[Int(t.x)], b = positions[Int(t.y)], c = positions[Int(t.z)]
-            guard abs(simd_dot(point - a, normals[i])) < 0.05 else { continue }
-            let d: Double = simd_distance(point, (a + b + c) / 3)
-            if d < seedDistance {
-                seedDistance = d
-                seed = i
+        func triangle(at p: SIMD3<Double>) -> Int {
+            var found = -1
+            var best: Double = .infinity
+            for i in 0..<count where areas[i] > 0 {
+                let t = triangles[i]
+                let a = positions[Int(t.x)], b = positions[Int(t.y)], c = positions[Int(t.z)]
+                guard abs(simd_dot(p - a, normals[i])) < 0.05 else { continue }
+                let d: Double = simd_distance(p, (a + b + c) / 3)
+                if d < best {
+                    best = d
+                    found = i
+                }
             }
+            return found
         }
+        let seed = triangle(at: point)
         guard seed >= 0 else { return nil }
+        let lastSeed: Int = second.map { triangle(at: $0) } ?? -1
+        if second != nil, lastSeed < 0 { return nil }
 
         // Kanten → Dreiecke
         var edgeTriangles: [SIMD2<UInt32>: [Int32]] = [:]
@@ -158,6 +167,20 @@ enum MeshRounds {
         }
 
         let first = group(containing: seed)
+        // Bereich zwischen zwei Tipps: Achse aus beiden Normalen, nur Streifen mit Normale dazwischen
+        let last: Int? = lastSeed >= 0 ? group(containing: lastSeed) : nil
+        var rangeAxis: SIMD3<Double>?
+        var rangeAngle: Double = 0
+        var firstNormal = SIMD3<Double>(repeating: 0), lastNormal = SIMD3<Double>(repeating: 0)
+        if let last {
+            firstNormal = groupNormal(first)
+            lastNormal = groupNormal(last)
+            let cross: SIMD3<Double> = simd_cross(firstNormal, lastNormal)
+            guard last != first, simd_length(cross) > 0.08 else { return nil }
+            rangeAxis = simd_normalize(cross)
+            rangeAngle = acos(max(-1, min(1, simd_dot(firstNormal, lastNormal))))
+        }
+        func angle(_ a: SIMD3<Double>, _ b: SIMD3<Double>) -> Double { acos(max(-1, min(1, simd_dot(a, b)))) }
         var accepted: [Int] = [first]
         var acceptedSet: Set<Int> = [first]
         var rejected: Set<Int> = []
@@ -175,10 +198,20 @@ enum MeshRounds {
                 let bend: Double = simd_dot(n, normalOf[current] ?? n)
                 let typical: Double = widths.sorted()[widths.count / 2]
                 let width: Double = groupWidth(g)
-                // Nachbarstreifen: leicht abgeknickt und ähnlich schmal (große Nachbarflächen gehören nicht dazu)
-                guard bend >= stepCos, bend < planarCos, width <= 2.5 * typical + 1e-6 else {
-                    rejected.insert(g)
-                    continue
+                if let rangeAxis {
+                    // Zwischen erster und letzter Seite: Normale senkrecht zur Achse und im Winkel dazwischen
+                    let slack: Double = 2 * .pi / 180
+                    guard bend >= stepCos, abs(simd_dot(n, rangeAxis)) < 0.15,
+                          angle(n, firstNormal) <= rangeAngle + slack, angle(n, lastNormal) <= rangeAngle + slack else {
+                        rejected.insert(g)
+                        continue
+                    }
+                } else {
+                    // Nachbarstreifen: leicht abgeknickt und ähnlich schmal (große Nachbarflächen gehören nicht dazu)
+                    guard bend >= stepCos, bend < planarCos, width <= 2.5 * typical + 1e-6 else {
+                        rejected.insert(g)
+                        continue
+                    }
                 }
                 accepted.append(g)
                 acceptedSet.insert(g)
@@ -186,7 +219,8 @@ enum MeshRounds {
                 queue.append(g)
             }
         }
-        guard accepted.count >= 3 else { return nil }
+        guard accepted.count >= (last == nil ? 3 : 2) else { return nil }
+        if let last, !acceptedSet.contains(last) { return nil }
 
         // Achse: Kreuzprodukt der am weitesten auseinander liegenden Normalen
         let list: [SIMD3<Double>] = accepted.compactMap { normalOf[$0] }
@@ -198,9 +232,11 @@ enum MeshRounds {
             }
         }
         let crossAxis: SIMD3<Double> = simd_cross(pair.0, pair.1)
-        guard simd_length(crossAxis) > 0.15 || pair.2 < -0.5 else { return nil }
+        guard rangeAxis != nil || simd_length(crossAxis) > 0.15 || pair.2 < -0.5 else { return nil }
         var axis: SIMD3<Double>
-        if simd_length(crossAxis) > 0.15 {
+        if let rangeAxis {
+            axis = rangeAxis
+        } else if simd_length(crossAxis) > 0.15 {
             axis = simd_normalize(crossAxis)
         } else {
             // Fast gegenüberliegende Normalen (Halbkreis und mehr): Achse aus der Streuung
@@ -208,7 +244,7 @@ enum MeshRounds {
             for n in list { m += simd_double3x3(columns: (n * n.x, n * n.y, n * n.z)) }
             axis = simd_normalize(MeshFeatures.symmetricEigen(m).vectors.0)
         }
-        for n in list where abs(simd_dot(n, axis)) > 0.1 { return nil }
+        for n in list where abs(simd_dot(n, axis)) > (rangeAxis == nil ? 0.1 : 0.15) { return nil }
 
         // Querschnitt: Kreis durch alle Punkte
         let helper: SIMD3<Double> = abs(axis.x) < 0.9 ? SIMD3<Double>(1, 0, 0) : SIMD3<Double>(0, 1, 0)
@@ -236,7 +272,9 @@ enum MeshRounds {
         for (k, q) in planar.enumerated() {
             let d: SIMD2<Double> = q - circle.center
             let distance: Double = simd_length(d)
-            guard abs(distance - r) <= max(0.04 * r, 0.05) else { return nil }
+            // Mit zwei Tipps großzügiger (unsaubere Netze, z. B. Scans oder stark reduzierte Dateien)
+            let tolerance: Double = rangeAxis == nil ? max(0.04 * r, 0.05) : max(0.12 * r, 0.3)
+            guard abs(distance - r) <= tolerance else { return nil }
             largest = max(largest, distance)
             angles.append(atan2(d.y, d.x))
             let t: Double = simd_dot(vertices[k], axis)
