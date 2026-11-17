@@ -916,84 +916,187 @@ struct MeshSculptCard: View {
     @ObservedObject var model: ModelStore
     @ObservedObject var sculpt: MeshSculpt
 
+    /// Build 78 (Kai): zuletzt gewählte Pinselart, damit „Pinsel“ dorthin zurückschaltet
+    @State private var lastBrush: SculptMode = .raise
+
+    private static let brushModes: [SculptMode] = [.raise, .lower, .smooth, .flatten]
+
+    /// Oberste Wahl: malen oder Rundung/Loch antippen
+    private var isRecognizing: Binding<Bool> {
+        Binding(get: { sculpt.mode == .recognize }, set: { on in
+            if on {
+                if sculpt.mode != .recognize { lastBrush = sculpt.mode }
+                sculpt.mode = .recognize
+            } else {
+                sculpt.mode = lastBrush
+            }
+        })
+    }
+
+    // Build 78: schmal und senkrecht aufgebaut (passt auch ins rechte Fenster, nichts wird abgeschnitten),
+    // Hinweise in normaler Schriftfarbe auf hellem Grund statt dunkelblau
     var body: some View {
         Card {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 8) {
                     Label("Netz bearbeiten", systemImage: "paintbrush.pointed")
-                        .font(.callout.weight(.semibold))
-                    Picker("Pinsel", selection: $sculpt.mode) {
-                        ForEach(SculptMode.allCases) { mode in
-                            Text(mode.rawValue).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 460)
-                    .hoverTip("Pinsel", "Anheben und Absenken schieben das Netz entlang der gemittelten Normale, Glätten mittelt mit den Nachbarpunkten, Abflachen zieht zur Ebene unter dem Pinsel.")
+                        .font(.headline)
+                    Spacer(minLength: 8)
                     if sculpt.isBusy {
                         ProgressView()
                     }
                 }
+                Picker("Modus", selection: isRecognizing) {
+                    Text("Pinsel").tag(false)
+                    Text("Rundung/Loch").tag(true)
+                }
+                .pickerStyle(.segmented)
                 if sculpt.mode == .recognize {
-                    // Build 73: Rundung bzw. Bohrung nachbauen
-                    HStack(spacing: 10) {
-                        Text(sculpt.round?.title ?? "Rundung oder Bohrung antippen")
-                            .font(.callout)
-                        if let round = sculpt.round {
-                            NumberField(title: round.isFillet ? "Radius" : "Durchmesser",
-                                        value: round.isFillet ? sculpt.roundRadius : 2 * sculpt.roundRadius) { value in
-                                guard value > 0 else { return }
-                                sculpt.roundRadius = round.isFillet ? value : value / 2
-                            }
-                            Button("Übernehmen", systemImage: "checkmark") { sculpt.applyRound(model: model) }
-                                .buttonStyle(.borderedProminent)
-                                .disabled(sculpt.isBusy)
-                                .hoverTip("Übernehmen", "Ersetzt die vielen Streifen durch eine echte Rundung bzw. einen echten Zylinder mit diesem Maß.")
-                            Button("Verwerfen", systemImage: "xmark") { sculpt.clearRound() }
-                                .buttonStyle(.bordered)
-                        }
-                    }
+                    recognizeSection
+                } else {
+                    brushSection
                 }
-                HStack(spacing: 10) {
-                    Text("Radius")
-                    Slider(value: $sculpt.radius, in: 0.2...max(sculpt.maxRadius, 1))
-                        .frame(width: 150)
-                    Text(LengthUnit.current.format(sculpt.radius))
-                        .monospacedDigit()
-                        .frame(width: 72, alignment: .leading)
-                    Text("Stärke")
-                    Slider(value: $sculpt.strength, in: 0.05...1)
-                        .frame(width: 120)
-                        .hoverTip("Stärke", "Fester mit dem Stift drücken verstärkt den Pinsel zusätzlich.")
-                    Text("\(Int((sculpt.strength * 100).rounded())) %")
-                        .monospacedDigit()
-                        .frame(width: 44, alignment: .leading)
+                Divider()
+                netSection
+                infoBox(status)
+            }
+            .frame(minWidth: 280, idealWidth: 380, maxWidth: 440, alignment: .leading)
+        }
+    }
+
+    // MARK: Rundung/Loch
+
+    @ViewBuilder private var recognizeSection: some View {
+        if let round = sculpt.round {
+            infoBox(round.title, systemImage: "checkmark.circle", strong: true)
+            NumberField(title: round.isFillet ? "Radius" : "Durchmesser",
+                        value: round.isFillet ? sculpt.roundRadius : 2 * sculpt.roundRadius) { value in
+                guard value > 0 else { return }
+                sculpt.roundRadius = round.isFillet ? value : value / 2
+            }
+            HStack(spacing: 10) {
+                Button {
+                    sculpt.applyRound(model: model)
+                } label: {
+                    Label("Übernehmen", systemImage: "checkmark")
+                        .frame(maxWidth: .infinity)
                 }
-                HStack(spacing: 10) {
-                    Button("Verfeinern", systemImage: "square.grid.3x3") { sculpt.refine(model: model) }
-                        .hoverTip("Verfeinern", "Teilt lange Dreiecke, damit der Pinsel auch große ebene Flächen formen kann (Kanten länger als ein Drittel des Radius).")
-                    Button("Reduzieren", systemImage: "triangle") { sculpt.reduce(model: model) }
-                        .hoverTip("Dreiecke reduzieren", "Fasst Dreiecke zusammen, wo das Netz kaum gekrümmt ist (Ziel in Prozent der jetzigen Zahl).")
-                    Stepper("auf \(Int(sculpt.reducePercent)) %", value: $sculpt.reducePercent, in: 10...90, step: 10)
-                        .fixedSize()
-                    Button("Löcher schließen", systemImage: "circle.dashed") { sculpt.closeHoles(model: model) }
-                        .hoverTip("Löcher schließen", "Schließt offene Ränder des Netzes mit neuen Dreiecken, damit ein Volumenkörper entsteht.")
-                    Button("Reparieren", systemImage: "wrench.and.screwdriver") { sculpt.repairAgain(model: model) }
-                    Button("Zylinder", systemImage: "cylinder") { sculpt.trueCylinders(model: model) }
-                        .hoverTip("Zylinder erkennen", "Ganz umlaufende Bohrungen und Zapfen werden echte Zylinderflächen statt vieler schmaler Dreiecke – danach lassen sie sich antippen, abrunden und fasen.")
-                        .hoverTip("Netz reparieren", "Ganze Reparatur noch einmal: Punkte verschweißen, kaputte und doppelte Dreiecke entfernen, Normalen ausrichten, auch große Löcher schließen.")
-                    Toggle("Offene Kanten", isOn: $sculpt.showsOpenEdges)
-                        .toggleStyle(.button)
-                        .hoverTip("Offene Kanten", "Zeigt Ränder des Netzes rot, an denen nur ein Dreieck hängt – dort ist das Netz nicht geschlossen.")
+                .buttonStyle(.borderedProminent)
+                .tint(.green)
+                .disabled(sculpt.isBusy)
+                .hoverTip("Übernehmen", "Ersetzt die vielen Streifen durch eine echte Rundung bzw. einen echten Zylinder mit diesem Maß.")
+                Button {
+                    sculpt.clearRound()
+                } label: {
+                    Label("Verwerfen", systemImage: "xmark")
+                        .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
-                .disabled(sculpt.body == nil || sculpt.isBusy)
-                Text(status)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
-            .fixedSize()
+            Text("Zum Eingrenzen noch den letzten Streifen antippen.")
+                .font(.footnote)
+                .foregroundStyle(Color.primary.opacity(0.75))
+        } else {
+            VStack(alignment: .leading, spacing: 8) {
+                step(1, "Ersten Streifen der Rundung antippen")
+                step(2, "Letzten Streifen antippen")
+                step(3, "Radius eintragen, „Übernehmen“")
+                Text("Loch: einmal auf die Lochwand tippen.")
+                    .font(.footnote)
+                    .foregroundStyle(Color.primary.opacity(0.75))
+            }
         }
+    }
+
+    private func step(_ number: Int, _ text: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text("\(number)")
+                .font(.footnote.weight(.bold))
+                .foregroundStyle(.white)
+                .frame(width: 22, height: 22)
+                .background(Circle().fill(Color.orange))
+            Text(text)
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    // MARK: Pinsel
+
+    @ViewBuilder private var brushSection: some View {
+        Picker("Pinsel", selection: $sculpt.mode) {
+            ForEach(Self.brushModes) { mode in
+                Text(mode.rawValue).tag(mode)
+            }
+        }
+        .pickerStyle(.segmented)
+        .hoverTip("Pinsel", "Anheben und Absenken schieben das Netz entlang der gemittelten Normale, Glätten mittelt mit den Nachbarpunkten, Abflachen zieht zur Ebene unter dem Pinsel.")
+        HStack(spacing: 10) {
+            Text("Radius")
+                .frame(width: 56, alignment: .leading)
+            Slider(value: $sculpt.radius, in: 0.2...max(sculpt.maxRadius, 1))
+            Text(LengthUnit.current.format(sculpt.radius))
+                .monospacedDigit()
+                .frame(width: 72, alignment: .trailing)
+        }
+        HStack(spacing: 10) {
+            Text("Stärke")
+                .frame(width: 56, alignment: .leading)
+            Slider(value: $sculpt.strength, in: 0.05...1)
+                .hoverTip("Stärke", "Fester mit dem Stift drücken verstärkt den Pinsel zusätzlich.")
+            Text("\(Int((sculpt.strength * 100).rounded())) %")
+                .monospacedDigit()
+                .frame(width: 72, alignment: .trailing)
+        }
+    }
+
+    // MARK: Netz
+
+    private var netSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 8)], alignment: .leading, spacing: 8) {
+                gridButton("Verfeinern", "square.grid.3x3") { sculpt.refine(model: model) }
+                    .hoverTip("Verfeinern", "Teilt lange Dreiecke, damit der Pinsel auch große ebene Flächen formen kann.")
+                gridButton("Reduzieren", "triangle") { sculpt.reduce(model: model) }
+                    .hoverTip("Dreiecke reduzieren", "Fasst Dreiecke zusammen, wo das Netz kaum gekrümmt ist (Ziel unten in Prozent).")
+                gridButton("Löcher schließen", "circle.dashed") { sculpt.closeHoles(model: model) }
+                    .hoverTip("Löcher schließen", "Schließt offene Ränder des Netzes mit neuen Dreiecken.")
+                gridButton("Reparieren", "wrench.and.screwdriver") { sculpt.repairAgain(model: model) }
+                    .hoverTip("Netz reparieren", "Punkte verschweißen, kaputte und doppelte Dreiecke entfernen, Normalen ausrichten, auch große Löcher schließen.")
+                gridButton("Alle Zylinder", "cylinder") { sculpt.trueCylinders(model: model) }
+                    .hoverTip("Zylinder erkennen", "Alle ganz umlaufenden Bohrungen und Zapfen werden echte Zylinderflächen.")
+            }
+            .disabled(sculpt.body == nil || sculpt.isBusy)
+            Stepper("Reduzieren auf \(Int(sculpt.reducePercent)) %", value: $sculpt.reducePercent, in: 10...90, step: 10)
+            Toggle("Offene Kanten rot zeigen", isOn: $sculpt.showsOpenEdges)
+                .hoverTip("Offene Kanten", "Zeigt Ränder des Netzes rot, an denen nur ein Dreieck hängt – dort ist das Netz nicht geschlossen.")
+        }
+    }
+
+    private func gridButton(_ title: String, _ icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: icon)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(.bordered)
+        .tint(Color.primary)
+    }
+
+    /// Hinweis gut lesbar: normale Schriftfarbe auf hellem Grund.
+    private func infoBox(_ text: String, systemImage: String = "info.circle", strong: Bool = false) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: systemImage)
+                .foregroundStyle(strong ? Color.green : Color.secondary)
+            Text(text)
+                .font(strong ? .callout.weight(.semibold) : .footnote)
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.secondary.opacity(0.12)))
     }
 
     private var status: String {
@@ -1002,6 +1105,6 @@ struct MeshSculptCard: View {
         }
         let open = sculpt.openEdgeCount
         let closedText = open == 0 ? "geschlossen" : "\(open) offene Kanten (rot)"
-        return "\(model.bodies[index].name): \(sculpt.triangleCount) Dreiecke, \(closedText) · jeder Strich ist ein Schritt zum Rückgängigmachen"
+        return "\(model.bodies[index].name): \(sculpt.triangleCount) Dreiecke, \(closedText)"
     }
 }
