@@ -15,7 +15,7 @@ struct MeshImportSheet: View {
     @State private var placeOnGround = true
     @State private var center = true
     @State private var keepTogether = false
-    @State private var trueCylinders = true
+    @State private var trueCylinders = false
     /// Höchstzahl Dreiecke in Tausend (Regler)
     @State private var thousands: Double = Double(MeshSolid.maxTriangles) / 1000
 
@@ -140,9 +140,10 @@ struct MeshImportSheet: View {
                 MeshImporter.preview(data, name: name, fileExtension: fileExtension)
             }.value
             preview = read
-            // Großes Netz: Regler so, dass nicht unnötig reduziert wird (bis 100.000)
+            // Build 74 (Kai): standardmäßig NICHT reduzieren – das Vereinfachen erzeugte zackige Kanten. Regler auf die
+            // Dreieckszahl der Datei (bis zum Höchstwert des Reglers)
             if read.triangles > 0 {
-                let wanted = min(max(Double(read.triangles) / 1000, Self.minimumThousands), 100)
+                let wanted = min(max(Double(read.triangles) / 1000, Self.minimumThousands), Self.maximumThousands)
                 thousands = max(thousands, (wanted / 5).rounded(.up) * 5)
             }
             // Winzig (unter 2 mm): vermutlich Zoll bzw. Meter

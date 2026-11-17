@@ -36,7 +36,7 @@ struct MeshImportOptions {
     /// Getrennte Teile als EIN Körper (sonst je Teil ein Körper, bis maxParts)
     var keepTogether = false
     /// Build 71: Bohrungen und Zapfen als echte Zylinder (MeshFeatures.swift)
-    var trueCylinders = true
+    var trueCylinders = false
 
     static let standard = MeshImportOptions()
 
