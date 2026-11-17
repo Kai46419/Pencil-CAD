@@ -439,16 +439,33 @@ private struct WorkspaceContent: View {
                     importsImages = false
                     isImporting = true
                 }
+                // Build 82 (Kai): Export nimmt die GEWÄHLTEN Körper; ohne Auswahl alle SICHTBAREN. Vorher gingen immer
+                // alle Körper raus, auch ausgeblendete (z. B. die Original-STL) – die Datei sah dann ganz anders aus.
+                let chosen: [Int] = exportSelection
+                if !chosen.isEmpty {
+                    Menu {
+                        ForEach(ExportFormat.allCases) { format in
+                            Button {
+                                exportBodies(format, chosen, chosen.count == 1 ? model.bodies[chosen[0]].name : projectName)
+                            } label: {
+                                Label("\(format.rawValue) – \(format.subtitle)", systemImage: format.systemImage)
+                            }
+                        }
+                    } label: {
+                        Label(chosen.count == 1 ? "Gewählten Körper exportieren" : "\(chosen.count) gewählte Körper exportieren",
+                              systemImage: "square.and.arrow.up")
+                    }
+                }
                 Menu {
                     ForEach(ExportFormat.allCases) { format in
                         Button {
-                            exportBodies(format, nil, projectName)
+                            exportBodies(format, visibleBodies, projectName)
                         } label: {
                             Label("\(format.rawValue) – \(format.subtitle)", systemImage: format.systemImage)
                         }
                     }
                 } label: {
-                    Label("Alle Körper exportieren", systemImage: "square.and.arrow.up")
+                    Label("Alle sichtbaren Körper exportieren", systemImage: "square.and.arrow.up.on.square")
                 }
                 Button("Zeichnung erstellen (PDF, DXF) …", systemImage: "doc.richtext") {
                     workspace.showsDrawing = true
@@ -711,6 +728,18 @@ private struct WorkspaceContent: View {
         exportType = type
         exportName = name
         isExporting = true
+    }
+
+    /// Build 82: gewählte Körper (auch über eine gewählte Fläche bzw. Kante), sichtbar oder nicht
+    private var exportSelection: [Int] {
+        var chosen: [Int] = model.selectedBodies.filter { model.bodies.indices.contains($0) }
+        if chosen.isEmpty, let body = model.selectedBody, model.bodies.indices.contains(body) { chosen = [body] }
+        return chosen.sorted()
+    }
+
+    /// Build 82: alle nicht ausgeblendeten Körper
+    private var visibleBodies: [Int] {
+        model.bodies.indices.filter { !model.bodies[$0].isHidden }
     }
 
     /// Körper (nil = alle) als 3MF, STL, OBJ oder STEP sichern bzw. teilen.
