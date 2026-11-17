@@ -471,6 +471,11 @@ final class MeshSculpt: ObservableObject {
     /// Stift schwebt: Pinselkreis zeigen (nil = ausblenden).
     func hover(origin: SIMD3<Float>?, direction: SIMD3<Float>?, model: ModelStore) {
         guard strokeTouch == nil else { return }
+        // Build 77: im Modus „Rundung/Loch“ wird nicht gemalt – kein Pinselkreis
+        guard mode != .recognize else {
+            brushCircle = []
+            return
+        }
         guard let origin, let direction else {
             brushCircle = []
             return
