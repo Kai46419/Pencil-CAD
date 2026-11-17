@@ -44,16 +44,15 @@ struct StandardPartPalette: View {
                     placementButtons(spec)
                     Divider()
                     if spec.kind == .sleeve {
+                        sizeMenu(spec)
                         detail("Innen-Ø", LengthUnit.current.format(spec.sleeveInnerDiameter))
                         detail("Außen-Ø", LengthUnit.current.format(spec.sleeveOuterDiameter))
                         detail("Länge", LengthUnit.current.format(spec.length))
                     } else if spec.kind.isScrew {
-                        detail("Größe", spec.metric.name)
-                        detail("Länge", LengthUnit.current.format(spec.length))
-                        detail("Steigung", LengthUnit.current.format(spec.metric.pitch))
-                        detail("Gewindelänge (Soll)", LengthUnit.current.format(spec.modeledThreadLength))
-                        detail("Gewindegeometrie", spec.threadGeometryKnown
-                               ? (spec.realThread ? "Modelliert" : "Vereinfacht") : "Bei Altteil unbekannt")
+                        // Build 88 (Kai): Größe, Länge, Gewindeart und -geometrie direkt hier umstellen
+                        sizeMenu(spec)
+                        lengthMenu(spec)
+                        threadSection(spec)
                         Menu {
                             ForEach(["Nicht festgelegt", "8.8", "10.9", "12.9", "A2-70", "A4-70"], id: \.self) { value in
                                 Button(value) { model.setStandardPartClass(value, body: index) }
@@ -80,9 +79,13 @@ struct StandardPartPalette: View {
                             Text("Eine ebene Fläche antippen. Die Schraubenachse folgt der Flächennormalen.")
                                 .font(.caption2).foregroundStyle(.secondary)
                         }
+                    } else if spec.kind == .bearing {
+                        detail("Typ", spec.kind.rawValue)
+                        detail("Größe", spec.bearingSize.name)
                     } else {
                         detail("Typ", spec.kind.rawValue)
-                        detail("Größe", spec.kind == .bearing ? spec.bearingSize.name : spec.metric.name)
+                        sizeMenu(spec)
+                        if spec.kind == .nut { threadSection(spec) }
                     }
                     Divider()
                     Button("Oberfläche …", systemImage: "paintpalette") {
@@ -140,6 +143,119 @@ struct StandardPartPalette: View {
         }
         .buttonStyle(.bordered)
         .hoverTip("Kopie", "Gleiches Teil noch einmal – danach z. B. in die nächste Bohrung setzen.")
+    }
+
+    // MARK: Build 88 – Normteil ändern
+
+    private func update(_ step: String, _ change: @escaping (inout StandardPartSpec) -> Void) {
+        model.updateStandardPart(index, step: step, change: change)
+    }
+
+    /// Zeile mit Wert in Akzentfarbe und ⌃⌄: antippen öffnet die Auswahl
+    private func choice(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
+            Text(label).foregroundStyle(.secondary)
+            Spacer(minLength: 2)
+            Text(value).foregroundStyle(Color.accentColor)
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+        }
+        .font(.caption)
+        .contentShape(Rectangle())
+    }
+
+    private func sizeMenu(_ spec: StandardPartSpec) -> some View {
+        Menu {
+            ForEach(Array(MetricSize.all.enumerated()), id: \.offset) { offset, size in
+                Button {
+                    update("Größe \(size.name)") { part in
+                        part.size = offset
+                        // Länge passend halten: nächste Normlänge der neuen Größe
+                        if part.kind.isScrew, !size.standardLengths.contains(part.length),
+                           let next = size.standardLengths.min(by: { abs($0 - part.length) < abs($1 - part.length) }) {
+                            part.length = next
+                        }
+                    }
+                } label: {
+                    if offset == spec.size {
+                        Label("\(size.name)  (Ø \(size.d.formatted()) mm)", systemImage: "checkmark")
+                    } else {
+                        Text("\(size.name)  (Ø \(size.d.formatted()) mm)")
+                    }
+                }
+            }
+        } label: {
+            choice("Größe", spec.metric.name)
+        }
+    }
+
+    private func lengthMenu(_ spec: StandardPartSpec) -> some View {
+        let lengths = Set(spec.metric.standardLengths + [spec.length]).sorted()
+        return Menu {
+            ForEach(lengths, id: \.self) { length in
+                Button {
+                    update("Länge \(length.formatted()) mm") { $0.length = length }
+                } label: {
+                    if length == spec.length {
+                        Label("\(length.formatted()) mm", systemImage: "checkmark")
+                    } else {
+                        Text("\(length.formatted()) mm")
+                    }
+                }
+            }
+        } label: {
+            choice("Länge", LengthUnit.current.format(spec.length))
+        }
+    }
+
+    /// Gewindeart (Regel-/Feingewinde), Steigung, Kern-Ø, Profil und Darstellung (vereinfacht/modelliert)
+    @ViewBuilder private func threadSection(_ spec: StandardPartSpec) -> some View {
+        Divider()
+        Text("GEWINDE")
+            .font(.system(size: 10, weight: .bold))
+            .tracking(0.5)
+            .foregroundStyle(.secondary)
+        Menu {
+            Button {
+                update("Regelgewinde") { $0.finePitch = false }
+            } label: {
+                Label("Regelgewinde \(spec.metric.name) · P \(spec.metric.pitch.formatted()) mm",
+                      systemImage: spec.finePitch ? "circle" : "checkmark.circle.fill")
+            }
+            Button {
+                update("Feingewinde") { $0.finePitch = true }
+            } label: {
+                Label("Feingewinde \(spec.metric.name)×\(spec.metric.finePitch.formatted()) · P \(spec.metric.finePitch.formatted()) mm",
+                      systemImage: spec.finePitch ? "checkmark.circle.fill" : "circle")
+            }
+        } label: {
+            choice("Gewindeart", spec.finePitch ? "Feingewinde" : "Regelgewinde")
+        }
+        detail("Bezeichnung", "\(spec.threadDesignation) – \(spec.kind == .nut ? "6H" : "6g")")
+        detail("Steigung P", LengthUnit.current.format(spec.pitch))
+        detail("Profil", "Metrisch ISO, 60°, rechtsgängig")
+        detail("Kern-Ø", LengthUnit.current.format(spec.minorDiameter))
+        detail("Gewindetiefe", LengthUnit.current.format(spec.threadDepth))
+        if spec.kind.isScrew {
+            detail("Gewindelänge", LengthUnit.current.format(spec.modeledThreadLength))
+        }
+        Picker("Gewindegänge", selection: Binding(
+            get: { spec.realThread },
+            set: { value in update(value ? "Gewinde modellieren" : "Gewinde vereinfachen") { $0.realThread = value } }
+        )) {
+            Text("Vereinfacht").tag(false)
+            Text("Modelliert").tag(true)
+        }
+        .pickerStyle(.segmented)
+        .controlSize(.small)
+        Text(spec.realThread
+             ? "Gewindegänge als echte Schraubenlinie – sichtbar, druckbar, etwas langsamer."
+             : "Glatter Schaft mit Nenn-Ø. „Modelliert“ schneidet die Gewindegänge ein.")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        Divider()
     }
 
     private func detail(_ label: String, _ value: String) -> some View {

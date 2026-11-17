@@ -335,6 +335,10 @@ struct PartCard: View {
                     Toggle("Echtes Gewinde", isOn: binding(\.standard.realThread))
                         .fixedSize()
                         .hoverTip("Echtes Gewinde", "Schraubenförmige Gewindenut statt glattem Schaft. Rechnet einige Sekunden; für den 3D-Druck ab etwa M5 sinnvoll.")
+                    // Build 88: Feingewinde (ISO 261)
+                    Toggle("Feingewinde", isOn: binding(\.standard.finePitch))
+                        .fixedSize()
+                        .hoverTip("Feingewinde", "Kleinere Steigung, z. B. M8×1 statt M8 (1,25 mm).")
                 }
                 if parts.standard.kind.isScrew {
                     Picker("Klasse", selection: binding(\.standard.propertyClass)) {

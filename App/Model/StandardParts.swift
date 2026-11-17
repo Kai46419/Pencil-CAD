@@ -97,6 +97,9 @@ struct MetricSize {
     var flangeDiameter: Double { [4.4, 5.4, 6.5, 8.6, 10.6, 12.5, 16.6, 20.8][index] }
     var flangeHeight: Double { [0.35, 0.4, 0.5, 0.6, 0.7, 0.8, 1, 1.2][index] }
 
+    /// Build 88: Feingewinde nach ISO 261 (gängigste Feinsteigung je Größe)
+    var finePitch: Double { [0.25, 0.35, 0.35, 0.5, 0.5, 0.75, 1, 1.25][index] }
+
     static let all: [MetricSize] = [
         MetricSize(name: "M2", d: 2, pitch: 0.4, headDiameter: 3.8, headHeight: 2, socket: 1.5, socketDepth: 1,
                    hexWidth: 4, hexHeadHeight: 1.4, nutHeight: 1.6, washerInner: 2.2, washerOuter: 5, washerThickness: 0.3),
@@ -164,6 +167,20 @@ struct StandardPartSpec: Codable, Hashable {
     /// Build 83: Montagehülse Innen- und Außen-Ø (0 = aus der Größe: d + 0,3 bzw. 1,8 × d)
     var sleeveInner: Double = 0
     var sleeveOuter: Double = 0
+    /// Build 88: Feingewinde (ISO 261) statt Regelgewinde
+    var finePitch = false
+
+    /// Steigung des gewählten Gewindes (Regel- oder Feingewinde)
+    var pitch: Double { finePitch ? metric.finePitch : metric.pitch }
+
+    /// Gewindebezeichnung, z. B. „M3“ bzw. „M8×1“ (Feingewinde)
+    var threadDesignation: String {
+        finePitch ? "\(metric.name)×\(pitch.formatted())" : metric.name
+    }
+
+    /// Gewindetiefe außen (ISO 68-1: h3 ≈ 0,6134 · P) und Kerndurchmesser d3 ≈ d − 1,2269 · P
+    var threadDepth: Double { 0.6134 * pitch }
+    var minorDiameter: Double { metric.d - 1.2269 * pitch }
 
     var sleeveInnerDiameter: Double { sleeveInner > 0 ? sleeveInner : metric.d + 0.3 }
     var sleeveOuterDiameter: Double { max(sleeveOuter > 0 ? sleeveOuter : 1.8 * metric.d, sleeveInnerDiameter + 0.4) }
@@ -187,6 +204,7 @@ struct StandardPartSpec: Codable, Hashable {
     // Ältere Projekte kennen die neuen Felder nicht: alles optional lesen (Build 83)
     private enum CodingKeys: String, CodingKey {
         case kind, size, length, realThread, threadGeometryKnown, propertyClass, bearing, balls, sleeveInner, sleeveOuter
+        case finePitch
     }
 
     init(from decoder: Decoder) throws {
@@ -201,6 +219,7 @@ struct StandardPartSpec: Codable, Hashable {
         balls = try c.decodeIfPresent(Bool.self, forKey: .balls) ?? true
         sleeveInner = try c.decodeIfPresent(Double.self, forKey: .sleeveInner) ?? 0
         sleeveOuter = try c.decodeIfPresent(Double.self, forKey: .sleeveOuter) ?? 0
+        finePitch = try c.decodeIfPresent(Bool.self, forKey: .finePitch) ?? false
     }
 
     var metric: MetricSize { MetricSize.all[max(0, min(MetricSize.all.count - 1, size))] }
@@ -244,15 +263,15 @@ struct StandardPartSpec: Codable, Hashable {
     var bodyName: String {
         let m = metric
         switch kind {
-        case .socketScrew: return "ISO 4762 \(m.name)×\(length.formatted())"
-        case .hexScrew: return "ISO 4017 \(m.name)×\(length.formatted())"
-        case .nut: return "ISO 4032 \(m.name)"
+        case .socketScrew: return "ISO 4762 \(threadDesignation)×\(length.formatted())"
+        case .hexScrew: return "ISO 4017 \(threadDesignation)×\(length.formatted())"
+        case .nut: return "ISO 4032 \(threadDesignation)"
         case .washer: return "ISO 7089 \(m.name)"
         case .bearing: return "Kugellager \(bearingSize.name)"
-        case .lowHeadScrew: return "DIN 7984 \(m.name)×\(length.formatted())"
-        case .countersunkScrew: return "ISO 10642 \(m.name)×\(length.formatted())"
-        case .buttonScrew: return "ISO 7380-1 \(m.name)×\(length.formatted())"
-        case .flangeButtonScrew: return "ISO 7380-2 \(m.name)×\(length.formatted())"
+        case .lowHeadScrew: return "DIN 7984 \(threadDesignation)×\(length.formatted())"
+        case .countersunkScrew: return "ISO 10642 \(threadDesignation)×\(length.formatted())"
+        case .buttonScrew: return "ISO 7380-1 \(threadDesignation)×\(length.formatted())"
+        case .flangeButtonScrew: return "ISO 7380-2 \(threadDesignation)×\(length.formatted())"
         case .sleeve:
             return "Hülse \(sleeveInnerDiameter.formatted())×\(sleeveOuterDiameter.formatted())×\(length.formatted())"
         }
@@ -336,6 +355,50 @@ extension ModelStore {
         result[index].standardPart = spec
         commit(result, name: "Schraubenklasse ändern")
         selectBodies([index])
+    }
+
+    /// Build 88 (Kai): Größe, Länge, Gewindeart oder Gewindegeometrie eines eingefügten Normteils ändern.
+    /// Das Teil wird neu erzeugt und an seiner bisherigen Lage (placement) wieder eingesetzt.
+    func updateStandardPart(_ index: Int, step: String, change: (inout StandardPartSpec) -> Void) {
+        guard bodies.indices.contains(index), let old = bodies[index].effectiveStandardPart else { return }
+        var spec = old
+        change(&spec)
+        spec.threadGeometryKnown = true
+        if spec.kind.isScrew {
+            spec.length = max(spec.length, 1)
+        }
+        guard spec != old else { return }
+        guard let shape = PartBuilder.build(spec)?.first?.shape,
+              let placed = Self.placedStandardShape(shape, by: bodies[index].placement) else {
+            message = "Normteil lässt sich so nicht erzeugen."
+            return
+        }
+        var result = bodies
+        let oldName = result[index].name
+        result[index] = result[index].with(placed)
+        result[index].standardPart = spec
+        if oldName == old.bodyName || StandardPartSpec.recognizedLegacyName(oldName) != nil {
+            result[index].name = spec.bodyName
+        }
+        commit(result, name: step)
+        selectBodies([index])
+    }
+
+    /// Form aus dem Normteil-Ursprung an die Lage des Körpers bringen (Drehung um den Ursprung, dann Verschiebung).
+    private static func placedStandardShape(_ shape: PCKShape, by m: simd_double4x4) -> PCKShape? {
+        let r = simd_double3x3(SIMD3(m.columns.0.x, m.columns.0.y, m.columns.0.z),
+                               SIMD3(m.columns.1.x, m.columns.1.y, m.columns.1.z),
+                               SIMD3(m.columns.2.x, m.columns.2.y, m.columns.2.z))
+        let t = SIMD3(m.columns.3.x, m.columns.3.y, m.columns.3.z)
+        var result: PCKShape? = shape
+        let q = simd_quatd(r)
+        if abs(q.angle) > 1e-12, q.angle.isFinite, simd_length(q.axis) > 0.5 {
+            result = result?.rotated(origin: [0, 0, 0], axis: simd_normalize(q.axis), angle: q.angle)
+        }
+        if simd_length(t) > 1e-12 {
+            result = result?.translated(by: t)
+        }
+        return result
     }
 
     /// Nach ausdrücklichem Wechsel darf das Normteil wie ein freier Volumenkörper bearbeitet werden.
@@ -443,8 +506,8 @@ enum PartBuilder {
             if spec.realThread {
                 // Gewindelänge nach ISO (b = 2d + 6), bei kurzen Schrauben bis zum Kopf
                 let threadLength = spec.modeledThreadLength
-                guard let groove = threadGroove(base: [0, 0, -length - m.pitch], axis: up, radius: m.d / 2,
-                                                pitch: m.pitch, length: threadLength + m.pitch, external: true),
+                guard let groove = threadGroove(base: [0, 0, -length - spec.pitch], axis: up, radius: m.d / 2,
+                                                pitch: spec.pitch, length: threadLength + spec.pitch, external: true),
                       let threaded = screw.cutting(groove) else { return nil }
                 screw = threaded
             }
@@ -454,8 +517,8 @@ enum PartBuilder {
                   let hole = PCKShape.cylinder(base: [0, 0, -1], axis: up, radius: m.d / 2, height: m.nutHeight + 2),
                   var nut = body.cutting(hole) else { return nil }
             if spec.realThread {
-                guard let groove = threadGroove(base: [0, 0, -m.pitch], axis: up, radius: m.d / 2, pitch: m.pitch,
-                                                length: m.nutHeight + 2 * m.pitch, external: false),
+                guard let groove = threadGroove(base: [0, 0, -spec.pitch], axis: up, radius: m.d / 2, pitch: spec.pitch,
+                                                length: m.nutHeight + 2 * spec.pitch, external: false),
                       let threaded = nut.cutting(groove) else { return nil }
                 nut = threaded
             }
@@ -513,8 +576,8 @@ enum PartBuilder {
               var screw = cut.fusing(rod) else { return nil }
         if spec.realThread {
             let threadLength = spec.modeledThreadLength
-            guard let groove = threadGroove(base: [0, 0, -length - m.pitch], axis: up, radius: m.d / 2,
-                                            pitch: m.pitch, length: threadLength + m.pitch, external: true),
+            guard let groove = threadGroove(base: [0, 0, -length - spec.pitch], axis: up, radius: m.d / 2,
+                                            pitch: spec.pitch, length: threadLength + spec.pitch, external: true),
                   let threaded = screw.cutting(groove) else { return nil }
             screw = threaded
         }
