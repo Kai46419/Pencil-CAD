@@ -90,7 +90,8 @@ struct StandardPartPalette: View {
                     } else {
                         detail("Typ", spec.kind.rawValue)
                         sizeMenu(spec)
-                        if spec.kind == .nut { threadSection(spec) }
+                        if spec.kind.hasLength { lengthMenu(spec) }
+                        if spec.kind.hasMetricThread { threadSection(spec) }
                     }
                     Divider()
                     Button("Oberfläche …", systemImage: "paintpalette") {
@@ -143,11 +144,64 @@ struct StandardPartPalette: View {
             .frame(maxWidth: .infinity)
             .hoverTip("Auf Schraube setzen", "Erst die Schraube antippen, dann die Fläche, auf der Mutter bzw. Scheibe aufliegt.")
         }
-        Button("Kopie", systemImage: "plus.square.on.square") {
-            model.duplicateStandardPart(index)
+        addMenu(spec)
+    }
+
+    // MARK: Build 90 – „+“: weiteres Normteil passend zur Größe
+
+    private func addMenu(_ spec: StandardPartSpec) -> some View {
+        Menu {
+            Button("Gleiches Teil (Kopie)", systemImage: "plus.square.on.square") {
+                model.duplicateStandardPart(index)
+            }
+            Section("Scheiben und Muttern · \(spec.metric.name)") {
+                addButton(.washer, "Unterlegscheibe", "circle.circle", spec)
+                addButton(.nut, "Sechskantmutter", "hexagon", spec)
+                addButton(.wingNut, "Flügelmutter", "fanblades", spec)
+            }
+            Section("Metrische Schrauben") {
+                addButton(.socketScrew, "Zylinderkopf (Innensechskant)", "sc.fastener", spec)
+                addButton(.hexScrew, "Sechskantschraube", "hexagon.fill", spec)
+                addButton(.lowHeadScrew, "Flachkopf", "sc.fastener", spec)
+                addButton(.countersunkScrew, "Senkkopf", "arrowtriangle.down", spec)
+                addButton(.buttonScrew, "Linsenkopf", "circle.bottomhalf.filled", spec)
+                addButton(.flangeButtonScrew, "Linsenkopf mit Bund", "circle.bottomhalf.filled", spec)
+            }
+            Section("Holz und Blech") {
+                addButton(.woodScrew, "Spanplattenschraube (Spax)", "sc.fastener", spec)
+                addButton(.blindRivet, "Blindniete (Popniete)", "pin", spec)
+            }
+            Section("Sonstiges") {
+                addButton(.sleeve, "Montagehülse", "cylinder", spec)
+            }
+        } label: {
+            Label("Hinzufügen", systemImage: "plus")
+                .font(.callout.weight(.semibold))
+                .frame(maxWidth: .infinity)
         }
         .buttonStyle(.bordered)
-        .hoverTip("Kopie", "Gleiches Teil noch einmal – danach z. B. in die nächste Bohrung setzen.")
+        .hoverTip("Hinzufügen", "Weiteres Normteil in derselben Größe: Scheibe unter den Kopf, Mutter ans Ende, andere Schrauben in eine Bohrung.")
+    }
+
+    private func addButton(_ kind: StandardPartKind, _ title: String, _ icon: String, _ spec: StandardPartSpec) -> some View {
+        Button {
+            guard let new = model.addStandardPart(kind, near: index) else { return }
+            workspace.placesSelectedScrew = false
+            workspace.centersSelectedPart = false
+            workspace.mountStage = .off
+            if spec.kind.isScrew, kind == .washer {
+                model.message = "Scheibe unter den Kopf gesetzt, die Schraube ist um die Scheibendicke hochgerückt."
+            } else if spec.kind.isScrew, kind == .nut || kind == .wingNut {
+                workspace.mountStage = .pickFace(screw: index)
+                model.message = "Mutter sitzt am Schraubenende – jetzt die Fläche antippen, an der sie anliegen soll."
+            } else if kind.fitsInHole {
+                workspace.centersSelectedPart = true
+                model.message = "Neues Teil gewählt – jetzt eine Bohrung antippen, um es dort einzusetzen."
+            }
+            _ = new
+        } label: {
+            ToolLabel(title, icon: icon)
+        }
     }
 
     // MARK: Build 88 – Normteil ändern
@@ -221,27 +275,32 @@ struct StandardPartPalette: View {
             .font(.system(size: 10, weight: .bold))
             .tracking(0.5)
             .foregroundStyle(.secondary)
-        Menu {
-            Button {
-                update("Regelgewinde") { $0.finePitch = false }
+        if spec.kind.hasMetricThread {
+            Menu {
+                Button {
+                    update("Regelgewinde") { $0.finePitch = false }
+                } label: {
+                    Label("Regelgewinde \(spec.metric.name) · P \(spec.metric.pitch.formatted()) mm",
+                          systemImage: spec.finePitch ? "circle" : "checkmark.circle.fill")
+                }
+                Button {
+                    update("Feingewinde") { $0.finePitch = true }
+                } label: {
+                    Label("Feingewinde \(spec.metric.name)×\(spec.metric.finePitch.formatted()) · P \(spec.metric.finePitch.formatted()) mm",
+                          systemImage: spec.finePitch ? "checkmark.circle.fill" : "circle")
+                }
             } label: {
-                Label("Regelgewinde \(spec.metric.name) · P \(spec.metric.pitch.formatted()) mm",
-                      systemImage: spec.finePitch ? "circle" : "checkmark.circle.fill")
+                choice("Gewindeart", spec.finePitch ? "Feingewinde" : "Regelgewinde")
             }
-            Button {
-                update("Feingewinde") { $0.finePitch = true }
-            } label: {
-                Label("Feingewinde \(spec.metric.name)×\(spec.metric.finePitch.formatted()) · P \(spec.metric.finePitch.formatted()) mm",
-                      systemImage: spec.finePitch ? "checkmark.circle.fill" : "circle")
-            }
-        } label: {
-            choice("Gewindeart", spec.finePitch ? "Feingewinde" : "Regelgewinde")
+            detail("Bezeichnung", "\(spec.threadDesignation) – \(spec.kind.isScrew ? "6g" : "6H")")
+            detail("Steigung P", LengthUnit.current.format(spec.pitch))
+            detail("Profil", "Metrisch ISO, 60°, rechtsgängig")
+            detail("Kern-Ø", LengthUnit.current.format(spec.minorDiameter))
+            detail("Gewindetiefe", LengthUnit.current.format(spec.threadDepth))
+        } else {
+            detail("Gewinde", "Holzgewinde, P ≈ \(LengthUnit.current.format(0.45 * spec.metric.d))")
+            detail("Spitze", "Selbstschneidend, Kreuzschlitz")
         }
-        detail("Bezeichnung", "\(spec.threadDesignation) – \(spec.kind == .nut ? "6H" : "6g")")
-        detail("Steigung P", LengthUnit.current.format(spec.pitch))
-        detail("Profil", "Metrisch ISO, 60°, rechtsgängig")
-        detail("Kern-Ø", LengthUnit.current.format(spec.minorDiameter))
-        detail("Gewindetiefe", LengthUnit.current.format(spec.threadDepth))
         if spec.kind.isScrew {
             detail("Gewindelänge", LengthUnit.current.format(spec.modeledThreadLength))
         }

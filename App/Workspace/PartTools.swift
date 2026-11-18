@@ -319,7 +319,7 @@ struct PartCard: View {
                         workspace.updatePartPreview()
                     }
                 }
-                if parts.standard.kind.isScrew {
+                if parts.standard.kind.isScrew || parts.standard.kind == .blindRivet {
                     field("Länge", \.standard.length, minimum: 1)
                     Menu("Normlänge") {
                         ForEach(parts.standard.metric.standardLengths, id: \.self) { length in
@@ -331,13 +331,14 @@ struct PartCard: View {
                     }
                     .fixedSize()
                 }
-                if parts.standard.kind.isScrew || parts.standard.kind == .nut {
+                if parts.standard.kind.isScrew || parts.standard.kind == .nut || parts.standard.kind == .wingNut {
                     Toggle("Echtes Gewinde", isOn: binding(\.standard.realThread))
                         .fixedSize()
                         .hoverTip("Echtes Gewinde", "Schraubenförmige Gewindenut statt glattem Schaft. Rechnet einige Sekunden; für den 3D-Druck ab etwa M5 sinnvoll.")
                     // Build 88: Feingewinde (ISO 261)
                     Toggle("Feingewinde", isOn: binding(\.standard.finePitch))
                         .fixedSize()
+                        .disabled(!parts.standard.kind.hasMetricThread)
                         .hoverTip("Feingewinde", "Kleinere Steigung, z. B. M8×1 statt M8 (1,25 mm).")
                 }
                 if parts.standard.kind.isScrew {

@@ -16,21 +16,31 @@ enum StandardPartKind: String, CaseIterable, Identifiable, Codable {
     case washer = "Scheibe ISO 7089"
     case sleeve = "Montagehülse"
     case bearing = "Kugellager 6xx"
+    // Build 90 (Kai): Holzschraube, Blindniete, Flügelmutter
+    case woodScrew = "Spanplattenschraube (Senkkopf)"
+    case blindRivet = "Blindniete DIN 7337"
+    case wingNut = "Flügelmutter DIN 315"
 
     var id: Self { self }
 
     var isScrew: Bool {
         switch self {
-        case .socketScrew, .hexScrew, .lowHeadScrew, .countersunkScrew, .buttonScrew, .flangeButtonScrew: true
+        case .socketScrew, .hexScrew, .lowHeadScrew, .countersunkScrew, .buttonScrew, .flangeButtonScrew, .woodScrew: true
         default: false
         }
     }
 
-    /// Steckt mit der Achse in einer Bohrung (Schrauben, Hülse): „In Loch zentrieren“
-    var fitsInHole: Bool { isScrew || self == .sleeve }
+    /// Metrisches ISO-Gewinde (Regel-/Feingewinde wählbar)
+    var hasMetricThread: Bool { (isScrew && self != .woodScrew) || self == .nut || self == .wingNut }
+
+    /// Steckt mit der Achse in einer Bohrung (Schrauben, Hülse, Niete): „In Loch zentrieren“
+    var fitsInHole: Bool { isScrew || self == .sleeve || self == .blindRivet }
 
     /// Sitzt auf einer Schraube (Mutter, Scheibe): „Auf Schraube setzen“
-    var mountsOnScrew: Bool { self == .nut || self == .washer }
+    var mountsOnScrew: Bool { self == .nut || self == .washer || self == .wingNut }
+
+    /// Hat eine Länge (Schrauben, Hülse, Niete)
+    var hasLength: Bool { isScrew || self == .sleeve || self == .blindRivet }
 
     var systemImage: String {
         switch self {
@@ -39,6 +49,9 @@ enum StandardPartKind: String, CaseIterable, Identifiable, Codable {
         case .washer: "circle.circle"
         case .sleeve: "cylinder"
         case .bearing: "circle.dotted.circle"
+        case .woodScrew: "sc.fastener"
+        case .blindRivet: "pin"
+        case .wingNut: "fanblades"
         }
     }
 }
@@ -274,6 +287,9 @@ struct StandardPartSpec: Codable, Hashable {
         case .flangeButtonScrew: return "ISO 7380-2 \(threadDesignation)×\(length.formatted())"
         case .sleeve:
             return "Hülse \(sleeveInnerDiameter.formatted())×\(sleeveOuterDiameter.formatted())×\(length.formatted())"
+        case .woodScrew: return "Spanplattenschraube \(m.d.formatted())×\(length.formatted())"
+        case .blindRivet: return "Blindniete DIN 7337 \(m.d.formatted())×\(length.formatted())"
+        case .wingNut: return "DIN 315 \(threadDesignation)"
         }
     }
 }
@@ -382,6 +398,61 @@ extension ModelStore {
         }
         commit(result, name: step)
         selectBodies([index])
+    }
+
+    /// Build 90 (Kai, „+“ im Normteil-Fenster): weiteres Normteil in derselben Größe zum gewählten hinzufügen.
+    /// Scheibe: unter den Schraubenkopf (Schraube rückt um die Scheibendicke hoch). Mutter/Flügelmutter: ans
+    /// Schraubenende, danach Fläche antippen lassen. Andere Schrauben/Nieten: an gleicher Stelle, danach Bohrung wählen.
+    /// Rückgabe: Index des neuen Körpers.
+    @discardableResult
+    func addStandardPart(_ kind: StandardPartKind, near source: Int) -> Int? {
+        guard bodies.indices.contains(source), let base = bodies[source].effectiveStandardPart else { return nil }
+        var spec = StandardPartSpec()
+        spec.kind = kind
+        spec.size = base.size
+        spec.finePitch = base.finePitch && kind.hasMetricThread
+        spec.realThread = base.realThread
+        if kind.hasLength {
+            spec.length = base.kind.hasLength ? base.length
+                : (spec.metric.standardLengths.first(where: { $0 >= 3 * spec.metric.d }) ?? 12)
+        }
+        let placement = bodies[source].placement
+        var local = matrix_identity_double4x4
+        var raiseSource: Double = 0
+        if base.kind.isScrew {
+            switch kind {
+            case .washer:
+                // Scheibe liegt zwischen Kopf und Auflage: Scheibe nach unten, Schraube um ihre Dicke nach oben
+                raiseSource = spec.metric.washerThickness
+            case .nut, .wingNut:
+                local = simd_double4x4.translation([0, 0, -base.length])
+            default:
+                break
+            }
+        }
+        guard let shape = PartBuilder.build(spec)?.first?.shape,
+              let placed = Self.placedStandardShape(shape, by: placement * local) else {
+            message = "Normteil lässt sich so nicht erzeugen."
+            return nil
+        }
+        var result = bodies
+        var body = bodies[source].with(placed)
+        body.placement = placement * local
+        body.standardPart = spec
+        body.name = spec.bodyName
+        body.componentID = nil
+        body.threads = nil
+        if raiseSource > 0 {
+            let axis = simd_normalize(SIMD3(placement.columns.2.x, placement.columns.2.y, placement.columns.2.z))
+            let delta = axis * raiseSource
+            if let moved = bodies[source].shape.translated(by: delta) {
+                result[source] = bodies[source].with(moved, moving: simd_double4x4.translation(delta))
+            }
+        }
+        result.append(body)
+        commit(result, name: "\(kind.rawValue) hinzufügen")
+        selectBodies([result.count - 1])
+        return result.count - 1
     }
 
     /// Form aus dem Normteil-Ursprung an die Lage des Körpers bringen (Drehung um den Ursprung, dann Verschiebung).
@@ -529,7 +600,90 @@ enum PartBuilder {
             return [(washer, spec.bodyName)]
         case .bearing:
             return bearing(spec.bearingSize, balls: spec.balls, name: spec.bodyName)
+        case .woodScrew:
+            return woodScrew(spec)
+        case .blindRivet:
+            return blindRivet(spec)
+        case .wingNut:
+            return wingNut(spec)
         }
+    }
+
+    /// Build 90: Spanplattenschraube mit 90°-Senkkopf (Oberseite bündig auf Z = 0), Kreuzschlitz, Spitze und
+    /// grobem Holzgewinde (Steigung ≈ 0,45 · d) – bei „Modelliert“ als echte Schraubenlinie.
+    private static func woodScrew(_ spec: StandardPartSpec) -> [(shape: PCKShape, name: String)]? {
+        let d = spec.metric.d, length = spec.length
+        let dk = 2 * d, k = (dk - d) / 2
+        let tipLength = min(1.2 * d, length / 2)
+        guard length > k + 0.5,
+              let head = PCKShape.cone(base: [0, 0, -k], axis: up, bottomRadius: d / 2, topRadius: dk / 2, height: k),
+              let slot1 = PCKShape.prism(pointsXYZ: rect(-0.45 * dk, -0.08 * dk, 0.9 * dk, 0.16 * dk, z: -0.6 * k),
+                                         direction: [0, 0, k]),
+              let slot2 = PCKShape.prism(pointsXYZ: rect(-0.08 * dk, -0.45 * dk, 0.16 * dk, 0.9 * dk, z: -0.6 * k),
+                                         direction: [0, 0, k]),
+              let cross = slot1.fusing(slot2),
+              let recessed = head.cutting(cross),
+              let shank = PCKShape.cylinder(base: [0, 0, -length + tipLength], axis: up, radius: d / 2,
+                                            height: length - tipLength - k + 0.2 * k),
+              let tip = PCKShape.cone(base: [0, 0, -length], axis: up, bottomRadius: 0.05 * d, topRadius: d / 2,
+                                      height: tipLength),
+              let rod = shank.fusing(tip),
+              var screw = recessed.fusing(rod) else { return nil }
+        if spec.realThread {
+            let pitch = 0.45 * d
+            let threadLength = min(length - k, 0.6 * length + tipLength)
+            if let groove = threadGroove(base: [0, 0, -length - pitch], axis: up, radius: d / 2, pitch: pitch,
+                                         length: threadLength + pitch, external: true),
+               let threaded = screw.cutting(groove) {
+                screw = threaded
+            }
+        }
+        return [(screw, spec.bodyName)]
+    }
+
+    /// Build 90: Blindniete (Flachrundkopf DIN 7337): Kopf Ø 2 · d auf Z = 0, Hülse nach unten, Dorn ragt oben heraus.
+    private static func blindRivet(_ spec: StandardPartSpec) -> [(shape: PCKShape, name: String)]? {
+        let d = spec.metric.d, length = spec.length
+        let k = 0.35 * d
+        guard length > 0,
+              let flange = PCKShape.cylinder(base: .zero, axis: up, radius: d, height: k),
+              let sleeve = PCKShape.cylinder(base: [0, 0, -length], axis: up, radius: d / 2, height: length + 0.5 * k),
+              let mandrel = PCKShape.cylinder(base: [0, 0, 0.5 * k], axis: up, radius: 0.3 * d, height: 2.5 * d + k),
+              let body = flange.fusing(sleeve),
+              let rivet = body.fusing(mandrel) else { return nil }
+        return [(rivet, spec.bodyName)]
+    }
+
+    /// Build 90: Flügelmutter DIN 315 (vereinfacht): Nabe mit Gewindebohrung, zwei Flügel quer zur Achse.
+    private static func wingNut(_ spec: StandardPartSpec) -> [(shape: PCKShape, name: String)]? {
+        let m = spec.metric
+        let d = m.d
+        let hub = 1.0 * d, height = 1.3 * d + 1, span = 4.6 * d, wingHeight = 2.4 * d + 2, t = max(0.35 * d, 0.8)
+        func wing(_ sign: Double) -> PCKShape? {
+            let x0 = sign * 0.7 * hub, x1 = sign * span / 2
+            let points: [Double] = [x0, -t / 2, 0.15 * height,
+                                    x1, -t / 2, 0.45 * wingHeight,
+                                    x1, -t / 2, wingHeight,
+                                    x0, -t / 2, 0.8 * wingHeight]
+            return PCKShape.prism(pointsXYZ: points.map { NSNumber(value: $0) }, direction: [0, t, 0])
+        }
+        guard let core = PCKShape.cylinder(base: .zero, axis: up, radius: hub, height: height),
+              let left = wing(-1), let right = wing(1),
+              let withLeft = core.fusing(left), let both = withLeft.fusing(right),
+              let hole = PCKShape.cylinder(base: [0, 0, -1], axis: up, radius: d / 2, height: height + 2),
+              var nut = both.cutting(hole) else { return nil }
+        if spec.realThread,
+           let groove = threadGroove(base: [0, 0, -spec.pitch], axis: up, radius: d / 2, pitch: spec.pitch,
+                                     length: height + 2 * spec.pitch, external: false),
+           let threaded = nut.cutting(groove) {
+            nut = threaded
+        }
+        return [(nut, spec.bodyName)]
+    }
+
+    /// Rechteck x, y, Breite w, Tiefe h in Höhe z (für prism(pointsXYZ:))
+    private static func rect(_ x: Double, _ y: Double, _ w: Double, _ h: Double, z: Double) -> [NSNumber] {
+        [x, y, z, x + w, y, z, x + w, y + h, z, x, y + h, z].map { NSNumber(value: $0) }
     }
 
     /// Build 83: Schrauben mit Innensechskant und flachem, Senk- oder Linsenkopf. Kopfauflage auf Z = 0, Schaft nach

@@ -1356,6 +1356,9 @@ final class Workspace: ObservableObject {
     var canFinish: Bool {
         if sketch.isActive { return true }
         switch tool {
+        // Build 90 (Kai): „Fertig“ beim Verschieben ging nicht, solange keine Vorschau offen war (Drehen ±90°,
+        // Größe usw. werden sofort übernommen) – jetzt schließt es das Werkzeug immer
+        case .move where model.movingSketch == nil: return true
         case .boolean: return model.selectedBodies.count > 1
         case .color, .construct, .measure, .section, .canvas, .offsetEdges, .printCheck, .meshSculpt: return true
         case .translate: return model.hasPreview
