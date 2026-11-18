@@ -166,6 +166,14 @@ struct SnapIndex {
                 if case .chain(let segments) = loop { return segments }
                 return []
             }
+            // Build 106 (Kai: „fängt keinen Eckpunkt mehr“): geschlossene Linienzüge (z. B. 3-Punkt-Rechteck) liefern
+            // keine offenen Segmente bzw. Ketten – ihre Ecken fehlten im Punktfang. Griffpunkte immer mitnehmen.
+            switch entity {
+            case .circle, .ellipse, .arc:
+                break
+            default:
+                endpoints += entity.handlePoints.filter { $0.x.isFinite && $0.y.isFinite }
+            }
             for segment in entity.openSegments + chainSegments {
                 guard segment.start.x.isFinite, segment.start.y.isFinite,
                       segment.end.x.isFinite, segment.end.y.isFinite else { continue }
