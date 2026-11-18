@@ -274,8 +274,8 @@ struct SketchInference {
             for (k, p) in handles.enumerated() {
                 var isCenter = false
                 switch entity {
-                // SolidCraft kennt keine Rechteckmitte als Punkt
-                case .rectangle where k == 4: continue
+                // Build 99 (Kai): Rechteckmitte fängt wie ein Punkt (Schnitt der Diagonalen)
+                case .rectangle where k == 4: isCenter = false
                 case .circle, .ellipse, .regularPolygon: isCenter = k == 0
                 case .arc: isCenter = k == 2
                 default: break

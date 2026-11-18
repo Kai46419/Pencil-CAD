@@ -187,7 +187,9 @@ struct SnapIndex {
             }
             switch entity {
             case .rectangle(let corner, let size):
+                // Build 99: Rechteckmitte wie ein Endpunkt fangen (auch ohne „Zentrum“-Fang)
                 centers.append(corner + size / 2)
+                endpoints.append(corner + size / 2)
             case .circle(let center, _), .ellipse(let center, _):
                 centers.append(center)
             case .regularPolygon(let center, _, _, _):
