@@ -1614,7 +1614,7 @@ private struct Flyout: View {
 enum TopToolbarSetting {
     static let key = "toolbar.top"
     /// Höhe der Leiste (Build 93: größere Kacheln)
-    static let height: CGFloat = 94
+    static let height: CGFloat = 104
 }
 
 /// Ein Werkzeug im Rubrik-Feld
@@ -1692,32 +1692,30 @@ struct TopMenuPanel: View {
 
 extension ToolRail {
     /// Passt alles in die Breite, liegt die Leiste kompakt in der Mitte; sonst seitlich wischen.
+    /// Build 95 (Kai): jede Rubrik in einem eigenen farbigen Feld; die Felder teilen sich die ganze Breite.
+    /// Passt es nicht, lässt sich die Leiste seitlich wischen.
     var topToolbar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        ViewThatFits(in: .horizontal) {
             topToolbarRow
-                .background {
-                    GeometryReader { proxy in
-                        Color.clear
-                            .onAppear { topRowWidth = proxy.size.width }
-                            .onChange(of: proxy.size.width) { _, width in topRowWidth = width }
-                    }
-                }
+                .frame(maxWidth: .infinity)
+            ScrollView(.horizontal, showsIndicators: false) {
+                topToolbarRow
+            }
+            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
         }
-        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
-        .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: TopToolbarSetting.height)
         .floatingSurface(in: RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
     }
 
     private var topToolbarRow: some View {
-        HStack(alignment: .top, spacing: 0) {
+        HStack(alignment: .top, spacing: 6) {
             if sketch.isActive {
                 sketchTopGroups
             } else {
                 modelTopGroups
             }
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, 6)
         .padding(.vertical, 5)
         .frame(height: TopToolbarSetting.height)
     }
@@ -1749,7 +1747,7 @@ extension ToolRail {
             }
             if let select { topTile(select) }
         }
-        .padding(.trailing, 4)
+        .topField(.secondary)
         topDivider
         topSketchGroup("ERSTELLEN", .create, entries, tiles: 5)
         topDivider
@@ -2029,12 +2027,9 @@ extension ToolRail {
 
     // MARK: Rahmen einer Rubrik
 
+    /// Früher Trennstrich, seit Build 95 trennen die farbigen Felder
     private var topDivider: some View {
-        Rectangle()
-            .fill(Color.primary.opacity(0.12))
-            .frame(width: 1, height: 64)
-            .padding(.horizontal, 5)
-            .padding(.top, 4)
+        Color.clear.frame(width: 0, height: 0)
     }
 
     private func topGroupFrame<Tiles: View>(title: String, color: Color, sections: [TopMenuSection],
@@ -2043,6 +2038,7 @@ extension ToolRail {
                              set: { if !$0, openTopMenu == title { openTopMenu = nil } })
         return VStack(spacing: 1) {
             HStack(alignment: .top, spacing: 2) { tiles() }
+                .frame(maxHeight: .infinity, alignment: .top)
             Button {
                 openTopMenu = openTopMenu == title ? nil : title
             } label: {
@@ -2070,5 +2066,24 @@ extension ToolRail {
                     .presentationCompactAdaptation(.popover)
             }
         }
+        .topField(color)
+    }
+}
+
+private extension View {
+    /// Build 95: Feld einer Rubrik – leicht getönt in der Rubrikfarbe mit feinem Rand, wächst mit der Breite.
+    func topField(_ color: Color) -> some View {
+        padding(.horizontal, 6)
+            .padding(.top, 5)
+            .padding(.bottom, 3)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(color.opacity(0.09))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(color.opacity(0.3), lineWidth: 1)
+            }
     }
 }
