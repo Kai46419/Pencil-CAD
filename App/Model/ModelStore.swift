@@ -679,12 +679,10 @@ final class ModelStore: ObservableObject {
     /// Alle Kanten des Körpers
     func selectAllEdges() {
         guard let body = selectedEdges.first?.body, bodies.indices.contains(body) else { return }
-        let data = bodies[body].shape.edgeIndexData
-        let count = data.count / MemoryLayout<UInt32>.stride
+        let shape = bodies[body].shape
         var numbers = Set<Int>()
-        data.withUnsafeBytes { raw in
-            let values = raw.bindMemory(to: UInt32.self)
-            for k in 0..<count where values[k] > 0 { numbers.insert(Int(values[k])) }
+        for face in 1...max(shape.faceCount, 1) {
+            for number in shape.edgeNumbers(ofFace: face).map(\.intValue) where number > 0 { numbers.insert(number) }
         }
         guard !numbers.isEmpty else { return }
         setSelectedEdges(numbers.sorted().map { EdgeRef(body: body, edge: $0) })
