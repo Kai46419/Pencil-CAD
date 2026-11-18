@@ -21,6 +21,19 @@ struct SketchSelectionSection: View {
     private var selectionSection: some View {
         PaletteSection("Auswahl", detail: summary) {
             VStack(alignment: .leading, spacing: PaletteStyle.spacing) {
+                // Build 96 (Kai): Mülltonne gleich oben rechts – ohne bis zu den Knöpfen unten zu scrollen
+                HStack {
+                    Spacer()
+                    Button(role: .destructive, action: sketch.deleteSelection) {
+                        Label("Löschen", systemImage: "trash")
+                            .font(.callout.weight(.semibold))
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.red)
+                    .controlSize(.small)
+                    .disabled(sketch.selection.isEmpty)
+                    .hoverTip("Löschen", "Gewählte Elemente entfernen.")
+                }
                 if let index = sketch.selectedTextIndex {
                     // Gewählter Text: Inhalt, Schrift, Höhe, Winkel ändern (SketchTextPanel.swift)
                     SketchTextEditor(sketch: sketch, index: index, stacked: true)

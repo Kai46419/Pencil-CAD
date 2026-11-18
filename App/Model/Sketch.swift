@@ -1113,15 +1113,24 @@ final class SketchController: ObservableObject {
         switch rectangleMode {
         case .diagonal, .rounded:
             let size = end - start
-            if size.x != 0, size.y != 0 { add(.rectangle(corner: start, size: size), editable: true) }
+            if size.x != 0, size.y != 0 {
+                add(.rectangle(corner: start, size: size), editable: true)
+                autoDefineRectangle(entities.count - 1)
+            }
         case .center:
             let half = end - start
-            if half.x != 0, half.y != 0 { add(.rectangle(corner: start - half, size: half * 2), editable: true) }
+            if half.x != 0, half.y != 0 {
+                add(.rectangle(corner: start - half, size: half * 2), editable: true)
+                autoDefineRectangle(entities.count - 1)
+            }
         case .threePoint:
             if let base = rectangleBase {
                 rectangleBase = nil
                 let corners = Self.threePointCorners(base.start, base.end, end)
-                if abs(signedArea(corners)) > 1e-9 { add(.polyline(corners, closed: true)) }
+                if abs(signedArea(corners)) > 1e-9 {
+                    add(.polyline(corners, closed: true))
+                    autoDefineRectangle(entities.count - 1)
+                }
             } else if simd_distance(start, end) > 1e-6 {
                 rectangleBase = (start, end)
             }
@@ -2059,7 +2068,10 @@ final class SketchController: ObservableObject {
                 chainStart = nil
                 chainEnd = nil
                 chainTapped = false
-                if closed { tool = .select }
+                if closed {
+                    autoDefineClosedChain(endingAt: entities.count - 1)
+                    tool = .select
+                }
             } else {
                 chainStart = start
                 chainEnd = end
@@ -2083,6 +2095,7 @@ final class SketchController: ObservableObject {
         if let first = chainStart, simd_distance(first, end) < 1e-6 {
             chainStart = nil
             chainEnd = nil
+            autoDefineClosedChain(endingAt: entities.count - 1)
             tool = .select
         } else {
             chainEnd = end
@@ -5511,5 +5524,91 @@ extension SketchController {
             }
         }
         return (result, updated)
+    }
+}
+
+// MARK: - Build 96 (Kai): geschlossene Formen automatisch bemaßen und festlegen
+
+extension SketchController {
+    /// Rechteck: X aus Konstruktionslinien (Mittelpunkt sichtbar), Breite und Höhe bemaßt, Lage fixiert.
+    fileprivate func autoDefineRectangle(_ index: Int) {
+        guard autoConstrain, entities.indices.contains(index) else { return }
+        let corners = Array(entities[index].handlePoints.prefix(4))
+        guard corners.count == 4 else { return }
+        // Diagonalen als Konstruktionslinien; die Enden fangen an den Ecken (connect)
+        let before = constructionMode
+        constructionMode = true
+        add(.line(corners[0], corners[2]))
+        add(.line(corners[1], corners[3]))
+        constructionMode = before
+        editableIndex = index
+        let p = { (k: Int) in SketchPointRef(entity: index, index: k) }
+        var candidates: [SketchConstraint.Variant] = []
+        if case .polyline = entities[index] {
+            for k in 0..<4 {
+                candidates.append(.distance(p(k), p((k + 1) % 4), value: simd_distance(corners[k], corners[(k + 1) % 4])))
+            }
+            candidates.append(.angle(SketchCurveRef(entity: index, index: 0), SketchCurveRef(entity: index, index: 1),
+                                     degrees: 90))
+        } else {
+            candidates.append(.distance(p(0), p(1), value: simd_distance(corners[0], corners[1])))
+            candidates.append(.distance(p(1), p(2), value: simd_distance(corners[1], corners[2])))
+        }
+        candidates.append(.lock(p(0), at: corners[0]))
+        addIndependentConstraints(candidates)
+        entitiesChanged()
+    }
+
+    /// Linienzug mit dem Stift geschlossen: alle Seiten bemaßen, Winkel zwischen schrägen Seiten festhalten und
+    /// den Startpunkt fixieren – so lässt sich die Form nicht mehr verziehen. Maße stehen außen (placedOutside).
+    fileprivate func autoDefineClosedChain(endingAt last: Int) {
+        guard autoConstrain, entities.indices.contains(last), case .line = entities[last] else { return }
+        // Rückwärts die zusammenhängenden Linien des Zugs sammeln, bis der Kreis geschlossen ist
+        var chain: [Int] = []
+        var index = last
+        guard case .line(_, let closeEnd) = entities[last] else { return }
+        while index >= 0, chain.count < 60, case .line(let a, let b) = entities[index], !construction.contains(index) {
+            if let next = chain.last, case .line(let na, _) = entities[next], simd_distance(b, na) > 1e-6 { break }
+            chain.append(index)
+            if simd_distance(a, closeEnd) < 1e-6 { break }
+            index -= 1
+        }
+        guard chain.count >= 3, case .line(let firstStart, _) = entities[chain.last!],
+              simd_distance(firstStart, closeEnd) < 1e-6 else { return }
+        chain.reverse()
+        var candidates: [SketchConstraint.Variant] = []
+        for line in chain {
+            guard case .line(let a, let b) = entities[line] else { continue }
+            candidates.append(.distance(SketchPointRef(entity: line, index: 0), SketchPointRef(entity: line, index: 1),
+                                        value: simd_distance(a, b)))
+        }
+        for k in chain.indices {
+            let i = chain[k], j = chain[(k + 1) % chain.count]
+            guard case .line(let a1, let b1) = entities[i], case .line(let a2, let b2) = entities[j] else { continue }
+            let d1 = simd_normalize(b1 - a1), d2 = simd_normalize(b2 - a2)
+            let angle = atan2(abs(d1.x * d2.y - d1.y * d2.x), simd_dot(d1, d2)) * 180 / .pi
+            candidates.append(.angle(SketchCurveRef(entity: i, index: 0), SketchCurveRef(entity: j, index: 0),
+                                     degrees: (angle * 100).rounded() / 100))
+        }
+        if case .line(let a, _) = entities[chain[0]] {
+            candidates.append(.lock(SketchPointRef(entity: chain[0], index: 0), at: a))
+        }
+        addIndependentConstraints(candidates)
+        entitiesChanged()
+    }
+
+    /// Bedingungen nur übernehmen, wenn sie die Form weiter bestimmen (Rang steigt) – keine doppelten oder
+    /// widersprüchlichen Maße (z. B. bei waagerechten/senkrechten Seiten reichen zwei Maße fürs Rechteck).
+    private func addIndependentConstraints(_ candidates: [SketchConstraint.Variant]) {
+        var rank = ConstraintSolver.constraintRank(entities, constraints: constraints)?.rank ?? 0
+        for variant in candidates where !constraints.contains(where: { $0.variant == variant }) {
+            constraints.append(SketchConstraint(variant: variant))
+            guard let next = ConstraintSolver.constraintRank(entities, constraints: constraints),
+                  next.rank > rank, next.satisfied else {
+                constraints.removeLast()
+                continue
+            }
+            rank = next.rank
+        }
     }
 }
