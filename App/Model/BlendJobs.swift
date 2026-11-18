@@ -579,7 +579,7 @@ extension ModelStore {
                 return
             }
             if result.crashed {
-                message = Self.crashMessage(shape: request.source, edges: request.blendEdges.map(\.edge))
+                message = BlendKernel.crashMessage(shape: request.source, edges: request.blendEdges.map(\.edge))
                 dropPreview()
                 return
             }
