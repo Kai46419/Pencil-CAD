@@ -1296,7 +1296,7 @@ struct RailTile: View {
             VStack(spacing: 2) {
                 tile
                 Text(title)
-                    .font(.system(size: 9, weight: .medium))
+                    .font(.system(size: labelWidth == nil ? 9 : 11, weight: .medium))
                     .foregroundStyle(isActive ? category.fill : Color.primary.opacity(0.7))
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -1703,7 +1703,7 @@ extension ToolRail {
         }
         .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
         .frame(maxWidth: topRowWidth > 0 ? topRowWidth : .infinity)
-        .frame(height: 78)
+        .frame(height: 84)
         .floatingSurface(in: RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
     }
 
@@ -1717,7 +1717,7 @@ extension ToolRail {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
-        .frame(height: 78)
+        .frame(height: 84)
     }
 
     // MARK: Skizze
@@ -1733,10 +1733,10 @@ extension ToolRail {
                         Image(systemName: "checkmark")
                             .font(.system(size: 17, weight: .bold))
                             .foregroundStyle(.white)
-                            .frame(width: 36, height: 36)
+                            .frame(width: 40, height: 40)
                             .background(ToolCategory.finish.color, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                         Text("Fertig")
-                            .font(.system(size: 9, weight: .semibold))
+                            .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(ToolCategory.finish.color)
                     }
                     .frame(minWidth: 48)
@@ -1749,11 +1749,11 @@ extension ToolRail {
         }
         .padding(.trailing, 4)
         topDivider
-        topSketchGroup("ERSTELLEN", .create, entries, tiles: 4)
+        topSketchGroup("ERSTELLEN", .create, entries, tiles: 6)
         topDivider
-        topSketchGroup("ÄNDERN", .modify, entries, tiles: 3)
+        topSketchGroup("ÄNDERN", .modify, entries, tiles: 2)
         topDivider
-        topSketchGroup("MUSTER", .sketchPattern, entries, tiles: 2)
+        topSketchGroup("MUSTER", .sketchPattern, entries, tiles: 1)
         topDivider
         topConstraintGroup
         topDivider
@@ -1822,13 +1822,13 @@ extension ToolRail {
         ]
         return topGroupFrame(title: "BEDINGUNGEN", color: color, sections: sections) {
             topDimensionTile
-            ForEach(Array(cells.prefix(5))) { cell in
+            ForEach(Array(cells.prefix(2))) { cell in
                 Button(action: cell.action) {
                     VStack(spacing: 2) {
                         ToolIcon(cell.icon, size: 22)
                             .font(.system(size: 17))
                             .foregroundStyle(cell.isApplicable || cell.isPending ? color : Color.primary)
-                            .frame(width: 34, height: 36)
+                            .frame(width: 40, height: 40)
                             .background {
                                 if cell.isPending {
                                     RoundedRectangle(cornerRadius: 9, style: .continuous)
@@ -1836,10 +1836,11 @@ extension ToolRail {
                                 }
                             }
                         Text(cell.title)
-                            .font(.system(size: 9, weight: .medium))
-                            .foregroundStyle(Color.primary.opacity(0.7))
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Color.primary.opacity(0.75))
                             .lineLimit(1)
-                            .frame(maxWidth: 46)
+                            .minimumScaleFactor(0.8)
+                            .frame(maxWidth: 60)
                     }
                 }
                 .buttonStyle(.plain)
@@ -1854,7 +1855,7 @@ extension ToolRail {
             startDimension()
         } label: {
             RailTile(title: "Bemaßen", systemImage: ConstraintKind.dimension.systemImage,
-                     category: .constrain, size: 36, labelBelow: true, labelWidth: 54)
+                     category: .constrain, size: 40, labelBelow: true, labelWidth: 64)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Bemaßen")
@@ -1867,23 +1868,38 @@ extension ToolRail {
         sketch.notice = ConstraintKind.dimension.selectionHint
     }
 
-    /// Kachel: Antippen startet (Varianten: zuletzt gewählte), lange drücken zeigt die Varianten.
+    /// Kachel. Build 92 (Kai): Werkzeuge mit Varianten (Rechtecke, Kreise, Bögen …) sind Oberkategorien –
+    /// Antippen öffnet die Varianten darunter.
     @ViewBuilder private func topTile(_ entry: RailEntry) -> some View {
         let label = RailTile(title: entry.label ?? entry.title, systemImage: entry.systemImage, category: entry.category,
-                             isActive: entry.isActive, size: 36, hasVariants: entry.flyout != nil,
-                             labelBelow: true, labelWidth: 54)
-        if let flyout = entry.flyout {
+                             isActive: entry.isActive, size: 40, hasVariants: entry.flyout != nil,
+                             labelBelow: true, labelWidth: 64)
+        if let flyout = entry.flyout, entry.id == "sketch.select" {
+            // Auswählen: Antippen wählt sofort, lange drücken Rechteck/Lasso
             Menu {
                 ForEach(flyout) { item in
-                    Button(action: item.action) {
-                        ToolLabel(item.subtitle.map { "\(item.title) · \($0)" } ?? item.title, icon: item.systemImage)
-                    }
-                    .disabled(!item.isEnabled)
+                    Button(action: item.action) { ToolLabel(item.title, icon: item.systemImage) }
                 }
             } label: {
                 label
             } primaryAction: {
                 if let primary = entry.primary { primary() } else { entry.action() }
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .accessibilityLabel(entry.title)
+        } else if let flyout = entry.flyout {
+            Menu {
+                Section(entry.title) {
+                    ForEach(flyout) { item in
+                        Button(action: item.action) {
+                            ToolLabel(item.subtitle.map { "\(item.title) · \($0)" } ?? item.title, icon: item.systemImage)
+                        }
+                        .disabled(!item.isEnabled)
+                    }
+                }
+            } label: {
+                label
             }
             .menuStyle(.button)
             .buttonStyle(.plain)
@@ -1904,9 +1920,9 @@ extension ToolRail {
     // MARK: 3D
 
     private static let topModelGroups: [(ToolGroup?, String, Int)] = [
-        (.sketch, "SKIZZE", 1), (.create, "ERSTELLEN", 3), (.modify, "ÄNDERN", 3), (.arrange, "ANORDNEN", 2),
-        (.construct, "KONSTR.", 1), (.inspect, "PRÜFEN", 2), (nil, "NETZ", 1),
-        (.sheetMetal, "BLECH", 1), (.insert, "EINFÜGEN", 2), (.visualize, "ANSICHT", 1),
+        (.sketch, "SKIZZE", 1), (.create, "ERSTELLEN", 2), (.modify, "ÄNDERN", 2), (.arrange, "ANORDNEN", 1),
+        (.construct, "KONSTR.", 1), (.inspect, "PRÜFEN", 1), (nil, "NETZ", 1),
+        (.sheetMetal, "BLECH", 1), (.insert, "EINFÜGEN", 1), (.visualize, "ANSICHT", 1),
     ]
 
     @ViewBuilder private var modelTopGroups: some View {
@@ -1999,7 +2015,7 @@ extension ToolRail {
             command.run()
         } label: {
             RailTile(title: command.title, systemImage: command.icon, category: category,
-                     isActive: command.isActive, size: 36, labelBelow: true, labelWidth: 54)
+                     isActive: command.isActive, size: 40, labelBelow: true, labelWidth: 64)
         }
         .buttonStyle(.plain)
         .disabled(!command.isEnabled)
@@ -2030,7 +2046,7 @@ extension ToolRail {
             } label: {
                 HStack(spacing: 3) {
                     Text(title)
-                        .font(.system(size: 9.5, weight: .bold))
+                        .font(.system(size: 11, weight: .bold))
                         .tracking(0.5)
                     Image(systemName: openTopMenu == title ? "chevron.up" : "chevron.down")
                         .font(.system(size: 8, weight: .bold))

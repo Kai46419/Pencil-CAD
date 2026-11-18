@@ -3510,6 +3510,28 @@ extension ModelStore {
 
     // MARK: Bohrungen
 
+    /// Build 92 (Kai: „Bohrung an dieser Stelle nicht möglich“ auf einer ebenen Fläche): Boolesches Abziehen
+    /// scheitert bei Körpern aus STL-Netzen oder mit kleinen Ungenauigkeiten. Nacheinander: normal, mit
+    /// wachsender Fuzzy-Toleranz, dann am reparierten Körper (ShapeFix) – Ergebnis nur, wenn Volumen abnimmt.
+    static func robustHoleCut(_ shape: PCKShape, tool: PCKShape, threaded: Bool) -> PCKShape? {
+        let before = shape.volume
+        func accept(_ result: PCKShape?) -> PCKShape? {
+            guard let result, result.faceCount > 0 else { return nil }
+            let after = result.volume
+            guard after.isFinite, after > 0, before <= 0 || after < before - 1e-9 else { return nil }
+            return result
+        }
+        if let cut = accept(threaded ? shape.cutting(tool, fuzzy: threadCutFuzzy) : shape.cutting(tool)) { return cut }
+        for fuzzy in [1e-4, 1e-3, 1e-2] {
+            if let cut = accept(shape.cutting(tool, fuzzy: fuzzy)) { return cut }
+        }
+        if let repaired = shape.validatedSolid() {
+            if let cut = accept(repaired.cutting(tool)) { return cut }
+            if let cut = accept(repaired.cutting(tool, fuzzy: 1e-3)) { return cut }
+        }
+        return nil
+    }
+
     /// Bohrungen (wie Fusion 360 „Bohrung“): je angetippter Punkt eine Bohrung senkrecht in die Fläche.
     func previewHoles(_ holes: [(face: FaceRef, point: SIMD3<Double>)], spec: HoleSpec) {
         guard requireKernel(), !holes.isEmpty else {
@@ -3534,9 +3556,16 @@ extension ModelStore {
             let shape = preview[body].shape
             // Nach innen gewölbte Flächen: Werkzeug beginnt so hoch, dass es sauber aus der Fläche austritt
             let lift = holeLift(shape, at: point, outward: n, radius: spec.toolRadius, planar: spot.planar)
-            guard let tool = spec.tool(at: point, outward: n, through: reach, lift: lift),
-                  let cut = spec.thread == nil ? shape.cutting(tool) : shape.cutting(tool, fuzzy: threadCutFuzzy) else {
-                message = "Bohrung an dieser Stelle nicht möglich."
+            guard let tool = spec.tool(at: point, outward: n, through: reach, lift: lift) else {
+                message = "Bohrung an dieser Stelle nicht möglich (Maße prüfen: Senkung größer als Bohrung?)."
+                dropPreview()
+                return
+            }
+            guard let cut = Self.robustHoleCut(shape, tool: tool, threaded: spec.thread != nil) else {
+                message = shape.faceCount > 400
+                    ? "Bohrung nicht möglich: Der Körper stammt aus einem Netz (STL) mit sehr vielen Dreiecken. "
+                      + "Unter NETZ › Netz bearbeiten „Reparieren“ ausführen und erneut bohren."
+                    : "Bohrung an dieser Stelle nicht möglich."
                 dropPreview()
                 return
             }

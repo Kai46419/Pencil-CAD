@@ -191,7 +191,7 @@ private struct WorkspaceContent: View {
                         }
                     }
                     .padding(.trailing, 16)
-                    .padding(.top, toolbarOnTop ? 156 : 76)
+                    .padding(.top, toolbarOnTop ? 162 : 76)
                     .animation(Theme.spring, value: sketch.isActive)
                     .animation(Theme.spring, value: workspace.command == nil)
                 }
