@@ -97,7 +97,16 @@ enum SheetKantenDriver: MainCommandDriver {
     static let inputID = "edges"
     static let edgesKey = "kanten"
 
-    static let modes = [CommandChoice(id: "edge", title: "An Außenkante"), CommandChoice(id: "line", title: "Skizzenlinie")]
+    // Build 107 (Kai): „An der Kante“ = die angetippte Linie ist die Biegelinie, eine Seite bleibt liegen (wählbar) –
+    // auch an der Nahtstelle zweier Blechfelder. „Flanke“ = Außenkante mit Flankenlänge (Biegelinie versetzt).
+    static let modes = [CommandChoice(id: "at", title: "An der Kante"), CommandChoice(id: "edge", title: "Flanke"),
+                        CommandChoice(id: "line", title: "Skizzenlinie")]
+    static let sides = [CommandChoice(id: "a", title: "Seite A bewegt"), CommandChoice(id: "b", title: "Seite B bewegt")]
+
+    /// Richtung zur Seite, die liegen bleibt (Modus „An der Kante“): A = die Seite der angetippten Fläche bleibt
+    @MainActor static func fixedDirection(_ pick: SheetKantEdge, _ cmd: ModelCommand) -> SIMD3<Double> {
+        cmd.option("side", default: "a") == "a" ? -pick.inward : pick.inward
+    }
     static let measures = [CommandChoice(id: "outer", title: "Außenmaß"), CommandChoice(id: "inner", title: "Innenmaß")]
     static let directions = [CommandChoice(id: "up", title: "Nach oben"), CommandChoice(id: "down", title: "Nach unten")]
     static let quickAngles = [CommandChoice(id: "45", title: "45°"), CommandChoice(id: "90", title: "90°"),
@@ -240,7 +249,7 @@ enum SheetKantenDriver: MainCommandDriver {
     @MainActor static func tapped(_ tap: CommandTap, _ cmd: ModelCommand, _ ws: Workspace) -> Bool {
         guard cmd.editing == nil else { return false }
         let model = ws.model
-        if cmd.option("mode", default: "edge") == "line" {
+        if cmd.option("mode", default: "at") == "line" {
             // Bereich einer Skizze: diese Skizze für die Biegelinie
             if let region = tap.region {
                 cmd.choices["lineSketch"] = String(region.sketch)
@@ -324,12 +333,19 @@ enum SheetKantenDriver: MainCommandDriver {
         let angle = cmd.number("angle", default: 90)
         let height = cmd.number("height", default: 40)
         let outer = cmd.option("measure", default: "outer") == "outer"
-        guard let offset = SheetBendMath.lineOffset(height: height, angle: angle, radius: r, thickness: rule.thickness,
-                                                    kFactor: rule.kFactor, outer: outer) else {
+        let atEdge = cmd.option("mode", default: "at") == "at"
+        guard let offset = atEdge ? 0 : SheetBendMath.lineOffset(height: height, angle: angle, radius: r,
+                                                                 thickness: rule.thickness, kFactor: rule.kFactor,
+                                                                 outer: outer) else {
             let minimum = SheetBendMath.minimumHeight(angle: angle, radius: r, thickness: rule.thickness, outer: outer)
             return ([], "Die Flanke ist kürzer als die Biegung – mindestens \(SheetFormat.length(minimum)).")
         }
         let allowance = SheetBendMath.allowance(angle: angle, radius: r, thickness: rule.thickness, kFactor: rule.kFactor)
+        if cmd.option("mode", default: "at") == "at" {
+            return (picks.filter { $0.body == body }.map { pick in
+                SheetKantFold(edge: pick, from: pick.a, to: pick.b, offset: 0, allowance: allowance)
+            }, nil)
+        }
         let folds = picks.filter { $0.body == body }.map { pick in
             SheetKantFold(edge: pick, from: pick.a + pick.inward * offset, to: pick.b + pick.inward * offset,
                           offset: offset, allowance: allowance)
@@ -382,10 +398,17 @@ enum SheetKantenDriver: MainCommandDriver {
         for fold in computed.folds {
             let pick = fold.edge
             // Punkt auf der Seite, die stehen bleibt: knapp hinter der Biegezone, auf der angetippten Fläche
-            let fixed = pick.mid + pick.inward * (fold.offset + fold.allowance / 2 + 0.5)
+            let atEdge = cmd.option("mode", default: "at") == "at"
+            let fixed = atEdge
+                ? pick.mid + fixedDirection(pick, cmd) * (fold.allowance / 2 + 0.5)
+                : pick.mid + pick.inward * (fold.offset + fold.allowance / 2 + 0.5)
             let flip = simd_dot(legSide(pick.thickness, cmd), pick.thickness) < 0
             var step = SheetStep("Kanten", .fold(from: fold.from, to: fold.to, angle: angle, radius: radius,
                                                  position: "centerline", fixed: fixed, flip: flip))
+            if atEdge {
+                steps.append(step)
+                continue
+            }
             // D2 (Build 41): Messbezug mitspeichern – der Nachbau rechnet die Linie aus Höhe und Winkel neu
             step.foldReference = SheetFoldReference(a: pick.a, b: pick.b, mid: pick.mid, inward: pick.inward,
                                                     height: height, outer: outer, thickness: rule.thickness,
@@ -432,7 +455,7 @@ enum SheetKantenDriver: MainCommandDriver {
         }
         let body: Int
         let steps: [SheetStep]
-        if cmd.option("mode", default: "edge") == "line" {
+        if cmd.option("mode", default: "at") == "line" {
             let found = lineStep(cmd, model)
             if let error = found.error {
                 model.dropPreview()
@@ -511,7 +534,8 @@ enum SheetKantenDriver: MainCommandDriver {
     // MARK: Pfeil (Flankenlänge)
 
     @MainActor static func arrows(_ cmd: ModelCommand, _ ws: Workspace) -> [DragHandle] {
-        guard cmd.option("mode", default: "edge") == "edge", let pick = list(cmd).first else { return [] }
+        guard cmd.option("mode", default: "at") == "edge", let pick = list(cmd).first else { return [] }
+        // („An der Kante“ hat keinen Längenpfeil – die Linie liegt fest)
         let side = legSide(pick.thickness, cmd)
         return [DragHandle(kind: .command("height"), axisOrigin: SIMD3<Float>(pick.mid), direction: SIMD3<Float>(side),
                            value: cmd.number("height", default: 40), color: Workspace.handleBlue)]
@@ -533,8 +557,25 @@ enum SheetKantenDriver: MainCommandDriver {
 
     /// Gewählte Kanten (Auswahlfarbe) und die Biegelinien gestrichelt (SheetUIOverlay).
     @MainActor static func overlay(_ cmd: ModelCommand, _ model: ModelStore, perPoint: Double) -> [LineGroup] {
-        guard cmd.option("mode", default: "edge") == "edge" else { return [] }
+        let mode = cmd.option("mode", default: "at")
+        guard mode == "edge" || mode == "at" else { return [] }
         var groups: [LineGroup] = []
+        if mode == "at" {
+            // Pfeil auf die Seite, die sich hochklappt
+            var arrows: [[SIMD3<Float>]] = []
+            let size = max(perPoint, 1e-6) * 28
+            for pick in list(cmd) {
+                let moving = -fixedDirection(pick, cmd)
+                let start = pick.mid + pick.normal * 0.05
+                let tip = start + moving * size
+                let side = simd_normalize(pick.b - pick.a) * size * 0.3
+                arrows.append([start, tip].map { SIMD3<Float>($0) })
+                arrows.append([tip - moving * size * 0.35 + side, tip, tip - moving * size * 0.35 - side].map { SIMD3<Float>($0) })
+            }
+            if !arrows.isEmpty {
+                groups.append(LineGroup(polylines: arrows, color: SIMD3<Float>(0.95, 0.45, 0.1), width: 4, onTop: true))
+            }
+        }
         let picked = list(cmd).flatMap(\.lines).map { $0.map { SIMD3<Float>($0) } }.filter { $0.count >= 2 }
         if !picked.isEmpty {
             groups.append(LineGroup(polylines: picked, color: SheetUIOverlay.pickColor, width: 4, onTop: true))
@@ -562,7 +603,7 @@ private struct SheetKantenRows: View {
     @ObservedObject var state: SheetCommandState
 
     var body: some View {
-        let mode = cmd.option("mode", default: "edge")
+        let mode = cmd.option("mode", default: "at")
         VStack(alignment: .leading, spacing: PaletteStyle.spacing) {
             SheetUnavailableRow(model: model)
             SheetToolPreview(sketch: .kanten)
@@ -580,6 +621,8 @@ private struct SheetKantenRows: View {
                     cmd.choices["position"] = id
                     CommandCache.refreshNow(cmd, workspace)
                 }
+            } else if mode == "at" {
+                atRows
             } else {
                 edgeRows
             }
@@ -603,6 +646,33 @@ private struct SheetKantenRows: View {
                 CommandPreviewRow(cmd: cmd, workspace: workspace)
             }
         }
+    }
+
+    /// Build 107: Linie antippen – dort wird gekantet; wählen, welche Seite sich bewegt (oranger Pfeil)
+    @ViewBuilder private var atRows: some View {
+        let picks = SheetKantenDriver.list(cmd)
+        if picks.isEmpty {
+            PaletteHint(text: "Linie antippen, an der gekantet werden soll – Außenkante oder Naht zwischen zwei Blechfeldern. "
+                        + "Danach wählen, welche Seite hochklappt (oranger Pfeil).")
+        } else {
+            HStack(spacing: PaletteStyle.spacing) {
+                SheetInfoRow(title: "Linien", text: picks.count == 1 ? "1 Linie" : "\(picks.count) Linien")
+                PrimaryWideButton(title: "Keine", systemImage: "xmark", isPrimary: false, showsTitle: false) {
+                    SheetKantenDriver.store([], cmd)
+                    CommandCache.refreshNow(cmd, workspace)
+                    workspace.objectWillChange.send()
+                }
+                .frame(width: PaletteStyle.touch + 8)
+                .accessibilityLabel("Linien abwählen")
+            }
+        }
+        CommandSegmentRow(title: "Welche Seite kanten?", options: SheetKantenDriver.sides,
+                          selected: cmd.option("side", default: "a")) { id in
+            cmd.choices["side"] = id
+            CommandCache.refreshNow(cmd, workspace)
+            workspace.objectWillChange.send()
+        }
+        PaletteHint(text: "Der orange Pfeil zeigt auf die Seite, die sich hochklappt; die andere bleibt liegen.")
     }
 
     @ViewBuilder private var edgeRows: some View {
@@ -635,7 +705,7 @@ private struct SheetKantenRows: View {
     /// Gemeinter Körper für den Hinweis „entfaltet“: gewählte Kante bzw. Körper der Biegelinie
     private var unfoldedTarget: Int? {
         if let body = SheetKantenDriver.list(cmd).first?.body { return body }
-        guard cmd.option("mode", default: "edge") == "line", let sketch = SheetLines.sketch(cmd, model) else { return nil }
+        guard cmd.option("mode", default: "at") == "line", let sketch = SheetLines.sketch(cmd, model) else { return nil }
         if let source = model.sketches[sketch].plane.sourceBody, model.isSheetBody(source) { return source }
         return SheetUI.targetSheetBody(model)
     }
