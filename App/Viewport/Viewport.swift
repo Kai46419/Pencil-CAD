@@ -2404,9 +2404,27 @@ final class ViewportView: MTKView {
         let half = 40 * perPoint
         let offset = half * 1.8
         let sides: [SIMD2<Float>] = [[1, -1], [1, 1], [-1, 1]]
+        // Build 103 (Kai): Liegt ein Körper auf dem Ursprung, verdeckte er die Felder – sie rücken dann neben die
+        // Szene (außerhalb ihres Umrisses in Richtung u bzw. v), damit sie sichtbar und antippbar bleiben.
+        let box = model?.mesh.bounds
         return Self.basePlanes.indices.map { index -> (index: Int, center: SIMD3<Float>, u: SIMD3<Float>, v: SIMD3<Float>, half: Float) in
             let plane = Self.basePlanes[index]
-            let center = plane.u * sides[index].x * offset + plane.v * sides[index].y * offset
+            var du = sides[index].x * offset, dv = sides[index].y * offset
+            if let box {
+                let corners: [SIMD3<Float>] = (0..<8).map { k in
+                    SIMD3(k & 1 == 0 ? box.min.x : box.max.x, k & 2 == 0 ? box.min.y : box.max.y,
+                          k & 4 == 0 ? box.min.z : box.max.z)
+                }
+                let us = corners.map { simd_dot($0, plane.u) }, vs = corners.map { simd_dot($0, plane.v) }
+                let gap = half * 1.25
+                if let lo = us.min(), let hi = us.max() {
+                    du = sides[index].x > 0 ? max(du, hi + gap) : min(du, lo - gap)
+                }
+                if let lo = vs.min(), let hi = vs.max() {
+                    dv = sides[index].y > 0 ? max(dv, hi + gap) : min(dv, lo - gap)
+                }
+            }
+            let center = plane.u * du + plane.v * dv
             return (index, center, plane.u, plane.v, half)
         }
     }
