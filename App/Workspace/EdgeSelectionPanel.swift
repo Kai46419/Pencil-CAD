@@ -16,6 +16,19 @@ struct EdgeSelectionPanel: View {
             scopeButton("Umlauf", "square.dashed") { model.selectEdgeLoop() }
             scopeButton("Alle", "cube") { model.selectAllEdges() }
         }
+        if chain.count > model.selectedEdges.count, model.canBlendOnlySelectedEdges {
+            // Build 104: ohne Tangentenkette selbst runden/fasen
+            Button {
+                model.blendOnlySelectedEdges()
+            } label: {
+                Label(model.edgeOperation == .chamfer ? "Nur diese Kante fasen" : "Nur diese Kante runden",
+                      systemImage: "scissors")
+                    .font(.callout.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+        }
         if chain.count > model.selectedEdges.count {
             Label("Glatt anschließende Kanten werden mitgenommen: \(chain.count) statt \(model.selectedEdges.count). "
                   + "Das macht der CAD-Kern bei tangentialen Übergängen immer.",

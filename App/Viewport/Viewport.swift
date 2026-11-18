@@ -145,6 +145,8 @@ final class ViewportView: MTKView {
     private var gizmoHover: GizmoPart?
     private let ringLabel = PaddedLabel()
     private let valueLabel = PaddedLabel()
+    /// Build 104: Griff, dessen Wert das Etikett gerade zeigt (für die Eingabe per Antippen)
+    private var valueLabelHandle: (kind: HandleKind, value: Double)?
     /// Einrasthinweis am Stift (Endpunkt, Mittelpunkt …)
     private let snapHintLabel = PaddedLabel()
     /// SolidCraft: „H“/„V“ an der Mitte des Gummibands, wenn es genau waagerecht bzw. senkrecht liegt
@@ -444,6 +446,9 @@ final class ViewportView: MTKView {
         valueLabel.layer.borderColor = UIColor(red: 0.2, green: 0.55, blue: 0.95, alpha: 1).cgColor
         valueLabel.layer.masksToBounds = true
         valueLabel.isHidden = true
+        // Build 104 (Kai): Wert am Pfeil antippen → Zahl eingeben
+        valueLabel.isUserInteractionEnabled = true
+        valueLabel.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(valueLabelTapped)))
         addSubview(valueLabel)
         ringLabel.font = .monospacedDigitSystemFont(ofSize: 15, weight: .semibold)
         ringLabel.textColor = .white
@@ -2601,6 +2606,7 @@ final class ViewportView: MTKView {
             valueLabel.text = LengthUnit.current.format(active.value)
         }
         if let text = commandValueText(active) { valueLabel.text = text }
+        valueLabelHandle = active.kind == .scale || active.kind == .radius || active.isMove ? nil : (active.kind, active.value)
         valueLabel.sizeToFit()
         // Wie in Fusion 360: Wertfeld neben dem Pfeil (seitlich auf Höhe der Spitze), nicht auf der Spitze
         var dx = tip.x - foot.x, dy = tip.y - foot.y
@@ -3813,6 +3819,30 @@ private extension CGPoint {
 }
 
 /// Etikett mit Innenabstand für das Maß am Ziehpfeil.
+extension ViewportView {
+    /// Build 104 (Kai): Etikett „2 mm“ neben dem Pfeil antippen öffnet ein Eingabefeld.
+    @objc func valueLabelTapped() {
+        guard let handle = valueLabelHandle else { return }
+        let alert = UIAlertController(title: "Wert eingeben", message: nil, preferredStyle: .alert)
+        alert.addTextField { field in
+            field.keyboardType = .decimalPad
+            field.text = handle.value.formatted(.number.precision(.fractionLength(0...3)))
+            field.clearButtonMode = .always
+            DispatchQueue.main.async { field.selectAll(nil) }
+        }
+        alert.addAction(UIAlertAction(title: "Abbrechen", style: .cancel))
+        alert.addAction(UIAlertAction(title: "OK", style: .default) { [weak self, weak alert] _ in
+            let text = alert?.textFields?.first?.text?.replacingOccurrences(of: ",", with: ".") ?? ""
+            guard let self, let value = Double(text.trimmingCharacters(in: .whitespaces)), value.isFinite else { return }
+            self.workspace?.apply(handle.kind, value: value)
+            self.refresh()
+        })
+        var controller = window?.rootViewController
+        while let presented = controller?.presentedViewController { controller = presented }
+        controller?.present(alert, animated: true)
+    }
+}
+
 final class PaddedLabel: UILabel {
     var insets = UIEdgeInsets(top: 4, left: 9, bottom: 4, right: 9)
 
