@@ -1288,6 +1288,7 @@ final class Workspace: ObservableObject {
             } else {
                 sketch.finishCurrentInput()
             }
+            if !sketch.isChoosingPlane { sketch.inputFinished = true }
             return
         }
         if tool == .part(.standard) {
@@ -1347,7 +1348,7 @@ final class Workspace: ObservableObject {
     var showsDoneBar: Bool {
         // Skizze: erst zeigen, wenn in dieser Sitzung gezeichnet/geändert wurde (vorher nur Ablenkung).
         // Bei der Ebenenwahl bleibt „Abbrechen“ der Weg zurück ins Modell.
-        if sketch.isActive { return sketch.isChoosingPlane || sketch.hasSessionChanges }
+        if sketch.isActive { return sketch.isChoosingPlane || (sketch.hasSessionChanges && !sketch.inputFinished) }
         // Offener Befehl: OK/Abbrechen im Panel bzw. in der Ecke (CornerConfirm.swift)
         if command != nil { return false }
         return tool != .select || model.hasPreview

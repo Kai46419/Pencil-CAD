@@ -319,12 +319,16 @@ final class SketchController: ObservableObject {
     /// Beim Start einer Skizze ohne gewählte Fläche: Standardebene antippen.
     @Published var isChoosingPlane = false
     @Published private(set) var basePlane: BasePlane = .top
+    /// Build 98 (Kai): nach „Fertig“ bzw. „Abbrechen“ verschwindet die Leiste, bis wieder gezeichnet wird
+    @Published var inputFinished = false
+
     @Published var tool: SketchTool = .select {
         didSet {
             // Eine erneute Zuweisung desselben Werkzeugs darf eine laufende
             // Klickfolge (z. B. Bogen mit bereits gesetztem Startpunkt) nicht beenden.
             // Swift ruft didSet auch bei einer unveränderten Wertzuweisung auf.
             guard oldValue != tool else { return }
+            inputFinished = false
             if tool == .polyline || tool == .arc { lineVariant = tool }
             // Werkzeugwechsel beendet Verformen bzw. Pfad wählen (Änderungen bleiben)
             if tool != .select, textDeformMode != nil { textDeformMode = nil }
@@ -2387,6 +2391,7 @@ final class SketchController: ObservableObject {
         finishInput()
         pendingAction = nil
         clearHelpers()
+        inputFinished = true
     }
 
     /// „Abbrechen“ unten im Skizzenmodus: laufende Eingabe verwerfen, die Skizze bleibt offen.
@@ -2397,6 +2402,7 @@ final class SketchController: ObservableObject {
         finishInput()
         pendingAction = nil
         clearHelpers()
+        inputFinished = true
     }
 
     /// Auswahl, gemerkte Punkte, Hilfspunkte und Mittellinien entfernen.
@@ -4878,6 +4884,7 @@ final class SketchController: ObservableObject {
     }
 
     private func entitiesChanged() {
+        inputFinished = false
         followTextPaths()
         let profile = entities.indices.filter { !construction.contains($0) }.map { entities[$0] }
         let found = findRegions(in: profile)
