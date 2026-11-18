@@ -37,6 +37,10 @@ extension SketchController {
             case move
             case scale
             case rotate
+            /// Build 101: Ecke oben links – waagrecht neigen (scheren)
+            case shear
+            /// Build 101: Schloss unten rechts – verankern/lösen (nur Tippen)
+            case lock
         }
 
         var kind: Kind
@@ -99,11 +103,13 @@ extension SketchController {
 
     /// Lage der Griffe. unit = Skizzenmaß eines Bildschirmpunkts.
     private func selectionHandlePoints(unit: Double)
-        -> (frame: SketchSelectionFrame, move: Point2, scale: Point2, rotate: Point2, rotateBase: Point2)? {
+        -> (frame: SketchSelectionFrame, move: Point2, scale: Point2, rotate: Point2, rotateBase: Point2,
+            shear: Point2, lock: Point2)? {
         guard let indices = transformSelectionIndices, let raw = selectionFrame(indices) else { return nil }
         let frame = raw.padded(8 * unit)
         let top = Point2(frame.center.x, frame.high.y)
-        return (frame, frame.center, frame.high, top + Point2(0, 30 * unit), top)
+        return (frame, frame.center, frame.high, top + Point2(0, 30 * unit), top,
+                Point2(frame.low.x, frame.high.y), Point2(frame.high.x + 16 * unit, frame.low.y - 16 * unit))
     }
 
     /// Rahmen, Pfeile und Knöpfe für den Viewport (Viewport.addSelectionTransformHandles).
@@ -148,8 +154,23 @@ extension SketchController {
             let back: Point2 = tip - axis * (4 * unit)
             lines.append([back + side, tip, back - side])
         }
+        // Neigen: Doppelpfeil waagrecht an der Ecke oben links
+        arrow(from: h.shear + Point2(-6 * unit, 8 * unit), to: h.shear + Point2(-20 * unit, 8 * unit))
+        arrow(from: h.shear + Point2(-14 * unit, 8 * unit), to: h.shear + Point2(0, 8 * unit))
+        lines.append([h.shear, h.shear + Point2(-6 * unit, 14 * unit)])
+        // Schloss: Bügel offen bzw. geschlossen, Körper als Rechteck
+        let body = [Point2(-5, -6), Point2(5, -6), Point2(5, 1), Point2(-5, 1), Point2(-5, -6)]
+        lines.append(body.map { h.lock + $0 * unit })
+        var shackle: [Point2] = []
+        let open = !selectionIsAnchored
+        for k in 0...12 {
+            let a: Double = Double(k) / 12 * .pi
+            shackle.append(h.lock + Point2(cos(a) * 3.5 + (open ? 3 : 0), 1 + 3 + sin(a) * 3.5) * unit)
+        }
+        lines.append([h.lock + Point2(-3.5 + (open ? 3 : 0), 1) * unit] + shackle.reversed()
+                     + [h.lock + Point2(3.5 + (open ? 3 : 0), open ? 3 : 1) * unit])
         let corners = h.frame.corners
-        return (corners + [corners[0]], lines, [h.move, h.scale, h.rotate])
+        return (corners + [corners[0]], lines, [h.move, h.scale, h.rotate, h.shear, h.lock])
     }
 
     /// Fang beim Ziehen am Rahmen (Anzeige über currentSnap).
@@ -163,6 +184,8 @@ extension SketchController {
         let unit: Double = tolerance / 20
         let reach: Double = Self.selectionHandleHitPoints * unit
         guard let h = selectionHandlePoints(unit: unit) else { return nil }
+        if simd_distance(p, h.lock) <= reach { return (.lock, true) }
+        if simd_distance(p, h.shear) <= reach { return (.shear, true) }
         if simd_distance(p, h.rotate) <= reach { return (.rotate, true) }
         if simd_distance(p, h.scale) <= reach { return (.scale, true) }
         if simd_distance(p, h.move) <= reach { return (.move, true) }
@@ -214,7 +237,7 @@ extension SketchController {
                                           snapIndex: SnapIndex(entities: others, guides: modelGuides),
                                           extra: marks + [Point2.zero], onKnob: hit.onKnob)
         drag.lastAngle = atan2(p.y - frame.center.y, p.x - frame.center.x)
-        drag.blocked = constraints.contains { constraint in
+        drag.blocked = hit.kind != .lock && constraints.contains { constraint in
             if case .lock = constraint.variant {
                 return constraint.entities.contains { movingSet.contains($0) }
             }
@@ -240,7 +263,7 @@ extension SketchController {
                 return true
             }
         }
-        guard !drag.blocked else {
+        guard !drag.blocked, drag.kind != .lock else {
             selectionTransformDrag = drag
             return true
         }
@@ -256,6 +279,10 @@ extension SketchController {
     func endSelectionTransformDrag(at p: Point2, tolerance: Double) -> Bool {
         guard var drag = selectionTransformDrag else { return false }
         selectionTransformDrag = nil
+        if drag.kind == .lock {
+            toggleSelectionLock()
+            return true
+        }
         if drag.blocked {
             changed()
             return true
@@ -271,6 +298,10 @@ extension SketchController {
                 notice = "Skaliert auf \(Int((drag.factor * 100).rounded())) %"
             case .rotate:
                 notice = "Gedreht um \(Int((drag.angle * 180 / .pi).rounded()))°"
+            case .shear:
+                notice = "Geneigt um \(Int((atan(drag.factor) * 180 / .pi).rounded()))°"
+            case .lock:
+                break
             }
             changed()
             return true
@@ -280,6 +311,8 @@ extension SketchController {
             case .move: notice = "Kreuz oder Fläche ziehen verschiebt die Auswahl."
             case .scale: notice = "Pfeil ziehen skaliert die Auswahl, die Ecke links unten bleibt stehen."
             case .rotate: notice = "Griff ziehen dreht die Auswahl um ihre Mitte (15°-Schritte rasten ein)."
+            case .shear: notice = "Ecke oben links waagrecht ziehen neigt die Auswahl, die Unterkante bleibt stehen."
+            case .lock: break
             }
             changed()
         } else {
@@ -380,6 +413,22 @@ extension SketchController {
             drag.angle = turn
             return rotatedSelection(drag.original, constraints: drag.originalConstraints, moving: drag.moving,
                                     about: center, by: turn)
+        case .shear:
+            let height: Double = frame.high.y - frame.low.y
+            guard height > 1e-9 else { return nil }
+            var factor: Double = (p.x - drag.start.x) / height
+            // 5°-Schritte rasten ein
+            if snapEnabled, snapKinds.contains(.angle) {
+                let degrees = atan(factor) * 180 / .pi
+                let rounded = (degrees / 5).rounded() * 5
+                if abs(degrees - rounded) <= 1.5 { factor = tan(rounded * .pi / 180) }
+            }
+            factor = max(min(factor, 5), -5)
+            drag.factor = factor
+            return shearedSelection(drag.original, constraints: drag.originalConstraints, moving: drag.moving,
+                                    baseline: frame.low.y, by: factor)
+        case .lock:
+            return nil
         }
     }
 

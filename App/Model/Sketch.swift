@@ -3728,7 +3728,17 @@ final class SketchController: ObservableObject {
                 selectedMarks.append(mark)
             }
         } else if let ref {
-            if let index = selection.firstIndex(of: ref) {
+            // Build 101 (Kai): Antippen einer Linie wählt die ganze Form (Viereck aus Linien, Linienzug …);
+            // ist die Form schon ganz gewählt, wählt erneutes Antippen nur diese eine Linie.
+            let figure = pendingAction == nil && tool == .select ? figureEntities(of: ref.entity) : [ref.entity]
+            let figureRefs: [SketchRef] = figure.flatMap { entity -> [SketchRef] in
+                (0..<max(entities[entity].curveCount, 1)).map { .curve(SketchCurveRef(entity: entity, index: $0)) }
+            }
+            if figure.count > 1, !figureRefs.allSatisfy({ selection.contains($0) }) {
+                for figureRef in figureRefs where !selection.contains(figureRef) { selection.append(figureRef) }
+            } else if figure.count > 1 {
+                selection = [ref]
+            } else if let index = selection.firstIndex(of: ref) {
                 selection.remove(at: index)
             } else {
                 selection.append(ref)
@@ -5543,75 +5553,158 @@ extension SketchController {
 
 extension SketchController {
     /// Rechteck: X aus Konstruktionslinien (Mittelpunkt sichtbar), Breite und Höhe bemaßt, Lage fixiert.
+    /// Build 101 (Kai): Rechteck nicht mehr automatisch verankern/bemaßen – nur das X aus Konstruktionslinien
+    /// (Mittelpunkt sichtbar und fangbar). Danach ist es gewählt: Rahmen mit Griffen zum Verschieben, Drehen,
+    /// Skalieren und Neigen; das Schloss am Rahmen verankert es.
     fileprivate func autoDefineRectangle(_ index: Int) {
-        guard autoConstrain, entities.indices.contains(index) else { return }
+        guard entities.indices.contains(index) else { return }
         let corners = Array(entities[index].handlePoints.prefix(4))
         guard corners.count == 4 else { return }
-        // Diagonalen als Konstruktionslinien; die Enden fangen an den Ecken (connect)
         let before = constructionMode
         constructionMode = true
         add(.line(corners[0], corners[2]))
         add(.line(corners[1], corners[3]))
         constructionMode = before
         editableIndex = index
-        let p = { (k: Int) in SketchPointRef(entity: index, index: k) }
-        var candidates: [SketchConstraint.Variant] = []
-        if case .polyline = entities[index] {
-            for k in 0..<4 {
-                candidates.append(.distance(p(k), p((k + 1) % 4), value: simd_distance(corners[k], corners[(k + 1) % 4])))
-            }
-            candidates.append(.angle(SketchCurveRef(entity: index, index: 0), SketchCurveRef(entity: index, index: 1),
-                                     degrees: 90))
-        } else {
-            candidates.append(.distance(p(0), p(1), value: simd_distance(corners[0], corners[1])))
-            candidates.append(.distance(p(1), p(2), value: simd_distance(corners[1], corners[2])))
-        }
-        candidates.append(.lock(p(0), at: corners[0]))
-        addIndependentConstraints(candidates)
         entitiesChanged()
+        selectFigureAfterDrawing(index)
+    }
+
+    /// Neu gezeichnete Form wählen und ins Pfeil-Werkzeug wechseln, damit der Griffrahmen sofort da ist.
+    fileprivate func selectFigureAfterDrawing(_ index: Int) {
+        guard entities.indices.contains(index) else { return }
+        let figure = figureEntities(of: index)
+        tool = .select
+        selection = figure.flatMap { entity -> [SketchRef] in
+            let count = max(entities[entity].curveCount, 1)
+            return (0..<count).map { .curve(SketchCurveRef(entity: entity, index: $0)) }
+        }
+        notice = "Gewählt – Kreuz verschiebt, Ecke oben rechts skaliert, Ecke oben links neigt, Griff oben dreht, Schloss verankert."
     }
 
     /// Linienzug mit dem Stift geschlossen: alle Seiten bemaßen, Winkel zwischen schrägen Seiten festhalten und
     /// den Startpunkt fixieren – so lässt sich die Form nicht mehr verziehen. Maße stehen außen (placedOutside).
+    /// Build 101: geschlossener Linienzug – nicht mehr automatisch festgelegt, sondern gewählt (Griffrahmen).
     fileprivate func autoDefineClosedChain(endingAt last: Int) {
-        guard autoConstrain, entities.indices.contains(last), case .line = entities[last] else { return }
-        // Rückwärts die zusammenhängenden Linien des Zugs sammeln, bis der Kreis geschlossen ist
-        var chain: [Int] = []
-        var index = last
-        guard case .line(_, let closeEnd) = entities[last] else { return }
-        while index >= 0, chain.count < 60, case .line(let a, let b) = entities[index], !construction.contains(index) {
-            if let next = chain.last, case .line(let na, _) = entities[next], simd_distance(b, na) > 1e-6 { break }
-            chain.append(index)
-            if simd_distance(a, closeEnd) < 1e-6 { break }
-            index -= 1
+        guard entities.indices.contains(last) else { return }
+        selectFigureAfterDrawing(last)
+    }
+
+    /// Zusammenhängende Form: Elemente, die über gemeinsame Endpunkte bzw. „Zusammenfallend“ verbunden sind
+    /// (z. B. die vier Linien eines gezeichneten Vierecks samt Diagonalen).
+    func figureEntities(of start: Int) -> [Int] {
+        guard entities.indices.contains(start) else { return [] }
+        func ends(_ i: Int) -> [Point2] {
+            switch entities[i] {
+            case .line(let a, let b): return [a, b]
+            case .arc(let a, _, let b): return [a, b]
+            case .polyline(let points, _): return points
+            case .rectangle: return Array(entities[i].handlePoints.prefix(4))
+            case .spline(let points, _, _, _): return [points.first, points.last].compactMap { $0 }
+            default: return []
+            }
         }
-        guard chain.count >= 3, case .line(let firstStart, _) = entities[chain.last!],
-              simd_distance(firstStart, closeEnd) < 1e-6 else { return }
-        chain.reverse()
-        var candidates: [SketchConstraint.Variant] = []
-        for line in chain {
-            guard case .line(let a, let b) = entities[line] else { continue }
-            candidates.append(.distance(SketchPointRef(entity: line, index: 0), SketchPointRef(entity: line, index: 1),
-                                        value: simd_distance(a, b)))
+        var group: Set<Int> = [start]
+        var frontier = [start]
+        while let current = frontier.popLast() {
+            let mine = ends(current)
+            for other in entities.indices where !group.contains(other) {
+                if case .text = entities[other] { continue }
+                let theirs = ends(other)
+                let touches = mine.contains { p in theirs.contains { simd_distance($0, p) < 1e-6 } }
+                let tied = constraints.contains { constraint in
+                    if case .coincident(let a, let b) = constraint.variant {
+                        return (a.entity == current && b.entity == other) || (b.entity == current && a.entity == other)
+                    }
+                    return false
+                }
+                if touches || tied {
+                    group.insert(other)
+                    frontier.append(other)
+                }
+            }
+            if group.count > 400 { break }
         }
-        for k in chain.indices {
-            let i = chain[k], j = chain[(k + 1) % chain.count]
-            guard case .line(let a1, let b1) = entities[i], case .line(let a2, let b2) = entities[j] else { continue }
-            let d1 = simd_normalize(b1 - a1), d2 = simd_normalize(b2 - a2)
-            let angle = atan2(abs(d1.x * d2.y - d1.y * d2.x), simd_dot(d1, d2)) * 180 / .pi
-            candidates.append(.angle(SketchCurveRef(entity: i, index: 0), SketchCurveRef(entity: j, index: 0),
-                                     degrees: (angle * 100).rounded() / 100))
+        return group.sorted()
+    }
+
+    /// Build 101: Schloss am Rahmen – Form verankern (alle Eckpunkte fest) bzw. lösen.
+    func toggleSelectionLock() {
+        guard let indices = transformSelectionIndices else { return }
+        let group = Set(constraintGroup(of: indices))
+        let locks = constraints.filter { constraint in
+            if case .lock = constraint.variant { return constraint.entities.contains { group.contains($0) } }
+            return false
         }
-        if case .line(let a, _) = entities[chain[0]] {
-            candidates.append(.lock(SketchPointRef(entity: chain[0], index: 0), at: a))
+        remember()
+        if !locks.isEmpty {
+            let removed = Set(locks)
+            constraints.removeAll { removed.contains($0) }
+            notice = "Gelöst – die Form lässt sich wieder verschieben, drehen und skalieren."
+        } else {
+            var candidates: [SketchConstraint.Variant] = []
+            for entity in group.sorted() where entities.indices.contains(entity) && !construction.contains(entity) {
+                for (k, point) in entities[entity].handlePoints.enumerated() {
+                    if case .rectangle = entities[entity], k > 3 { continue }
+                    candidates.append(.lock(SketchPointRef(entity: entity, index: k), at: point))
+                }
+            }
+            addIndependentConstraints(candidates)
+            notice = "Verankert – Schloss am Rahmen nochmal antippen zum Lösen."
         }
-        addIndependentConstraints(candidates)
         entitiesChanged()
+        changed()
+    }
+
+    /// Ist die gewählte Form verankert? (Schloss-Symbol geschlossen)
+    var selectionIsAnchored: Bool {
+        guard let indices = transformSelectionIndices else { return false }
+        let group = Set(constraintGroup(of: indices))
+        return constraints.contains { constraint in
+            if case .lock = constraint.variant { return constraint.entities.contains { group.contains($0) } }
+            return false
+        }
+    }
+
+    /// Build 101: Neigen (Scheren) waagrecht um factor: x' = x + factor · (y − Bezugshöhe).
+    func shearedSelection(_ base: [SketchEntity], constraints all: [SketchConstraint], moving: [Int],
+                          baseline: Double, by factor: Double) -> (entities: [SketchEntity], constraints: [SketchConstraint]) {
+        let movingSet = Set(moving)
+        var result = base
+        var converted: Set<Int> = []
+        let f: (Point2) -> Point2 = { p in Point2(p.x + factor * (p.y - baseline), p.y) }
+        for index in moving where base.indices.contains(index) {
+            if case .text = base[index] { continue }
+            // rotation ≠ 0 erzwingt beim Rechteck den Linienzug (geschert ist es kein Rechteck mehr)
+            if let mapped = base[index].mapped(f, rotation: 0.123) {
+                if case .rectangle = base[index] { converted.insert(index) }
+                result[index] = mapped
+            }
+        }
+        func point(_ ref: SketchPointRef) -> SketchPointRef? {
+            if converted.contains(ref.entity) { return ref.index < 4 ? ref : nil }
+            return ref
+        }
+        var updated: [SketchConstraint] = []
+        for constraint in all {
+            guard constraint.entities.contains(where: { movingSet.contains($0) }) else {
+                updated.append(constraint)
+                continue
+            }
+            // Scheren erhält nur Lage-Beziehungen; Maße, Winkel, Senkrechte usw. der Form gelten danach nicht mehr
+            switch constraint.variant {
+            case .coincident, .horizontal, .horizontalPoints:
+                if let remapped = constraint.remappedRefs(point: point, curve: { $0 }) { updated.append(remapped) }
+            default:
+                continue
+            }
+        }
+        return (result, updated)
     }
 
     /// Bedingungen nur übernehmen, wenn sie die Form weiter bestimmen (Rang steigt) – keine doppelten oder
     /// widersprüchlichen Maße (z. B. bei waagerechten/senkrechten Seiten reichen zwei Maße fürs Rechteck).
-    private func addIndependentConstraints(_ candidates: [SketchConstraint.Variant]) {
+    fileprivate func addIndependentConstraints(_ candidates: [SketchConstraint.Variant]) {
         var rank = ConstraintSolver.constraintRank(entities, constraints: constraints)?.rank ?? 0
         for variant in candidates where !constraints.contains(where: { $0.variant == variant }) {
             constraints.append(SketchConstraint(variant: variant))
