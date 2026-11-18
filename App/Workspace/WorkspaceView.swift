@@ -127,7 +127,8 @@ private struct WorkspaceContent: View {
                         }
                     }
                     .padding(.leading, 16)
-                    .padding(.top, 12)
+                    // Build 93: unter der Werkzeugleiste, auf Höhe der Titelleiste
+                    .padding(.top, toolbarOnTop ? TopToolbarSetting.height + 14 : 12)
                     .animation(Theme.spring, value: workspace.showsLayers)
                 }
                 .overlay(alignment: .topTrailing) {
@@ -191,7 +192,7 @@ private struct WorkspaceContent: View {
                         }
                     }
                     .padding(.trailing, 16)
-                    .padding(.top, toolbarOnTop ? 162 : 76)
+                    .padding(.top, toolbarOnTop ? TopToolbarSetting.height + 14 + Theme.barHeight + 14 : 76)
                     .animation(Theme.spring, value: sketch.isActive)
                     .animation(Theme.spring, value: workspace.command == nil)
                 }
@@ -375,16 +376,16 @@ private struct WorkspaceContent: View {
 
     private var topArea: some View {
         VStack(spacing: 10) {
-            titleBar
             if toolbarOnTop {
-                // Build 84: Werkzeugleiste oben (ToolRail.topToolbar) – Skizze bzw. 3D mit Rubriken und Untermenüs
+                // Build 93 (Kai): Werkzeugleiste ganz oben, fest und über die ganze Breite; Titelleiste darunter
                 ToolRail(workspace: workspace, model: model, sketch: sketch, openGroup: $openGroup, onTop: true) {
                     importsImages = false
                     isImporting = true
                 }
-                .padding(.horizontal, 16)
-                .frame(maxWidth: 1180)
+                .padding(.horizontal, 8)
+                .frame(maxWidth: .infinity)
             }
+            titleBar
             if let hint = workspace.hint {
                 Text(hint)
                     .font(.footnote.weight(.medium))
@@ -394,7 +395,7 @@ private struct WorkspaceContent: View {
                     .transition(.opacity)
             }
         }
-        .padding(.top, 12)
+        .padding(.top, toolbarOnTop ? 4 : 12)
         .animation(Theme.snappy, value: workspace.hint)
     }
 

@@ -1613,6 +1613,8 @@ private struct Flyout: View {
 /// Einstellung: Werkzeugleiste oben (Std. an) statt links
 enum TopToolbarSetting {
     static let key = "toolbar.top"
+    /// Höhe der Leiste (Build 93: größere Kacheln)
+    static let height: CGFloat = 94
 }
 
 /// Ein Werkzeug im Rubrik-Feld
@@ -1665,7 +1667,7 @@ struct TopMenuPanel: View {
                                     item.action()
                                 } label: {
                                     RailTile(title: item.title, systemImage: item.icon, category: item.category,
-                                             isActive: item.isActive, size: 42, labelBelow: true, labelWidth: 72)
+                                             isActive: item.isActive, size: 42, labelBelow: true, labelWidth: 68)
                                 }
                                 .buttonStyle(.plain)
                                 .disabled(!item.isEnabled)
@@ -1702,8 +1704,8 @@ extension ToolRail {
                 }
         }
         .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
-        .frame(maxWidth: topRowWidth > 0 ? topRowWidth : .infinity)
-        .frame(height: 84)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: TopToolbarSetting.height)
         .floatingSurface(in: RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
     }
 
@@ -1717,7 +1719,7 @@ extension ToolRail {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
-        .frame(height: 84)
+        .frame(height: TopToolbarSetting.height)
     }
 
     // MARK: Skizze
@@ -1733,7 +1735,7 @@ extension ToolRail {
                         Image(systemName: "checkmark")
                             .font(.system(size: 17, weight: .bold))
                             .foregroundStyle(.white)
-                            .frame(width: 40, height: 40)
+                            .frame(width: 46, height: 46)
                             .background(ToolCategory.finish.color, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                         Text("Fertig")
                             .font(.system(size: 11, weight: .semibold))
@@ -1749,7 +1751,7 @@ extension ToolRail {
         }
         .padding(.trailing, 4)
         topDivider
-        topSketchGroup("ERSTELLEN", .create, entries, tiles: 6)
+        topSketchGroup("ERSTELLEN", .create, entries, tiles: 5)
         topDivider
         topSketchGroup("ÄNDERN", .modify, entries, tiles: 2)
         topDivider
@@ -1822,13 +1824,13 @@ extension ToolRail {
         ]
         return topGroupFrame(title: "BEDINGUNGEN", color: color, sections: sections) {
             topDimensionTile
-            ForEach(Array(cells.prefix(2))) { cell in
+            ForEach(Array(cells.prefix(1))) { cell in
                 Button(action: cell.action) {
                     VStack(spacing: 2) {
                         ToolIcon(cell.icon, size: 22)
                             .font(.system(size: 17))
                             .foregroundStyle(cell.isApplicable || cell.isPending ? color : Color.primary)
-                            .frame(width: 40, height: 40)
+                            .frame(width: 46, height: 46)
                             .background {
                                 if cell.isPending {
                                     RoundedRectangle(cornerRadius: 9, style: .continuous)
@@ -1855,7 +1857,7 @@ extension ToolRail {
             startDimension()
         } label: {
             RailTile(title: "Bemaßen", systemImage: ConstraintKind.dimension.systemImage,
-                     category: .constrain, size: 40, labelBelow: true, labelWidth: 64)
+                     category: .constrain, size: 46, labelBelow: true, labelWidth: 68)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Bemaßen")
@@ -1872,8 +1874,8 @@ extension ToolRail {
     /// Antippen öffnet die Varianten darunter.
     @ViewBuilder private func topTile(_ entry: RailEntry) -> some View {
         let label = RailTile(title: entry.label ?? entry.title, systemImage: entry.systemImage, category: entry.category,
-                             isActive: entry.isActive, size: 40, hasVariants: entry.flyout != nil,
-                             labelBelow: true, labelWidth: 64)
+                             isActive: entry.isActive, size: 46, hasVariants: entry.flyout != nil,
+                             labelBelow: true, labelWidth: 68)
         if let flyout = entry.flyout, entry.id == "sketch.select" {
             // Auswählen: Antippen wählt sofort, lange drücken Rechteck/Lasso
             Menu {
@@ -2015,7 +2017,7 @@ extension ToolRail {
             command.run()
         } label: {
             RailTile(title: command.title, systemImage: command.icon, category: category,
-                     isActive: command.isActive, size: 40, labelBelow: true, labelWidth: 64)
+                     isActive: command.isActive, size: 46, labelBelow: true, labelWidth: 68)
         }
         .buttonStyle(.plain)
         .disabled(!command.isEnabled)
@@ -2030,7 +2032,7 @@ extension ToolRail {
     private var topDivider: some View {
         Rectangle()
             .fill(Color.primary.opacity(0.12))
-            .frame(width: 1, height: 52)
+            .frame(width: 1, height: 64)
             .padding(.horizontal, 5)
             .padding(.top, 4)
     }
