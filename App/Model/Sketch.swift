@@ -2379,6 +2379,11 @@ final class SketchController: ObservableObject {
         if offsetTarget != nil, offsetDistance != 0 {
             applyOffset()
         }
+        // Build 97 (Kai): Spiegeln und Muster – „Fertig“ verwarf bisher die Vorschau (applyTransform wurde
+        // nirgends aufgerufen); jetzt werden die Kopien übernommen
+        if [.mirror, .rectPattern, .circPattern].contains(tool), canApplyTransform {
+            applyTransform()
+        }
         finishInput()
         pendingAction = nil
         clearHelpers()
@@ -5610,5 +5615,43 @@ extension SketchController {
             }
             rank = next.rank
         }
+    }
+}
+
+// MARK: - Build 97 (Kai): Hilfslinie aus zwei Fangpunkten in eine echte Linie umwandeln
+
+extension SketchController {
+    /// Gewählte Hilfslinien (Verbindung der beiden Fangpunkte bzw. Mittelsenkrechte), sonst nil
+    var selectedGuideLines: [[Point2]] {
+        selectedMarks.compactMap { index -> [Point2]? in
+            guard marks.indices.contains(index),
+                  let guide = guideLines.first(where: { simd_distance($0.mark, marks[index]) < 1e-9 }) else { return nil }
+            return guide.lines.first
+        }
+    }
+
+    /// Mittelsenkrechte der gewählten Hilfslinie (zweite Linie des Hilfspaars)
+    var selectedGuideBisectors: [[Point2]] {
+        selectedMarks.compactMap { index -> [Point2]? in
+            guard marks.indices.contains(index),
+                  let guide = guideLines.first(where: { simd_distance($0.mark, marks[index]) < 1e-9 }),
+                  guide.lines.count > 1 else { return nil }
+            return guide.lines[1]
+        }
+    }
+
+    /// Gewählte Hilfslinie(n) als Skizzenlinie übernehmen; bisector = die Mittelsenkrechte statt der Verbindung.
+    func convertSelectedGuides(construction asConstruction: Bool, bisector: Bool = false) {
+        let lines = (bisector ? selectedGuideBisectors : selectedGuideLines).filter { $0.count >= 2 }
+        guard !lines.isEmpty else { return }
+        let before = constructionMode
+        constructionMode = asConstruction
+        for line in lines where simd_distance(line[0], line[1]) > 1e-9 {
+            add(.line(line[0], line[1]))
+        }
+        constructionMode = before
+        selectedMarks = []
+        notice = lines.count == 1 ? "Linie erstellt." : "\(lines.count) Linien erstellt."
+        changed()
     }
 }

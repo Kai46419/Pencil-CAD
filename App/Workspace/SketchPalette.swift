@@ -45,6 +45,26 @@ struct SketchPalette: View {
                     SketchSelectionSection(sketch: sketch)
                     PaletteRule()
                 }
+                // Build 97 (Kai): gewählte Hilfslinie aus zwei Fangpunkten in eine Linie umwandeln
+                if !sketch.selectedGuideLines.isEmpty {
+                    PaletteSection("Hilfslinie", detail: nil) {
+                        VStack(alignment: .leading, spacing: PaletteStyle.spacing) {
+                            PrimaryWideButton(title: "Als Linie übernehmen", systemImage: "line.diagonal",
+                                              isPrimary: true) {
+                                sketch.convertSelectedGuides(construction: false)
+                            }
+                            PrimaryWideButton(title: "Als Konstruktionslinie", systemImage: "line.diagonal",
+                                              isPrimary: false) {
+                                sketch.convertSelectedGuides(construction: true)
+                            }
+                            PrimaryWideButton(title: "Mittelsenkrechte als Linie", systemImage: "arrow.up.and.down",
+                                              isPrimary: false) {
+                                sketch.convertSelectedGuides(construction: false, bisector: true)
+                            }
+                        }
+                    }
+                    PaletteRule()
+                }
                 LineTypeSection(sketch: sketch, options: sketch.options)
                 PaletteRule()
                 PaletteToggles(sketch: sketch)

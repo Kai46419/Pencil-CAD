@@ -1296,7 +1296,7 @@ struct RailTile: View {
             VStack(spacing: 2) {
                 tile
                 Text(title)
-                    .font(.system(size: labelWidth == nil ? 9 : 11, weight: .medium))
+                    .font(.system(size: labelWidth == nil ? 9 : 13, weight: .medium))
                     .foregroundStyle(isActive ? category.fill : Color.primary.opacity(0.7))
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -1614,7 +1614,7 @@ private struct Flyout: View {
 enum TopToolbarSetting {
     static let key = "toolbar.top"
     /// Höhe der Leiste (Build 93: größere Kacheln)
-    static let height: CGFloat = 104
+    static let height: CGFloat = 110
 }
 
 /// Ein Werkzeug im Rubrik-Feld
@@ -1667,7 +1667,7 @@ struct TopMenuPanel: View {
                                     item.action()
                                 } label: {
                                     RailTile(title: item.title, systemImage: item.icon, category: item.category,
-                                             isActive: item.isActive, size: 42, labelBelow: true, labelWidth: 68)
+                                             isActive: item.isActive, size: 42, labelBelow: true, labelWidth: 80)
                                 }
                                 .buttonStyle(.plain)
                                 .disabled(!item.isEnabled)
@@ -1736,7 +1736,7 @@ extension ToolRail {
                             .frame(width: 46, height: 46)
                             .background(ToolCategory.finish.color, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                         Text("Fertig")
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(ToolCategory.finish.color)
                     }
                     .frame(minWidth: 48)
@@ -1836,11 +1836,11 @@ extension ToolRail {
                                 }
                             }
                         Text(cell.title)
-                            .font(.system(size: 11, weight: .medium))
+                            .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(Color.primary.opacity(0.75))
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
-                            .frame(maxWidth: 60)
+                            .frame(maxWidth: 76)
                     }
                 }
                 .buttonStyle(.plain)
@@ -1855,7 +1855,7 @@ extension ToolRail {
             startDimension()
         } label: {
             RailTile(title: "Bemaßen", systemImage: ConstraintKind.dimension.systemImage,
-                     category: .constrain, size: 46, labelBelow: true, labelWidth: 68)
+                     category: .constrain, size: 46, labelBelow: true, labelWidth: 80)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Bemaßen")
@@ -1873,7 +1873,7 @@ extension ToolRail {
     @ViewBuilder private func topTile(_ entry: RailEntry) -> some View {
         let label = RailTile(title: entry.label ?? entry.title, systemImage: entry.systemImage, category: entry.category,
                              isActive: entry.isActive, size: 46, hasVariants: entry.flyout != nil,
-                             labelBelow: true, labelWidth: 68)
+                             labelBelow: true, labelWidth: 80)
         if let flyout = entry.flyout, entry.id == "sketch.select" {
             // Auswählen: Antippen wählt sofort, lange drücken Rechteck/Lasso
             Menu {
@@ -2015,7 +2015,7 @@ extension ToolRail {
             command.run()
         } label: {
             RailTile(title: command.title, systemImage: command.icon, category: category,
-                     isActive: command.isActive, size: 46, labelBelow: true, labelWidth: 68)
+                     isActive: command.isActive, size: 46, labelBelow: true, labelWidth: 80)
         }
         .buttonStyle(.plain)
         .disabled(!command.isEnabled)
@@ -2044,7 +2044,7 @@ extension ToolRail {
             } label: {
                 HStack(spacing: 3) {
                     Text(title)
-                        .font(.system(size: 11, weight: .bold))
+                        .font(.system(size: 12, weight: .bold))
                         .tracking(0.5)
                     Image(systemName: openTopMenu == title ? "chevron.up" : "chevron.down")
                         .font(.system(size: 8, weight: .bold))
