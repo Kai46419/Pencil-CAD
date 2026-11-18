@@ -171,7 +171,12 @@ struct ParameterCard: View {
             case .boolean(let kind):
                 BooleanCard(workspace: workspace, model: model, settings: workspace.mold, kind: kind)
             case .move:
-                moveCard
+                // Build 89: bei einem Normteil stehen die Werte rechts im Normteil-Fenster (MovePaletteSection)
+                if movesSingleStandardPart {
+                    EmptyView()
+                } else {
+                    moveCard
+                }
             case .mirror:
                 mirrorCard
             case .shell:
@@ -871,6 +876,12 @@ struct ParameterCard: View {
             workspace.insertSize[index] = value
             workspace.updateInsertPreview()
         }
+    }
+
+    private var movesSingleStandardPart: Bool {
+        guard model.movingSketch == nil, model.selectedBodies.count == 1, let index = model.selectedBodies.first,
+              model.bodies.indices.contains(index) else { return false }
+        return model.bodies[index].effectiveStandardPart != nil
     }
 
     private var moveCard: some View {

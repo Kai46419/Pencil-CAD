@@ -40,6 +40,11 @@ struct StandardPartPalette: View {
                     }
                     if !collapsed {
                     Divider()
+                    // Build 89 (Kai): Verschieben und Drehen hier statt in der Karte unten
+                    if workspace.tool == .move {
+                        MovePaletteSection(model: model)
+                        Divider()
+                    }
                     // Build 83: Normteil setzen und kopieren
                     placementButtons(spec)
                     Divider()
