@@ -179,6 +179,24 @@ enum BlendKernel {
     }
 
     /// Meldung aus der Diagnose (IsolatedBlend.unblendableEdges); nil, wenn keine Kante auffällt.
+    /// Build 102: Absturzmeldung mit Grund – liegt die Kante an einer Freiform-/Gewindefläche (weder Ebene noch
+    /// Zylinder), sagt die Meldung das, statt nur „abgebrochen“.
+    static func crashMessage(shape: PCKShape, edges: [Int]) -> String {
+        var freeform = false
+        let faceCount = shape.faceCount
+        if faceCount > 0, faceCount < 3000 {
+            let wanted = Set(edges)
+            for face in 1...faceCount where shape.edgeNumbers(ofFace: face).contains(where: { wanted.contains($0.intValue) }) {
+                if shape.plane(ofFace: face) == nil, shape.cylinder(ofFace: face) == nil { freeform = true }
+            }
+        }
+        if freeform {
+            return "Diese Kante grenzt an eine Freiformfläche (z. B. modelliertes Gewinde oder Rändel) – dort kann der "
+                + "Geometriekernel nicht runden. Eine Kante an ebenen oder zylindrischen Flächen wählen; Projekt bleibt erhalten."
+        }
+        return "Geometriekernel bei dieser Kantenauswahl abgebrochen. Kleineren Wert oder andere Kante versuchen; Projekt bleibt erhalten."
+    }
+
     static func unblendableMessage(_ edges: [Int], chamfer: Bool) -> String? {
         guard !edges.isEmpty else { return nil }
         let verb = chamfer ? "gefast" : "abgerundet"
@@ -297,6 +315,12 @@ extension ModelStore {
     func requestBlend(body: Int, value requested: Double, blendEdges: [EdgeRef]) {
         guard requested.isFinite, edgeSecondValue?.isFinite ?? true, edgeEndValue?.isFinite ?? true else {
             message = "Radius und Abstände müssen endliche Zahlen sein."
+            dropPreview()
+            return
+        }
+        // Build 102 (Kai: „Geometriekernel abgebrochen“ direkt nach dem Antippen bei 0 mm): Radius bzw. Fase 0
+        // nicht rechnen – OCCT bricht bei 0 ab. Erst ab einem echten Wert gibt es eine Vorschau.
+        guard requested > 1e-6 else {
             dropPreview()
             return
         }
@@ -555,7 +579,7 @@ extension ModelStore {
                 return
             }
             if result.crashed {
-                message = "Geometriekernel bei dieser Kantenauswahl abgebrochen. Auswahl oder Körper ändern; Projekt bleibt erhalten."
+                message = Self.crashMessage(shape: request.source, edges: request.blendEdges.map(\.edge))
                 dropPreview()
                 return
             }
