@@ -322,7 +322,7 @@ struct PartCard: View {
                 if parts.standard.kind.isScrew || parts.standard.kind == .blindRivet {
                     field("Länge", \.standard.length, minimum: 1)
                     Menu("Normlänge") {
-                        ForEach(parts.standard.metric.standardLengths, id: \.self) { length in
+                        ForEach(Set(parts.standard.metric.standardLengths + [4, 5, 6, 8]).sorted(), id: \.self) { length in
                             Button("\(length.formatted()) mm") {
                                 parts.standard.length = length
                                 workspace.updatePartPreview()

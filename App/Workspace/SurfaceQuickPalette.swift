@@ -50,9 +50,19 @@ struct StandardPartPalette: View {
                     Divider()
                     if spec.kind == .sleeve {
                         sizeMenu(spec)
-                        detail("Innen-Ø", LengthUnit.current.format(spec.sleeveInnerDiameter))
-                        detail("Außen-Ø", LengthUnit.current.format(spec.sleeveOuterDiameter))
-                        detail("Länge", LengthUnit.current.format(spec.length))
+                        // Build 91 (Kai): Hülse frei bemaßen
+                        valueRow("Innen-Ø", spec.sleeveInnerDiameter) { value in
+                            guard value > 0.1 else { return }
+                            update("Innen-Ø \(value.formatted()) mm") { part in
+                                part.sleeveInner = value
+                                if part.sleeveOuterDiameter <= value + 0.4 { part.sleeveOuter = value + 2 }
+                            }
+                        }
+                        valueRow("Außen-Ø", spec.sleeveOuterDiameter) { value in
+                            guard value > spec.sleeveInnerDiameter + 0.2 else { return }
+                            update("Außen-Ø \(value.formatted()) mm") { $0.sleeveOuter = value }
+                        }
+                        lengthMenu(spec)
                     } else if spec.kind.isScrew {
                         // Build 88 (Kai): Größe, Länge, Gewindeart und -geometrie direkt hier umstellen
                         sizeMenu(spec)
@@ -249,22 +259,72 @@ struct StandardPartPalette: View {
         }
     }
 
+    /// Build 91 (Kai): Länge frei eingeben (ab 1 mm), ± 0,5 mm, daneben die Normlängen als Auswahl.
     private func lengthMenu(_ spec: StandardPartSpec) -> some View {
-        let lengths = Set(spec.metric.standardLengths + [spec.length]).sorted()
-        return Menu {
-            ForEach(lengths, id: \.self) { length in
-                Button {
-                    update("Länge \(length.formatted()) mm") { $0.length = length }
-                } label: {
-                    if length == spec.length {
-                        Label("\(length.formatted()) mm", systemImage: "checkmark")
-                    } else {
-                        Text("\(length.formatted()) mm")
+        let lengths = Set(spec.metric.standardLengths + [4, 5, 6, 8] + [spec.length]).sorted()
+        func set(_ value: Double) {
+            let length = min(max((value * 100).rounded() / 100, 1), 500)
+            guard length != spec.length else { return }
+            update("Länge \(length.formatted()) mm") { $0.length = length }
+        }
+        return HStack(spacing: 6) {
+            Text("Länge")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 2)
+            Button {
+                set(spec.length - 0.5)
+            } label: {
+                Image(systemName: "minus")
+                    .frame(width: 22, height: 22)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+            .disabled(spec.length <= 1)
+            .accessibilityLabel("Länge −0,5 mm")
+            NumberField(title: "", value: spec.length, unit: "mm", width: 60) { set($0) }
+                .font(.caption)
+            Button {
+                set(spec.length + 0.5)
+            } label: {
+                Image(systemName: "plus")
+                    .frame(width: 22, height: 22)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+            .accessibilityLabel("Länge +0,5 mm")
+            Menu {
+                Section("Normlängen \(spec.metric.name)") {
+                    ForEach(lengths, id: \.self) { length in
+                        Button {
+                            set(length)
+                        } label: {
+                            if length == spec.length {
+                                Label("\(length.formatted()) mm", systemImage: "checkmark")
+                            } else {
+                                Text("\(length.formatted()) mm")
+                            }
+                        }
                     }
                 }
+            } label: {
+                Image(systemName: "list.bullet")
+                    .font(.caption)
+                    .frame(width: 22, height: 22)
             }
-        } label: {
-            choice("Länge", LengthUnit.current.format(spec.length))
+            .accessibilityLabel("Normlängen")
+        }
+    }
+
+    /// Zeile mit frei eingebbarem Maß (mm)
+    private func valueRow(_ label: String, _ value: Double, set: @escaping (Double) -> Void) -> some View {
+        HStack(spacing: 6) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 2)
+            NumberField(title: "", value: value, unit: "mm", width: 60, set: set)
+                .font(.caption)
         }
     }
 
