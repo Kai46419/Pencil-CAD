@@ -145,6 +145,8 @@ final class ViewportView: MTKView {
     private var gizmoHover: GizmoPart?
     private let ringLabel = PaddedLabel()
     private let valueLabel = PaddedLabel()
+    /// Build 105: Art der letzten Berührung (Punkt setzen nur mit dem Stift)
+    private var lastTouchType: UITouch.TouchType = .direct
     /// Build 104: Griff, dessen Wert das Etikett gerade zeigt (für die Eingabe per Antippen)
     private var valueLabelHandle: (kind: HandleKind, value: Double)?
     /// Einrasthinweis am Stift (Endpunkt, Mittelpunkt …)
@@ -2878,6 +2880,7 @@ final class ViewportView: MTKView {
     // MARK: Berührungen
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if let first = touches.first { lastTouchType = first.type }
         noteFingerTaps(began: touches)
         updateHeldFingers(began: touches)
         // Beschneiden mit dem Finger: kommt ein zweiter Finger dazu (Verschieben, Zoomen, Rückgängig), ist es kein Wisch
@@ -3300,6 +3303,22 @@ final class ViewportView: MTKView {
                 region = nil
                 regionPoint = nil
             }
+        }
+        // Build 105 (Kai): Punkt setzen nur mit dem Stift (der Finger dreht/verschiebt die Ansicht); ohne Körper
+        // unter dem Stift liegt der Punkt auf der Bodenebene (Z = 0), gerastet im Fangraster
+        if workspace.tool == .construct(.point) {
+            guard lastTouchType != .direct else {
+                model.message = "Punkt mit dem Stift setzen – der Finger bewegt die Ansicht."
+                refresh()
+                return
+            }
+            var point = edgeHit?.point ?? hit?.point
+            if point == nil, abs(ray.direction.z) > 1e-5 {
+                let t = -ray.origin.z / ray.direction.z
+                if t > 0 { point = ray.origin + ray.direction * t }
+            }
+            workspace.tapped(face: hit?.face, edge: edgeHit?.edge, region: region, point: point)
+            return
         }
         workspace.tapped(face: hit?.face, edge: edgeHit?.edge, region: region,
                          point: edgeHit?.point ?? hit?.point ?? regionPoint)

@@ -1983,8 +1983,28 @@ final class Workspace: ObservableObject {
                 constructCustomAxis = AxisSpec(origin: cylinder.origin, direction: cylinder.axis, name: "Zylinderachse")
             }
         case .point:
-            if let point { constructPoint = SIMD3<Double>(point) }
+            // Build 105 (Kai): fängt an Ecken, Kantenmitten, Kreismitten und am Ursprung; sonst Raster (1 mm)
+            guard let point else { return }
+            let raw = SIMD3<Double>(point)
+            var keys = model.modelKeyPoints()
+            keys.append(.zero)
+            let reach = max(pickTolerance * 2, 0.5)
+            if let nearest = keys.min(by: { simd_distance($0, raw) < simd_distance($1, raw) }),
+               simd_distance(nearest, raw) <= reach {
+                constructPoint = nearest
+                model.message = "Gefangen: \(Self.pointText(nearest))"
+            } else if face == nil, edge == nil {
+                let step = 1.0
+                constructPoint = SIMD3((raw.x / step).rounded() * step, (raw.y / step).rounded() * step, 0)
+            } else {
+                constructPoint = raw
+            }
         }
+    }
+
+    static func pointText(_ p: SIMD3<Double>) -> String {
+        let f = { (v: Double) in v.formatted(.number.precision(.fractionLength(0...2))) }
+        return "X \(f(p.x)) · Y \(f(p.y)) · Z \(f(p.z))"
     }
 
     /// Anfang und Ende einer Kante (nil bei geschlossenen Kanten wie Kreisen).
