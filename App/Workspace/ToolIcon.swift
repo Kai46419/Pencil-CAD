@@ -148,6 +148,11 @@ struct ToolIcon: View {
         return UIImage(systemName: resolvedSymbol(name)) ?? UIImage(systemName: "square")
     }
 
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// Bilder mit schwarzer Zeichnung ohne Farbe (im dunklen Modus umkehren)
+    static let darkGlyphs: Set<String> = ["sc/select"]
+
     var body: some View {
         Group {
             if Self.isCustom(name), UIImage(named: Self.assetName(name)) != nil {
@@ -157,6 +162,8 @@ struct ToolIcon: View {
                     .interpolation(.high)
                     .scaledToFit()
                     .frame(width: size, height: size)
+                    // Build 94 (Kai): schwarzer Auswahlpfeil war im dunklen Modus unsichtbar
+                    .colorInvert(when: colorScheme == .dark && Self.darkGlyphs.contains(Self.assetName(name)))
             } else {
                 Image(systemName: Self.resolvedSymbol(name))
                     .resizable()
@@ -186,5 +193,12 @@ struct ToolLabel: View {
         } icon: {
             ToolIcon(icon, size: size)
         }
+    }
+}
+
+extension View {
+    /// Farben umkehren, wenn condition gilt (z. B. schwarze Symbole im dunklen Modus)
+    @ViewBuilder func colorInvert(when condition: Bool) -> some View {
+        if condition { colorInvert() } else { self }
     }
 }
