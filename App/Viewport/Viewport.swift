@@ -2199,6 +2199,11 @@ final class ViewportView: MTKView {
                 }
             }
             field.lockState = dimension.lockState
+            // Build 100 (Kai): Beim Zeichnen sind fertige Maße kein Ziel für den Stift – sonst fing das Maßfeld den
+            // Strich ab statt Linie/Punkt. Mit „Auswählen“ lassen sie sich weiter antippen und ändern.
+            let drawing = sketch.tool != .select
+            field.isUserInteractionEnabled = !drawing || field.isLive || field.isFirstResponder
+                || dimension.id.hasPrefix("live-")
             let id = dimension.id
             // Kai: feste Maße schlank als kleines Schloss; antippen klappt das Maß auf und öffnet die Eingabe
             let collapses = sketch.collapsesLockedDimensions && dimension.lockState == true

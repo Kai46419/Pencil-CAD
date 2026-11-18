@@ -622,6 +622,74 @@ final class ModelStore: ObservableObject {
         }
     }
 
+    // MARK: Build 100 (Kai): Kanten gezielt wählen – Kette, Umlauf, alle
+
+    /// Kanten, die OCCT beim Runden/Fasen der gewählten Kanten mitnimmt (glatt anschließende Tangentenkette)
+    var tangentChainEdges: [EdgeRef] {
+        guard let first = selectedEdges.first, bodies.indices.contains(first.body) else { return [] }
+        let shape = bodies[first.body].shape
+        var result = Set(selectedEdges)
+        for edge in selectedEdges {
+            for number in shape.tangentEdges(startingAt: edge.edge).map(\.intValue) {
+                result.insert(EdgeRef(body: edge.body, edge: number))
+            }
+        }
+        return result.sorted { $0.edge < $1.edge }
+    }
+
+    /// Gewählte Kanten ersetzen (wie toggleEdge, aber als ganze Liste)
+    func setSelectedEdges(_ edges: [EdgeRef]) {
+        if commitsOnSelect { commitPreview() } else { dropPreview() }
+        clearSelectionState()
+        selectedEdges = edges
+        if let last = edges.last, bodies.indices.contains(last.body),
+           let values = bodies[last.body].shape.handle(ofEdge: last.edge)?.map(\.doubleValue), values.count == 6 {
+            edgeHandle = (SIMD3(values[0], values[1], values[2]), SIMD3(values[3], values[4], values[5]))
+        }
+        refreshHighlight()
+    }
+
+    /// Kette: alle glatt anschließenden Kanten ausdrücklich mitwählen
+    func selectTangentChain() {
+        let chain = tangentChainEdges
+        guard !chain.isEmpty else { return }
+        setSelectedEdges(chain)
+    }
+
+    /// Umlauf: alle zusammenhängenden Randkanten einer angrenzenden Fläche (z. B. die ganze obere Umrandung).
+    /// Erneut antippen wechselt zur anderen Fläche an der Kante.
+    func selectEdgeLoop() {
+        guard let edge = selectedEdges.last, bodies.indices.contains(edge.body) else { return }
+        let shape = bodies[edge.body].shape
+        let faces = (1...max(shape.faceCount, 1)).filter { face in
+            shape.edgeNumbers(ofFace: face).contains { $0.intValue == edge.edge }
+        }
+        guard !faces.isEmpty else { return }
+        // Ebene Flächen zuerst; ist der Umlauf der ersten schon gewählt, die nächste Fläche
+        let ordered = faces.sorted { (shape.plane(ofFace: $0) != nil ? 0 : 1) < (shape.plane(ofFace: $1) != nil ? 0 : 1) }
+        let current = Set(selectedEdges.map(\.edge))
+        for face in ordered + ordered {
+            let loop = shape.connectedEdges(ofFace: face, startingAt: edge.edge).map(\.intValue)
+            guard !loop.isEmpty, Set(loop) != current else { continue }
+            setSelectedEdges(loop.map { EdgeRef(body: edge.body, edge: $0) })
+            return
+        }
+    }
+
+    /// Alle Kanten des Körpers
+    func selectAllEdges() {
+        guard let body = selectedEdges.first?.body, bodies.indices.contains(body) else { return }
+        let data = bodies[body].shape.edgeIndexData
+        let count = data.count / MemoryLayout<UInt32>.stride
+        var numbers = Set<Int>()
+        data.withUnsafeBytes { raw in
+            let values = raw.bindMemory(to: UInt32.self)
+            for k in 0..<count where values[k] > 0 { numbers.insert(Int(values[k])) }
+        }
+        guard !numbers.isEmpty else { return }
+        setSelectedEdges(numbers.sorted().map { EdgeRef(body: body, edge: $0) })
+    }
+
     /// Körper zur Auswahl hinzufügen bzw. entfernen (für Boolesch, Verschieben, Spiegeln, Farbe).
     func toggleBody(_ body: Int, exclusive: Bool = false) {
         dropPreview()

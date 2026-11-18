@@ -131,6 +131,22 @@ enum ModelRibbon {
             list += primitives.map { id, primitive in
                 command(id, primitive.rawValue, "Grundkörper", primitive.systemImage, heading: "GRUNDKÖRPER", ws)
             }
+            // Build 100 (Kai): Drehen, Sweep, Loft und Dünn extrudieren brauchen eine sichtbare Skizze. Nach
+            // „Skizze fertig“ und Extrudieren ist sie meist ausgeblendet – dann grau mit Hinweis statt wirkungslos.
+            let visible = model.sketches.filter { !$0.isHidden }
+            let profiles = visible.reduce(0) { $0 + $1.regions.count }
+            let hasLines = visible.contains { !$0.entities.isEmpty }
+            let needs: [String: (Bool, String)] = [
+                ModelCommandID.revolve.rawValue: (profiles > 0, "Braucht eine sichtbare Skizze mit Bereich"),
+                ModelCommandID.sweep.rawValue: (profiles > 0 && hasLines, "Braucht Skizzenbereich und Pfad"),
+                ModelCommandID.loft.rawValue: (profiles > 1, "Braucht zwei Skizzenbereiche"),
+                ModelCommandID.thinExtrude.rawValue: (hasLines, "Braucht eine sichtbare Skizze"),
+            ]
+            for index in list.indices {
+                guard let (ok, why) = needs[list[index].id], !ok, !list[index].isActive else { continue }
+                list[index].isEnabled = false
+                list[index].subtitle = why
+            }
             return list
         case .modify:
             let hasSelection = model.selection != nil || !model.selectedBodies.isEmpty || !model.selectedEdges.isEmpty

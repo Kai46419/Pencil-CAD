@@ -39,7 +39,8 @@ struct PickChip: View {
                     .foregroundStyle(isActive ? SketchTheme.accent : Color.secondary)
                 Text(label)
                     .font(.footnote)
-                    .foregroundStyle(isEmpty ? Color.secondary : Color.primary)
+                    .foregroundStyle(isEmpty && !isActive ? Color.secondary : Color.primary)
+                    .fontWeight(isActive ? .semibold : .regular)
                     .lineLimit(2)
                     .minimumScaleFactor(0.8)
                     .multilineTextAlignment(.leading)
@@ -52,7 +53,7 @@ struct PickChip: View {
             .background(fill, in: shape)
             .overlay {
                 if isActive {
-                    shape.strokeBorder(SketchTheme.accent, lineWidth: 1.5)
+                    shape.strokeBorder(SketchTheme.accent, lineWidth: 2)
                 } else if isEmpty {
                     shape.strokeBorder(PaletteStyle.controlBorder, style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
                 } else {
@@ -81,7 +82,8 @@ struct PickChip: View {
     }
 
     private var fill: Color {
-        if isActive { return SketchTheme.accentSoft }
+        // Build 100 (Kai): aktives Feld war dunkelblau mit dunkler Schrift – jetzt hell mit blauem Rahmen
+        if isActive { return Color(uiColor: .systemBackground) }
         return input.items.isEmpty ? PaletteStyle.field : Color.primary.opacity(0.08)
     }
 }

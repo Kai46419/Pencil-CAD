@@ -9,6 +9,33 @@ struct EdgeSelectionPanel: View {
     /// Build 83: zuklappbar
     @AppStorage("edgePanel.collapsed") private var collapsed = false
 
+    @ViewBuilder private var edgeScopeRow: some View {
+        let chain = model.tangentChainEdges
+        HStack(spacing: 6) {
+            scopeButton("Kette", "link") { model.selectTangentChain() }
+            scopeButton("Umlauf", "square.dashed") { model.selectEdgeLoop() }
+            scopeButton("Alle", "cube") { model.selectAllEdges() }
+        }
+        if chain.count > model.selectedEdges.count {
+            Label("Glatt anschließende Kanten werden mitgenommen: \(chain.count) statt \(model.selectedEdges.count). "
+                  + "Das macht der CAD-Kern bei tangentialen Übergängen immer.",
+                  systemImage: "exclamationmark.triangle")
+                .font(.caption)
+                .foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func scopeButton(_ title: String, _ icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: icon)
+                .font(.caption.weight(.semibold))
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: PaletteStyle.spacing) {
@@ -37,6 +64,8 @@ struct EdgeSelectionPanel: View {
                     .buttonStyle(.plain)
                 }
                 if !collapsed {
+                // Build 100 (Kai): gezielt wählen statt Überraschung – Kette, Umlauf, alle Kanten
+                edgeScopeRow
                 Picker("Operation", selection: $model.edgeOperation) {
                     ForEach(EdgeOperation.allCases) { Text($0.rawValue).tag($0) }
                 }
